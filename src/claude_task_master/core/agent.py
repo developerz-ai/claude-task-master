@@ -691,97 +691,157 @@ Format your response clearly."""
 
 GOAL: {goal}
 
-Your task is to:
-1. Analyze the goal and understand what needs to be done
-2. Explore the codebase if relevant (use Read, Glob, Grep tools)
-3. Create a detailed, well-organized task list with markdown checkboxes
-4. Classify each task by complexity for optimal model routing
-5. Define clear, testable success criteria
+## Your Mission
 
-IMPORTANT SETUP:
-- If the project has a .gitignore file, ensure that .claude-task-master/ is added to it
-- This directory contains task state and should not be committed to version control
+You will plan and then autonomously execute a series of tasks to achieve this goal.
+The workflow is: Plan → Work → Push → PR → CI/Review → Fix if needed → Repeat → Success
+
+## Phase 1: Exploration & Understanding
+
+First, thoroughly explore the codebase:
+1. Read relevant files to understand the architecture
+2. Use Glob to find file patterns
+3. Use Grep to search for specific code patterns
+4. Identify dependencies, tests, CI configuration, and coding standards
+
+## Phase 2: Create the Plan
 
 {context}
 
-Please create a comprehensive plan with:
+IMPORTANT SETUP:
+- Add `.claude-task-master/` to .gitignore if not already present
+- This directory stores task state and should not be committed
 
-## Task List
+## Task List Format
 
-Organize tasks into logical phases if the goal is complex. Each task should be:
-- **Specific and actionable** - Clear what needs to be done
-- **Testable** - Can verify when complete
-- **Appropriately sized** - Not too large or too small
-- **Ordered logically** - Dependencies should come first
-- **Classified by complexity** - Tag with appropriate model tier
+Create tasks that are:
+- **Atomic**: Each task should be a single PR-able unit of work
+- **Testable**: Can verify completion (tests pass, lint clean, etc.)
+- **Ordered**: Dependencies first, then dependent tasks
+- **Tagged**: Complexity tag for model routing
 
-Use this EXACT format (the tag is required for model routing):
-- [ ] `[coding]` Task requiring complex implementation, algorithms, or architecture
-- [ ] `[quick]` Simple config change, fix typo, update version number
-- [ ] `[general]` Moderate task like documentation, testing, refactoring
+Use this EXACT format:
+```markdown
+- [ ] `[coding]` Complex implementation requiring architecture decisions
+- [ ] `[quick]` Simple fix, config change, or typo correction
+- [ ] `[general]` Standard task like tests, docs, or refactoring
+```
 
-**Complexity Classification Guide:**
-- `[coding]` → Opus (smartest): New features, complex logic, debugging tricky issues, architecture decisions
-- `[quick]` → Haiku (fastest): Config changes, simple edits, renaming, updating values, small fixes
-- `[general]` → Sonnet (balanced): Documentation, tests, moderate refactoring, standard implementations
+**Model Routing:**
+- `[coding]` → **Opus** (smartest): New features, complex logic, debugging, architecture
+- `[quick]` → **Haiku** (fastest): Config, simple edits, renaming, small fixes
+- `[general]` → **Sonnet** (balanced): Tests, docs, refactoring, standard implementations
 
-**Prefer `[coding]` when in doubt** - it's better to use a smarter model than struggle with a simpler one.
+**When in doubt, use `[coding]`** - better to use a smarter model than struggle.
+
+## PR Strategy
+
+Group related tasks into logical PRs:
+- Each PR should be focused and reviewable
+- Include a task for "Create PR for [feature]" after implementation tasks
+- Consider CI and code review feedback cycles
+
+Example task flow:
+```markdown
+- [ ] `[coding]` Implement feature X core logic
+- [ ] `[general]` Add tests for feature X
+- [ ] `[quick]` Update documentation for feature X
+- [ ] `[general]` Create PR for feature X, wait for CI and reviews
+- [ ] `[coding]` Address PR feedback if any
+```
 
 ## Success Criteria
 
-Define 3-5 clear, measurable criteria that indicate complete success:
-1. Criterion with specific metric or outcome
-2. Another criterion that can be objectively verified
-...
+Define 3-5 clear, measurable criteria:
+1. All tests pass (`pytest` or equivalent)
+2. Linting/formatting clean (`ruff`, `mypy`, etc.)
+3. CI pipeline green
+4. PRs merged (if applicable)
+5. Specific functional requirement met
 
-Remember: The task list will be executed sequentially, so order matters."""
+Be specific and verifiable. These will be checked at the end."""
         return prompt
 
     def _build_work_prompt(
         self, task_description: str, context: str, pr_comments: str | None
     ) -> str:
         """Build prompt for work session."""
-        prompt = f"""You are Claude Task Master working on a specific task.
+        prompt = f"""You are Claude Task Master, an autonomous AI agent executing tasks.
 
-CURRENT TASK: {task_description}
+## Current Task
+
+{task_description}
+
+## Context
 
 {context}"""
 
         if pr_comments:
             prompt += f"""
 
-PR REVIEW COMMENTS TO ADDRESS:
-{pr_comments}"""
+## PR Review Comments to Address
+
+The following feedback was received from code reviewers (CodeRabbit, human reviewers, etc.):
+
+{pr_comments}
+
+**Instructions for addressing reviews:**
+- Read each comment carefully
+- Make the requested changes or explain why not needed
+- Run tests after changes to ensure nothing breaks
+- Commit with a message referencing the review feedback
+"""
 
         prompt += """
 
-Please complete this task using the available tools (Read, Write, Edit, Bash, Glob, Grep).
+## Execution Guidelines
 
-Important instructions:
-- Work autonomously and methodically
-- Test your changes to verify they work
-- After completing the task, COMMIT your changes with git
-- Use a clear, descriptive commit message
-- When you complete the task, provide a clear summary of what was done
-- Report any blockers or issues encountered
+### 1. Understand Before Acting
+- Read relevant files before modifying them
+- Check existing patterns and coding standards
+- Identify tests that need to pass
 
-Git commit format:
+### 2. Make Changes
+- Use Edit for existing files, Write for new files
+- Follow the project's coding style
+- Keep changes focused on the current task
+
+### 3. Verify Your Work
+- Run tests: `pytest`, `npm test`, or project-specific commands
+- Run linting: `ruff check .`, `eslint`, etc.
+- Check types if applicable: `mypy`, `tsc`
+
+### 4. Commit Your Changes
+Use conventional commits with clear messages:
+
 ```bash
 git add -A && git commit -m "$(cat <<'EOF'
-Brief description of changes
+feat/fix/chore: Brief description (50 chars max)
 
-Detailed explanation of what was done and why.
+- Detailed bullet points of what changed
+- Why this change was needed
+- Any relevant context
 
-Co-Authored-By: Claude Sonnet 4.5 (1M context) <noreply@anthropic.com>
+Co-Authored-By: Claude <noreply@anthropic.com>
 EOF
 )"
 ```
 
-When done, summarize:
-1. What was completed
-2. Any tests run and their results
-3. Any files modified
-4. Git commit made"""
+### 5. Handle PR Tasks
+If task involves creating/managing PRs:
+- Push changes: `git push -u origin HEAD`
+- Create PR: `gh pr create --title "..." --body "..."`
+- Check CI: `gh pr checks` or `gh run list`
+- Wait for reviews and address feedback
+
+## Completion Summary
+
+When done, provide:
+1. **What was completed** - specific changes made
+2. **Tests run** - commands and results
+3. **Files modified** - list of changed files
+4. **Git status** - commits made, push status
+5. **Blockers** - any issues encountered"""
 
         return prompt
 
