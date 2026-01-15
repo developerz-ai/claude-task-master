@@ -30,6 +30,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+mcp = ["mcp>=1.0.0"]
 dev = [
     "pytest>=8.0.0",
     "pytest-cov>=4.1.0",
@@ -37,9 +38,13 @@ dev = [
     "ruff>=0.3.0",
     "mypy>=1.9.0",
 ]
+all = [
+    "claude-task-master[mcp,dev]",
+]
 
 [project.scripts]
 claudetm = "claude_task_master.cli:app"
+claudetm-mcp = "claude_task_master.mcp.server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -85,6 +90,10 @@ strict_equality = true
 
 [[tool.mypy.overrides]]
 module = "claude_agent_sdk.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "mcp.*"
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

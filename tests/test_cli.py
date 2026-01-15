@@ -1347,8 +1347,8 @@ class TestStartCommand:
 
                         result = cli_runner.invoke(app, ["start", "Test goal"])
 
-        # Should show default model
-        assert "sonnet" in result.output
+        # Should show default model (opus is the default)
+        assert "opus" in result.output
 
     def test_start_with_custom_model(self, cli_runner, temp_dir):
         """Test start with custom model option."""

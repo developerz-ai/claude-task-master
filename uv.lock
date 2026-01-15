@@ -164,6 +164,14 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+all = [
+    { name = "mcp" },
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+    { name = "ruff" },
+]
 dev = [
     { name = "mypy" },
     { name = "pytest" },
@@ -171,11 +179,16 @@ dev = [
     { name = "pytest-cov" },
     { name = "ruff" },
 ]
+mcp = [
+    { name = "mcp" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "claude-agent-sdk", specifier = ">=0.1.0" },
+    { name = "claude-task-master", extras = ["mcp", "dev"], marker = "extra == 'all'" },
     { name = "httpx", specifier = ">=0.27.0" },
+    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.0.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.9.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
@@ -185,7 +198,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.3.0" },
     { name = "typer", specifier = ">=0.12.0" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["mcp", "dev", "all"]
 
 [[package]]
 name = "click"
