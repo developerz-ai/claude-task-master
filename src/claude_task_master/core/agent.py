@@ -138,11 +138,68 @@ class ModelType(Enum):
     HAIKU = "haiku"
 
 
+class TaskComplexity(Enum):
+    """Task complexity levels for model selection.
+
+    - CODING: Complex implementation tasks → Opus (smartest)
+    - QUICK: Simple fixes, config changes → Haiku (fastest/cheapest)
+    - GENERAL: Moderate complexity → Sonnet (balanced)
+    """
+
+    CODING = "coding"
+    QUICK = "quick"
+    GENERAL = "general"
+
+    @classmethod
+    def get_model_for_complexity(cls, complexity: "TaskComplexity") -> ModelType:
+        """Map task complexity to appropriate model."""
+        mapping = {
+            cls.CODING: ModelType.OPUS,
+            cls.QUICK: ModelType.HAIKU,
+            cls.GENERAL: ModelType.SONNET,
+        }
+        return mapping.get(complexity, ModelType.SONNET)
+
+
 class ToolConfig(Enum):
     """Tool configurations for different phases."""
 
     PLANNING = ["Read", "Glob", "Grep"]
     WORKING = ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
+
+
+def parse_task_complexity(task_description: str) -> tuple[TaskComplexity, str]:
+    """Parse task complexity tag from task description.
+
+    Looks for `[coding]`, `[quick]`, or `[general]` tags in the task.
+
+    Args:
+        task_description: The task description potentially containing a complexity tag.
+
+    Returns:
+        Tuple of (TaskComplexity, cleaned_task_description).
+        Defaults to CODING if no tag found (prefer smarter model).
+    """
+    import re
+
+    # Look for complexity tags in backticks: `[coding]`, `[quick]`, `[general]`
+    pattern = r"`\[(coding|quick|general)\]`"
+    match = re.search(pattern, task_description, re.IGNORECASE)
+
+    if match:
+        complexity_str = match.group(1).lower()
+        # Remove the tag from the description
+        cleaned = re.sub(pattern, "", task_description, flags=re.IGNORECASE).strip()
+
+        complexity_map = {
+            "coding": TaskComplexity.CODING,
+            "quick": TaskComplexity.QUICK,
+            "general": TaskComplexity.GENERAL,
+        }
+        return complexity_map.get(complexity_str, TaskComplexity.CODING), cleaned
+
+    # Default to CODING (prefer smarter model when uncertain)
+    return TaskComplexity.CODING, task_description
 
 
 class AgentWrapper:
@@ -231,15 +288,23 @@ class AgentWrapper:
             )
 
     def run_planning_phase(self, goal: str, context: str = "") -> dict[str, Any]:
-        """Run planning phase with read-only tools."""
+        """Run planning phase with read-only tools.
+
+        Always uses Opus (smartest model) for planning to ensure
+        high-quality task breakdown and complexity classification.
+        """
         # Build prompt for planning
         prompt = self._build_planning_prompt(goal, context)
 
-        # Run async query
+        # Always use Opus for planning (smartest model)
+        console.info("Planning with Opus (smartest model)...")
+
+        # Run async query with Opus override
         result = asyncio.run(
             self._run_query(
                 prompt=prompt,
                 tools=self.get_tools_for_phase("planning"),
+                model_override=ModelType.OPUS,  # Always use Opus for planning
             )
         )
 
@@ -255,22 +320,36 @@ class AgentWrapper:
         task_description: str,
         context: str = "",
         pr_comments: str | None = None,
+        model_override: ModelType | None = None,
     ) -> dict[str, Any]:
-        """Run a work session with full tools."""
+        """Run a work session with full tools.
+
+        Args:
+            task_description: Description of the task to complete.
+            context: Additional context for the task.
+            pr_comments: PR review comments to address (if any).
+            model_override: Optional model to use instead of default.
+                           Used for dynamic model routing based on task complexity.
+
+        Returns:
+            Dict with 'output' and 'success' keys.
+        """
         # Build prompt for work session
         prompt = self._build_work_prompt(task_description, context, pr_comments)
 
-        # Run async query
+        # Run async query with optional model override
         result = asyncio.run(
             self._run_query(
                 prompt=prompt,
                 tools=self.get_tools_for_phase("working"),
+                model_override=model_override,
             )
         )
 
         return {
             "output": result,
             "success": True,  # For MVP, assume success
+            "model_used": (model_override or self.model).value,
         }
 
     def verify_success_criteria(self, criteria: str, context: str = "") -> dict[str, Any]:
@@ -304,12 +383,15 @@ Format your response clearly."""
             "details": result,
         }
 
-    async def _run_query(self, prompt: str, tools: list[str]) -> str:
+    async def _run_query(
+        self, prompt: str, tools: list[str], model_override: ModelType | None = None
+    ) -> str:
         """Run query with retry logic for transient errors.
 
         Args:
             prompt: The prompt to send to the model.
             tools: List of tools to enable.
+            model_override: Optional model to use instead of default.
 
         Returns:
             The result text from the query.
@@ -319,14 +401,17 @@ Format your response clearly."""
             QueryExecutionError: If the query fails after all retries.
             APIAuthenticationError: If authentication fails (not retried).
         """
-        return await self._run_query_with_retry(prompt, tools)
+        return await self._run_query_with_retry(prompt, tools, model_override)
 
-    async def _run_query_with_retry(self, prompt: str, tools: list[str]) -> str:
+    async def _run_query_with_retry(
+        self, prompt: str, tools: list[str], model_override: ModelType | None = None
+    ) -> str:
         """Execute query with exponential backoff retry for transient errors.
 
         Args:
             prompt: The prompt to send to the model.
             tools: List of tools to enable.
+            model_override: Optional model to use instead of default.
 
         Returns:
             The result text from the query.
@@ -340,7 +425,7 @@ Format your response clearly."""
 
         for attempt in range(self.max_retries + 1):
             try:
-                return await self._execute_query(prompt, tools)
+                return await self._execute_query(prompt, tools, model_override)
             except self.TRANSIENT_ERRORS as e:
                 last_error = e
                 if attempt < self.max_retries:
@@ -380,12 +465,15 @@ Format your response clearly."""
             raise last_error
         raise QueryExecutionError("Query failed with unknown error")
 
-    async def _execute_query(self, prompt: str, tools: list[str]) -> str:
+    async def _execute_query(
+        self, prompt: str, tools: list[str], model_override: ModelType | None = None
+    ) -> str:
         """Execute a single query attempt.
 
         Args:
             prompt: The prompt to send to the model.
             tools: List of tools to enable.
+            model_override: Optional model to use instead of default.
 
         Returns:
             The result text from the query.
@@ -402,6 +490,13 @@ Format your response clearly."""
         result_text = ""
         original_dir = os.getcwd()
 
+        # Determine which model to use
+        effective_model = model_override or self.model
+        model_name = self._get_model_name(effective_model)
+
+        # Log the model being used
+        console.detail(f"Using model: {effective_model.value} ({model_name})", flush=True)
+
         try:
             # Change to working directory
             try:
@@ -413,11 +508,12 @@ Format your response clearly."""
             except OSError as e:
                 raise WorkingDirectoryError(self.working_dir, "change to", e) from e
 
-            # Create options
+            # Create options with model specification
             try:
                 options = self.options_class(
                     allowed_tools=tools,
                     permission_mode="bypassPermissions",  # For MVP, bypass permissions
+                    model=model_name,  # Specify the model to use
                 )
             except Exception as e:
                 raise SDKInitializationError("ClaudeAgentOptions", e) from e
@@ -530,14 +626,22 @@ Format your response clearly."""
         else:
             return ToolConfig.WORKING.value
 
-    def _get_model_name(self) -> str:
-        """Convert ModelType to API model name."""
+    def _get_model_name(self, model: ModelType | None = None) -> str:
+        """Convert ModelType to API model name.
+
+        Args:
+            model: Optional model override. If None, uses self.model.
+
+        Returns:
+            The API model name string.
+        """
+        target_model = model or self.model
         model_map = {
-            ModelType.SONNET: "claude-sonnet-4-20250514",
-            ModelType.OPUS: "claude-opus-4-20250514",
-            ModelType.HAIKU: "claude-3-5-haiku-20241022",
+            ModelType.SONNET: "claude-sonnet-4-5-20241022",
+            ModelType.OPUS: "claude-opus-4-5-20250514",
+            ModelType.HAIKU: "claude-haiku-4-5-20241022",
         }
-        return model_map.get(self.model, "claude-sonnet-4-20250514")
+        return model_map.get(target_model, "claude-sonnet-4-5-20241022")
 
     def _build_planning_prompt(self, goal: str, context: str) -> str:
         """Build prompt for planning phase."""
@@ -549,7 +653,8 @@ Your task is to:
 1. Analyze the goal and understand what needs to be done
 2. Explore the codebase if relevant (use Read, Glob, Grep tools)
 3. Create a detailed, well-organized task list with markdown checkboxes
-4. Define clear, testable success criteria
+4. Classify each task by complexity for optimal model routing
+5. Define clear, testable success criteria
 
 IMPORTANT SETUP:
 - If the project has a .gitignore file, ensure that .claude-task-master/ is added to it
@@ -566,11 +671,19 @@ Organize tasks into logical phases if the goal is complex. Each task should be:
 - **Testable** - Can verify when complete
 - **Appropriately sized** - Not too large or too small
 - **Ordered logically** - Dependencies should come first
+- **Classified by complexity** - Tag with appropriate model tier
 
-Use this format:
-- [ ] Task description (be specific about what and where)
-- [ ] Another task with clear deliverables
-...
+Use this EXACT format (the tag is required for model routing):
+- [ ] `[coding]` Task requiring complex implementation, algorithms, or architecture
+- [ ] `[quick]` Simple config change, fix typo, update version number
+- [ ] `[general]` Moderate task like documentation, testing, refactoring
+
+**Complexity Classification Guide:**
+- `[coding]` → Opus (smartest): New features, complex logic, debugging tricky issues, architecture decisions
+- `[quick]` → Haiku (fastest): Config changes, simple edits, renaming, updating values, small fixes
+- `[general]` → Sonnet (balanced): Documentation, tests, moderate refactoring, standard implementations
+
+**Prefer `[coding]` when in doubt** - it's better to use a smarter model than struggle with a simpler one.
 
 ## Success Criteria
 

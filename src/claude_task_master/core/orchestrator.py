@@ -1,7 +1,7 @@
 """Work Loop Orchestrator - Main loop driving work sessions until completion."""
 
 from . import console
-from .agent import AgentError, AgentWrapper
+from .agent import AgentError, AgentWrapper, ModelType, TaskComplexity, parse_task_complexity
 from .planner import Planner
 from .state import StateError, StateManager, TaskState
 
@@ -390,6 +390,10 @@ class WorkLoopOrchestrator:
             self.state_manager.save_state(state)
             return
 
+        # Parse task complexity to determine which model to use
+        complexity, cleaned_task = parse_task_complexity(current_task)
+        target_model = TaskComplexity.get_model_for_complexity(complexity)
+
         # Load context safely
         try:
             context = self.state_manager.load_context()
@@ -406,18 +410,20 @@ class WorkLoopOrchestrator:
 
         task_description = f"""Goal: {goal}
 
-Current Task (#{state.current_task_index + 1}): {current_task}
+Current Task (#{state.current_task_index + 1}): {cleaned_task}
 
 Please complete this task."""
 
         console.newline()
-        console.info(f"Working on task #{state.current_task_index + 1}: {current_task}")
+        console.info(f"Working on task #{state.current_task_index + 1}: {cleaned_task}")
+        console.detail(f"Complexity: {complexity.value} → Model: {target_model.value}")
 
-        # Run agent work session with error wrapping
+        # Run agent work session with model routing based on complexity
         try:
             result = self.agent.run_work_session(
                 task_description=task_description,
                 context=context,
+                model_override=target_model,  # Route to appropriate model
             )
         except AgentError:
             # Let agent errors propagate to be wrapped by caller

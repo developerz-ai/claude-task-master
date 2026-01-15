@@ -13,8 +13,10 @@ from claude_task_master.core.agent import (
     QueryExecutionError,
     SDKImportError,
     SDKInitializationError,
+    TaskComplexity,
     ToolConfig,
     WorkingDirectoryError,
+    parse_task_complexity,
 )
 from claude_task_master.core.credentials import (
     CredentialError,
@@ -83,8 +85,10 @@ __all__ = [
     "WorkingDirectoryError",
     # Agent classes
     "ModelType",
+    "TaskComplexity",
     "ToolConfig",
     "AgentWrapper",
+    "parse_task_complexity",
     # State exceptions
     "StateError",
     "StateNotFoundError",
