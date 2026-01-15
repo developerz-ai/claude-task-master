@@ -68,8 +68,7 @@ class TestStartCommandWorkflow:
         patched_sdk.set_verify_response("All success criteria met!")
 
         result = runner.invoke(
-            app,
-            ["start", "Build a simple test application", "--model", "sonnet"]
+            app, ["start", "Build a simple test application", "--model", "sonnet"]
         )
 
         # The workflow started and ran successfully
@@ -121,6 +120,7 @@ class TestStartCommandWorkflow:
             # Clean up state between runs
             if integration_state_dir.exists():
                 import shutil
+
                 shutil.rmtree(integration_state_dir)
             integration_state_dir.mkdir(parents=True)
 
@@ -138,10 +138,7 @@ class TestStartCommandWorkflow:
             patched_sdk.set_work_response("Completed.")
             patched_sdk.set_verify_response("Success!")
 
-            runner.invoke(
-                app,
-                ["start", f"Test with {model}", "--model", model]
-            )
+            runner.invoke(app, ["start", f"Test with {model}", "--model", model])
 
             # Verify the model was saved in state
             state_file = integration_state_dir / "state.json"
@@ -172,11 +169,13 @@ class TestStartCommandWorkflow:
         runner.invoke(
             app,
             [
-                "start", "Test with options",
+                "start",
+                "Test with options",
                 "--no-auto-merge",
-                "--max-sessions", "5",
+                "--max-sessions",
+                "5",
                 "--pause-on-pr",
-            ]
+            ],
         )
 
         # Verify options were saved
@@ -254,6 +253,7 @@ class TestResumeCommandWorkflow:
         # Make sure state dir does NOT exist
         if state_dir.exists():
             import shutil
+
             shutil.rmtree(state_dir)
 
         monkeypatch.chdir(integration_temp_dir)
@@ -279,7 +279,11 @@ class TestResumeCommandWorkflow:
         result = runner.invoke(app, ["resume"])
 
         # Should indicate task is already complete
-        assert result.exit_code == 0 or "success" in result.output.lower() or "completed" in result.output.lower()
+        assert (
+            result.exit_code == 0
+            or "success" in result.output.lower()
+            or "completed" in result.output.lower()
+        )
 
     def test_resume_failed_task(
         self,
@@ -509,6 +513,7 @@ class TestCleanCommand:
         state_dir = integration_temp_dir / ".claude-task-master"
         if state_dir.exists():
             import shutil
+
             shutil.rmtree(state_dir)
 
         monkeypatch.chdir(integration_temp_dir)
@@ -762,22 +767,25 @@ class TestStartToCompletionWorkflow:
         patched_sdk.set_verify_response("All success criteria have been met! Overall: SUCCESS")
 
         # Execute start command
-        result = runner.invoke(
-            app,
-            ["start", "Implement a simple feature", "--model", "sonnet"]
-        )
+        result = runner.invoke(app, ["start", "Implement a simple feature", "--model", "sonnet"])
 
         # Verify workflow completed
-        assert result.exit_code == 0, f"Expected exit code 0, got {result.exit_code}. Output: {result.output}"
+        assert result.exit_code == 0, (
+            f"Expected exit code 0, got {result.exit_code}. Output: {result.output}"
+        )
         assert "Starting new task" in result.output
         assert "Implement a simple feature" in result.output
-        assert "completed successfully" in result.output.lower() or "success" in result.output.lower()
+        assert (
+            "completed successfully" in result.output.lower() or "success" in result.output.lower()
+        )
 
         # Verify state is either cleaned up (success) or shows success status
         state_file = integration_state_dir / "state.json"
         if state_file.exists():
             state_data = json.loads(state_file.read_text())
-            assert state_data["status"] == "success", f"Expected 'success' status, got '{state_data['status']}'"
+            assert state_data["status"] == "success", (
+                f"Expected 'success' status, got '{state_data['status']}'"
+            )
 
     def test_complete_multi_task_workflow(
         self,
@@ -818,6 +826,7 @@ class TestStartToCompletionWorkflow:
 
         # Track work session calls to verify all tasks are processed
         work_call_count = [0]
+
         def track_work_response(**kwargs):
             work_call_count[0] += 1
             return {"output": f"Completed task {work_call_count[0]}", "success": True}
@@ -826,10 +835,7 @@ class TestStartToCompletionWorkflow:
         patched_sdk.set_verify_response("All success criteria met! All 4 tasks completed.")
 
         # Execute start command
-        result = runner.invoke(
-            app,
-            ["start", "Build a complete module", "--model", "sonnet"]
-        )
+        result = runner.invoke(app, ["start", "Build a complete module", "--model", "sonnet"])
 
         # Verify workflow started
         assert "Starting new task" in result.output
@@ -844,7 +850,9 @@ class TestStartToCompletionWorkflow:
                 assert state_data["status"] == "success"
         else:
             # Should not fail for this test
-            assert result.exit_code == 0, f"Multi-task workflow should complete. Output: {result.output}"
+            assert result.exit_code == 0, (
+                f"Multi-task workflow should complete. Output: {result.output}"
+            )
 
     def test_workflow_with_verification_pass(
         self,
@@ -884,10 +892,7 @@ Overall Status: SUCCESS
 All success criteria have been met!
 """)
 
-        result = runner.invoke(
-            app,
-            ["start", "Test verification flow", "--model", "sonnet"]
-        )
+        result = runner.invoke(app, ["start", "Test verification flow", "--model", "sonnet"])
 
         # Should complete successfully
         assert result.exit_code == 0, f"Verification should pass. Output: {result.output}"
@@ -923,10 +928,7 @@ All success criteria have been met!
         patched_sdk.set_work_response("Done.")
         patched_sdk.set_verify_response("All success criteria met!")
 
-        result = runner.invoke(
-            app,
-            ["start", "Track state progression", "--model", "sonnet"]
-        )
+        result = runner.invoke(app, ["start", "Track state progression", "--model", "sonnet"])
 
         # Workflow should complete
         assert result.exit_code == 0 or result.exit_code == 1  # Success or blocked
@@ -970,10 +972,7 @@ All success criteria have been met!
         patched_sdk.set_work_response("Artifacts created.")
         patched_sdk.set_verify_response("All criteria met!")
 
-        result = runner.invoke(
-            app,
-            ["start", test_goal, "--model", "sonnet"]
-        )
+        result = runner.invoke(app, ["start", test_goal, "--model", "sonnet"])
 
         # Verify goal file was created
         goal_file = integration_state_dir / "goal.txt"
@@ -1025,8 +1024,7 @@ All success criteria have been met!
         patched_sdk.set_verify_response("All success criteria met!")
 
         runner.invoke(
-            app,
-            ["start", "Test max sessions", "--model", "sonnet", "--max-sessions", "10"]
+            app, ["start", "Test max sessions", "--model", "sonnet", "--max-sessions", "10"]
         )
 
         # Should complete with plenty of sessions remaining
@@ -1078,10 +1076,7 @@ All success criteria have been met!
         patched_sdk.set_verify_response("All success criteria met!")
 
         # Step 1: Start the workflow
-        result = runner.invoke(
-            app,
-            ["start", "Full cycle test", "--model", "sonnet"]
-        )
+        result = runner.invoke(app, ["start", "Full cycle test", "--model", "sonnet"])
 
         # The workflow should have progressed
         assert "Starting new task" in result.output
@@ -1143,11 +1138,13 @@ All success criteria have been met!
         runner.invoke(
             app,
             [
-                "start", "Test options preservation",
+                "start",
+                "Test options preservation",
                 "--no-auto-merge",
-                "--max-sessions", "5",
+                "--max-sessions",
+                "5",
                 "--pause-on-pr",
-            ]
+            ],
         )
 
         # Verify options in state
@@ -1190,10 +1187,7 @@ This goal requires no tasks - everything is already done.
 """)
         patched_sdk.set_verify_response("Success - nothing needed!")
 
-        result = runner.invoke(
-            app,
-            ["start", "Empty task list", "--model", "sonnet"]
-        )
+        result = runner.invoke(app, ["start", "Empty task list", "--model", "sonnet"])
 
         # Should complete successfully (nothing to do is valid)
         # or fail gracefully with clear indication
@@ -1216,6 +1210,7 @@ This goal requires no tasks - everything is already done.
         for model in ["sonnet", "opus", "haiku"]:
             # Clean state for each model test
             import shutil
+
             if integration_state_dir.exists():
                 shutil.rmtree(integration_state_dir)
             integration_state_dir.mkdir(parents=True)
@@ -1236,10 +1231,7 @@ This goal requires no tasks - everything is already done.
             patched_sdk.set_work_response("Completed.")
             patched_sdk.set_verify_response("All criteria met!")
 
-            runner.invoke(
-                app,
-                ["start", f"Test with {model} model", "--model", model]
-            )
+            runner.invoke(app, ["start", f"Test with {model} model", "--model", model])
 
             # Verify model was saved
             state_file = integration_state_dir / "state.json"

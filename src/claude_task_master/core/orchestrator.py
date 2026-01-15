@@ -1,6 +1,5 @@
 """Work Loop Orchestrator - Main loop driving work sessions until completion."""
 
-
 from . import console
 from .agent import AgentError, AgentWrapper
 from .planner import Planner
@@ -116,7 +115,9 @@ class VerificationFailedError(OrchestratorError):
         self.criteria = criteria
         super().__init__(
             "Success criteria verification failed",
-            details or f"Criteria not met: {criteria[:100]}..." if len(criteria) > 100 else criteria,
+            details or f"Criteria not met: {criteria[:100]}..."
+            if len(criteria) > 100
+            else criteria,
         )
 
 
@@ -308,15 +309,14 @@ class WorkLoopOrchestrator:
 
             # Get the most recent backup
             backups = sorted(
-                backup_dir.glob("state.*.json"),
-                key=lambda p: p.stat().st_mtime,
-                reverse=True
+                backup_dir.glob("state.*.json"), key=lambda p: p.stat().st_mtime, reverse=True
             )
 
             if not backups:
                 return None
 
             import json
+
             for backup_file in backups:
                 try:
                     with open(backup_file) as f:
@@ -383,7 +383,9 @@ class WorkLoopOrchestrator:
         # Check if task is already complete
         if self._is_task_complete(plan, state.current_task_index):
             console.newline()
-            console.success(f"Task #{state.current_task_index + 1} already complete: {current_task}")
+            console.success(
+                f"Task #{state.current_task_index + 1} already complete: {current_task}"
+            )
             state.current_task_index += 1
             self.state_manager.save_state(state)
             return
@@ -432,7 +434,7 @@ Please complete this task."""
             "# Progress Tracker\n",
             f"**Session:** {state.session_count + 1}",
             f"**Current Task:** {state.current_task_index + 1} of {len(tasks)}\n",
-            "## Task List\n"
+            "## Task List\n",
         ]
 
         # Add all tasks with their status
@@ -453,13 +455,15 @@ Please complete this task."""
             progress_lines.append(f"{status} {marker} **Task {i + 1}:** {task}")
 
         # Add latest result if available
-        if result.get('output'):
-            progress_lines.extend([
-                "\n## Latest Completed",
-                f"**Task {state.current_task_index + 1}:** {current_task}\n",
-                "### Summary",
-                result.get('output', 'Completed')
-            ])
+        if result.get("output"):
+            progress_lines.extend(
+                [
+                    "\n## Latest Completed",
+                    f"**Task {state.current_task_index + 1}:** {current_task}\n",
+                    "### Summary",
+                    result.get("output", "Completed"),
+                ]
+            )
 
         progress = "\n".join(progress_lines)
 

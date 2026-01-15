@@ -772,10 +772,7 @@ class TestAgentWrapperRunWorkSession:
         with patch.object(agent_with_mock, "_run_query", new_callable=AsyncMock) as mock_query:
             mock_query.return_value = "Done"
             with patch("asyncio.run", return_value="Done"):
-                result = agent_with_mock.run_work_session(
-                    "Task",
-                    context="Previous work info"
-                )
+                result = agent_with_mock.run_work_session("Task", context="Previous work info")
 
         assert result is not None
 
@@ -785,8 +782,7 @@ class TestAgentWrapperRunWorkSession:
             mock_query.return_value = "Done"
             with patch("asyncio.run", return_value="Done"):
                 result = agent_with_mock.run_work_session(
-                    "Task",
-                    pr_comments="Fix the error handling"
+                    "Task", pr_comments="Fix the error handling"
                 )
 
         assert result is not None
@@ -838,7 +834,9 @@ class TestAgentWrapperVerifySuccessCriteria:
         """Test verify_success_criteria detects success indicators."""
         with patch.object(agent_with_mock, "_run_query", new_callable=AsyncMock) as mock_query:
             mock_query.return_value = "All criteria met. Everything is working correctly."
-            with patch("asyncio.run", return_value="All criteria met. Everything is working correctly."):
+            with patch(
+                "asyncio.run", return_value="All criteria met. Everything is working correctly."
+            ):
                 result = agent_with_mock.verify_success_criteria("Tests pass")
 
         assert result["success"] is True
@@ -858,8 +856,7 @@ class TestAgentWrapperVerifySuccessCriteria:
             mock_query.return_value = "Success confirmed"
             with patch("asyncio.run", return_value="Success confirmed"):
                 result = agent_with_mock.verify_success_criteria(
-                    "Tests pass",
-                    context="Additional context info"
+                    "Tests pass", context="Additional context info"
                 )
 
         assert result is not None

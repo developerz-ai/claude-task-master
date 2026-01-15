@@ -52,9 +52,7 @@ class MockClaudeAgentSDK:
         self._verify_responses.append(response)
 
     def configure_failure(
-        self,
-        fail_after: int | None = None,
-        failure_type: str = "generic"
+        self, fail_after: int | None = None, failure_type: str = "generic"
     ) -> None:
         """Configure the mock to fail after a certain number of calls.
 
@@ -276,11 +274,7 @@ def integration_workflow_setup(
     monkeypatch.setattr(StateManager, "STATE_DIR", integration_state_dir)
 
     # Patch CredentialManager to use our mock credentials path
-    monkeypatch.setattr(
-        CredentialManager,
-        "CREDENTIALS_PATH",
-        mock_credentials_file
-    )
+    monkeypatch.setattr(CredentialManager, "CREDENTIALS_PATH", mock_credentials_file)
 
     yield {
         "temp_dir": integration_temp_dir,
@@ -390,12 +384,8 @@ def paused_state(
 
     # Mark first two tasks as complete in the plan
     plan_with_progress = sample_plan_content.replace(
-        "- [ ] Initialize project structure",
-        "- [x] Initialize project structure"
-    ).replace(
-        "- [ ] Implement authentication module",
-        "- [x] Implement authentication module"
-    )
+        "- [ ] Initialize project structure", "- [x] Initialize project structure"
+    ).replace("- [ ] Implement authentication module", "- [x] Implement authentication module")
 
     state_data = {
         "status": "paused",
@@ -508,8 +498,7 @@ def blocked_state(
 
     # Write plan file with first task complete
     plan_with_progress = sample_plan_content.replace(
-        "- [ ] Initialize project structure",
-        "- [x] Initialize project structure"
+        "- [ ] Initialize project structure", "- [x] Initialize project structure"
     )
     plan_file = integration_state_dir / "plan.md"
     plan_file.write_text(plan_with_progress)
@@ -763,17 +752,23 @@ Please complete the API documentation before marking as successful.
 def mock_agent_wrapper(mock_sdk: MockClaudeAgentSDK):
     """Provide a mock AgentWrapper for integration tests."""
     mock = MagicMock()
-    mock.run_planning_phase = MagicMock(return_value={
-        "plan": "## Task List\n- [ ] Task 1\n\n## Success Criteria\n1. Done",
-        "criteria": "1. Done",
-        "raw_output": "Plan created successfully",
-    })
-    mock.run_work_session = MagicMock(return_value={
-        "output": "Task completed successfully",
-        "success": True,
-    })
-    mock.verify_success_criteria = MagicMock(return_value={
-        "success": True,
-        "details": "All criteria met!",
-    })
+    mock.run_planning_phase = MagicMock(
+        return_value={
+            "plan": "## Task List\n- [ ] Task 1\n\n## Success Criteria\n1. Done",
+            "criteria": "1. Done",
+            "raw_output": "Plan created successfully",
+        }
+    )
+    mock.run_work_session = MagicMock(
+        return_value={
+            "output": "Task completed successfully",
+            "success": True,
+        }
+    )
+    mock.verify_success_criteria = MagicMock(
+        return_value={
+            "success": True,
+            "details": "All criteria met!",
+        }
+    )
     return mock

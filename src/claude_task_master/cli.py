@@ -39,7 +39,9 @@ def start(
         # Check if state already exists
         state_manager = StateManager()
         if state_manager.exists():
-            console.print("[red]Error: Task already exists. Use 'resume' to continue or 'clean' to start fresh.[/red]")
+            console.print(
+                "[red]Error: Task already exists. Use 'resume' to continue or 'clean' to start fresh.[/red]"
+            )
             raise typer.Exit(1)
 
         # Load credentials
@@ -283,7 +285,7 @@ def plan() -> None:
 @app.command()
 def logs(
     session: int | None = typer.Option(None, help="Show specific session number"),
-    tail: int = typer.Option(100, help="Number of lines to show from the end")
+    tail: int = typer.Option(100, help="Number of lines to show from the end"),
 ) -> None:
     """Display logs from the current run."""
     state_manager = StateManager()
@@ -369,9 +371,7 @@ def progress() -> None:
 
 
 @app.command()
-def comments(
-    pr: int | None = typer.Option(None, help="PR number to show comments for")
-) -> None:
+def comments(pr: int | None = typer.Option(None, help="PR number to show comments for")) -> None:
     """Display PR review comments."""
     console.print("[bold blue]PR Comments[/bold blue]")
     # TODO: Implement comments logic
@@ -387,9 +387,7 @@ def pr() -> None:
 
 
 @app.command()
-def clean(
-    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation")
-) -> None:
+def clean(force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation")) -> None:
     """Clean up task state directory."""
     state_manager = StateManager()
 
@@ -406,6 +404,7 @@ def clean(
     console.print("[bold red]Cleaning task state...[/bold red]")
 
     import shutil
+
     if state_manager.state_dir.exists():
         shutil.rmtree(state_manager.state_dir)
         console.print("[green]✓ Task state cleaned[/green]")

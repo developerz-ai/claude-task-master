@@ -74,10 +74,7 @@ class TestPauseResumeWorkflow:
         patched_sdk.set_verify_response("All success criteria met!")
 
         # Step 1: Start the task
-        result = runner.invoke(
-            app,
-            ["start", "Test pause and resume", "--model", "sonnet"]
-        )
+        result = runner.invoke(app, ["start", "Test pause and resume", "--model", "sonnet"])
 
         # Verify task started
         assert "Starting new task" in result.output
@@ -104,7 +101,9 @@ class TestPauseResumeWorkflow:
                 resume_result = runner.invoke(app, ["resume"])
 
                 # Should indicate resuming
-                assert "Resuming" in resume_result.output or "resume" in resume_result.output.lower()
+                assert (
+                    "Resuming" in resume_result.output or "resume" in resume_result.output.lower()
+                )
 
     def test_pause_and_resume_multi_task_workflow(
         self,
@@ -149,10 +148,7 @@ class TestPauseResumeWorkflow:
         patched_sdk.set_verify_response("All criteria met!")
 
         # Step 1: Start the task and let it begin
-        result = runner.invoke(
-            app,
-            ["start", "Multi-task pause test", "--model", "sonnet"]
-        )
+        result = runner.invoke(app, ["start", "Multi-task pause test", "--model", "sonnet"])
 
         # Verify task started
         assert "Starting new task" in result.output
@@ -186,7 +182,9 @@ class TestPauseResumeWorkflow:
                 resume_result = runner.invoke(app, ["resume"])
 
                 # Should resume without error
-                assert "Resuming" in resume_result.output or "resume" in resume_result.output.lower()
+                assert (
+                    "Resuming" in resume_result.output or "resume" in resume_result.output.lower()
+                )
 
     def test_resume_preserves_task_completion_status(
         self,
@@ -790,7 +788,11 @@ class TestEdgeCases:
         result = runner.invoke(app, ["resume"])
 
         # Should indicate max sessions reached
-        assert result.exit_code == 1 or "max" in result.output.lower() or "session" in result.output.lower()
+        assert (
+            result.exit_code == 1
+            or "max" in result.output.lower()
+            or "session" in result.output.lower()
+        )
 
     def test_resume_with_all_tasks_complete(
         self,
@@ -851,7 +853,11 @@ class TestEdgeCases:
 
         # Should complete verification and succeed
         # Or indicate task completed
-        assert result.exit_code == 0 or "complete" in result.output.lower() or "success" in result.output.lower()
+        assert (
+            result.exit_code == 0
+            or "complete" in result.output.lower()
+            or "success" in result.output.lower()
+        )
 
     def test_resume_with_empty_plan(
         self,

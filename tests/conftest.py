@@ -292,9 +292,7 @@ def mock_agent_wrapper(temp_dir: Path):
             "raw_output": "Planning output",
         }
     )
-    mock.run_work_session = MagicMock(
-        return_value={"output": "Work completed", "success": True}
-    )
+    mock.run_work_session = MagicMock(return_value={"output": "Work completed", "success": True})
     mock.verify_success_criteria = MagicMock(
         return_value={"success": True, "details": "All criteria met"}
     )
@@ -527,7 +525,9 @@ def event_loop_policy():
 
 def pytest_configure(config):
     """Configure pytest with custom markers."""
-    config.addinivalue_line("markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')")
+    config.addinivalue_line(
+        "markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')"
+    )
     config.addinivalue_line(
         "markers", "integration: marks tests as integration tests (require external services)"
     )

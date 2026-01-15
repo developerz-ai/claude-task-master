@@ -180,9 +180,7 @@ class TestInvalidTokenResponseError:
 
     def test_invalid_token_response_error(self):
         """Test InvalidTokenResponseError initialization."""
-        error = InvalidTokenResponseError(
-            "Missing access_token", {"refresh_token": "xxx"}
-        )
+        error = InvalidTokenResponseError("Missing access_token", {"refresh_token": "xxx"})
         assert error.response_data == {"refresh_token": "xxx"}
         assert "access_token" in str(error).lower()
         assert isinstance(error, TokenRefreshError)
@@ -542,7 +540,9 @@ class TestCredentialManagerRefresh:
         assert new_creds.refreshToken == "new-refresh-token"
         assert new_creds.expiresAt == new_token_data["expires_at"]
 
-    def test_refresh_access_token_preserves_old_refresh_token(self, temp_dir, mock_credentials_data):
+    def test_refresh_access_token_preserves_old_refresh_token(
+        self, temp_dir, mock_credentials_data
+    ):
         """Test that old refresh token is preserved if new one not provided."""
         credentials_path = temp_dir / ".claude" / ".credentials.json"
         credentials_path.parent.mkdir(parents=True, exist_ok=True)
@@ -725,7 +725,9 @@ class TestCredentialManagerRefresh:
 
         # Create a mock request object for the error
         mock_request = MagicMock()
-        with patch.object(httpx, "post", side_effect=httpx.RequestError("Request failed", request=mock_request)):
+        with patch.object(
+            httpx, "post", side_effect=httpx.RequestError("Request failed", request=mock_request)
+        ):
             with pytest.raises(NetworkConnectionError) as exc_info:
                 manager.refresh_access_token(original_creds)
 

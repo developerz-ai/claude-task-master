@@ -21,9 +21,7 @@ class PRCycleManager:
         self.state_manager = state_manager
         self.agent = agent
 
-    def create_or_update_pr(
-        self, title: str, body: str, state: TaskState
-    ) -> int:
+    def create_or_update_pr(self, title: str, body: str, state: TaskState) -> int:
         """Create a new PR or update existing one."""
         if state.current_pr:
             # TODO: Update existing PR
@@ -127,9 +125,7 @@ class PRCycleManager:
 
         for check in status.check_details:
             if check["conclusion"] in ("FAILURE", "ERROR"):
-                lines.append(
-                    f"- {check['name']}: {check['conclusion']}"
-                )
+                lines.append(f"- {check['name']}: {check['conclusion']}")
                 if check.get("url"):
                     lines.append(f"  URL: {check['url']}")
 

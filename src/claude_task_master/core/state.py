@@ -56,7 +56,12 @@ class StateCorruptedError(StateError):
 class StateValidationError(StateError):
     """Raised when state data fails validation."""
 
-    def __init__(self, message: str, missing_fields: list[str] | None = None, invalid_fields: list[str] | None = None):
+    def __init__(
+        self,
+        message: str,
+        missing_fields: list[str] | None = None,
+        invalid_fields: list[str] | None = None,
+    ):
         self.missing_fields = missing_fields or []
         self.invalid_fields = invalid_fields or []
 
@@ -155,7 +160,9 @@ RESUMABLE_STATUSES = frozenset(["paused", "working", "blocked"])
 # Define valid state transitions
 VALID_TRANSITIONS: dict[str, frozenset[str]] = {
     "planning": frozenset(["working", "failed", "paused"]),
-    "working": frozenset(["blocked", "success", "failed", "working", "paused"]),  # working -> working for retries
+    "working": frozenset(
+        ["blocked", "success", "failed", "working", "paused"]
+    ),  # working -> working for retries
     "blocked": frozenset(["working", "failed", "paused"]),
     "paused": frozenset(["working", "failed"]),  # Can resume or fail from paused
     "success": frozenset([]),  # Terminal state
@@ -270,9 +277,7 @@ class StateManager:
         """Get the path to the backup directory."""
         return self.state_dir / "backups"
 
-    def initialize(
-        self, goal: str, model: str, options: TaskOptions
-    ) -> TaskState:
+    def initialize(self, goal: str, model: str, options: TaskOptions) -> TaskState:
         """Initialize new task state.
 
         Args:
@@ -439,11 +444,7 @@ class StateManager:
         path.parent.mkdir(parents=True, exist_ok=True)
 
         # Write to a temp file in the same directory, then rename
-        fd, temp_path = tempfile.mkstemp(
-            dir=path.parent,
-            prefix=".tmp_",
-            suffix=".json"
-        )
+        fd, temp_path = tempfile.mkstemp(dir=path.parent, prefix=".tmp_", suffix=".json")
         try:
             with open(fd, "w") as f:
                 json.dump(data, f, indent=2)
@@ -474,9 +475,7 @@ class StateManager:
         if self.backup_dir.exists():
             # Get the most recent backup
             backups = sorted(
-                self.backup_dir.glob("state.*.json"),
-                key=lambda p: p.stat().st_mtime,
-                reverse=True
+                self.backup_dir.glob("state.*.json"), key=lambda p: p.stat().st_mtime, reverse=True
             )
             for backup_file in backups:
                 try:
@@ -723,9 +722,7 @@ class StateManager:
 
         # Get all log files sorted by modification time (newest first)
         log_files = sorted(
-            self.logs_dir.glob("run-*.txt"),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True
+            self.logs_dir.glob("run-*.txt"), key=lambda p: p.stat().st_mtime, reverse=True
         )
 
         # Delete older logs

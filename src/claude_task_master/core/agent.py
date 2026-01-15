@@ -230,18 +230,18 @@ class AgentWrapper:
                 ValueError("query must be callable"),
             )
 
-    def run_planning_phase(
-        self, goal: str, context: str = ""
-    ) -> dict[str, Any]:
+    def run_planning_phase(self, goal: str, context: str = "") -> dict[str, Any]:
         """Run planning phase with read-only tools."""
         # Build prompt for planning
         prompt = self._build_planning_prompt(goal, context)
 
         # Run async query
-        result = asyncio.run(self._run_query(
-            prompt=prompt,
-            tools=self.get_tools_for_phase("planning"),
-        ))
+        result = asyncio.run(
+            self._run_query(
+                prompt=prompt,
+                tools=self.get_tools_for_phase("planning"),
+            )
+        )
 
         # Parse result to extract plan and criteria
         return {
@@ -261,19 +261,19 @@ class AgentWrapper:
         prompt = self._build_work_prompt(task_description, context, pr_comments)
 
         # Run async query
-        result = asyncio.run(self._run_query(
-            prompt=prompt,
-            tools=self.get_tools_for_phase("working"),
-        ))
+        result = asyncio.run(
+            self._run_query(
+                prompt=prompt,
+                tools=self.get_tools_for_phase("working"),
+            )
+        )
 
         return {
             "output": result,
             "success": True,  # For MVP, assume success
         }
 
-    def verify_success_criteria(
-        self, criteria: str, context: str = ""
-    ) -> dict[str, Any]:
+    def verify_success_criteria(self, criteria: str, context: str = "") -> dict[str, Any]:
         """Verify if success criteria are met."""
         prompt = f"""Review the following success criteria and verify if they have been met:
 
@@ -289,10 +289,12 @@ Respond with:
 Format your response clearly."""
 
         # Run async query
-        result = asyncio.run(self._run_query(
-            prompt=prompt,
-            tools=self.get_tools_for_phase("planning"),
-        ))
+        result = asyncio.run(
+            self._run_query(
+                prompt=prompt,
+                tools=self.get_tools_for_phase("planning"),
+            )
+        )
 
         # For MVP, simple check for success indicators
         success = "all criteria met" in result.lower() or "success" in result.lower()

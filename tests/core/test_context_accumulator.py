@@ -1,6 +1,5 @@
 """Tests for context_accumulator.py - learning accumulation and session summaries."""
 
-
 from claude_task_master.core.context_accumulator import ContextAccumulator
 from claude_task_master.core.state import StateManager
 
@@ -109,7 +108,9 @@ class TestAddSessionSummary:
 
     def test_add_session_summary_to_empty_context(self, context_accumulator):
         """Test adding a session summary when no context exists."""
-        context_accumulator.add_session_summary(1, "Explored the codebase and identified key components.")
+        context_accumulator.add_session_summary(
+            1, "Explored the codebase and identified key components."
+        )
 
         context = context_accumulator.state_manager.load_context()
         assert "# Accumulated Context" in context
@@ -298,9 +299,7 @@ class TestContextPersistence:
 class TestContextAccumulatorWithExistingContext:
     """Tests for behavior with pre-existing context."""
 
-    def test_add_learning_with_existing_context_file(
-        self, state_manager, sample_context_file
-    ):
+    def test_add_learning_with_existing_context_file(self, state_manager, sample_context_file):
         """Test adding learning when context file already exists."""
         accumulator = ContextAccumulator(state_manager)
         accumulator.add_learning("New learning after existing context.")
@@ -383,22 +382,14 @@ class TestContextIntegration:
         context_accumulator.add_session_summary(
             1, "Explored codebase structure and identified main components."
         )
-        context_accumulator.add_learning(
-            "Project uses modular architecture with clear separation."
-        )
+        context_accumulator.add_learning("Project uses modular architecture with clear separation.")
 
         # Session 2: Implementation
-        context_accumulator.add_session_summary(
-            2, "Implemented core feature with tests."
-        )
-        context_accumulator.add_learning(
-            "Found existing utilities that can be reused."
-        )
+        context_accumulator.add_session_summary(2, "Implemented core feature with tests.")
+        context_accumulator.add_learning("Found existing utilities that can be reused.")
 
         # Session 3: Refinement
-        context_accumulator.add_session_summary(
-            3, "Refactored and improved code quality."
-        )
+        context_accumulator.add_session_summary(3, "Refactored and improved code quality.")
 
         # Get final context for prompt
         context = context_accumulator.get_context_for_prompt()

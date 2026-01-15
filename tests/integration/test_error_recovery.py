@@ -68,10 +68,14 @@ class TestSDKErrorRecovery:
             )
             # Try to run a query
             import asyncio
+
             asyncio.run(agent._run_query("test prompt", ["Read"]))
 
         # Should have hit the rate limit error
-        assert "rate" in str(exc_info.value).lower() or exc_info.type in [Exception, APIRateLimitError]
+        assert "rate" in str(exc_info.value).lower() or exc_info.type in [
+            Exception,
+            APIRateLimitError,
+        ]
 
     def test_auth_error_is_not_retried(
         self,
@@ -243,7 +247,11 @@ class TestMaxSessionsLimitHandling:
         result = runner.invoke(app, ["resume"])
 
         # Should indicate max sessions reached
-        assert result.exit_code == 1 or "max" in result.output.lower() or "session" in result.output.lower()
+        assert (
+            result.exit_code == 1
+            or "max" in result.output.lower()
+            or "session" in result.output.lower()
+        )
 
     def test_session_count_increments_correctly(
         self,

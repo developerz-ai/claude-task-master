@@ -1,6 +1,5 @@
 """Comprehensive tests for the orchestrator module."""
 
-
 import pytest
 
 from claude_task_master.core.agent import AgentError, QueryExecutionError
@@ -40,9 +39,7 @@ class TestWorkLoopOrchestratorInitialization:
         assert orchestrator.state_manager == initialized_state_manager
         assert orchestrator.planner == planner
 
-    def test_init_stores_components(
-        self, mock_agent_wrapper, initialized_state_manager, planner
-    ):
+    def test_init_stores_components(self, mock_agent_wrapper, initialized_state_manager, planner):
         """Test initialization stores all components correctly."""
         orchestrator = WorkLoopOrchestrator(
             agent=mock_agent_wrapper,
@@ -392,9 +389,7 @@ No tasks defined.
 class TestSessionLimits:
     """Tests for session limit handling."""
 
-    def test_run_exceeds_max_sessions_immediately(
-        self, mock_agent_wrapper, state_dir, planner
-    ):
+    def test_run_exceeds_max_sessions_immediately(self, mock_agent_wrapper, state_dir, planner):
         """Test run returns immediately when max sessions exceeded."""
         # Create state manager with max_sessions already reached
         state_manager = StateManager(state_dir)
@@ -507,7 +502,9 @@ class TestStateTransitions:
         state.status = "working"
         state_manager.save_state(state)
         state_manager.save_plan("## Task List\n- [ ] Task 1")
-        state_manager.save_criteria("1. All tests pass")  # Must save criteria for verification to run
+        state_manager.save_criteria(
+            "1. All tests pass"
+        )  # Must save criteria for verification to run
 
         mock_agent_wrapper.run_work_session.return_value = {"output": "Done", "success": True}
         mock_agent_wrapper.verify_success_criteria.return_value = {"success": False}
@@ -697,7 +694,9 @@ class TestRunWorkSession:
 class TestVerifySuccess:
     """Tests for _verify_success method."""
 
-    def test_verify_success_with_criteria(self, orchestrator, mock_agent_wrapper, initialized_state_manager):
+    def test_verify_success_with_criteria(
+        self, orchestrator, mock_agent_wrapper, initialized_state_manager
+    ):
         """Test verification with success criteria."""
         initialized_state_manager.save_criteria("1. All tests pass\n2. No bugs")
         mock_agent_wrapper.verify_success_criteria.return_value = {"success": True}
@@ -707,7 +706,9 @@ class TestVerifySuccess:
         assert result is True
         mock_agent_wrapper.verify_success_criteria.assert_called_once()
 
-    def test_verify_success_no_criteria(self, orchestrator, mock_agent_wrapper, initialized_state_manager):
+    def test_verify_success_no_criteria(
+        self, orchestrator, mock_agent_wrapper, initialized_state_manager
+    ):
         """Test verification returns True when no criteria specified."""
         # Ensure no criteria file exists
         criteria_file = initialized_state_manager.state_dir / "criteria.txt"
@@ -719,7 +720,9 @@ class TestVerifySuccess:
         assert result is True
         mock_agent_wrapper.verify_success_criteria.assert_not_called()
 
-    def test_verify_success_failure(self, orchestrator, mock_agent_wrapper, initialized_state_manager):
+    def test_verify_success_failure(
+        self, orchestrator, mock_agent_wrapper, initialized_state_manager
+    ):
         """Test verification returns False when criteria not met."""
         initialized_state_manager.save_criteria("1. All tests pass")
         mock_agent_wrapper.verify_success_criteria.return_value = {"success": False}
@@ -1309,9 +1312,7 @@ class TestRunWorkSessionErrorHandling:
 class TestRunErrorHandling:
     """Tests for run() method error handling."""
 
-    def test_run_handles_no_plan_as_success(
-        self, mock_agent_wrapper, state_dir, planner
-    ):
+    def test_run_handles_no_plan_as_success(self, mock_agent_wrapper, state_dir, planner):
         """Test run treats no plan as success (nothing to do = done)."""
         state_manager = StateManager(state_dir)
         options = TaskOptions()
@@ -1333,9 +1334,7 @@ class TestRunErrorHandling:
         # No plan means _is_complete returns True immediately, then verification passes
         assert result == 0  # Success
 
-    def test_run_handles_no_tasks_as_success(
-        self, mock_agent_wrapper, state_dir, planner
-    ):
+    def test_run_handles_no_tasks_as_success(self, mock_agent_wrapper, state_dir, planner):
         """Test run treats no tasks in plan as success case."""
         state_manager = StateManager(state_dir)
         options = TaskOptions()
@@ -1382,9 +1381,7 @@ class TestRunErrorHandling:
         captured = capsys.readouterr()
         assert "error" in captured.out.lower()
 
-    def test_run_creates_backup_on_unexpected_error(
-        self, mock_agent_wrapper, state_dir, planner
-    ):
+    def test_run_creates_backup_on_unexpected_error(self, mock_agent_wrapper, state_dir, planner):
         """Test run creates state backup on unexpected error."""
         state_manager = StateManager(state_dir)
         options = TaskOptions()
@@ -1517,9 +1514,7 @@ class TestStateRecovery:
         self, mock_agent_wrapper, initialized_state_manager, planner
     ):
         """Test _get_current_task_description returns correct task."""
-        initialized_state_manager.save_plan(
-            "## Task List\n- [ ] First task\n- [ ] Second task\n"
-        )
+        initialized_state_manager.save_plan("## Task List\n- [ ] First task\n- [ ] Second task\n")
         state = initialized_state_manager.load_state()
         state.current_task_index = 1
 
@@ -1593,9 +1588,7 @@ class TestMaxSessionsHandling:
 class TestSuccessOutput:
     """Tests for success output messages."""
 
-    def test_run_prints_success_message(
-        self, mock_agent_wrapper, state_dir, planner, capsys
-    ):
+    def test_run_prints_success_message(self, mock_agent_wrapper, state_dir, planner, capsys):
         """Test run prints success message when all tasks complete."""
         state_manager = StateManager(state_dir)
         options = TaskOptions()

@@ -632,7 +632,7 @@ class TestSystemDoctorEdgeCases:
         creds_dir = temp_dir / ".claude"
         creds_dir.mkdir()
         creds_file = creds_dir / ".credentials.json"
-        creds_file.write_text('')
+        creds_file.write_text("")
 
         with patch.object(Path, "home", return_value=temp_dir):
             doctor._check_credentials()

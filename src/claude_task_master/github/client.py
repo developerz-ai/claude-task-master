@@ -33,17 +33,11 @@ class GitHubClient:
                 text=True,
             )
         except subprocess.CalledProcessError as e:
-            raise RuntimeError(
-                "gh CLI not authenticated. Run 'gh auth login' first."
-            ) from e
+            raise RuntimeError("gh CLI not authenticated. Run 'gh auth login' first.") from e
         except FileNotFoundError as e:
-            raise RuntimeError(
-                "gh CLI not installed. Install from https://cli.github.com/"
-            ) from e
+            raise RuntimeError("gh CLI not installed. Install from https://cli.github.com/") from e
 
-    def create_pr(
-        self, title: str, body: str, base: str = "main"
-    ) -> int:
+    def create_pr(self, title: str, body: str, base: str = "main") -> int:
         """Create a new pull request."""
         result = subprocess.run(
             ["gh", "pr", "create", "--title", title, "--body", body, "--base", base],
@@ -109,11 +103,17 @@ class GitHubClient:
 
         result = subprocess.run(
             [
-                "gh", "api", "graphql",
-                "-f", f"query={query}",
-                "-F", f"owner={owner}",
-                "-F", f"repo={repo}",
-                "-F", f"pr={pr_number}",
+                "gh",
+                "api",
+                "graphql",
+                "-f",
+                f"query={query}",
+                "-F",
+                f"owner={owner}",
+                "-F",
+                f"repo={repo}",
+                "-F",
+                f"pr={pr_number}",
             ],
             check=True,
             capture_output=True,
@@ -144,9 +144,7 @@ class GitHubClient:
 
         # Count unresolved review threads
         unresolved = sum(
-            1
-            for thread in pr_data["reviewThreads"]["nodes"]
-            if not thread["isResolved"]
+            1 for thread in pr_data["reviewThreads"]["nodes"] if not thread["isResolved"]
         )
 
         return PRStatus(
@@ -187,11 +185,17 @@ class GitHubClient:
 
         result = subprocess.run(
             [
-                "gh", "api", "graphql",
-                "-f", f"query={query}",
-                "-F", f"owner={owner}",
-                "-F", f"repo={repo}",
-                "-F", f"pr={pr_number}",
+                "gh",
+                "api",
+                "graphql",
+                "-f",
+                f"query={query}",
+                "-F",
+                f"owner={owner}",
+                "-F",
+                f"repo={repo}",
+                "-F",
+                f"pr={pr_number}",
             ],
             check=True,
             capture_output=True,

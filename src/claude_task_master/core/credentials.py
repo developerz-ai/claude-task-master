@@ -168,9 +168,7 @@ class CredentialManager:
                         f"JSON parse error at line {e.lineno}, column {e.colno}: {e.msg}",
                     ) from e
         except PermissionError as e:
-            raise CredentialPermissionError(
-                self.CREDENTIALS_PATH, "reading", e
-            ) from e
+            raise CredentialPermissionError(self.CREDENTIALS_PATH, "reading", e) from e
 
         # Handle empty JSON object
         if not data:
@@ -320,9 +318,7 @@ class CredentialManager:
             with open(self.CREDENTIALS_PATH, "w") as f:
                 json.dump(data, f, indent=2)
         except PermissionError as e:
-            raise CredentialPermissionError(
-                self.CREDENTIALS_PATH, "writing", e
-            ) from e
+            raise CredentialPermissionError(self.CREDENTIALS_PATH, "writing", e) from e
 
     def get_valid_token(self) -> str:
         """Get a valid access token, refreshing if necessary.

@@ -1,6 +1,5 @@
 """Comprehensive tests for the planner module."""
 
-
 import pytest
 
 from claude_task_master.core.planner import Planner
@@ -263,7 +262,9 @@ Third line"""
         self, planner, mock_agent_wrapper, state_manager
     ):
         """Test create_plan with special characters in goal."""
-        special_goal = "Fix bug #123 in `module.py` with 'quotes' and \"double quotes\" & ampersands"
+        special_goal = (
+            "Fix bug #123 in `module.py` with 'quotes' and \"double quotes\" & ampersands"
+        )
         state_manager.state_dir.mkdir(exist_ok=True)
         result = planner.create_plan(special_goal)
 
@@ -299,9 +300,7 @@ Third line"""
 class TestUpdatePlanProgress:
     """Tests for update_plan_progress method."""
 
-    def test_update_plan_progress_with_existing_plan(
-        self, planner, state_manager, sample_plan
-    ):
+    def test_update_plan_progress_with_existing_plan(self, planner, state_manager, sample_plan):
         """Test update_plan_progress with an existing plan."""
         state_manager.state_dir.mkdir(exist_ok=True)
         state_manager.save_plan(sample_plan)
@@ -334,6 +333,7 @@ class TestUpdatePlanProgress:
 
         # Small delay to ensure mtime changes
         import time
+
         time.sleep(0.01)
 
         planner.update_plan_progress(task_index=0, completed=True)
@@ -342,9 +342,7 @@ class TestUpdatePlanProgress:
         # File should have been rewritten (mtime should be same or newer)
         assert new_mtime >= original_mtime
 
-    def test_update_plan_progress_with_completed_false(
-        self, planner, state_manager, sample_plan
-    ):
+    def test_update_plan_progress_with_completed_false(self, planner, state_manager, sample_plan):
         """Test update_plan_progress with completed=False."""
         state_manager.state_dir.mkdir(exist_ok=True)
         state_manager.save_plan(sample_plan)
@@ -352,9 +350,7 @@ class TestUpdatePlanProgress:
         # Should not raise an exception
         planner.update_plan_progress(task_index=0, completed=False)
 
-    def test_update_plan_progress_with_various_indices(
-        self, planner, state_manager, sample_plan
-    ):
+    def test_update_plan_progress_with_various_indices(self, planner, state_manager, sample_plan):
         """Test update_plan_progress with various task indices."""
         state_manager.state_dir.mkdir(exist_ok=True)
         state_manager.save_plan(sample_plan)
@@ -367,9 +363,7 @@ class TestUpdatePlanProgress:
         loaded_plan = state_manager.load_plan()
         assert loaded_plan is not None
 
-    def test_update_plan_progress_preserves_plan_content(
-        self, planner, state_manager, sample_plan
-    ):
+    def test_update_plan_progress_preserves_plan_content(self, planner, state_manager, sample_plan):
         """Test update_plan_progress preserves plan content."""
         state_manager.state_dir.mkdir(exist_ok=True)
         state_manager.save_plan(sample_plan)
@@ -390,9 +384,7 @@ class TestUpdatePlanProgress:
 class TestPlannerIntegration:
     """Integration tests for Planner."""
 
-    def test_create_plan_then_update_progress(
-        self, planner, mock_agent_wrapper, state_manager
-    ):
+    def test_create_plan_then_update_progress(self, planner, mock_agent_wrapper, state_manager):
         """Test creating a plan and then updating progress."""
         mock_agent_wrapper.run_planning_phase.return_value = {
             "plan": """## Task List
@@ -475,9 +467,7 @@ class TestPlannerEdgeCases:
         assert result.get("plan", "") == ""
         assert result.get("criteria", "") == ""
 
-    def test_create_plan_with_very_large_plan(
-        self, planner, mock_agent_wrapper, state_manager
-    ):
+    def test_create_plan_with_very_large_plan(self, planner, mock_agent_wrapper, state_manager):
         """Test create_plan handles very large plan."""
         large_plan = "## Task List\n" + "\n".join(
             [f"- [ ] Task {i} with some description" for i in range(1000)]
@@ -542,9 +532,7 @@ class TestPlannerEdgeCases:
 class TestContextHandling:
     """Tests for context handling in create_plan."""
 
-    def test_create_plan_loads_existing_context(
-        self, planner, mock_agent_wrapper, state_manager
-    ):
+    def test_create_plan_loads_existing_context(self, planner, mock_agent_wrapper, state_manager):
         """Test create_plan loads and passes existing context."""
         existing_context = """# Previous Session Context
 
@@ -563,9 +551,7 @@ class TestContextHandling:
         call_kwargs = mock_agent_wrapper.run_planning_phase.call_args.kwargs
         assert call_kwargs["context"] == existing_context
 
-    def test_create_plan_with_large_context(
-        self, planner, mock_agent_wrapper, state_manager
-    ):
+    def test_create_plan_with_large_context(self, planner, mock_agent_wrapper, state_manager):
         """Test create_plan handles large context."""
         large_context = "# Context\n" + "\n".join(
             [f"Session {i} completed task {i}" for i in range(500)]
@@ -611,9 +597,7 @@ Unicode: 日本語 🚀 ♠♣♥♦
 class TestErrorHandling:
     """Tests for error handling in Planner."""
 
-    def test_create_plan_agent_raises_exception(
-        self, planner, mock_agent_wrapper, state_manager
-    ):
+    def test_create_plan_agent_raises_exception(self, planner, mock_agent_wrapper, state_manager):
         """Test create_plan propagates agent exceptions."""
         mock_agent_wrapper.run_planning_phase.side_effect = RuntimeError("Agent error")
 
@@ -622,9 +606,7 @@ class TestErrorHandling:
         with pytest.raises(RuntimeError, match="Agent error"):
             planner.create_plan("Test goal")
 
-    def test_create_plan_state_manager_save_fails(
-        self, mock_agent_wrapper, temp_dir
-    ):
+    def test_create_plan_state_manager_save_fails(self, mock_agent_wrapper, temp_dir):
         """Test create_plan handles state manager save failures."""
         # Create a state manager pointing to a non-existent directory
         non_existent_dir = temp_dir / "non_existent" / "deep" / "path"
@@ -641,9 +623,7 @@ class TestErrorHandling:
         with pytest.raises((FileNotFoundError, OSError)):
             planner.create_plan("Test goal")
 
-    def test_update_plan_progress_handles_corrupted_plan_file(
-        self, planner, state_manager
-    ):
+    def test_update_plan_progress_handles_corrupted_plan_file(self, planner, state_manager):
         """Test update_plan_progress handles corrupted plan file."""
         state_manager.state_dir.mkdir(exist_ok=True)
 
@@ -671,9 +651,7 @@ class TestPlannerWithInitializedStateManager:
         self, mock_agent_wrapper, initialized_state_manager
     ):
         """Test create_plan works with initialized state manager."""
-        planner = Planner(
-            agent=mock_agent_wrapper, state_manager=initialized_state_manager
-        )
+        planner = Planner(agent=mock_agent_wrapper, state_manager=initialized_state_manager)
 
         result = planner.create_plan("New goal for initialized state")
 
@@ -686,9 +664,7 @@ class TestPlannerWithInitializedStateManager:
         """Test update_plan_progress works with initialized state manager."""
         initialized_state_manager.save_plan(sample_plan)
 
-        planner = Planner(
-            agent=mock_agent_wrapper, state_manager=initialized_state_manager
-        )
+        planner = Planner(agent=mock_agent_wrapper, state_manager=initialized_state_manager)
 
         # Should not raise an exception
         planner.update_plan_progress(task_index=0, completed=True)
@@ -702,9 +678,7 @@ class TestPlannerWithInitializedStateManager:
 class TestPlannerPlanContent:
     """Tests for plan content handling."""
 
-    def test_create_plan_with_task_list_format(
-        self, planner, mock_agent_wrapper, state_manager
-    ):
+    def test_create_plan_with_task_list_format(self, planner, mock_agent_wrapper, state_manager):
         """Test create_plan handles proper task list format."""
         proper_plan = """## Task List
 
@@ -733,9 +707,7 @@ class TestPlannerPlanContent:
         assert "- [ ]" in loaded_plan
         assert "## Success Criteria" in loaded_plan
 
-    def test_create_plan_with_nested_tasks(
-        self, planner, mock_agent_wrapper, state_manager
-    ):
+    def test_create_plan_with_nested_tasks(self, planner, mock_agent_wrapper, state_manager):
         """Test create_plan handles nested tasks."""
         nested_plan = """## Task List
 
@@ -762,9 +734,7 @@ Additional information here.
         assert "Main Task 1" in loaded_plan
         assert "Subtask 1.1" in loaded_plan
 
-    def test_create_plan_with_completed_tasks(
-        self, planner, mock_agent_wrapper, state_manager
-    ):
+    def test_create_plan_with_completed_tasks(self, planner, mock_agent_wrapper, state_manager):
         """Test create_plan handles plan with pre-completed tasks."""
         plan_with_completed = """## Task List
 

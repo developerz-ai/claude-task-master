@@ -238,7 +238,9 @@ class TestToolLogging:
         task_logger.log_tool_use("Read", {"file_path": "/a.py"})
         task_logger.log_tool_result("Read", "content of a")
 
-        task_logger.log_tool_use("Edit", {"file_path": "/a.py", "old_string": "foo", "new_string": "bar"})
+        task_logger.log_tool_use(
+            "Edit", {"file_path": "/a.py", "old_string": "foo", "new_string": "bar"}
+        )
         task_logger.log_tool_result("Edit", "Edit successful")
 
         content = log_file.read_text()
@@ -482,15 +484,7 @@ class TestEdgeCases:
 
     def test_nested_dict_parameters(self, task_logger, log_file: Path):
         """Test logging deeply nested dict parameters."""
-        params = {
-            "level1": {
-                "level2": {
-                    "level3": {
-                        "value": "deep_value"
-                    }
-                }
-            }
-        }
+        params = {"level1": {"level2": {"level3": {"value": "deep_value"}}}}
         task_logger.log_tool_use("DeepTool", params)
 
         content = log_file.read_text()
@@ -531,6 +525,7 @@ class TestFileHandling:
 
         # Create a new logger instance pointing to the same file
         from claude_task_master.core.logger import TaskLogger
+
         new_logger = TaskLogger(log_file)
         new_logger._write("new content")
 

@@ -87,7 +87,9 @@ class TestOrchestratorTaskExecution:
 
         state_manager = StateManager(integration_state_dir)
         options = TaskOptions(auto_merge=True)
-        state = state_manager.initialize(goal="Test multiple tasks", model="sonnet", options=options)
+        state = state_manager.initialize(
+            goal="Test multiple tasks", model="sonnet", options=options
+        )
 
         # Create a plan with multiple tasks
         state_manager.save_plan("""## Task List

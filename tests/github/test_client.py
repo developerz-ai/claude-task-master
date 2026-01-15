@@ -192,10 +192,15 @@ class TestGitHubClientCreatePR:
             assert pr_number == 42
             mock_run.assert_called_once_with(
                 [
-                    "gh", "pr", "create",
-                    "--title", "Test PR",
-                    "--body", "This is a test PR",
-                    "--base", "main",
+                    "gh",
+                    "pr",
+                    "create",
+                    "--title",
+                    "Test PR",
+                    "--body",
+                    "This is a test PR",
+                    "--base",
+                    "main",
                 ],
                 check=True,
                 capture_output=True,
@@ -422,15 +427,7 @@ class TestGitHubClientGetPRStatus:
             "data": {
                 "repository": {
                     "pullRequest": {
-                        "commits": {
-                            "nodes": [
-                                {
-                                    "commit": {
-                                        "statusCheckRollup": None
-                                    }
-                                }
-                            ]
-                        },
+                        "commits": {"nodes": [{"commit": {"statusCheckRollup": None}}]},
                         "reviewThreads": {"nodes": []},
                     }
                 }
@@ -850,15 +847,7 @@ class TestGitHubClientGetPRComments:
 
     def test_get_pr_comments_no_comments(self, github_client):
         """Test when there are no review threads."""
-        response = {
-            "data": {
-                "repository": {
-                    "pullRequest": {
-                        "reviewThreads": {"nodes": []}
-                    }
-                }
-            }
-        }
+        response = {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": []}}}}}
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = MagicMock(
@@ -1325,9 +1314,7 @@ class TestGitHubClientEdgeCases:
     def test_subprocess_timeout(self, github_client):
         """Test handling subprocess timeout."""
         with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = subprocess.TimeoutExpired(
-                cmd="gh", timeout=30
-            )
+            mock_run.side_effect = subprocess.TimeoutExpired(cmd="gh", timeout=30)
             with pytest.raises(subprocess.TimeoutExpired):
                 github_client.create_pr("Title", "Body")
 

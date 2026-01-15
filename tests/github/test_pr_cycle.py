@@ -44,9 +44,7 @@ def mock_state_manager():
 def mock_agent():
     """Provide a mocked AgentWrapper."""
     mock = MagicMock()
-    mock.run_work_session = MagicMock(
-        return_value={"output": "Fixed the issues", "success": True}
-    )
+    mock.run_work_session = MagicMock(return_value={"output": "Fixed the issues", "success": True})
     return mock
 
 
@@ -99,9 +97,7 @@ def pr_cycle_manager(
 class TestPRCycleManagerInit:
     """Tests for PRCycleManager initialization."""
 
-    def test_init_with_all_dependencies(
-        self, mock_github_client, mock_state_manager, mock_agent
-    ):
+    def test_init_with_all_dependencies(self, mock_github_client, mock_state_manager, mock_agent):
         """Test initialization with all required dependencies."""
         manager = PRCycleManager(
             github_client=mock_github_client,
@@ -112,9 +108,7 @@ class TestPRCycleManagerInit:
         assert manager.state_manager is mock_state_manager
         assert manager.agent is mock_agent
 
-    def test_init_stores_references(
-        self, mock_github_client, mock_state_manager, mock_agent
-    ):
+    def test_init_stores_references(self, mock_github_client, mock_state_manager, mock_agent):
         """Test that initialization stores references correctly."""
         manager = PRCycleManager(
             github_client=mock_github_client,
@@ -182,9 +176,7 @@ class TestCreateOrUpdatePR:
             body="## Summary\n- Added feature\n- Fixed bug",
         )
 
-    def test_create_pr_with_unicode(
-        self, pr_cycle_manager, mock_github_client, sample_task_state
-    ):
+    def test_create_pr_with_unicode(self, pr_cycle_manager, mock_github_client, sample_task_state):
         """Test creating PR with unicode content."""
         pr_cycle_manager.create_or_update_pr(
             title="Fix: 日本語 and emoji 🎉",
@@ -283,9 +275,7 @@ class TestWaitForPRReady:
         assert reason.startswith("ci_failure:")
         assert "tests" in reason
 
-    def test_not_ready_with_ci_error(
-        self, pr_cycle_manager, mock_github_client, sample_task_state
-    ):
+    def test_not_ready_with_ci_error(self, pr_cycle_manager, mock_github_client, sample_task_state):
         """Test PR not ready when CI has error state."""
         mock_github_client.get_pr_status.return_value = PRStatus(
             number=123,
@@ -308,9 +298,7 @@ class TestWaitForPRReady:
         assert ready is False
         assert reason.startswith("ci_failure:")
 
-    def test_waits_for_pending_ci(
-        self, pr_cycle_manager, mock_github_client, sample_task_state
-    ):
+    def test_waits_for_pending_ci(self, pr_cycle_manager, mock_github_client, sample_task_state):
         """Test that method waits when CI is pending then succeeds."""
         # First call returns PENDING, second returns SUCCESS
         mock_github_client.get_pr_status.side_effect = [
@@ -340,9 +328,7 @@ class TestWaitForPRReady:
         mock_sleep.assert_called_once_with(5)
         assert mock_github_client.get_pr_status.call_count == 2
 
-    def test_custom_poll_interval(
-        self, pr_cycle_manager, mock_github_client, sample_task_state
-    ):
+    def test_custom_poll_interval(self, pr_cycle_manager, mock_github_client, sample_task_state):
         """Test that custom poll interval is used."""
         mock_github_client.get_pr_status.side_effect = [
             PRStatus(
@@ -368,9 +354,7 @@ class TestWaitForPRReady:
 
         mock_sleep.assert_called_once_with(60)
 
-    def test_multiple_pending_cycles(
-        self, pr_cycle_manager, mock_github_client, sample_task_state
-    ):
+    def test_multiple_pending_cycles(self, pr_cycle_manager, mock_github_client, sample_task_state):
         """Test waiting through multiple pending cycles."""
         mock_github_client.get_pr_status.side_effect = [
             PRStatus(number=123, ci_state="PENDING", unresolved_threads=0, check_details=[]),
@@ -507,7 +491,10 @@ class TestHandlePRCycle:
         mock_agent.run_work_session.assert_called_once()
         # Verify CI failure info was passed to agent
         call_args = mock_agent.run_work_session.call_args
-        assert "ci_failure" in call_args[1]["task_description"].lower() or "CI" in call_args[1]["task_description"]
+        assert (
+            "ci_failure" in call_args[1]["task_description"].lower()
+            or "CI" in call_args[1]["task_description"]
+        )
 
     def test_respects_max_sessions_limit(
         self, pr_cycle_manager, mock_github_client, sample_task_state
@@ -594,9 +581,7 @@ class TestRunFixSession:
 
         mock_state_manager.save_state.assert_called_once_with(sample_task_state)
 
-    def test_handles_pr_comments_issue(
-        self, pr_cycle_manager, mock_agent, sample_task_state
-    ):
+    def test_handles_pr_comments_issue(self, pr_cycle_manager, mock_agent, sample_task_state):
         """Test handling PR comments as issue description."""
         pr_cycle_manager._run_fix_session(
             state=sample_task_state,
@@ -606,9 +591,7 @@ class TestRunFixSession:
         call_args = mock_agent.run_work_session.call_args
         assert "PR comments" in call_args[1]["task_description"]
 
-    def test_handles_ci_failure_issue(
-        self, pr_cycle_manager, mock_agent, sample_task_state
-    ):
+    def test_handles_ci_failure_issue(self, pr_cycle_manager, mock_agent, sample_task_state):
         """Test handling CI failure as issue description."""
         pr_cycle_manager._run_fix_session(
             state=sample_task_state,
@@ -919,9 +902,7 @@ class TestPRCycleEdgeCases:
         assert result is True
         mock_agent.run_work_session.assert_called_once()
 
-    def test_zero_unresolved_threads(
-        self, pr_cycle_manager, mock_github_client, sample_task_state
-    ):
+    def test_zero_unresolved_threads(self, pr_cycle_manager, mock_github_client, sample_task_state):
         """Test handling when unresolved_threads is exactly 0."""
         mock_github_client.get_pr_status.return_value = PRStatus(
             number=123,
@@ -1043,4 +1024,7 @@ class TestPRCycleIntegration:
         mock_agent.run_work_session.assert_called_once()
         # Verify CI failure info was passed
         call_kwargs = mock_agent.run_work_session.call_args[1]
-        assert "ci_failure" in call_kwargs["task_description"].lower() or "CI" in call_kwargs["task_description"]
+        assert (
+            "ci_failure" in call_kwargs["task_description"].lower()
+            or "CI" in call_kwargs["task_description"]
+        )

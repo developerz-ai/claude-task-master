@@ -748,6 +748,7 @@ class TestStateManagerCleanup:
 
         # Remove logs dir
         import shutil
+
         if state_manager.logs_dir.exists():
             shutil.rmtree(state_manager.logs_dir)
 
@@ -782,11 +783,7 @@ class TestStateManagerIntegration:
 
         # Initialize
         options = TaskOptions(auto_merge=True, max_sessions=5)
-        state = manager.initialize(
-            goal="Complete the task",
-            model="sonnet",
-            options=options
-        )
+        state = manager.initialize(goal="Complete the task", model="sonnet", options=options)
 
         assert state.status == "planning"
 
@@ -911,7 +908,7 @@ class TestStateManagerEdgeCases:
         """Test content with special characters."""
         state_manager.state_dir.mkdir(exist_ok=True)
 
-        special_content = 'Content with "quotes", <tags>, & ampersands, and \'apostrophes\''
+        special_content = "Content with \"quotes\", <tags>, & ampersands, and 'apostrophes'"
         state_manager.save_criteria(special_content)
         assert state_manager.load_criteria() == special_content
 
@@ -1009,20 +1006,14 @@ class TestStateExceptions:
 
     def test_state_validation_error_missing_fields(self):
         """Test StateValidationError with missing fields."""
-        error = StateValidationError(
-            "Invalid state",
-            missing_fields=["status", "run_id"]
-        )
+        error = StateValidationError("Invalid state", missing_fields=["status", "run_id"])
         assert error.missing_fields == ["status", "run_id"]
         assert "status" in str(error)
         assert "run_id" in str(error)
 
     def test_state_validation_error_invalid_fields(self):
         """Test StateValidationError with invalid fields."""
-        error = StateValidationError(
-            "Invalid state",
-            invalid_fields=["status: invalid value"]
-        )
+        error = StateValidationError("Invalid state", invalid_fields=["status: invalid value"])
         assert error.invalid_fields == ["status: invalid value"]
         assert "invalid value" in str(error)
 
@@ -1328,10 +1319,7 @@ class TestFileLocking:
             except Exception as e:
                 errors.append(e)
 
-        threads = [
-            threading.Thread(target=update_state, args=(i,))
-            for i in range(5)
-        ]
+        threads = [threading.Thread(target=update_state, args=(i,)) for i in range(5)]
 
         for t in threads:
             t.start()
@@ -1477,11 +1465,7 @@ class TestStateResumeValidationError:
 
     def test_error_with_task_index(self):
         """Test error with task index information."""
-        error = StateResumeValidationError(
-            "Test reason",
-            current_task_index=5,
-            total_tasks=3
-        )
+        error = StateResumeValidationError("Test reason", current_task_index=5, total_tasks=3)
         assert error.current_task_index == 5
         assert error.total_tasks == 3
         assert "Task index: 5" in str(error)
@@ -1489,10 +1473,7 @@ class TestStateResumeValidationError:
 
     def test_error_with_suggestion(self):
         """Test error with suggestion."""
-        error = StateResumeValidationError(
-            "Test reason",
-            suggestion="Try running 'clean' first"
-        )
+        error = StateResumeValidationError("Test reason", suggestion="Try running 'clean' first")
         assert error.suggestion == "Try running 'clean' first"
         assert "Suggestion: Try running 'clean' first" in str(error)
 
@@ -1503,7 +1484,7 @@ class TestStateResumeValidationError:
             status="failed",
             current_task_index=2,
             total_tasks=5,
-            suggestion="Use 'clean' to start fresh"
+            suggestion="Use 'clean' to start fresh",
         )
         assert error.reason == "Task has failed"
         assert error.status == "failed"
