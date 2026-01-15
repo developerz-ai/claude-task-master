@@ -4,10 +4,188 @@ import json
 import pytest
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, Mock
 import httpx
 
-from claude_task_master.core.credentials import Credentials, CredentialManager
+from claude_task_master.core.credentials import (
+    Credentials,
+    CredentialManager,
+    CredentialError,
+    CredentialNotFoundError,
+    InvalidCredentialsError,
+    CredentialPermissionError,
+    TokenRefreshError,
+    NetworkTimeoutError,
+    NetworkConnectionError,
+    TokenRefreshHTTPError,
+    InvalidTokenResponseError,
+)
+
+
+# =============================================================================
+# Exception Classes Tests
+# =============================================================================
+
+
+class TestCredentialError:
+    """Tests for the base CredentialError exception."""
+
+    def test_credential_error_with_message_only(self):
+        """Test CredentialError with just a message."""
+        error = CredentialError("Test error message")
+        assert error.message == "Test error message"
+        assert error.details is None
+        assert str(error) == "Test error message"
+
+    def test_credential_error_with_message_and_details(self):
+        """Test CredentialError with message and details."""
+        error = CredentialError("Test error", "Additional details")
+        assert error.message == "Test error"
+        assert error.details == "Additional details"
+        assert "Test error" in str(error)
+        assert "Additional details" in str(error)
+
+
+class TestCredentialNotFoundError:
+    """Tests for CredentialNotFoundError exception."""
+
+    def test_credential_not_found_error(self):
+        """Test CredentialNotFoundError initialization."""
+        path = Path("/test/path/.credentials.json")
+        error = CredentialNotFoundError(path)
+        assert error.path == path
+        assert "Credentials not found" in str(error)
+        assert str(path) in str(error)
+        assert "claude" in str(error).lower()
+
+    def test_credential_not_found_is_credential_error(self):
+        """Test that CredentialNotFoundError inherits from CredentialError."""
+        error = CredentialNotFoundError(Path("/test"))
+        assert isinstance(error, CredentialError)
+
+
+class TestInvalidCredentialsError:
+    """Tests for InvalidCredentialsError exception."""
+
+    def test_invalid_credentials_error(self):
+        """Test InvalidCredentialsError initialization."""
+        error = InvalidCredentialsError("Invalid format", "Missing field: token")
+        assert error.message == "Invalid format"
+        assert error.details == "Missing field: token"
+        assert isinstance(error, CredentialError)
+
+
+class TestCredentialPermissionError:
+    """Tests for CredentialPermissionError exception."""
+
+    def test_credential_permission_error(self):
+        """Test CredentialPermissionError initialization."""
+        path = Path("/test/.credentials.json")
+        original = PermissionError("Permission denied")
+        error = CredentialPermissionError(path, "reading", original)
+
+        assert error.path == path
+        assert error.operation == "reading"
+        assert error.original_error == original
+        assert "Permission denied" in str(error)
+        assert "reading" in str(error)
+        assert isinstance(error, CredentialError)
+
+
+class TestTokenRefreshError:
+    """Tests for TokenRefreshError exception."""
+
+    def test_token_refresh_error_basic(self):
+        """Test TokenRefreshError with basic message."""
+        error = TokenRefreshError("Refresh failed")
+        assert error.message == "Refresh failed"
+        assert error.status_code is None
+        assert isinstance(error, CredentialError)
+
+    def test_token_refresh_error_with_status_code(self):
+        """Test TokenRefreshError with status code."""
+        error = TokenRefreshError("Unauthorized", "Invalid token", 401)
+        assert error.status_code == 401
+
+
+class TestNetworkTimeoutError:
+    """Tests for NetworkTimeoutError exception."""
+
+    def test_network_timeout_error(self):
+        """Test NetworkTimeoutError initialization."""
+        error = NetworkTimeoutError("https://api.example.com/token", 30.0)
+        assert error.url == "https://api.example.com/token"
+        assert error.timeout == 30.0
+        assert "timeout" in str(error).lower()
+        assert "30" in str(error)
+        assert isinstance(error, TokenRefreshError)
+
+
+class TestNetworkConnectionError:
+    """Tests for NetworkConnectionError exception."""
+
+    def test_network_connection_error(self):
+        """Test NetworkConnectionError initialization."""
+        original = ConnectionError("Connection refused")
+        error = NetworkConnectionError("https://api.example.com/token", original)
+        assert error.url == "https://api.example.com/token"
+        assert error.original_error == original
+        assert "connect" in str(error).lower()
+        assert isinstance(error, TokenRefreshError)
+
+
+class TestTokenRefreshHTTPError:
+    """Tests for TokenRefreshHTTPError exception."""
+
+    def test_token_refresh_http_error_401(self):
+        """Test TokenRefreshHTTPError with 401 status."""
+        error = TokenRefreshHTTPError(401)
+        assert error.status_code == 401
+        assert "Unauthorized" in str(error)
+        assert isinstance(error, TokenRefreshError)
+
+    def test_token_refresh_http_error_403(self):
+        """Test TokenRefreshHTTPError with 403 status."""
+        error = TokenRefreshHTTPError(403)
+        assert error.status_code == 403
+        assert "Forbidden" in str(error)
+
+    def test_token_refresh_http_error_429(self):
+        """Test TokenRefreshHTTPError with 429 rate limit status."""
+        error = TokenRefreshHTTPError(429)
+        assert error.status_code == 429
+        assert "rate limit" in str(error).lower()
+
+    def test_token_refresh_http_error_500(self):
+        """Test TokenRefreshHTTPError with 500 server error."""
+        error = TokenRefreshHTTPError(500)
+        assert error.status_code == 500
+        assert "server error" in str(error).lower()
+
+    def test_token_refresh_http_error_with_response_body(self):
+        """Test TokenRefreshHTTPError with response body."""
+        error = TokenRefreshHTTPError(400, '{"error": "invalid_grant"}')
+        assert error.response_body == '{"error": "invalid_grant"}'
+        assert "invalid_grant" in str(error)
+
+    def test_token_refresh_http_error_unknown_status(self):
+        """Test TokenRefreshHTTPError with unknown status code."""
+        error = TokenRefreshHTTPError(418)  # I'm a teapot
+        assert error.status_code == 418
+        assert "418" in str(error)
+
+
+class TestInvalidTokenResponseError:
+    """Tests for InvalidTokenResponseError exception."""
+
+    def test_invalid_token_response_error(self):
+        """Test InvalidTokenResponseError initialization."""
+        error = InvalidTokenResponseError(
+            "Missing access_token", {"refresh_token": "xxx"}
+        )
+        assert error.response_data == {"refresh_token": "xxx"}
+        assert "access_token" in str(error).lower()
+        assert isinstance(error, TokenRefreshError)
 
 
 # =============================================================================
@@ -126,16 +304,17 @@ class TestCredentialManagerLoad:
         assert creds.tokenType == "Bearer"
 
     def test_load_credentials_file_not_found(self, temp_dir):
-        """Test loading credentials when file doesn't exist."""
+        """Test loading credentials when file doesn't exist raises CredentialNotFoundError."""
         non_existent_path = temp_dir / "non-existent" / ".credentials.json"
 
         manager = CredentialManager()
         with patch.object(CredentialManager, "CREDENTIALS_PATH", non_existent_path):
-            with pytest.raises(FileNotFoundError) as exc_info:
+            with pytest.raises(CredentialNotFoundError) as exc_info:
                 manager.load_credentials()
 
+        assert exc_info.value.path == non_existent_path
         assert "Credentials not found" in str(exc_info.value)
-        assert "Please run 'claude' CLI first" in str(exc_info.value)
+        assert "claude" in str(exc_info.value).lower()
 
     def test_load_credentials_flat_structure(self, temp_dir):
         """Test loading credentials without nested claudeAiOauth wrapper."""
@@ -157,20 +336,20 @@ class TestCredentialManagerLoad:
         assert creds.refreshToken == "flat-refresh-token"
 
     def test_load_credentials_invalid_json(self, temp_dir):
-        """Test loading credentials from invalid JSON file."""
+        """Test loading credentials from invalid JSON file raises InvalidCredentialsError."""
         credentials_path = temp_dir / ".claude" / ".credentials.json"
         credentials_path.parent.mkdir(parents=True, exist_ok=True)
         credentials_path.write_text("{ invalid json }")
 
         manager = CredentialManager()
         with patch.object(CredentialManager, "CREDENTIALS_PATH", credentials_path):
-            with pytest.raises(json.JSONDecodeError):
+            with pytest.raises(InvalidCredentialsError) as exc_info:
                 manager.load_credentials()
 
-    def test_load_credentials_missing_required_fields(self, temp_dir):
-        """Test loading credentials with missing required fields."""
-        from pydantic import ValidationError
+        assert "invalid JSON" in str(exc_info.value)
 
+    def test_load_credentials_missing_required_fields(self, temp_dir):
+        """Test loading credentials with missing required fields raises InvalidCredentialsError."""
         incomplete_data = {
             "claudeAiOauth": {
                 "accessToken": "test-token",
@@ -183,32 +362,54 @@ class TestCredentialManagerLoad:
 
         manager = CredentialManager()
         with patch.object(CredentialManager, "CREDENTIALS_PATH", credentials_path):
-            with pytest.raises(ValidationError):
+            with pytest.raises(InvalidCredentialsError) as exc_info:
                 manager.load_credentials()
 
+        error_str = str(exc_info.value)
+        assert "invalid structure" in error_str.lower()
+        assert "refreshToken" in error_str or "expiresAt" in error_str
+
     def test_load_credentials_empty_file(self, temp_dir):
-        """Test loading credentials from empty file."""
+        """Test loading credentials from empty file raises InvalidCredentialsError."""
         credentials_path = temp_dir / ".claude" / ".credentials.json"
         credentials_path.parent.mkdir(parents=True, exist_ok=True)
         credentials_path.write_text("")
 
         manager = CredentialManager()
         with patch.object(CredentialManager, "CREDENTIALS_PATH", credentials_path):
-            with pytest.raises(json.JSONDecodeError):
+            with pytest.raises(InvalidCredentialsError) as exc_info:
                 manager.load_credentials()
 
-    def test_load_credentials_empty_json_object(self, temp_dir):
-        """Test loading credentials from empty JSON object."""
-        from pydantic import ValidationError
+        assert "invalid JSON" in str(exc_info.value)
 
+    def test_load_credentials_empty_json_object(self, temp_dir):
+        """Test loading credentials from empty JSON object raises InvalidCredentialsError."""
         credentials_path = temp_dir / ".claude" / ".credentials.json"
         credentials_path.parent.mkdir(parents=True, exist_ok=True)
         credentials_path.write_text("{}")
 
         manager = CredentialManager()
         with patch.object(CredentialManager, "CREDENTIALS_PATH", credentials_path):
-            with pytest.raises(ValidationError):
+            with pytest.raises(InvalidCredentialsError) as exc_info:
                 manager.load_credentials()
+
+        assert "empty" in str(exc_info.value).lower()
+
+    def test_load_credentials_permission_error(self, temp_dir, mock_credentials_data):
+        """Test handling of permission errors when loading credentials."""
+        credentials_path = temp_dir / ".claude" / ".credentials.json"
+        credentials_path.parent.mkdir(parents=True, exist_ok=True)
+        credentials_path.write_text(json.dumps(mock_credentials_data))
+
+        manager = CredentialManager()
+
+        with patch.object(CredentialManager, "CREDENTIALS_PATH", credentials_path):
+            with patch("builtins.open", side_effect=PermissionError("Access denied")):
+                with pytest.raises(CredentialPermissionError) as exc_info:
+                    manager.load_credentials()
+
+        assert exc_info.value.operation == "reading"
+        assert "Permission denied" in str(exc_info.value)
 
 
 # =============================================================================
@@ -317,7 +518,7 @@ class TestCredentialManagerRefresh:
 
         mock_response = MagicMock()
         mock_response.json.return_value = new_token_data
-        mock_response.raise_for_status = MagicMock()
+        mock_response.status_code = 200
 
         manager = CredentialManager()
         original_creds = Credentials(**mock_credentials_data["claudeAiOauth"])
@@ -355,7 +556,7 @@ class TestCredentialManagerRefresh:
 
         mock_response = MagicMock()
         mock_response.json.return_value = new_token_data
-        mock_response.raise_for_status = MagicMock()
+        mock_response.status_code = 200
 
         manager = CredentialManager()
         original_creds = Credentials(**mock_credentials_data["claudeAiOauth"])
@@ -367,60 +568,168 @@ class TestCredentialManagerRefresh:
         # Old refresh token should be preserved
         assert new_creds.refreshToken == original_creds.refreshToken
 
-    def test_refresh_access_token_network_error(self, mock_credentials_data):
-        """Test token refresh handles network errors."""
-        manager = CredentialManager()
-        original_creds = Credentials(**mock_credentials_data["claudeAiOauth"])
-
-        with patch.object(httpx, "post", side_effect=httpx.ConnectError("Connection failed")):
-            with pytest.raises(httpx.ConnectError):
-                manager.refresh_access_token(original_creds)
-
-    def test_refresh_access_token_timeout(self, mock_credentials_data):
-        """Test token refresh handles timeout errors."""
+    def test_refresh_access_token_network_timeout(self, mock_credentials_data):
+        """Test token refresh handles timeout errors with NetworkTimeoutError."""
         manager = CredentialManager()
         original_creds = Credentials(**mock_credentials_data["claudeAiOauth"])
 
         with patch.object(httpx, "post", side_effect=httpx.TimeoutException("Timeout")):
-            with pytest.raises(httpx.TimeoutException):
+            with pytest.raises(NetworkTimeoutError) as exc_info:
                 manager.refresh_access_token(original_creds)
 
-    def test_refresh_access_token_http_error(self, mock_credentials_data):
-        """Test token refresh handles HTTP errors (401, 403, etc.)."""
+        assert exc_info.value.url == CredentialManager.OAUTH_TOKEN_URL
+        assert exc_info.value.timeout == 30.0
+        assert "timeout" in str(exc_info.value).lower()
+
+    def test_refresh_access_token_connection_error(self, mock_credentials_data):
+        """Test token refresh handles connection errors with NetworkConnectionError."""
+        manager = CredentialManager()
+        original_creds = Credentials(**mock_credentials_data["claudeAiOauth"])
+
+        with patch.object(httpx, "post", side_effect=httpx.ConnectError("Connection failed")):
+            with pytest.raises(NetworkConnectionError) as exc_info:
+                manager.refresh_access_token(original_creds)
+
+        assert exc_info.value.url == CredentialManager.OAUTH_TOKEN_URL
+        assert "connect" in str(exc_info.value).lower()
+
+    def test_refresh_access_token_http_401(self, mock_credentials_data):
+        """Test token refresh handles 401 unauthorized."""
         manager = CredentialManager()
         original_creds = Credentials(**mock_credentials_data["claudeAiOauth"])
 
         mock_response = MagicMock()
-        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "401 Unauthorized",
-            request=MagicMock(),
-            response=MagicMock(status_code=401),
-        )
+        mock_response.status_code = 401
+        mock_response.text = '{"error": "invalid_token"}'
 
         with patch.object(httpx, "post", return_value=mock_response):
-            with pytest.raises(httpx.HTTPStatusError):
+            with pytest.raises(TokenRefreshHTTPError) as exc_info:
                 manager.refresh_access_token(original_creds)
 
-    def test_refresh_access_token_invalid_response_format(self, temp_dir, mock_credentials_data):
-        """Test token refresh handles invalid response format."""
-        credentials_path = temp_dir / ".claude" / ".credentials.json"
-        credentials_path.parent.mkdir(parents=True, exist_ok=True)
-        credentials_path.write_text(json.dumps(mock_credentials_data))
+        assert exc_info.value.status_code == 401
+        assert "Unauthorized" in str(exc_info.value)
 
-        # Response missing required fields
-        invalid_response_data = {"invalid": "data"}
-
-        mock_response = MagicMock()
-        mock_response.json.return_value = invalid_response_data
-        mock_response.raise_for_status = MagicMock()
-
+    def test_refresh_access_token_http_403(self, mock_credentials_data):
+        """Test token refresh handles 403 forbidden."""
         manager = CredentialManager()
         original_creds = Credentials(**mock_credentials_data["claudeAiOauth"])
 
-        with patch.object(CredentialManager, "CREDENTIALS_PATH", credentials_path):
-            with patch.object(httpx, "post", return_value=mock_response):
-                with pytest.raises(KeyError):
-                    manager.refresh_access_token(original_creds)
+        mock_response = MagicMock()
+        mock_response.status_code = 403
+        mock_response.text = '{"error": "forbidden"}'
+
+        with patch.object(httpx, "post", return_value=mock_response):
+            with pytest.raises(TokenRefreshHTTPError) as exc_info:
+                manager.refresh_access_token(original_creds)
+
+        assert exc_info.value.status_code == 403
+        assert "Forbidden" in str(exc_info.value)
+
+    def test_refresh_access_token_http_429_rate_limit(self, mock_credentials_data):
+        """Test token refresh handles 429 rate limit."""
+        manager = CredentialManager()
+        original_creds = Credentials(**mock_credentials_data["claudeAiOauth"])
+
+        mock_response = MagicMock()
+        mock_response.status_code = 429
+        mock_response.text = '{"error": "rate_limited"}'
+
+        with patch.object(httpx, "post", return_value=mock_response):
+            with pytest.raises(TokenRefreshHTTPError) as exc_info:
+                manager.refresh_access_token(original_creds)
+
+        assert exc_info.value.status_code == 429
+        assert "rate limit" in str(exc_info.value).lower()
+
+    def test_refresh_access_token_http_500(self, mock_credentials_data):
+        """Test token refresh handles 500 server error."""
+        manager = CredentialManager()
+        original_creds = Credentials(**mock_credentials_data["claudeAiOauth"])
+
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        mock_response.text = '{"error": "internal_error"}'
+
+        with patch.object(httpx, "post", return_value=mock_response):
+            with pytest.raises(TokenRefreshHTTPError) as exc_info:
+                manager.refresh_access_token(original_creds)
+
+        assert exc_info.value.status_code == 500
+        assert "server error" in str(exc_info.value).lower()
+
+    def test_refresh_access_token_invalid_json_response(self, mock_credentials_data):
+        """Test token refresh handles invalid JSON response."""
+        manager = CredentialManager()
+        original_creds = Credentials(**mock_credentials_data["claudeAiOauth"])
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.side_effect = json.JSONDecodeError("Invalid", "", 0)
+        mock_response.text = "not valid json"
+
+        with patch.object(httpx, "post", return_value=mock_response):
+            with pytest.raises(InvalidTokenResponseError) as exc_info:
+                manager.refresh_access_token(original_creds)
+
+        assert "not valid JSON" in str(exc_info.value)
+
+    def test_refresh_access_token_missing_access_token_field(self, mock_credentials_data):
+        """Test token refresh handles missing access_token field."""
+        manager = CredentialManager()
+        original_creds = Credentials(**mock_credentials_data["claudeAiOauth"])
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"expires_at": 12345}
+
+        with patch.object(httpx, "post", return_value=mock_response):
+            with pytest.raises(InvalidTokenResponseError) as exc_info:
+                manager.refresh_access_token(original_creds)
+
+        assert "access_token" in str(exc_info.value)
+
+    def test_refresh_access_token_missing_expires_at_field(self, mock_credentials_data):
+        """Test token refresh handles missing expires_at field."""
+        manager = CredentialManager()
+        original_creds = Credentials(**mock_credentials_data["claudeAiOauth"])
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"access_token": "new-token"}
+
+        with patch.object(httpx, "post", return_value=mock_response):
+            with pytest.raises(InvalidTokenResponseError) as exc_info:
+                manager.refresh_access_token(original_creds)
+
+        assert "expires_at" in str(exc_info.value)
+
+    def test_refresh_access_token_non_dict_response(self, mock_credentials_data):
+        """Test token refresh handles non-dict response."""
+        manager = CredentialManager()
+        original_creds = Credentials(**mock_credentials_data["claudeAiOauth"])
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = ["not", "a", "dict"]
+
+        with patch.object(httpx, "post", return_value=mock_response):
+            with pytest.raises(InvalidTokenResponseError) as exc_info:
+                manager.refresh_access_token(original_creds)
+
+        assert "not a JSON object" in str(exc_info.value)
+
+    def test_refresh_access_token_request_error(self, mock_credentials_data):
+        """Test token refresh handles general request errors."""
+        manager = CredentialManager()
+        original_creds = Credentials(**mock_credentials_data["claudeAiOauth"])
+
+        # Create a mock request object for the error
+        mock_request = MagicMock()
+        with patch.object(httpx, "post", side_effect=httpx.RequestError("Request failed", request=mock_request)):
+            with pytest.raises(NetworkConnectionError) as exc_info:
+                manager.refresh_access_token(original_creds)
+
+        assert "connect" in str(exc_info.value).lower() or "network" in str(exc_info.value).lower()
 
 
 # =============================================================================
@@ -520,6 +829,25 @@ class TestCredentialManagerSave:
         # Should have indentation (2 spaces as per json.dump indent=2)
         assert "  " in content
 
+    def test_save_credentials_permission_error(self, temp_dir):
+        """Test handling of permission errors when saving credentials."""
+        credentials_path = temp_dir / ".claude" / ".credentials.json"
+        credentials_path.parent.mkdir(parents=True, exist_ok=True)
+
+        manager = CredentialManager()
+        creds = Credentials(
+            accessToken="test",
+            refreshToken="test",
+            expiresAt=1704067200000,
+        )
+
+        with patch.object(CredentialManager, "CREDENTIALS_PATH", credentials_path):
+            with patch("builtins.open", side_effect=PermissionError("Access denied")):
+                with pytest.raises(CredentialPermissionError) as exc_info:
+                    manager._save_credentials(creds)
+
+        assert exc_info.value.operation == "writing"
+
 
 # =============================================================================
 # CredentialManager - get_valid_token Tests
@@ -556,7 +884,7 @@ class TestCredentialManagerGetValidToken:
 
         mock_response = MagicMock()
         mock_response.json.return_value = new_token_data
-        mock_response.raise_for_status = MagicMock()
+        mock_response.status_code = 200
 
         manager = CredentialManager()
 
@@ -567,13 +895,13 @@ class TestCredentialManagerGetValidToken:
         assert token == "refreshed-token"
 
     def test_get_valid_token_file_not_found(self, temp_dir):
-        """Test get_valid_token raises error when file not found."""
+        """Test get_valid_token raises CredentialNotFoundError when file not found."""
         non_existent_path = temp_dir / "non-existent" / ".credentials.json"
 
         manager = CredentialManager()
 
         with patch.object(CredentialManager, "CREDENTIALS_PATH", non_existent_path):
-            with pytest.raises(FileNotFoundError):
+            with pytest.raises(CredentialNotFoundError):
                 manager.get_valid_token()
 
     def test_get_valid_token_refresh_fails(self, temp_dir, mock_expired_credentials_data):
@@ -586,7 +914,7 @@ class TestCredentialManagerGetValidToken:
 
         with patch.object(CredentialManager, "CREDENTIALS_PATH", credentials_path):
             with patch.object(httpx, "post", side_effect=httpx.ConnectError("Network error")):
-                with pytest.raises(httpx.ConnectError):
+                with pytest.raises(NetworkConnectionError):
                     manager.get_valid_token()
 
 
@@ -614,7 +942,7 @@ class TestCredentialManagerIntegration:
 
         mock_response = MagicMock()
         mock_response.json.return_value = new_token_data
-        mock_response.raise_for_status = MagicMock()
+        mock_response.status_code = 200
 
         manager = CredentialManager()
 
@@ -738,11 +1066,11 @@ class TestCredentialManagerEdgeCases:
 
     def test_credentials_with_unicode_characters(self, temp_dir):
         """Test credentials with unicode characters."""
-        unicode_token = "token_with_unicode_🔐_emoji"
+        unicode_token = "token_with_unicode_\U0001f510_emoji"
         data = {
             "claudeAiOauth": {
                 "accessToken": unicode_token,
-                "refreshToken": "refresh_tökén_ñ",
+                "refreshToken": "refresh_token_n",
                 "expiresAt": 1704067200000,
             }
         }
@@ -791,33 +1119,37 @@ class TestCredentialManagerEdgeCases:
         )
         assert manager.is_expired(creds) is False
 
-    def test_load_credentials_permission_error(self, temp_dir, mock_credentials_data):
-        """Test handling of permission errors when loading credentials."""
-        credentials_path = temp_dir / ".claude" / ".credentials.json"
-        credentials_path.parent.mkdir(parents=True, exist_ok=True)
-        # Create the file so it passes the exists() check
-        credentials_path.write_text(json.dumps(mock_credentials_data))
+    def test_exception_hierarchy(self):
+        """Test that all custom exceptions inherit correctly."""
+        # All should inherit from CredentialError
+        assert issubclass(CredentialNotFoundError, CredentialError)
+        assert issubclass(InvalidCredentialsError, CredentialError)
+        assert issubclass(CredentialPermissionError, CredentialError)
+        assert issubclass(TokenRefreshError, CredentialError)
 
-        manager = CredentialManager()
+        # Token refresh specific errors should inherit from TokenRefreshError
+        assert issubclass(NetworkTimeoutError, TokenRefreshError)
+        assert issubclass(NetworkConnectionError, TokenRefreshError)
+        assert issubclass(TokenRefreshHTTPError, TokenRefreshError)
+        assert issubclass(InvalidTokenResponseError, TokenRefreshError)
 
-        with patch.object(CredentialManager, "CREDENTIALS_PATH", credentials_path):
-            with patch("builtins.open", side_effect=PermissionError("Access denied")):
-                with pytest.raises(PermissionError):
-                    manager.load_credentials()
+    def test_can_catch_all_credential_errors(self):
+        """Test that all credential errors can be caught with base class."""
+        errors = [
+            CredentialNotFoundError(Path("/test")),
+            InvalidCredentialsError("Invalid"),
+            CredentialPermissionError(Path("/test"), "reading", Exception()),
+            TokenRefreshError("Refresh failed"),
+            NetworkTimeoutError("http://test", 30.0),
+            NetworkConnectionError("http://test", Exception()),
+            TokenRefreshHTTPError(401),
+            InvalidTokenResponseError("Invalid response"),
+        ]
 
-    def test_save_credentials_permission_error(self, temp_dir):
-        """Test handling of permission errors when saving credentials."""
-        credentials_path = temp_dir / ".claude" / ".credentials.json"
-        credentials_path.parent.mkdir(parents=True, exist_ok=True)
-
-        manager = CredentialManager()
-        creds = Credentials(
-            accessToken="test",
-            refreshToken="test",
-            expiresAt=1704067200000,
-        )
-
-        with patch.object(CredentialManager, "CREDENTIALS_PATH", credentials_path):
-            with patch("builtins.open", side_effect=PermissionError("Access denied")):
-                with pytest.raises(PermissionError):
-                    manager._save_credentials(creds)
+        for error in errors:
+            try:
+                raise error
+            except CredentialError:
+                pass  # Expected - all should be caught
+            except Exception as e:
+                pytest.fail(f"Error {type(error).__name__} was not caught as CredentialError: {e}")
