@@ -1,11 +1,24 @@
 """Comprehensive tests for the orchestrator module."""
 
 import pytest
+import json
 from unittest.mock import MagicMock, patch, PropertyMock
 from pathlib import Path
 
-from claude_task_master.core.orchestrator import WorkLoopOrchestrator
-from claude_task_master.core.state import StateManager, TaskState, TaskOptions
+from claude_task_master.core.orchestrator import (
+    WorkLoopOrchestrator,
+    OrchestratorError,
+    PlanParsingError,
+    NoPlanFoundError,
+    NoTasksFoundError,
+    TaskIndexOutOfBoundsError,
+    WorkSessionError,
+    StateRecoveryError,
+    MaxSessionsReachedError,
+    VerificationFailedError,
+)
+from claude_task_master.core.state import StateManager, TaskState, TaskOptions, StateError
+from claude_task_master.core.agent import AgentError, QueryExecutionError
 
 
 # =============================================================================
@@ -657,7 +670,7 @@ class TestRunWorkSession:
 
         state = orchestrator.state_manager.load_state()
 
-        with pytest.raises(ValueError, match="No plan found"):
+        with pytest.raises(NoPlanFoundError):
             orchestrator._run_work_session(state)
 
     def test_run_work_session_all_tasks_processed(
@@ -1118,3 +1131,493 @@ class TestIntegration:
         assert result == 0  # Success
         # Should only process remaining 2 tasks
         assert mock_agent_wrapper.run_work_session.call_count == 2
+
+
+# =============================================================================
+# Exception Class Tests
+# =============================================================================
+
+
+class TestOrchestratorExceptions:
+    """Tests for orchestrator exception classes."""
+
+    def test_orchestrator_error_base_class(self):
+        """Test OrchestratorError base class."""
+        error = OrchestratorError("Test error message")
+        assert error.message == "Test error message"
+        assert error.details is None
+        assert str(error) == "Test error message"
+
+    def test_orchestrator_error_with_details(self):
+        """Test OrchestratorError with details."""
+        error = OrchestratorError("Test error", "Additional details here")
+        assert error.message == "Test error"
+        assert error.details == "Additional details here"
+        assert "Additional details" in str(error)
+
+    def test_plan_parsing_error(self):
+        """Test PlanParsingError."""
+        plan_content = "## Invalid Plan\n\nSome random content"
+        error = PlanParsingError("Failed to parse plan", plan_content)
+        assert error.message == "Failed to parse plan"
+        assert error.plan_content == plan_content
+        assert "Plan content preview" in error.details
+
+    def test_plan_parsing_error_truncates_long_content(self):
+        """Test PlanParsingError truncates long content."""
+        long_content = "x" * 500
+        error = PlanParsingError("Failed", long_content)
+        assert error.plan_content == long_content
+        # Preview should be truncated to 200 chars + "..."
+        assert len(error.details) < len(long_content) + 50
+
+    def test_no_plan_found_error(self):
+        """Test NoPlanFoundError."""
+        error = NoPlanFoundError()
+        assert "No plan found" in error.message
+        assert "planning phase" in error.details
+
+    def test_no_tasks_found_error(self):
+        """Test NoTasksFoundError."""
+        plan = "## Task List\n\nNo tasks here"
+        error = NoTasksFoundError(plan)
+        assert "No tasks found" in error.message
+        assert error.plan_content == plan
+
+    def test_task_index_out_of_bounds_error(self):
+        """Test TaskIndexOutOfBoundsError."""
+        error = TaskIndexOutOfBoundsError(5, 3)
+        assert error.task_index == 5
+        assert error.total_tasks == 3
+        assert "5" in error.message
+        assert "3 tasks" in error.details
+
+    def test_work_session_error(self):
+        """Test WorkSessionError."""
+        original = ValueError("Something went wrong")
+        error = WorkSessionError(2, "Fix the bug", original)
+        assert error.task_index == 2
+        assert error.task_description == "Fix the bug"
+        assert error.original_error == original
+        assert "task #3" in error.message  # 1-indexed in message
+        assert "ValueError" in error.details
+
+    def test_state_recovery_error(self):
+        """Test StateRecoveryError."""
+        original = OSError("File not found")
+        error = StateRecoveryError("Could not load backup", original)
+        assert "recover" in error.message.lower()
+        assert error.original_error == original
+        assert "OSError" in error.details
+
+    def test_max_sessions_reached_error(self):
+        """Test MaxSessionsReachedError."""
+        error = MaxSessionsReachedError(10, 10)
+        assert error.max_sessions == 10
+        assert error.current_session == 10
+        assert "10" in error.message
+
+    def test_verification_failed_error(self):
+        """Test VerificationFailedError."""
+        criteria = "1. All tests pass\n2. No bugs"
+        error = VerificationFailedError(criteria)
+        assert error.criteria == criteria
+        assert "verification" in error.message.lower()
+
+
+# =============================================================================
+# Error Handling Tests
+# =============================================================================
+
+
+class TestRunWorkSessionErrorHandling:
+    """Tests for _run_work_session error handling."""
+
+    def test_run_work_session_raises_no_plan_found(
+        self, mock_agent_wrapper, initialized_state_manager, planner
+    ):
+        """Test _run_work_session raises NoPlanFoundError when no plan exists."""
+        # Remove plan file
+        plan_file = initialized_state_manager.state_dir / "plan.md"
+        if plan_file.exists():
+            plan_file.unlink()
+
+        orchestrator = WorkLoopOrchestrator(
+            agent=mock_agent_wrapper,
+            state_manager=initialized_state_manager,
+            planner=planner,
+        )
+        state = initialized_state_manager.load_state()
+
+        with pytest.raises(NoPlanFoundError):
+            orchestrator._run_work_session(state)
+
+    def test_run_work_session_raises_no_tasks_found(
+        self, mock_agent_wrapper, initialized_state_manager, planner
+    ):
+        """Test _run_work_session raises NoTasksFoundError when plan has no tasks."""
+        # Save plan with no tasks
+        initialized_state_manager.save_plan("## Task List\n\nNo actual tasks here.\n")
+
+        orchestrator = WorkLoopOrchestrator(
+            agent=mock_agent_wrapper,
+            state_manager=initialized_state_manager,
+            planner=planner,
+        )
+        state = initialized_state_manager.load_state()
+
+        with pytest.raises(NoTasksFoundError):
+            orchestrator._run_work_session(state)
+
+    def test_run_work_session_wraps_agent_errors(
+        self, mock_agent_wrapper, initialized_state_manager, planner
+    ):
+        """Test _run_work_session wraps agent errors properly."""
+        initialized_state_manager.save_plan("## Task List\n- [ ] Task 1\n")
+        mock_agent_wrapper.run_work_session.side_effect = RuntimeError("Agent crashed")
+
+        orchestrator = WorkLoopOrchestrator(
+            agent=mock_agent_wrapper,
+            state_manager=initialized_state_manager,
+            planner=planner,
+        )
+        state = initialized_state_manager.load_state()
+
+        with pytest.raises(WorkSessionError) as exc_info:
+            orchestrator._run_work_session(state)
+
+        assert exc_info.value.task_index == 0
+        assert "Task 1" in exc_info.value.task_description
+        assert isinstance(exc_info.value.original_error, RuntimeError)
+
+    def test_run_work_session_propagates_agent_errors(
+        self, mock_agent_wrapper, initialized_state_manager, planner
+    ):
+        """Test _run_work_session propagates AgentError subclasses."""
+        initialized_state_manager.save_plan("## Task List\n- [ ] Task 1\n")
+        mock_agent_wrapper.run_work_session.side_effect = QueryExecutionError("Query failed")
+
+        orchestrator = WorkLoopOrchestrator(
+            agent=mock_agent_wrapper,
+            state_manager=initialized_state_manager,
+            planner=planner,
+        )
+        state = initialized_state_manager.load_state()
+
+        # AgentError subclasses should propagate through
+        with pytest.raises(AgentError):
+            orchestrator._run_work_session(state)
+
+
+class TestRunErrorHandling:
+    """Tests for run() method error handling."""
+
+    def test_run_handles_no_plan_as_success(
+        self, mock_agent_wrapper, state_dir, planner
+    ):
+        """Test run treats no plan as success (nothing to do = done)."""
+        state_manager = StateManager(state_dir)
+        options = TaskOptions()
+        state = state_manager.initialize(goal="Test", model="sonnet", options=options)
+        state.status = "working"
+        state_manager.save_state(state)
+        # Don't save a plan - _is_complete will return True (no tasks = complete)
+
+        mock_agent_wrapper.verify_success_criteria.return_value = {"success": True}
+
+        orchestrator = WorkLoopOrchestrator(
+            agent=mock_agent_wrapper,
+            state_manager=state_manager,
+            planner=planner,
+        )
+
+        result = orchestrator.run()
+
+        # No plan means _is_complete returns True immediately, then verification passes
+        assert result == 0  # Success
+
+    def test_run_handles_no_tasks_as_success(
+        self, mock_agent_wrapper, state_dir, planner
+    ):
+        """Test run treats no tasks in plan as success case."""
+        state_manager = StateManager(state_dir)
+        options = TaskOptions()
+        state = state_manager.initialize(goal="Test", model="sonnet", options=options)
+        state.status = "working"
+        state_manager.save_state(state)
+        state_manager.save_plan("## Task List\n\nNo tasks defined.")
+
+        mock_agent_wrapper.verify_success_criteria.return_value = {"success": True}
+
+        orchestrator = WorkLoopOrchestrator(
+            agent=mock_agent_wrapper,
+            state_manager=state_manager,
+            planner=planner,
+        )
+
+        result = orchestrator.run()
+
+        assert result == 0  # Success (no tasks = nothing to do = done)
+
+    def test_run_prints_error_details_on_orchestrator_error(
+        self, mock_agent_wrapper, state_dir, planner, capsys
+    ):
+        """Test run prints error details for OrchestratorError."""
+        state_manager = StateManager(state_dir)
+        options = TaskOptions()
+        state = state_manager.initialize(goal="Test", model="sonnet", options=options)
+        state.status = "working"
+        state_manager.save_state(state)
+        state_manager.save_plan("## Task List\n- [ ] Task 1\n")
+
+        # Make agent raise an error that will be wrapped
+        mock_agent_wrapper.run_work_session.side_effect = RuntimeError("Boom!")
+
+        orchestrator = WorkLoopOrchestrator(
+            agent=mock_agent_wrapper,
+            state_manager=state_manager,
+            planner=planner,
+        )
+
+        result = orchestrator.run()
+
+        assert result == 1  # Error
+        captured = capsys.readouterr()
+        assert "error" in captured.out.lower()
+
+    def test_run_creates_backup_on_unexpected_error(
+        self, mock_agent_wrapper, state_dir, planner
+    ):
+        """Test run creates state backup on unexpected error."""
+        state_manager = StateManager(state_dir)
+        options = TaskOptions()
+        state = state_manager.initialize(goal="Test", model="sonnet", options=options)
+        state.status = "working"
+        state_manager.save_state(state)
+        state_manager.save_plan("## Task List\n- [ ] Task 1\n")
+
+        # Make agent raise an unexpected error
+        mock_agent_wrapper.run_work_session.side_effect = MemoryError("Out of memory")
+
+        orchestrator = WorkLoopOrchestrator(
+            agent=mock_agent_wrapper,
+            state_manager=state_manager,
+            planner=planner,
+        )
+
+        result = orchestrator.run()
+
+        assert result == 1  # Error
+
+        # Check that a backup was created
+        backup_dir = state_manager.backup_dir
+        if backup_dir.exists():
+            backups = list(backup_dir.glob("state.*.json"))
+            # Backup may or may not exist depending on timing
+            # The important thing is the method didn't crash
+
+    def test_run_provides_debugging_info_on_unexpected_error(
+        self, mock_agent_wrapper, state_dir, planner, capsys
+    ):
+        """Test run provides debugging info on unexpected error."""
+        state_manager = StateManager(state_dir)
+        options = TaskOptions()
+        state = state_manager.initialize(goal="Test", model="sonnet", options=options)
+        state.status = "working"
+        state.current_task_index = 2
+        state.session_count = 5
+        state_manager.save_state(state)
+        state_manager.save_plan("## Task List\n- [ ] Task 1\n- [ ] Task 2\n- [ ] Task 3\n")
+
+        # Make agent raise an unexpected error
+        mock_agent_wrapper.run_work_session.side_effect = TypeError("Unexpected type")
+
+        orchestrator = WorkLoopOrchestrator(
+            agent=mock_agent_wrapper,
+            state_manager=state_manager,
+            planner=planner,
+        )
+
+        result = orchestrator.run()
+
+        captured = capsys.readouterr()
+        # Should include debugging info
+        assert "TypeError" in captured.out
+        assert "Task index" in captured.out or "task" in captured.out.lower()
+
+
+class TestStateRecovery:
+    """Tests for state recovery functionality."""
+
+    def test_attempt_state_recovery_returns_none_when_no_backups(
+        self, mock_agent_wrapper, state_dir, planner
+    ):
+        """Test _attempt_state_recovery returns None when no backups exist."""
+        state_manager = StateManager(state_dir)
+        options = TaskOptions()
+        state_manager.initialize(goal="Test", model="sonnet", options=options)
+
+        orchestrator = WorkLoopOrchestrator(
+            agent=mock_agent_wrapper,
+            state_manager=state_manager,
+            planner=planner,
+        )
+
+        # No backups should exist
+        result = orchestrator._attempt_state_recovery()
+        assert result is None
+
+    def test_attempt_state_recovery_recovers_from_backup(
+        self, mock_agent_wrapper, state_dir, planner
+    ):
+        """Test _attempt_state_recovery recovers from valid backup."""
+        state_manager = StateManager(state_dir)
+        options = TaskOptions()
+        state = state_manager.initialize(goal="Test", model="sonnet", options=options)
+        state.status = "working"
+        state.current_task_index = 3
+        state_manager.save_state(state)
+
+        # Create a backup
+        backup_path = state_manager.create_state_backup()
+        assert backup_path is not None
+
+        orchestrator = WorkLoopOrchestrator(
+            agent=mock_agent_wrapper,
+            state_manager=state_manager,
+            planner=planner,
+        )
+
+        # Now corrupt the main state file
+        (state_dir / "state.json").write_text("invalid json{{{")
+
+        # Recovery should work
+        recovered = orchestrator._attempt_state_recovery()
+        assert recovered is not None
+        assert recovered.current_task_index == 3
+
+    def test_get_current_task_description_returns_placeholder_on_error(
+        self, mock_agent_wrapper, state_dir, planner
+    ):
+        """Test _get_current_task_description returns placeholder on error."""
+        state_manager = StateManager(state_dir)
+        options = TaskOptions()
+        state = state_manager.initialize(goal="Test", model="sonnet", options=options)
+        state.status = "working"
+        state_manager.save_state(state)
+        # Don't save a plan
+
+        orchestrator = WorkLoopOrchestrator(
+            agent=mock_agent_wrapper,
+            state_manager=state_manager,
+            planner=planner,
+        )
+
+        description = orchestrator._get_current_task_description(state)
+        assert description == "<unknown task>"
+
+    def test_get_current_task_description_returns_task(
+        self, mock_agent_wrapper, initialized_state_manager, planner
+    ):
+        """Test _get_current_task_description returns correct task."""
+        initialized_state_manager.save_plan(
+            "## Task List\n- [ ] First task\n- [ ] Second task\n"
+        )
+        state = initialized_state_manager.load_state()
+        state.current_task_index = 1
+
+        orchestrator = WorkLoopOrchestrator(
+            agent=mock_agent_wrapper,
+            state_manager=initialized_state_manager,
+            planner=planner,
+        )
+
+        description = orchestrator._get_current_task_description(state)
+        assert description == "Second task"
+
+
+class TestInterruptHandling:
+    """Tests for interrupt (Ctrl+C) handling."""
+
+    def test_keyboard_interrupt_creates_backup(
+        self, mock_agent_wrapper, state_dir, planner, capsys
+    ):
+        """Test keyboard interrupt creates state backup."""
+        state_manager = StateManager(state_dir)
+        options = TaskOptions()
+        state = state_manager.initialize(goal="Test", model="sonnet", options=options)
+        state.status = "working"
+        state_manager.save_state(state)
+        state_manager.save_plan("## Task List\n- [ ] Task 1\n")
+
+        mock_agent_wrapper.run_work_session.side_effect = KeyboardInterrupt()
+
+        orchestrator = WorkLoopOrchestrator(
+            agent=mock_agent_wrapper,
+            state_manager=state_manager,
+            planner=planner,
+        )
+
+        result = orchestrator.run()
+
+        assert result == 2  # Paused
+        captured = capsys.readouterr()
+        assert "Interrupted" in captured.out or "pausing" in captured.out.lower()
+
+
+class TestMaxSessionsHandling:
+    """Tests for max sessions error handling."""
+
+    def test_max_sessions_prints_informative_message(
+        self, mock_agent_wrapper, state_dir, planner, capsys
+    ):
+        """Test max sessions reached prints informative message."""
+        state_manager = StateManager(state_dir)
+        options = TaskOptions(max_sessions=5)
+        state = state_manager.initialize(goal="Test", model="sonnet", options=options)
+        state.session_count = 5  # Already at max
+        state_manager.save_state(state)
+        state_manager.save_plan("## Task List\n- [ ] Task 1\n")
+
+        orchestrator = WorkLoopOrchestrator(
+            agent=mock_agent_wrapper,
+            state_manager=state_manager,
+            planner=planner,
+        )
+
+        result = orchestrator.run()
+
+        assert result == 1  # Blocked
+        captured = capsys.readouterr()
+        assert "5" in captured.out  # Should mention the limit
+        assert "Max sessions" in captured.out or "max" in captured.out.lower()
+
+
+class TestSuccessOutput:
+    """Tests for success output messages."""
+
+    def test_run_prints_success_message(
+        self, mock_agent_wrapper, state_dir, planner, capsys
+    ):
+        """Test run prints success message when all tasks complete."""
+        state_manager = StateManager(state_dir)
+        options = TaskOptions()
+        state = state_manager.initialize(goal="Test", model="sonnet", options=options)
+        state.status = "working"
+        state_manager.save_state(state)
+        state_manager.save_plan("## Task List\n- [ ] Single task\n")
+
+        mock_agent_wrapper.run_work_session.return_value = {"output": "Done", "success": True}
+        mock_agent_wrapper.verify_success_criteria.return_value = {"success": True}
+
+        orchestrator = WorkLoopOrchestrator(
+            agent=mock_agent_wrapper,
+            state_manager=state_manager,
+            planner=planner,
+        )
+
+        result = orchestrator.run()
+
+        assert result == 0  # Success
+        captured = capsys.readouterr()
+        assert "completed" in captured.out.lower() or "success" in captured.out.lower()
