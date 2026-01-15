@@ -590,8 +590,8 @@ Format your response clearly."""
         if tool_name == "Bash":
             cmd = tool_input.get("command", "")
             # Truncate long commands
-            if len(cmd) > 80:
-                cmd = cmd[:77] + "..."
+            if len(cmd) > 250:
+                cmd = cmd[:247] + "..."
             return f"→ {cmd}"
         elif tool_name == "Read":
             path = tool_input.get("file_path", "")

@@ -2,6 +2,7 @@
 
 from . import console
 from .agent import AgentError, AgentWrapper, TaskComplexity, parse_task_complexity
+from .key_listener import check_escape, start_listening, stop_listening
 from .planner import Planner
 from .state import StateError, StateManager, TaskState
 
@@ -166,8 +167,24 @@ class WorkLoopOrchestrator:
             console.warning(error.message)
             return 1  # Blocked
 
+        # Start listening for Escape key
+        start_listening()
+        console.detail("Press [Escape] to pause, [Ctrl+C] to interrupt")
+
         try:
             while not self._is_complete(state):
+                # Check if user pressed Escape to pause
+                if check_escape():
+                    console.newline()
+                    console.warning("Escape pressed - pausing...")
+                    state.status = "paused"
+                    self.state_manager.save_state(state)
+                    backup_path = self.state_manager.create_state_backup()
+                    if backup_path:
+                        console.detail(f"State backup saved: {backup_path}")
+                    stop_listening()
+                    return 2  # Paused
+
                 # Run work session for current task with error handling
                 try:
                     self._run_work_session(state)
@@ -219,6 +236,7 @@ class WorkLoopOrchestrator:
                     return 1
 
             # All tasks complete - verify success criteria
+            stop_listening()
             try:
                 if self._verify_success():
                     state.status = "success"
@@ -240,17 +258,20 @@ class WorkLoopOrchestrator:
                 return 1
 
         except KeyboardInterrupt:
+            stop_listening()
             console.newline()
-            console.warning("Interrupted by user - pausing...")
+            console.warning("Interrupted by user (Ctrl+C) - pausing...")
             state.status = "paused"
             self.state_manager.save_state(state)
             # Create a backup when pausing
             backup_path = self.state_manager.create_state_backup()
             if backup_path:
                 console.detail(f"State backup saved: {backup_path}")
+            console.info("Use 'claudetm resume' to continue")
             return 2  # User interrupted
 
         except OrchestratorError as e:
+            stop_listening()
             # Known orchestrator errors - already have good messages
             console.error(f"Orchestrator error: {e.message}")
             if e.details:
@@ -260,6 +281,7 @@ class WorkLoopOrchestrator:
             return 1  # Error
 
         except StateError as e:
+            stop_listening()
             # State-related errors
             console.error(f"State error: {e.message}")
             if e.details:
@@ -273,6 +295,7 @@ class WorkLoopOrchestrator:
             return 1  # Error
 
         except Exception as e:
+            stop_listening()
             # Unexpected errors - provide detailed debugging info
             error_type = type(e).__name__
             error_msg = str(e)
