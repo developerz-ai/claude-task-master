@@ -17,7 +17,21 @@ from .utils.doctor import SystemDoctor
 
 app = typer.Typer(
     name="claude-task-master",
-    help="Autonomous task orchestration system using Claude Agent SDK",
+    help="""Autonomous task orchestration system using Claude Agent SDK.
+
+Claude Task Master keeps Claude working until a goal is achieved by:
+- Breaking down goals into actionable tasks
+- Executing tasks with appropriate tools
+- Creating and managing GitHub PRs
+- Waiting for CI and addressing reviews
+
+Quick start:
+  claudetm start "Your goal here"
+  claudetm status
+  claudetm clean -f
+
+For more info, see: https://github.com/sebyx07/claude-task-master-py
+""",
     add_completion=False,
 )
 console = Console()
@@ -25,16 +39,42 @@ console = Console()
 
 @app.command()
 def start(
-    goal: str = typer.Argument(..., help="The goal to achieve"),
-    model: str = typer.Option("sonnet", help="Model to use: sonnet, opus, haiku"),
-    auto_merge: bool = typer.Option(True, help="Automatically merge PRs when ready"),
-    max_sessions: int | None = typer.Option(None, help="Maximum number of sessions"),
-    pause_on_pr: bool = typer.Option(False, help="Pause after creating PR for review"),
+    goal: str = typer.Argument(..., help="The goal to achieve (e.g., 'Add user authentication')"),
+    model: str = typer.Option(
+        "sonnet",
+        "--model",
+        "-m",
+        help="Model: sonnet (balanced), opus (smartest), haiku (fastest)",
+    ),
+    auto_merge: bool = typer.Option(
+        True,
+        "--auto-merge/--no-auto-merge",
+        help="Automatically merge PRs when CI passes and approved",
+    ),
+    max_sessions: int | None = typer.Option(
+        None,
+        "--max-sessions",
+        "-n",
+        help="Max work sessions before pausing (default: unlimited)",
+    ),
+    pause_on_pr: bool = typer.Option(
+        False,
+        "--pause-on-pr",
+        help="Pause after creating PR for manual review",
+    ),
     enable_checkpointing: bool = typer.Option(
-        False, help="Enable file checkpointing for safe rollbacks"
+        False,
+        "--checkpointing",
+        help="Enable file checkpointing for safe rollbacks",
     ),
 ) -> None:
-    """Start a new task with the given goal."""
+    """Start a new task with the given goal.
+
+    Examples:
+        claudetm start "Add dark mode toggle"
+        claudetm start "Fix bug #123" -m opus --no-auto-merge
+        claudetm start "Refactor auth" -n 5 --pause-on-pr
+    """
     console.print(f"[bold green]Starting new task:[/bold green] {goal}")
     console.print(f"Model: {model}, Auto-merge: {auto_merge}")
 
@@ -128,7 +168,16 @@ def start(
 
 @app.command()
 def resume() -> None:
-    """Resume a paused or interrupted task."""
+    """Resume a paused or interrupted task.
+
+    Use this to continue a task that was:
+    - Paused by pressing Escape
+    - Interrupted by Ctrl+C
+    - Blocked and waiting for intervention
+
+    Examples:
+        claudetm resume
+    """
     console.print("[bold blue]Resuming task...[/bold blue]")
 
     try:
@@ -226,7 +275,13 @@ def resume() -> None:
 
 @app.command()
 def status() -> None:
-    """Show current status of the task."""
+    """Show current status of the task.
+
+    Displays goal, current task, session count, and configuration options.
+
+    Examples:
+        claudetm status
+    """
     state_manager = StateManager()
 
     if not state_manager.exists():
@@ -262,7 +317,13 @@ def status() -> None:
 
 @app.command()
 def plan() -> None:
-    """Display the current task plan."""
+    """Display the current task plan.
+
+    Shows the markdown task list with checkboxes indicating completion status.
+
+    Examples:
+        claudetm plan
+    """
     state_manager = StateManager()
 
     if not state_manager.exists():
@@ -289,9 +350,16 @@ def plan() -> None:
 @app.command()
 def logs(
     session: int | None = typer.Option(None, help="Show specific session number"),
-    tail: int = typer.Option(100, help="Number of lines to show from the end"),
+    tail: int = typer.Option(100, "--tail", "-n", help="Number of lines to show"),
 ) -> None:
-    """Display logs from the current run."""
+    """Display logs from the current run.
+
+    Shows Claude's output, tool usage, and execution details.
+
+    Examples:
+        claudetm logs
+        claudetm logs -n 50
+    """
     state_manager = StateManager()
 
     if not state_manager.exists():
@@ -324,7 +392,13 @@ def logs(
 
 @app.command()
 def context() -> None:
-    """Display accumulated context and learnings."""
+    """Display accumulated context and learnings.
+
+    Shows insights gathered during execution that help inform future sessions.
+
+    Examples:
+        claudetm context
+    """
     state_manager = StateManager()
 
     if not state_manager.exists():
@@ -350,7 +424,13 @@ def context() -> None:
 
 @app.command()
 def progress() -> None:
-    """Display human-readable progress summary."""
+    """Display human-readable progress summary.
+
+    Shows what has been accomplished and what remains to be done.
+
+    Examples:
+        claudetm progress
+    """
     state_manager = StateManager()
 
     if not state_manager.exists():
@@ -375,8 +455,17 @@ def progress() -> None:
 
 
 @app.command()
-def comments(pr: int | None = typer.Option(None, help="PR number to show comments for")) -> None:
-    """Display PR review comments."""
+def comments(
+    pr: int | None = typer.Option(None, "--pr", "-p", help="PR number to show comments for"),
+) -> None:
+    """Display PR review comments.
+
+    Shows review comments for the current task's PR or a specified PR.
+
+    Examples:
+        claudetm comments
+        claudetm comments -p 123
+    """
     console.print("[bold blue]PR Comments[/bold blue]")
     # TODO: Implement comments logic
     raise typer.Exit(1)
@@ -384,7 +473,13 @@ def comments(pr: int | None = typer.Option(None, help="PR number to show comment
 
 @app.command()
 def pr() -> None:
-    """Display current PR status and CI checks."""
+    """Display current PR status and CI checks.
+
+    Shows the status of the PR associated with the current task.
+
+    Examples:
+        claudetm pr
+    """
     console.print("[bold blue]PR Status[/bold blue]")
     # TODO: Implement pr logic
     raise typer.Exit(1)
@@ -392,7 +487,15 @@ def pr() -> None:
 
 @app.command()
 def clean(force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation")) -> None:
-    """Clean up task state directory."""
+    """Clean up task state directory.
+
+    Removes all state files (.claude-task-master/) to start fresh.
+    Use this after completing a task or to abandon a stuck task.
+
+    Examples:
+        claudetm clean       # Prompts for confirmation
+        claudetm clean -f    # Force without confirmation
+    """
     state_manager = StateManager()
 
     if not state_manager.exists():
@@ -418,18 +521,36 @@ def clean(force: bool = typer.Option(False, "--force", "-f", help="Skip confirma
 
 @app.command()
 def doctor() -> None:
-    """Check system requirements and authentication."""
-    doctor = SystemDoctor()
-    success = doctor.run_checks()
+    """Check system requirements and authentication.
+
+    Verifies:
+    - Claude CLI is installed and accessible
+    - OAuth credentials exist and are valid
+    - Git is configured properly
+    - GitHub CLI (gh) is available
+
+    Examples:
+        claudetm doctor
+    """
+    sys_doctor = SystemDoctor()
+    success = sys_doctor.run_checks()
     raise typer.Exit(0 if success else 1)
 
 
 @app.command(name="ci-status")
 def ci_status(
-    run_id: int | None = typer.Option(None, help="Specific workflow run ID"),
-    limit: int = typer.Option(5, help="Number of recent runs to show"),
+    run_id: int | None = typer.Option(None, "--run-id", "-r", help="Specific workflow run ID"),
+    limit: int = typer.Option(5, "--limit", "-l", help="Number of recent runs to show"),
 ) -> None:
-    """Show GitHub Actions workflow run status."""
+    """Show GitHub Actions workflow run status.
+
+    Lists recent CI runs with their status (success/failure/pending).
+
+    Examples:
+        claudetm ci-status
+        claudetm ci-status -l 10
+        claudetm ci-status -r 12345678
+    """
     from .github.client import GitHubClient
 
     try:
@@ -467,10 +588,18 @@ def ci_status(
 
 @app.command(name="ci-logs")
 def ci_logs(
-    run_id: int | None = typer.Option(None, help="Specific workflow run ID"),
-    lines: int = typer.Option(100, help="Maximum lines to show"),
+    run_id: int | None = typer.Option(None, "--run-id", "-r", help="Specific workflow run ID"),
+    lines: int = typer.Option(100, "--lines", "-n", help="Maximum lines to show"),
 ) -> None:
-    """Show logs from failed CI runs."""
+    """Show logs from failed CI runs.
+
+    Useful for debugging CI failures without leaving the terminal.
+
+    Examples:
+        claudetm ci-logs
+        claudetm ci-logs -r 12345678
+        claudetm ci-logs -n 200
+    """
     from .github.client import GitHubClient
 
     try:
@@ -491,7 +620,14 @@ def pr_comments(
     pr_number: int = typer.Argument(..., help="PR number"),
     all_comments: bool = typer.Option(False, "--all", "-a", help="Include resolved comments"),
 ) -> None:
-    """Show PR review comments formatted for addressing."""
+    """Show PR review comments formatted for addressing.
+
+    Displays reviewer feedback grouped by file for easy reference.
+
+    Examples:
+        claudetm pr-comments 123
+        claudetm pr-comments 123 --all
+    """
     from .github.client import GitHubClient
 
     try:
@@ -515,7 +651,13 @@ def pr_comments(
 def pr_status_cmd(
     pr_number: int = typer.Argument(..., help="PR number"),
 ) -> None:
-    """Show PR status including CI and review comments."""
+    """Show PR status including CI and review comments.
+
+    Displays CI check results and count of unresolved review threads.
+
+    Examples:
+        claudetm pr-status 123
+    """
     from .github.client import GitHubClient
 
     try:
