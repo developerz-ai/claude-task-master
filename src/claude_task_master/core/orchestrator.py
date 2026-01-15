@@ -1,7 +1,7 @@
 """Work Loop Orchestrator - Main loop driving work sessions until completion."""
 
 from . import console
-from .agent import AgentError, AgentWrapper, ModelType, TaskComplexity, parse_task_complexity
+from .agent import AgentError, AgentWrapper, TaskComplexity, parse_task_complexity
 from .planner import Planner
 from .state import StateError, StateManager, TaskState
 
