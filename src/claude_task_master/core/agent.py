@@ -255,14 +255,28 @@ Please complete this task using the available tools (Read, Write, Edit, Bash, Gl
 Important instructions:
 - Work autonomously and methodically
 - Test your changes to verify they work
+- After completing the task, COMMIT your changes with git
+- Use a clear, descriptive commit message
 - When you complete the task, provide a clear summary of what was done
 - Report any blockers or issues encountered
+
+Git commit format:
+```bash
+git add -A && git commit -m "$(cat <<'EOF'
+Brief description of changes
+
+Detailed explanation of what was done and why.
+
+Co-Authored-By: Claude Sonnet 4.5 (1M context) <noreply@anthropic.com>
+EOF
+)"
+```
 
 When done, summarize:
 1. What was completed
 2. Any tests run and their results
 3. Any files modified
-4. Next steps or considerations"""
+4. Git commit made"""
 
         return prompt
 
