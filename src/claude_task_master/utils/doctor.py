@@ -9,7 +9,7 @@ from rich.console import Console
 class SystemDoctor:
     """Checks system requirements."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize doctor."""
         self.console = Console()
         self.checks_passed = True

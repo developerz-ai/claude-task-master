@@ -40,7 +40,7 @@ class PlanParsingError(OrchestratorError):
 class NoPlanFoundError(OrchestratorError):
     """Raised when no plan file exists."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(
             "No plan found",
             "The plan file does not exist. Please run the planning phase first.",
@@ -541,4 +541,4 @@ Please complete this task."""
         context = self.state_manager.load_context()
         result = self.agent.verify_success_criteria(criteria=criteria, context=context)
 
-        return result.get("success", False)
+        return bool(result.get("success", False))

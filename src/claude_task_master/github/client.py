@@ -19,7 +19,7 @@ class PRStatus(BaseModel):
 class GitHubClient:
     """Handles all GitHub operations using gh CLI."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize GitHub client."""
         self._check_gh_cli()
 

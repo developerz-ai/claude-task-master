@@ -4,10 +4,11 @@ import fcntl
 import json
 import shutil
 import tempfile
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import IO, Literal
 
 from pydantic import BaseModel, ValidationError
 
@@ -207,7 +208,9 @@ class TaskState(BaseModel):
 
 
 @contextmanager
-def file_lock(lock_path: Path, timeout: float = 5.0, exclusive: bool = True):
+def file_lock(
+    lock_path: Path, timeout: float = 5.0, exclusive: bool = True
+) -> Generator[IO[str], None, None]:
     """Context manager for file locking with timeout.
 
     Args:
