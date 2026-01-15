@@ -31,6 +31,15 @@ from claude_task_master.core.credentials import (
     TokenRefreshError,
     TokenRefreshHTTPError,
 )
+from claude_task_master.core.hooks import (
+    AuditLogger,
+    DangerousPattern,
+    HookMatcher,
+    HookResult,
+    ProgressTracker,
+    SafetyHooks,
+    create_default_hooks,
+)
 from claude_task_master.core.orchestrator import (
     MaxSessionsReachedError,
     NoPlanFoundError,
@@ -113,4 +122,12 @@ __all__ = [
     "VerificationFailedError",
     # Orchestrator classes
     "WorkLoopOrchestrator",
+    # Hook classes
+    "HookMatcher",
+    "HookResult",
+    "DangerousPattern",
+    "SafetyHooks",
+    "AuditLogger",
+    "ProgressTracker",
+    "create_default_hooks",
 ]
