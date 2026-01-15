@@ -541,25 +541,24 @@ class TestAgentWrapperPromptBuilding:
         pr_comments = "Please add error handling for edge cases."
         prompt = agent._build_work_prompt("Test task", "", pr_comments)
 
-        assert "PR REVIEW COMMENTS TO ADDRESS" in prompt
+        assert "PR Review Comments" in prompt
         assert "Please add error handling for edge cases." in prompt
 
     def test_build_work_prompt_without_pr_comments(self, agent):
         """Test _build_work_prompt without PR comments."""
         prompt = agent._build_work_prompt("Test task", "", None)
 
-        assert "PR REVIEW COMMENTS" not in prompt
+        assert "PR Review Comments" not in prompt
 
     def test_build_work_prompt_mentions_tools(self, agent):
-        """Test _build_work_prompt mentions available tools."""
+        """Test _build_work_prompt mentions git and common commands."""
         prompt = agent._build_work_prompt("Test task", "", None)
 
-        assert "Read" in prompt
-        assert "Write" in prompt
+        # Check for key workflow elements instead of tool names
+        assert "git" in prompt
+        assert "commit" in prompt
         assert "Edit" in prompt
-        assert "Bash" in prompt
-        assert "Glob" in prompt
-        assert "Grep" in prompt
+        assert "Write" in prompt
 
 
 # =============================================================================
