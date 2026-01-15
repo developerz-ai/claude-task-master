@@ -3,9 +3,12 @@
 import asyncio
 import os
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from . import console
+
+if TYPE_CHECKING:
+    from .hooks import HookMatcher
 
 # =============================================================================
 # Custom Exception Classes
@@ -227,6 +230,8 @@ class AgentWrapper:
         max_retries: int = DEFAULT_MAX_RETRIES,
         initial_backoff: float = DEFAULT_INITIAL_BACKOFF,
         max_backoff: float = DEFAULT_MAX_BACKOFF,
+        hooks: dict[str, list["HookMatcher"]] | None = None,
+        enable_safety_hooks: bool = True,
     ):
         """Initialize agent wrapper.
 
@@ -237,6 +242,8 @@ class AgentWrapper:
             max_retries: Maximum number of retries for transient errors.
             initial_backoff: Initial backoff time in seconds.
             max_backoff: Maximum backoff time in seconds.
+            hooks: Optional pre-configured hooks dictionary for ClaudeAgentOptions.
+            enable_safety_hooks: If True and hooks is None, create default safety hooks.
 
         Raises:
             SDKImportError: If claude-agent-sdk is not installed.
@@ -248,12 +255,36 @@ class AgentWrapper:
         self.max_retries = max_retries
         self.initial_backoff = initial_backoff
         self.max_backoff = max_backoff
+        self.hooks = hooks
+        self.enable_safety_hooks = enable_safety_hooks
 
         # Import Claude Agent SDK with improved error handling
         self._import_sdk()
 
+        # Initialize default hooks if not provided and safety enabled
+        if self.hooks is None and self.enable_safety_hooks:
+            self._init_default_hooks()
+
         # Note: The Claude Agent SDK will automatically use credentials from
         # ~/.claude/.credentials.json if no ANTHROPIC_API_KEY is set
+
+    def _init_default_hooks(self) -> None:
+        """Initialize default safety and audit hooks.
+
+        This method is called when hooks are not explicitly provided and
+        enable_safety_hooks is True. It sets up basic safety controls.
+        """
+        try:
+            from .hooks import create_default_hooks
+
+            self.hooks = create_default_hooks(
+                enable_safety=True,
+                enable_audit=False,  # Audit logging is handled by TaskLogger
+                enable_progress=False,  # Progress tracking is handled by orchestrator
+            )
+        except ImportError:
+            # If hooks module fails to import, continue without hooks
+            self.hooks = None
 
     def _import_sdk(self) -> None:
         """Import and initialize the Claude Agent SDK.
@@ -515,6 +546,7 @@ Format your response clearly."""
                     permission_mode="bypassPermissions",  # For MVP, bypass permissions
                     model=model_name,  # Specify the model to use
                     setting_sources=["project"],  # Load CLAUDE.md from project directory
+                    hooks=self.hooks,  # type: ignore[arg-type]  # Compatible HookMatcher
                 )
             except Exception as e:
                 raise SDKInitializationError("ClaudeAgentOptions", e) from e
