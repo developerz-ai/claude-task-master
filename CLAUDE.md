@@ -1,232 +1,113 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Project instructions for Claude Code when working with Claude Task Master.
 
 ## Project Overview
 
-Claude Task Master is an autonomous task orchestration system that keeps Claude working until a goal is achieved. It uses the Claude Agent SDK with OAuth credentials from Claude Code CLI (`~/.claude/.credentials.json`) for authentication.
+Autonomous task orchestration system that uses Claude Agent SDK to keep Claude working until a goal is achieved. Uses OAuth credentials from `~/.claude/.credentials.json` for authentication.
 
-**Core Philosophy**: Claude is smart enough to do the work AND verify its own work. The task master just keeps the loop going and persists state between sessions.
+**Core Philosophy**: Claude is smart enough to do work AND verify it. Task master keeps the loop going and persists state.
 
-## Development Commands
+## Quick Start
 
-### Testing
 ```bash
-pytest                           # Run all tests
-pytest tests/test_specific.py    # Run specific test file
-pytest -v                         # Verbose output
-pytest -k "test_name"            # Run tests matching pattern
+# Setup
+uv sync                          # Install dependencies
+uv run python -m claude_task_master.cli doctor  # Check system
+
+# Usage
+cd <project-dir>
+uv run python -m claude_task_master.cli start "Your task here" --max-sessions 10
+uv run python -m claude_task_master.cli status   # Check progress
+uv run python -m claude_task_master.cli plan     # View task list
+uv run python -m claude_task_master.cli clean -f # Clean state
 ```
 
-### Linting & Formatting
+## Development
+
 ```bash
-ruff check .                     # Lint code
-ruff format .                    # Format code
-mypy .                           # Type checking
+pytest                    # Run tests
+ruff check . && ruff format .  # Lint & format
+mypy .                    # Type check
 ```
 
-### Installation
-```bash
-pip install -e .                 # Install in development mode
-claude-task-master --help        # Verify installation
-```
+## Architecture
 
-## Architecture Overview
+**Components** (Single Responsibility):
+1. **Credential Manager** - OAuth from `~/.claude/.credentials.json` (nested `claudeAiOauth` structure)
+2. **State Manager** - Persistence to `.claude-task-master/`
+3. **Agent Wrapper** - Claude Agent SDK `query()` with real-time streaming
+4. **Planner** - Planning phase (Read, Glob, Grep tools only)
+5. **Work Loop Orchestrator** - Execution loop with task tracking
+6. **Logger** - Consolidated `logs/run-{timestamp}.txt`
 
-The system follows SOLID principles with Single Responsibility Principle (SRP) strictly enforced. Each component handles one specific concern.
-
-### Core Components
-
-1. **Credential Manager** - OAuth credential loading, validation, and refresh from `~/.claude/.credentials.json`
-2. **State Manager** - All persistence to `.claude-task-master/` directory
-3. **Agent Wrapper** - Encapsulates all Claude Agent SDK interactions
-4. **Planner** - Orchestrates initial planning phase (read-only tools)
-5. **Work Loop Orchestrator** - Main loop driving work sessions until completion
-6. **GitHub Integration Layer** - All GitHub operations via `gh` CLI and GraphQL API
-7. **PR Cycle Manager** - Handles create → CI wait → address comments → merge cycle
-8. **Logger** - Single consolidated log file per run: `logs/run-{timestamp}.txt`
-9. **Context Accumulator** - Builds up learnings across sessions in `context.md`
-10. **CLI Layer** - Uses `typer` for command parsing and dispatch
-
-### State Directory Structure
-
+**State Directory**:
 ```
 .claude-task-master/
-├── goal.txt              # Original user goal
+├── goal.txt              # User goal
 ├── criteria.txt          # Success criteria
-├── plan.md               # Task list with markdown checkboxes
-├── state.json            # Machine-readable state
-├── progress.md           # Human-readable progress summary
-├── context.md            # Learnings accumulated across sessions
+├── plan.md               # Tasks (markdown checkboxes)
+├── state.json            # Machine state
+├── progress.md           # Progress summary
+├── context.md            # Accumulated learnings
 └── logs/
-    └── run-{timestamp}.txt    # Full consolidated log (KEPT ON SUCCESS)
+    └── run-*.txt         # Last 10 logs kept
 ```
 
-### Exit Codes and Cleanup Behavior
+## Exit Codes
 
-**Exit Code 0 (Success)**:
-- All tasks completed and success criteria verified
-- **Cleanup**: Delete all state files EXCEPT `logs/run-{timestamp}.txt`
-- Log file is kept as the audit trail
-
-**Exit Code 1 (Blocked/Error)**:
-- Task cannot proceed, needs human intervention
-- Unrecoverable error or max sessions reached
-- **Keep everything** for debugging and resume
-
-**Exit Code 2 (User Interrupted)**:
-- User pressed Ctrl+C to pause
-- **Keep everything** for resume
-
-### Authentication Flow
-
-1. Read credentials from `~/.claude/.credentials.json` (created by Claude Code CLI)
-2. Check if `accessToken` is expired by comparing `expiresAt` with current time
-3. If expired, use `refreshToken` to get new `accessToken` from Claude OAuth endpoint
-4. Update credentials file with new tokens
-5. Pass access token to Agent SDK for authentication
-
-**Error handling**: If credentials missing or refresh fails, exit with message to run `claude` CLI first.
-
-### Work Loop Flow
-
-```
-Planning Phase (Claude analyzes, creates task list)
-    ↓
-┌─────────────────────────────────────┐
-│          WORK LOOP                  │
-│  1. Work on current task            │
-│  2. Check if task complete          │
-│  3. If PR needed: create/update PR  │
-│  4. Wait for CI + address comments  │
-│  5. Merge when ready (if auto)      │
-│  6. Move to next task               │
-│  Repeat until all tasks done        │
-└─────────────────────────────────────┘
-    ↓
-Verify success criteria met
-    ↓
-SUCCESS: exit 0, cleanup (keep logs)
-BLOCKED: exit 1, keep all state
-```
-
-### GitHub Integration
-
-**Uses `gh` CLI** for all operations. Key GraphQL query for PR info:
-
-```graphql
-query($owner: String!, $repo: String!, $pr: Int!) {
-  repository(owner: $owner, name: $repo) {
-    pullRequest(number: $pr) {
-      commits(last: 1) {
-        nodes {
-          commit {
-            statusCheckRollup {
-              state
-              contexts(first: 50) {
-                nodes {
-                  ... on CheckRun {
-                    name
-                    status
-                    conclusion
-                    detailsUrl
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-      reviewThreads(first: 100) {
-        nodes {
-          isResolved
-          comments(first: 10) {
-            nodes {
-              author { login }
-              body
-              path
-              line
-            }
-          }
-        }
-      }
-    }
-  }
-}
-```
-
-**Bot detection**: Any author login ending in `[bot]` (e.g., `coderabbitai[bot]`, `github-actions[bot]`)
-
-### Tool Configuration by Phase
-
-- **Planning phase**: Read, Glob, Grep (read-only)
-- **Working phase**: Read, Write, Edit, Bash, Glob, Grep
-- **PR phase**: Same as working, plus PR comment context
+- **0 (Success)**: Tasks done, cleanup all except logs/, keep last 10 logs
+- **1 (Blocked)**: Need intervention, keep everything for resume
+- **2 (Interrupted)**: Ctrl+C, keep everything for resume
 
 ## Key Implementation Details
 
-### state.json Schema
+### Credentials Loading
+- File structure: `{"claudeAiOauth": {accessToken, refreshToken, expiresAt, ...}}`
+- `expiresAt` is milliseconds (int), divide by 1000 for datetime
+- Agent SDK auto-uses OAuth from credentials file
 
-```json
-{
-  "status": "planning|working|blocked|success|failed",
-  "current_task_index": 0,
-  "session_count": 0,
-  "current_pr": null,
-  "created_at": "ISO timestamp",
-  "updated_at": "ISO timestamp",
-  "run_id": "timestamp string",
-  "model": "sonnet",
-  "options": {
-    "auto_merge": true,
-    "max_sessions": null,
-    "pause_on_pr": false
-  }
-}
+### Agent SDK Integration
+- Use `query()` with `ClaudeAgentOptions(allowed_tools=[], permission_mode="bypassPermissions")`
+- Message types: `TextBlock`, `ToolUseBlock`, `ToolResultBlock`, `ResultMessage`
+- Change to working dir before query, restore after
+- Stream output real-time: 🔧 for tools, ✓ for completion
+
+### Task Management
+- Parse `- [ ]` and `- [x]` from plan.md
+- Check `_is_task_complete()` before running (skip if [x])
+- Mark complete with `_mark_task_complete()`
+- Increment `current_task_index` and save state
+
+### CLI Commands
+All commands check `state_manager.exists()` first:
+- `start`: Initialize and run planning → work loop
+- `status`: Show goal, status, session count, options
+- `plan`: Display plan.md with markdown rendering
+- `logs`: Show last N lines from log file
+- `progress`: Display progress.md
+- `context`: Display context.md
+- `clean`: Remove .claude-task-master/ with confirmation
+
+### Planning Prompt
+- Instructs Claude to add `.claude-task-master/` to .gitignore
+- Use Read, Glob, Grep to explore codebase
+- Create task list with checkboxes
+- Define success criteria
+
+## Testing
+
+Test in `tmp/test-project-1/`:
+```bash
+cd tmp/test-project-1
+uv run python -m claude_task_master.cli start "Implement TODO" --max-sessions 3 --no-auto-merge
 ```
 
-### Single Log File Strategy
+## Important Notes
 
-All sessions append to one file: `logs/run-{timestamp}.txt`
-
-Format includes session number, timestamp, phase, full prompt/response, tool usage, outcome, and duration. This file is the only thing kept after successful completion.
-
-### PR Cycle Logic
-
-```
-create/update PR
-while PR not merged:
-    if CI pending: poll and wait
-    if CI failed: create fix session with details
-    if unresolved comments: create fix session
-    if ready and auto_merge: merge
-    if ready and no auto_merge: exit 1 (blocked)
-move to next task
-```
-
-## Dependencies
-
-Core:
-- `claude-agent-sdk` - Agent functionality
-- `typer` - CLI framework
-- `pydantic` - Data validation
-- `rich` - Terminal formatting
-- `httpx` - Token refresh HTTP calls
-
-External tools (checked by `doctor` command):
-- `gh` CLI must be installed and authenticated
-- `~/.claude/.credentials.json` must exist (user ran Claude Code CLI once)
-
-## Success Criteria for Implementation
-
-The implementation is complete when:
-1. Uses OAuth from `~/.claude/.credentials.json` with auto-refresh
-2. All CLI commands work (`start`, `resume`, `status`, `plan`, `logs`, `context`, `progress`, `comments`, `pr`, `clean`, `doctor`)
-3. Exit code 0 on success with cleanup (keeps only log file)
-4. Exit codes 1/2 preserve full state for resume
-5. Successfully creates/merges PRs with CI checks
-6. Handles review comments from humans and bots
-7. Installable via pip with `claude-task-master` command
-8. Single consolidated log per run
-9. All code follows SOLID/SRP principles
-10. All code is fully tested and linted
+1. **Always check if tasks already complete** - planning phase might finish some tasks
+2. **Real-time output** - stream Claude's thinking and tool use
+3. **Log rotation** - auto-keep last 10 logs only
+4. **Clean exit** - delete state files on success, keep logs
+5. **OAuth credentials** - handle nested JSON structure properly
+6. **Working directory** - change dir for queries, always restore
