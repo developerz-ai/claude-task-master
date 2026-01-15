@@ -103,6 +103,11 @@ cd tmp/test-project-1
 uv run claudetm start "Implement TODO" --max-sessions 3 --no-auto-merge
 ```
 
+## Code Style
+
+- **Max 500 LOC per file** - split larger files following SRP/SOLID
+- **Single Responsibility** - one reason to change per module
+
 ## Important Notes
 
 1. **Always check if tasks already complete** - planning phase might finish some tasks
