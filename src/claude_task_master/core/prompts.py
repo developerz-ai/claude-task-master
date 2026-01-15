@@ -277,12 +277,23 @@ EOF
 )"
 ```
 
-**5. Handle PRs** (if task involves PRs)
+**5. Handle PRs** (CRITICAL - complete full cycle)
 ```bash
+# 1. Create PR
 git push -u origin HEAD
 gh pr create --title "..." --body "..."
-gh pr checks  # Wait for CI
-```""",
+
+# 2. Wait for CI
+gh pr checks --watch
+
+# 3. Address feedback if any
+gh pr view --comments
+
+# 4. MERGE before next task (required!)
+gh pr merge --squash --delete-branch
+```
+
+**IMPORTANT**: Complete PR cycle (including merge) before starting new features.""",
     )
 
     # Completion summary

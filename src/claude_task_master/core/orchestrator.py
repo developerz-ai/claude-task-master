@@ -13,6 +13,7 @@ from .state import StateError, StateManager, TaskState
 
 if TYPE_CHECKING:
     from ..github.client import GitHubClient
+    from .logger import TaskLogger
 
 # =============================================================================
 # Custom Exception Classes
@@ -171,6 +172,7 @@ class WorkLoopOrchestrator:
         state_manager: StateManager,
         planner: Planner,
         github_client: GitHubClient | None = None,
+        logger: TaskLogger | None = None,
     ):
         """Initialize orchestrator.
 
@@ -179,11 +181,13 @@ class WorkLoopOrchestrator:
             state_manager: The state manager for persistence.
             planner: The planner for planning phases.
             github_client: Optional GitHub client for PR operations.
+            logger: Optional logger for recording session activity.
         """
         self.agent = agent
         self.state_manager = state_manager
         self.planner = planner
         self._github_client = github_client
+        self.logger = logger
 
     @property
     def github_client(self) -> GitHubClient:
@@ -454,7 +458,16 @@ class WorkLoopOrchestrator:
 
     def _handle_working_stage(self, state: TaskState) -> int | None:
         """Handle the working stage - implement the current task."""
-        self._run_work_session(state)
+        # Log session start
+        if self.logger:
+            self.logger.start_session(state.session_count + 1, "working")
+
+        try:
+            self._run_work_session(state)
+        finally:
+            # Log session end
+            if self.logger:
+                self.logger.end_session("completed")
 
         # After work session, check if we should create a PR
         # For now, always try to create/update PR after work
@@ -530,9 +543,29 @@ class WorkLoopOrchestrator:
         except Exception:
             failed_logs = "Could not retrieve CI logs"
 
-        # Build fix prompt
-        task_description = f"""CI has failed for PR #{state.current_pr}.
+        # Save CI failure logs to file for Claude to read
+        if state.current_pr is not None:
+            try:
+                # Get failed check names
+                pr_status = self.github_client.get_pr_status(state.current_pr)
+                for check in pr_status.check_details:
+                    if check.get("conclusion") in ("failure", "error"):
+                        self.state_manager.save_ci_failure(
+                            state.current_pr,
+                            check.get("name", "unknown"),
+                            failed_logs,
+                        )
+            except Exception:
+                pass  # Best effort
 
+        # Build fix prompt - point Claude to the saved context files
+        pr_context_hint = ""
+        if state.current_pr is not None:
+            pr_dir = self.state_manager.get_pr_dir(state.current_pr)
+            pr_context_hint = f"\nCI failure logs saved to: {pr_dir}/ci/"
+
+        task_description = f"""CI has failed for PR #{state.current_pr}.
+{pr_context_hint}
 Failed CI logs:
 {failed_logs}
 
@@ -596,22 +629,32 @@ Please:
         console.info("Addressing review comments...")
 
         # Get PR comments
+        comments_text = ""
         try:
             if state.current_pr is not None:
-                comments = self.github_client.get_pr_comments(
+                comments_text = self.github_client.get_pr_comments(
                     state.current_pr,
                     only_unresolved=True,
                 )
+
+                # Also save comments to files for Claude to read
+                # Parse the GraphQL response to get structured comments
+                self._save_pr_comments_to_files(state.current_pr)
             else:
-                comments = "No PR number available"
+                comments_text = "No PR number available"
         except Exception:
-            comments = "Could not retrieve review comments"
+            comments_text = "Could not retrieve review comments"
 
-        # Build fix prompt
+        # Build fix prompt - point Claude to the saved context files
+        pr_context_hint = ""
+        if state.current_pr is not None:
+            pr_dir = self.state_manager.get_pr_dir(state.current_pr)
+            pr_context_hint = f"\nReview comments saved to: {pr_dir}/comments/"
+
         task_description = f"""PR #{state.current_pr} has review comments to address.
-
+{pr_context_hint}
 Review comments:
-{comments}
+{comments_text}
 
 Please:
 1. Read each comment carefully
@@ -628,7 +671,7 @@ Please:
         self.agent.run_work_session(
             task_description=task_description,
             context=context,
-            pr_comments=comments,
+            pr_comments=comments_text,
             model_override=ModelType.OPUS,  # Use smartest model for reviews
         )
 
@@ -637,6 +680,88 @@ Please:
         state.session_count += 1
         self.state_manager.save_state(state)
         return None
+
+    def _save_pr_comments_to_files(self, pr_number: int) -> None:
+        """Fetch and save PR comments to files for Claude to read."""
+        try:
+            import json
+            import subprocess
+
+            # Get repository info
+            result = subprocess.run(
+                ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            repo_info = result.stdout.strip()
+            owner, repo = repo_info.split("/")
+
+            # GraphQL query to get structured comments
+            query = """
+            query($owner: String!, $repo: String!, $pr: Int!) {
+              repository(owner: $owner, name: $repo) {
+                pullRequest(number: $pr) {
+                  reviewThreads(first: 100) {
+                    nodes {
+                      isResolved
+                      comments(first: 10) {
+                        nodes {
+                          author { login }
+                          body
+                          path
+                          line
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            """
+
+            result = subprocess.run(
+                [
+                    "gh",
+                    "api",
+                    "graphql",
+                    "-f",
+                    f"query={query}",
+                    "-F",
+                    f"owner={owner}",
+                    "-F",
+                    f"repo={repo}",
+                    "-F",
+                    f"pr={pr_number}",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            data = json.loads(result.stdout)
+            threads = data["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
+
+            # Convert to list of comment dicts
+            comments = []
+            for thread in threads:
+                is_resolved = thread["isResolved"]
+                for comment in thread["comments"]["nodes"]:
+                    comments.append(
+                        {
+                            "author": comment["author"]["login"],
+                            "body": comment["body"],
+                            "path": comment.get("path"),
+                            "line": comment.get("line"),
+                            "is_resolved": is_resolved,
+                        }
+                    )
+
+            # Save to files
+            self.state_manager.save_pr_comments(pr_number, comments)
+
+        except Exception as e:
+            console.warning(f"Could not save PR comments to files: {e}")
 
     def _handle_ready_to_merge_stage(self, state: TaskState) -> int | None:
         """Handle ready to merge - merge the PR if auto_merge enabled."""
@@ -674,6 +799,13 @@ Please:
         plan = self.state_manager.load_plan()
         if plan:
             self._mark_task_complete(plan, state.current_task_index)
+
+        # Clear PR context files (comments, CI logs) after merge
+        if state.current_pr is not None:
+            try:
+                self.state_manager.clear_pr_context(state.current_pr)
+            except Exception:
+                pass  # Best effort cleanup
 
         # Move to next task
         state.current_task_index += 1
@@ -775,6 +907,10 @@ Please complete this task."""
         console.info(f"Working on task #{state.current_task_index + 1}: {cleaned_task}")
         console.detail(f"Complexity: {complexity.value} → Model: {target_model.value}")
 
+        # Log the prompt
+        if self.logger:
+            self.logger.log_prompt(task_description)
+
         # Run agent work session with model routing based on complexity
         try:
             result = self.agent.run_work_session(
@@ -783,14 +919,24 @@ Please complete this task."""
                 model_override=target_model,  # Route to appropriate model
             )
         except AgentError:
+            # Log the error
+            if self.logger:
+                self.logger.log_error("Agent error during work session")
             # Let agent errors propagate to be wrapped by caller
             raise
         except Exception as e:
+            # Log the error
+            if self.logger:
+                self.logger.log_error(str(e))
             raise WorkSessionError(
                 state.current_task_index,
                 current_task,
                 e,
             ) from e
+
+        # Log the response
+        if self.logger and result.get("output"):
+            self.logger.log_response(result.get("output", ""))
 
         # Update progress as todo list
         progress_lines = [

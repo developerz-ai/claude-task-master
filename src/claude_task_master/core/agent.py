@@ -391,12 +391,16 @@ class AgentWrapper:
 
 {context}
 
-Respond with:
-1. Whether each criterion is met (yes/no)
-2. Overall success (all criteria met)
+**IMPORTANT**: Your response MUST start with one of these two lines:
+- "VERIFICATION_RESULT: PASS" - if ALL criteria are met
+- "VERIFICATION_RESULT: FAIL" - if ANY criterion is not met
+
+Then provide:
+1. Whether each criterion is met (✓/✗)
+2. Evidence for each criterion
 3. Any issues or gaps
 
-Format your response clearly."""
+Be strict - only say PASS if ALL criteria are truly met."""
 
         # Run async query
         result = asyncio.run(
@@ -406,8 +410,44 @@ Format your response clearly."""
             )
         )
 
-        # For MVP, simple check for success indicators
-        success = "all criteria met" in result.lower() or "success" in result.lower()
+        # Parse the verification result - look for explicit PASS/FAIL marker
+        result_lower = result.lower()
+
+        # Look for our explicit marker first
+        if "verification_result: pass" in result_lower:
+            success = True
+        elif "verification_result: fail" in result_lower:
+            success = False
+        else:
+            # Fallback: check for clear negative vs positive indicators
+            # The key issue is catching "Overall Success: NO" while still
+            # detecting genuine success
+            negative_indicators = [
+                "not met",
+                "not all criteria",
+                "criteria not met",
+                "overall success: no",
+                "criteria not satisfied",
+                "verification failed",
+                "cannot verify",
+            ]
+            positive_indicators = [
+                "all criteria met",
+                "all criteria verified",
+                "overall success: yes",
+                "verification successful",
+                "success",  # Generic success indicator
+            ]
+
+            # Check for negative indicators first (these are disqualifying)
+            has_negative = any(ind in result_lower for ind in negative_indicators)
+
+            # Check for positive indicators
+            has_positive = any(ind in result_lower for ind in positive_indicators)
+
+            # Succeed if we have positive indicators without clear negatives
+            # The key fix: "Overall Success: NO" will trigger has_negative
+            success = has_positive and not has_negative
 
         return {
             "success": success,
@@ -859,12 +899,37 @@ EOF
 )"
 ```
 
-### 5. Handle PR Tasks
-If task involves creating/managing PRs:
-- Push changes: `git push -u origin HEAD`
-- Create PR: `gh pr create --title "..." --body "..."`
-- Check CI: `gh pr checks` or `gh run list`
-- Wait for reviews and address feedback
+### 5. Handle PR Tasks (CRITICAL)
+**You MUST complete the full PR cycle before starting any new feature:**
+
+1. **Create PR** (if not exists):
+   ```bash
+   git push -u origin HEAD
+   gh pr create --title "..." --body "..."
+   ```
+
+2. **Wait for CI to pass**:
+   ```bash
+   gh pr checks --watch  # Wait for all checks
+   ```
+
+3. **Address any review feedback**:
+   - Check for comments: `gh pr view --comments`
+   - Make requested changes, commit, push
+   - Re-run CI checks
+
+4. **MERGE the PR before moving on**:
+   ```bash
+   gh pr merge --squash --delete-branch
+   ```
+
+**IMPORTANT**: Do NOT start work on a new feature while a PR is still open.
+The correct workflow is: Work → PR → CI → Fix if needed → Merge → Next task
+
+### 6. Mark Tasks Complete
+After completing a task and merging any PR:
+- Update plan.md to mark the task as done: `- [x]`
+- Move to the next task only after the current one is fully complete
 
 ## Completion Summary
 
@@ -872,7 +937,7 @@ When done, provide:
 1. **What was completed** - specific changes made
 2. **Tests run** - commands and results
 3. **Files modified** - list of changed files
-4. **Git status** - commits made, push status
+4. **Git status** - commits made, push status, PR merged?
 5. **Blockers** - any issues encountered"""
 
         return prompt

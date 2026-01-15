@@ -142,7 +142,7 @@ def start(
 
         # Run work loop
         console.print("\n[bold cyan]Phase 2: Execution[/bold cyan]")
-        orchestrator = WorkLoopOrchestrator(agent, state_manager, planner)
+        orchestrator = WorkLoopOrchestrator(agent, state_manager, planner, logger=logger)
 
         exit_code = orchestrator.run()
 
@@ -233,7 +233,7 @@ def resume() -> None:
 
         # Initialize logger
         log_file = state_manager.get_log_file(state.run_id)
-        TaskLogger(log_file)
+        logger = TaskLogger(log_file)
 
         # Update state to working if it was paused
         if state.status == "paused":
@@ -249,7 +249,7 @@ def resume() -> None:
 
         # Run work loop
         console.print("\n[bold cyan]Resuming Execution[/bold cyan]")
-        orchestrator = WorkLoopOrchestrator(agent, state_manager, planner)
+        orchestrator = WorkLoopOrchestrator(agent, state_manager, planner, logger=logger)
 
         exit_code = orchestrator.run()
 
