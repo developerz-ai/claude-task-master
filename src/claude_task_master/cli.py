@@ -110,6 +110,8 @@ def start(
 
         raise typer.Exit(exit_code)
 
+    except typer.Exit:
+        raise
     except FileNotFoundError as e:
         console.print(f"[red]Error: {e}[/red]")
         console.print("Run 'claude-task-master doctor' to check your setup.")
@@ -156,8 +158,8 @@ def status() -> None:
         console.print(f"  Max sessions: {state.options.max_sessions or 'unlimited'}")
         console.print(f"  Pause on PR: {state.options.pause_on_pr}")
 
-        raise typer.Exit(0)
-
+    except typer.Exit:
+        raise
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
@@ -182,8 +184,8 @@ def plan() -> None:
         console.print("\n[bold blue]Task Plan[/bold blue]\n")
         console.print(Markdown(plan_content))
 
-        raise typer.Exit(0)
-
+    except typer.Exit:
+        raise
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
@@ -218,8 +220,8 @@ def logs(
         for line in lines[-tail:]:
             print(line, end="")
 
-        raise typer.Exit(0)
-
+    except typer.Exit:
+        raise
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
@@ -239,13 +241,13 @@ def context() -> None:
 
         if not context_content:
             console.print("[yellow]No context accumulated yet.[/yellow]")
-            raise typer.Exit(0)
+            return
 
         console.print("\n[bold blue]Accumulated Context[/bold blue]\n")
         console.print(Markdown(context_content))
 
-        raise typer.Exit(0)
-
+    except typer.Exit:
+        raise
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
@@ -265,13 +267,13 @@ def progress() -> None:
 
         if not progress_content:
             console.print("[yellow]No progress recorded yet.[/yellow]")
-            raise typer.Exit(0)
+            return
 
         console.print("\n[bold blue]Progress Summary[/bold blue]\n")
         console.print(Markdown(progress_content))
 
-        raise typer.Exit(0)
-
+    except typer.Exit:
+        raise
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
