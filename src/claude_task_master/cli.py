@@ -30,6 +30,9 @@ def start(
     auto_merge: bool = typer.Option(True, help="Automatically merge PRs when ready"),
     max_sessions: int | None = typer.Option(None, help="Maximum number of sessions"),
     pause_on_pr: bool = typer.Option(False, help="Pause after creating PR for review"),
+    enable_checkpointing: bool = typer.Option(
+        False, help="Enable file checkpointing for safe rollbacks"
+    ),
 ) -> None:
     """Start a new task with the given goal."""
     console.print(f"[bold green]Starting new task:[/bold green] {goal}")
@@ -58,6 +61,7 @@ def start(
             auto_merge=auto_merge,
             max_sessions=max_sessions,
             pause_on_pr=pause_on_pr,
+            enable_checkpointing=enable_checkpointing,
         )
         state = state_manager.initialize(goal=goal, model=model, options=options)
 

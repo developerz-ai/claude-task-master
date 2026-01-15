@@ -196,6 +196,7 @@ class TaskOptions(BaseModel):
     auto_merge: bool = True
     max_sessions: int | None = None
     pause_on_pr: bool = False
+    enable_checkpointing: bool = False
 
 
 # Status type alias for type checking

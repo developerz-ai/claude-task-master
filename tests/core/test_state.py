@@ -60,7 +60,12 @@ class TestTaskOptions:
         """Test TaskOptions model dump."""
         options = TaskOptions(auto_merge=False, max_sessions=3)
         dump = options.model_dump()
-        assert dump == {"auto_merge": False, "max_sessions": 3, "pause_on_pr": False}
+        assert dump == {
+            "auto_merge": False,
+            "max_sessions": 3,
+            "pause_on_pr": False,
+            "enable_checkpointing": False,
+        }
 
 
 # =============================================================================

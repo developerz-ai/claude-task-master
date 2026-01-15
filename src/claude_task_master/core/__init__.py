@@ -18,6 +18,15 @@ from claude_task_master.core.agent import (
     WorkingDirectoryError,
     parse_task_complexity,
 )
+from claude_task_master.core.checkpoint import (
+    Checkpoint,
+    CheckpointError,
+    CheckpointingOptions,
+    CheckpointManager,
+    CheckpointNotFoundError,
+    CheckpointRewindError,
+    get_checkpointing_env,
+)
 from claude_task_master.core.credentials import (
     CredentialError,
     CredentialManager,
@@ -98,6 +107,15 @@ __all__ = [
     "ToolConfig",
     "AgentWrapper",
     "parse_task_complexity",
+    # Checkpoint exceptions
+    "CheckpointError",
+    "CheckpointNotFoundError",
+    "CheckpointRewindError",
+    # Checkpoint classes
+    "Checkpoint",
+    "CheckpointManager",
+    "CheckpointingOptions",
+    "get_checkpointing_env",
     # State exceptions
     "StateError",
     "StateNotFoundError",
