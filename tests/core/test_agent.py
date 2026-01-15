@@ -270,27 +270,20 @@ class TestToolConfig:
     """Tests for ToolConfig enum."""
 
     def test_planning_tools(self):
-        """Test PLANNING tool configuration."""
-        expected = ["Read", "Glob", "Grep"]
+        """Test PLANNING tool configuration - planning now has full access."""
+        expected = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "Task", "TodoWrite"]
         assert ToolConfig.PLANNING.value == expected
 
     def test_working_tools(self):
         """Test WORKING tool configuration."""
-        expected = ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
+        expected = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "Task", "TodoWrite"]
         assert ToolConfig.WORKING.value == expected
 
-    def test_planning_tools_are_read_only(self):
-        """Test planning tools don't include write capabilities."""
-        planning_tools = ToolConfig.PLANNING.value
-        assert "Write" not in planning_tools
-        assert "Edit" not in planning_tools
-        assert "Bash" not in planning_tools
-
-    def test_working_tools_include_planning_tools(self):
-        """Test working tools include all planning tools."""
+    def test_planning_and_working_tools_are_same(self):
+        """Test planning and working phases have same tool access."""
         planning_tools = set(ToolConfig.PLANNING.value)
         working_tools = set(ToolConfig.WORKING.value)
-        assert planning_tools.issubset(working_tools)
+        assert planning_tools == working_tools
 
 
 # =============================================================================
@@ -400,24 +393,24 @@ class TestAgentWrapperGetToolsForPhase:
             )
 
     def test_planning_phase_tools(self, agent):
-        """Test get_tools_for_phase returns planning tools."""
+        """Test get_tools_for_phase returns planning tools (now full access)."""
         tools = agent.get_tools_for_phase("planning")
-        assert tools == ["Read", "Glob", "Grep"]
+        assert tools == ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "Task", "TodoWrite"]
 
     def test_working_phase_tools(self, agent):
         """Test get_tools_for_phase returns working tools."""
         tools = agent.get_tools_for_phase("working")
-        assert tools == ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
+        assert tools == ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "Task", "TodoWrite"]
 
     def test_unknown_phase_returns_working_tools(self, agent):
         """Test unknown phase returns working tools by default."""
         tools = agent.get_tools_for_phase("unknown")
-        assert tools == ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
+        assert tools == ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "Task", "TodoWrite"]
 
     def test_empty_phase_returns_working_tools(self, agent):
         """Test empty phase string returns working tools."""
         tools = agent.get_tools_for_phase("")
-        assert tools == ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
+        assert tools == ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "Task", "TodoWrite"]
 
 
 # =============================================================================

@@ -41,10 +41,10 @@ console = Console()
 def start(
     goal: str = typer.Argument(..., help="The goal to achieve (e.g., 'Add user authentication')"),
     model: str = typer.Option(
-        "sonnet",
+        "opus",
         "--model",
         "-m",
-        help="Model: sonnet (balanced), opus (smartest), haiku (fastest)",
+        help="Model: opus (smartest, default), sonnet (balanced), haiku (fastest)",
     ),
     auto_merge: bool = typer.Option(
         True,
@@ -105,15 +105,15 @@ def start(
         )
         state = state_manager.initialize(goal=goal, model=model, options=options)
 
-        # Initialize components
-        working_dir = Path.cwd()
-        agent = AgentWrapper(access_token, model_type, str(working_dir))
-        planner = Planner(agent, state_manager)
-        ContextAccumulator(state_manager)
-
-        # Initialize logger
+        # Initialize logger first so it can be passed to agent
         log_file = state_manager.get_log_file(state.run_id)
         logger = TaskLogger(log_file)
+
+        # Initialize components with logger
+        working_dir = Path.cwd()
+        agent = AgentWrapper(access_token, model_type, str(working_dir), logger=logger)
+        planner = Planner(agent, state_manager)
+        ContextAccumulator(state_manager)
 
         # Run planning phase
         console.print("\n[bold cyan]Phase 1: Planning[/bold cyan]")

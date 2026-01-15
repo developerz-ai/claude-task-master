@@ -9,6 +9,7 @@ from . import console
 
 if TYPE_CHECKING:
     from .hooks import HookMatcher
+    from .logger import TaskLogger
 
 # =============================================================================
 # Custom Exception Classes
@@ -167,8 +168,9 @@ class TaskComplexity(Enum):
 class ToolConfig(Enum):
     """Tool configurations for different phases."""
 
-    PLANNING = ["Read", "Glob", "Grep"]
-    WORKING = ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
+    # Planning now uses all tools since Claude needs full access to explore and create plans
+    PLANNING = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "Task", "TodoWrite"]
+    WORKING = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "Task", "TodoWrite"]
 
 
 def parse_task_complexity(task_description: str) -> tuple[TaskComplexity, str]:
@@ -232,6 +234,7 @@ class AgentWrapper:
         max_backoff: float = DEFAULT_MAX_BACKOFF,
         hooks: dict[str, list["HookMatcher"]] | None = None,
         enable_safety_hooks: bool = True,
+        logger: "TaskLogger | None" = None,
     ):
         """Initialize agent wrapper.
 
@@ -244,6 +247,7 @@ class AgentWrapper:
             max_backoff: Maximum backoff time in seconds.
             hooks: Optional pre-configured hooks dictionary for ClaudeAgentOptions.
             enable_safety_hooks: If True and hooks is None, create default safety hooks.
+            logger: Optional TaskLogger for capturing tool usage and responses.
 
         Raises:
             SDKImportError: If claude-agent-sdk is not installed.
@@ -257,6 +261,7 @@ class AgentWrapper:
         self.max_backoff = max_backoff
         self.hooks = hooks
         self.enable_safety_hooks = enable_safety_hooks
+        self.logger = logger
 
         # Import Claude Agent SDK with improved error handling
         self._import_sdk()
@@ -633,14 +638,22 @@ Be strict - only say PASS if ALL criteria are truly met."""
                 elif block_type == "ToolUseBlock":
                     # Tool being invoked - show details
                     console.newline()
-                    tool_detail = self._format_tool_detail(block.name, getattr(block, "input", {}))
+                    tool_input = getattr(block, "input", {})
+                    tool_detail = self._format_tool_detail(block.name, tool_input)
                     console.tool(f"Using tool: {block.name} {tool_detail}", flush=True)
+                    # Log to file if logger is available
+                    if self.logger:
+                        self.logger.log_tool_use(block.name, tool_input)
                 elif block_type == "ToolResultBlock":
                     # Tool result - show completion
                     if block.is_error:
                         console.error("Tool error", flush=True)
+                        if self.logger:
+                            self.logger.log_tool_result(block.tool_use_id, "ERROR")
                     else:
                         console.success("Tool completed", flush=True)
+                        if self.logger:
+                            self.logger.log_tool_result(block.tool_use_id, "completed")
 
         # Collect final result from ResultMessage
         if message_type == "ResultMessage":
