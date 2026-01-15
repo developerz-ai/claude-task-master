@@ -130,43 +130,151 @@ def resume() -> None:
 @app.command()
 def status() -> None:
     """Show current status of the task."""
-    console.print("[bold blue]Task Status[/bold blue]")
-    # TODO: Implement status logic
-    raise typer.Exit(1)
+    state_manager = StateManager()
+
+    if not state_manager.exists():
+        console.print("[yellow]No active task found.[/yellow]")
+        raise typer.Exit(1)
+
+    try:
+        state = state_manager.load_state()
+        goal = state_manager.load_goal()
+
+        console.print("\n[bold blue]Task Status[/bold blue]\n")
+        console.print(f"[cyan]Goal:[/cyan] {goal}")
+        console.print(f"[cyan]Status:[/cyan] {state.status}")
+        console.print(f"[cyan]Model:[/cyan] {state.model}")
+        console.print(f"[cyan]Current Task:[/cyan] {state.current_task_index + 1}")
+        console.print(f"[cyan]Sessions:[/cyan] {state.session_count}")
+        console.print(f"[cyan]Run ID:[/cyan] {state.run_id}")
+
+        if state.current_pr:
+            console.print(f"[cyan]Current PR:[/cyan] #{state.current_pr}")
+
+        console.print(f"\n[cyan]Options:[/cyan]")
+        console.print(f"  Auto-merge: {state.options.auto_merge}")
+        console.print(f"  Max sessions: {state.options.max_sessions or 'unlimited'}")
+        console.print(f"  Pause on PR: {state.options.pause_on_pr}")
+
+        raise typer.Exit(0)
+
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
 
 
 @app.command()
 def plan() -> None:
     """Display the current task plan."""
-    console.print("[bold blue]Task Plan[/bold blue]")
-    # TODO: Implement plan logic
-    raise typer.Exit(1)
+    state_manager = StateManager()
+
+    if not state_manager.exists():
+        console.print("[yellow]No active task found.[/yellow]")
+        raise typer.Exit(1)
+
+    try:
+        plan_content = state_manager.load_plan()
+
+        if not plan_content:
+            console.print("[yellow]No plan found.[/yellow]")
+            raise typer.Exit(1)
+
+        console.print("\n[bold blue]Task Plan[/bold blue]\n")
+        console.print(Markdown(plan_content))
+
+        raise typer.Exit(0)
+
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
 
 
 @app.command()
 def logs(
-    session: Optional[int] = typer.Option(None, help="Show specific session number")
+    session: Optional[int] = typer.Option(None, help="Show specific session number"),
+    tail: int = typer.Option(100, help="Number of lines to show from the end")
 ) -> None:
     """Display logs from the current run."""
-    console.print("[bold blue]Logs[/bold blue]")
-    # TODO: Implement logs logic
-    raise typer.Exit(1)
+    state_manager = StateManager()
+
+    if not state_manager.exists():
+        console.print("[yellow]No active task found.[/yellow]")
+        raise typer.Exit(1)
+
+    try:
+        state = state_manager.load_state()
+        log_file = state_manager.get_log_file(state.run_id)
+
+        if not log_file.exists():
+            console.print("[yellow]No log file found.[/yellow]")
+            raise typer.Exit(1)
+
+        console.print(f"\n[bold blue]Logs[/bold blue] ({log_file})\n")
+
+        with open(log_file) as f:
+            lines = f.readlines()
+
+        # Show last N lines
+        for line in lines[-tail:]:
+            print(line, end="")
+
+        raise typer.Exit(0)
+
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
 
 
 @app.command()
 def context() -> None:
     """Display accumulated context and learnings."""
-    console.print("[bold blue]Context[/bold blue]")
-    # TODO: Implement context logic
-    raise typer.Exit(1)
+    state_manager = StateManager()
+
+    if not state_manager.exists():
+        console.print("[yellow]No active task found.[/yellow]")
+        raise typer.Exit(1)
+
+    try:
+        context_content = state_manager.load_context()
+
+        if not context_content:
+            console.print("[yellow]No context accumulated yet.[/yellow]")
+            raise typer.Exit(0)
+
+        console.print("\n[bold blue]Accumulated Context[/bold blue]\n")
+        console.print(Markdown(context_content))
+
+        raise typer.Exit(0)
+
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
 
 
 @app.command()
 def progress() -> None:
     """Display human-readable progress summary."""
-    console.print("[bold blue]Progress[/bold blue]")
-    # TODO: Implement progress logic
-    raise typer.Exit(1)
+    state_manager = StateManager()
+
+    if not state_manager.exists():
+        console.print("[yellow]No active task found.[/yellow]")
+        raise typer.Exit(1)
+
+    try:
+        progress_content = state_manager.load_progress()
+
+        if not progress_content:
+            console.print("[yellow]No progress recorded yet.[/yellow]")
+            raise typer.Exit(0)
+
+        console.print("\n[bold blue]Progress Summary[/bold blue]\n")
+        console.print(Markdown(progress_content))
+
+        raise typer.Exit(0)
+
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
 
 
 @app.command()
@@ -192,6 +300,12 @@ def clean(
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation")
 ) -> None:
     """Clean up task state directory."""
+    state_manager = StateManager()
+
+    if not state_manager.exists():
+        console.print("[yellow]No task state found.[/yellow]")
+        raise typer.Exit(0)
+
     if not force:
         confirm = typer.confirm("Are you sure you want to clean all task state?")
         if not confirm:
@@ -199,7 +313,12 @@ def clean(
             raise typer.Exit(0)
 
     console.print("[bold red]Cleaning task state...[/bold red]")
-    # TODO: Implement clean logic
+
+    import shutil
+    if state_manager.state_dir.exists():
+        shutil.rmtree(state_manager.state_dir)
+        console.print("[green]✓ Task state cleaned[/green]")
+
     raise typer.Exit(0)
 
 

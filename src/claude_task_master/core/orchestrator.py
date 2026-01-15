@@ -87,6 +87,13 @@ class WorkLoopOrchestrator:
 
         current_task = tasks[state.current_task_index]
 
+        # Check if task is already complete
+        if self._is_task_complete(plan, state.current_task_index):
+            print(f"\n✓ Task #{state.current_task_index + 1} already complete: {current_task}")
+            state.current_task_index += 1
+            self.state_manager.save_state(state)
+            return
+
         # Load context
         context = self.state_manager.load_context()
 
@@ -135,6 +142,19 @@ Current Task: {state.current_task_index + 1} of {len(tasks)}
                 if task:
                     tasks.append(task)
         return tasks
+
+    def _is_task_complete(self, plan: str, task_index: int) -> bool:
+        """Check if a task is already marked as complete."""
+        lines = plan.split("\n")
+        task_count = -1
+
+        for line in lines:
+            if line.strip().startswith("- [ ]") or line.strip().startswith("- [x]"):
+                task_count += 1
+                if task_count == task_index:
+                    return line.strip().startswith("- [x]")
+
+        return False
 
     def _mark_task_complete(self, plan: str, task_index: int) -> None:
         """Mark a task as complete in the plan."""

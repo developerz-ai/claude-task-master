@@ -151,14 +151,30 @@ class StateManager:
 
     def cleanup_on_success(self, run_id: str) -> None:
         """Clean up all state files except logs on success."""
-        files_to_keep = [self.get_log_file(run_id)]
+        import shutil
 
+        # Delete all files in state directory except logs/
         for item in self.state_dir.iterdir():
-            if item.is_file() and item not in files_to_keep:
+            if item.is_file():
                 item.unlink()
             elif item.is_dir() and item != self.logs_dir:
-                # Remove empty directories
-                try:
-                    item.rmdir()
-                except OSError:
-                    pass  # Directory not empty, skip
+                shutil.rmtree(item)
+
+        # Keep only the last 10 log files
+        self._cleanup_old_logs(max_logs=10)
+
+    def _cleanup_old_logs(self, max_logs: int = 10) -> None:
+        """Keep only the most recent log files."""
+        if not self.logs_dir.exists():
+            return
+
+        # Get all log files sorted by modification time (newest first)
+        log_files = sorted(
+            self.logs_dir.glob("run-*.txt"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True
+        )
+
+        # Delete older logs
+        for log_file in log_files[max_logs:]:
+            log_file.unlink()

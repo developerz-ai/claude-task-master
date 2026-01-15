@@ -201,6 +201,9 @@ Your task is to:
 3. Create a detailed task list with markdown checkboxes
 4. Define clear success criteria
 
+IMPORTANT: If the project has a .gitignore file, ensure that .claude-task-master/ is added to it.
+This directory contains task state and should not be committed to version control.
+
 {context}
 
 Please create a plan with:
