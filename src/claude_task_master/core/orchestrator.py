@@ -597,10 +597,13 @@ Please:
 
         # Get PR comments
         try:
-            comments = self.github_client.get_pr_comments(
-                state.current_pr,
-                only_unresolved=True,  # type: ignore
-            )
+            if state.current_pr is not None:
+                comments = self.github_client.get_pr_comments(
+                    state.current_pr,
+                    only_unresolved=True,
+                )
+            else:
+                comments = "No PR number available"
         except Exception:
             comments = "Could not retrieve review comments"
 

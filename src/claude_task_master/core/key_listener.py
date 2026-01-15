@@ -20,7 +20,7 @@ class KeyListener:
         self._running = False
         self._thread: threading.Thread | None = None
         self._on_escape = on_escape
-        self._original_settings = None
+        self._original_settings: list | None = None
 
     @property
     def escape_pressed(self) -> bool:
