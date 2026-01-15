@@ -1,10 +1,132 @@
 """State Manager - All persistence to .claude-task-master/ directory."""
 
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Literal
 from datetime import datetime
 import json
-from pydantic import BaseModel
+import fcntl
+import shutil
+import tempfile
+from contextlib import contextmanager
+from pydantic import BaseModel, ValidationError
+
+
+# =============================================================================
+# Custom Exception Classes
+# =============================================================================
+
+
+class StateError(Exception):
+    """Base exception for all state-related errors."""
+
+    def __init__(self, message: str, details: Optional[str] = None):
+        self.message = message
+        self.details = details
+        super().__init__(self._format_message())
+
+    def _format_message(self) -> str:
+        if self.details:
+            return f"{self.message}\n  Details: {self.details}"
+        return self.message
+
+
+class StateNotFoundError(StateError):
+    """Raised when state file is not found."""
+
+    def __init__(self, path: Path):
+        super().__init__(
+            f"No task state found at {path}",
+            "Please run 'start' first to initialize a new task.",
+        )
+        self.path = path
+
+
+class StateCorruptedError(StateError):
+    """Raised when state file is corrupted and cannot be parsed."""
+
+    def __init__(self, path: Path, reason: str, recoverable: bool = True):
+        self.path = path
+        self.recoverable = recoverable
+        details = f"Parse error: {reason}"
+        if recoverable:
+            details += " A backup will be created and state may be recoverable."
+        super().__init__(f"State file at {path} is corrupted", details)
+
+
+class StateValidationError(StateError):
+    """Raised when state data fails validation."""
+
+    def __init__(self, message: str, missing_fields: Optional[list[str]] = None, invalid_fields: Optional[list[str]] = None):
+        self.missing_fields = missing_fields or []
+        self.invalid_fields = invalid_fields or []
+
+        details_parts = []
+        if missing_fields:
+            details_parts.append(f"Missing required fields: {', '.join(missing_fields)}")
+        if invalid_fields:
+            details_parts.append(f"Invalid fields: {'; '.join(invalid_fields)}")
+
+        super().__init__(message, " | ".join(details_parts) if details_parts else None)
+
+
+class InvalidStateTransitionError(StateError):
+    """Raised when an invalid state transition is attempted."""
+
+    def __init__(self, current_status: str, new_status: str):
+        self.current_status = current_status
+        self.new_status = new_status
+        super().__init__(
+            f"Invalid state transition from '{current_status}' to '{new_status}'",
+            f"Valid transitions from '{current_status}': {', '.join(VALID_TRANSITIONS.get(current_status, []))}",
+        )
+
+
+class StatePermissionError(StateError):
+    """Raised when there are permission issues accessing state files."""
+
+    def __init__(self, path: Path, operation: str, original_error: Exception):
+        self.path = path
+        self.operation = operation
+        self.original_error = original_error
+        super().__init__(
+            f"Permission denied when {operation} state file at {path}",
+            f"Check file permissions. Original error: {original_error}",
+        )
+
+
+class StateLockError(StateError):
+    """Raised when state file cannot be locked for access."""
+
+    def __init__(self, path: Path, timeout: float):
+        self.path = path
+        self.timeout = timeout
+        super().__init__(
+            f"Could not acquire lock on state file at {path}",
+            f"Another process may be accessing this file. Timeout after {timeout} seconds.",
+        )
+
+
+# =============================================================================
+# Valid State Transitions
+# =============================================================================
+
+# Define valid status values
+VALID_STATUSES = frozenset(["planning", "working", "blocked", "paused", "success", "failed"])
+
+# Define valid state transitions
+VALID_TRANSITIONS: dict[str, frozenset[str]] = {
+    "planning": frozenset(["working", "failed", "paused"]),
+    "working": frozenset(["blocked", "success", "failed", "working", "paused"]),  # working -> working for retries
+    "blocked": frozenset(["working", "failed", "paused"]),
+    "paused": frozenset(["working", "failed"]),  # Can resume or fail from paused
+    "success": frozenset([]),  # Terminal state
+    "failed": frozenset([]),  # Terminal state
+}
+
+
+# =============================================================================
+# Models
+# =============================================================================
 
 
 class TaskOptions(BaseModel):
@@ -15,10 +137,14 @@ class TaskOptions(BaseModel):
     pause_on_pr: bool = False
 
 
+# Status type alias for type checking
+StatusType = Literal["planning", "working", "blocked", "paused", "success", "failed"]
+
+
 class TaskState(BaseModel):
     """Machine-readable state."""
 
-    status: str  # planning|working|blocked|success|failed
+    status: StatusType  # planning|working|blocked|paused|success|failed
     current_task_index: int = 0
     session_count: int = 0
     current_pr: Optional[int] = None
@@ -29,22 +155,103 @@ class TaskState(BaseModel):
     options: TaskOptions
 
 
+# =============================================================================
+# File Lock Context Manager
+# =============================================================================
+
+
+@contextmanager
+def file_lock(lock_path: Path, timeout: float = 5.0, exclusive: bool = True):
+    """Context manager for file locking with timeout.
+
+    Args:
+        lock_path: Path to the lock file (will be created if it doesn't exist).
+        timeout: Maximum time to wait for lock acquisition.
+        exclusive: If True, acquire exclusive lock; otherwise shared lock.
+
+    Yields:
+        The file handle for the lock file.
+
+    Raises:
+        StateLockError: If the lock cannot be acquired within the timeout.
+    """
+    import time
+
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_file = None
+    start_time = time.time()
+
+    try:
+        lock_file = open(lock_path, "w")
+        lock_type = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+
+        while True:
+            try:
+                fcntl.flock(lock_file.fileno(), lock_type | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.time() - start_time > timeout:
+                    raise StateLockError(lock_path, timeout)
+                time.sleep(0.1)
+
+        yield lock_file
+    finally:
+        if lock_file:
+            try:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            except Exception:
+                pass  # Ignore errors when unlocking
+            lock_file.close()
+
+
+# =============================================================================
+# State Manager
+# =============================================================================
+
+
 class StateManager:
     """Manages all state persistence."""
 
     STATE_DIR = Path(".claude-task-master")
+    LOCK_TIMEOUT = 5.0  # seconds
 
     def __init__(self, state_dir: Optional[Path] = None):
         """Initialize state manager."""
         self.state_dir = state_dir or self.STATE_DIR
         self.logs_dir = self.state_dir / "logs"
+        self._lock_file = self.state_dir / ".state.lock"
+
+    @property
+    def state_file(self) -> Path:
+        """Get the path to the state.json file."""
+        return self.state_dir / "state.json"
+
+    @property
+    def backup_dir(self) -> Path:
+        """Get the path to the backup directory."""
+        return self.state_dir / "backups"
 
     def initialize(
         self, goal: str, model: str, options: TaskOptions
     ) -> TaskState:
-        """Initialize new task state."""
-        self.state_dir.mkdir(exist_ok=True)
-        self.logs_dir.mkdir(exist_ok=True)
+        """Initialize new task state.
+
+        Args:
+            goal: The task goal description.
+            model: The model to use (e.g., 'sonnet', 'opus').
+            options: Task execution options.
+
+        Returns:
+            TaskState: The initialized task state.
+
+        Raises:
+            StatePermissionError: If directories cannot be created.
+        """
+        try:
+            self.state_dir.mkdir(exist_ok=True)
+            self.logs_dir.mkdir(exist_ok=True)
+        except PermissionError as e:
+            raise StatePermissionError(self.state_dir, "creating directories", e) from e
 
         timestamp = datetime.now().isoformat()
         run_id = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -63,25 +270,218 @@ class StateManager:
 
         return state
 
-    def save_state(self, state: TaskState) -> None:
-        """Save state to state.json."""
-        state.updated_at = datetime.now().isoformat()
-        state_file = self.state_dir / "state.json"
+    def save_state(self, state: TaskState, validate_transition: bool = True) -> None:
+        """Save state to state.json with file locking.
 
-        with open(state_file, "w") as f:
-            json.dump(state.model_dump(), f, indent=2)
+        Args:
+            state: The TaskState to save.
+            validate_transition: If True, validates state transition (default True).
+
+        Raises:
+            InvalidStateTransitionError: If the state transition is invalid.
+            StatePermissionError: If the file cannot be written.
+            StateLockError: If the file lock cannot be acquired.
+        """
+        # Validate state transition if there's an existing state
+        if validate_transition and self.state_file.exists():
+            try:
+                current_state = self._load_state_internal()
+                self._validate_transition(current_state.status, state.status)
+            except (StateNotFoundError, StateCorruptedError):
+                # If we can't load current state, allow the save
+                pass
+
+        state.updated_at = datetime.now().isoformat()
+
+        with file_lock(self._lock_file, timeout=self.LOCK_TIMEOUT):
+            try:
+                # Use atomic write with temp file
+                self._atomic_write_json(self.state_file, state.model_dump())
+            except PermissionError as e:
+                raise StatePermissionError(self.state_file, "writing", e) from e
 
     def load_state(self) -> TaskState:
-        """Load state from state.json."""
-        state_file = self.state_dir / "state.json"
+        """Load state from state.json with error recovery.
 
-        if not state_file.exists():
-            raise FileNotFoundError("No task state found. Run 'start' first.")
+        Returns:
+            TaskState: The loaded task state.
 
-        with open(state_file) as f:
-            data = json.load(f)
+        Raises:
+            StateNotFoundError: If the state file does not exist.
+            StateCorruptedError: If the state file is corrupted and cannot be recovered.
+            StateValidationError: If the state data fails validation.
+            StatePermissionError: If the file cannot be read.
+            StateLockError: If the file lock cannot be acquired.
+        """
+        with file_lock(self._lock_file, timeout=self.LOCK_TIMEOUT, exclusive=False):
+            return self._load_state_internal()
 
-        return TaskState(**data)
+    def _load_state_internal(self) -> TaskState:
+        """Internal method to load state without locking.
+
+        This is used by save_state to check transitions without deadlock.
+        """
+        if not self.state_file.exists():
+            raise StateNotFoundError(self.state_file)
+
+        try:
+            with open(self.state_file) as f:
+                try:
+                    data = json.load(f)
+                except json.JSONDecodeError as e:
+                    # Attempt recovery from backup
+                    recovered_state = self._attempt_recovery(e)
+                    if recovered_state:
+                        return recovered_state
+                    raise StateCorruptedError(
+                        self.state_file,
+                        f"JSON parse error at line {e.lineno}, column {e.colno}: {e.msg}",
+                        recoverable=False,
+                    ) from e
+        except PermissionError as e:
+            raise StatePermissionError(self.state_file, "reading", e) from e
+
+        # Handle empty JSON
+        if not data:
+            recovered_state = self._attempt_recovery(ValueError("Empty JSON object"))
+            if recovered_state:
+                return recovered_state
+            raise StateCorruptedError(
+                self.state_file,
+                "State file is empty or contains an empty JSON object",
+                recoverable=False,
+            )
+
+        # Validate and parse the state data
+        try:
+            return TaskState(**data)
+        except ValidationError as e:
+            # Extract meaningful error messages
+            missing_fields = []
+            invalid_fields = []
+            for error in e.errors():
+                field = ".".join(str(loc) for loc in error["loc"])
+                if error["type"] == "missing":
+                    missing_fields.append(field)
+                else:
+                    invalid_fields.append(f"{field}: {error['msg']}")
+
+            raise StateValidationError(
+                "State file has invalid structure",
+                missing_fields=missing_fields if missing_fields else None,
+                invalid_fields=invalid_fields if invalid_fields else None,
+            ) from e
+
+    def _validate_transition(self, current_status: str, new_status: str) -> None:
+        """Validate that a state transition is allowed.
+
+        Args:
+            current_status: The current status value.
+            new_status: The new status value.
+
+        Raises:
+            InvalidStateTransitionError: If the transition is not allowed.
+        """
+        # Same status is always allowed (no actual transition)
+        if current_status == new_status:
+            return
+
+        valid_next_states = VALID_TRANSITIONS.get(current_status, frozenset())
+        if new_status not in valid_next_states:
+            raise InvalidStateTransitionError(current_status, new_status)
+
+    def _atomic_write_json(self, path: Path, data: dict) -> None:
+        """Atomically write JSON data to a file using a temp file.
+
+        Args:
+            path: The target file path.
+            data: The data to write as JSON.
+        """
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Write to a temp file in the same directory, then rename
+        fd, temp_path = tempfile.mkstemp(
+            dir=path.parent,
+            prefix=".tmp_",
+            suffix=".json"
+        )
+        try:
+            with open(fd, "w") as f:
+                json.dump(data, f, indent=2)
+            # Atomic rename
+            shutil.move(temp_path, path)
+        except Exception:
+            # Clean up temp file on error
+            try:
+                Path(temp_path).unlink()
+            except Exception:
+                pass
+            raise
+
+    def _attempt_recovery(self, original_error: Exception) -> Optional[TaskState]:
+        """Attempt to recover state from backup.
+
+        Args:
+            original_error: The error that triggered recovery.
+
+        Returns:
+            TaskState if recovery successful, None otherwise.
+        """
+        # First, create a backup of the corrupted file
+        if self.state_file.exists():
+            self._create_backup(self.state_file, suffix=".corrupted")
+
+        # Try to recover from backup
+        if self.backup_dir.exists():
+            # Get the most recent backup
+            backups = sorted(
+                self.backup_dir.glob("state.*.json"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True
+            )
+            for backup_file in backups:
+                try:
+                    with open(backup_file) as f:
+                        data = json.load(f)
+                    state = TaskState(**data)
+                    # Restore from backup
+                    self._atomic_write_json(self.state_file, data)
+                    return state
+                except (json.JSONDecodeError, ValidationError):
+                    continue
+
+        return None
+
+    def _create_backup(self, file_path: Path, suffix: str = "") -> Optional[Path]:
+        """Create a backup of a file.
+
+        Args:
+            file_path: The file to backup.
+            suffix: Optional suffix to add to backup name.
+
+        Returns:
+            Path to the backup file, or None if backup failed.
+        """
+        if not file_path.exists():
+            return None
+
+        try:
+            self.backup_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            backup_name = f"{file_path.stem}.{timestamp}{suffix}{file_path.suffix}"
+            backup_path = self.backup_dir / backup_name
+            shutil.copy2(file_path, backup_path)
+            return backup_path
+        except Exception:
+            return None
+
+    def create_state_backup(self) -> Optional[Path]:
+        """Create a backup of the current state file.
+
+        Returns:
+            Path to the backup file, or None if backup failed.
+        """
+        return self._create_backup(self.state_file)
 
     def save_goal(self, goal: str) -> None:
         """Save goal to goal.txt."""
@@ -151,8 +551,6 @@ class StateManager:
 
     def cleanup_on_success(self, run_id: str) -> None:
         """Clean up all state files except logs on success."""
-        import shutil
-
         # Delete all files in state directory except logs/
         for item in self.state_dir.iterdir():
             if item.is_file():

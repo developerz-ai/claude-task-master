@@ -3,10 +3,25 @@
 import json
 import pytest
 import time
+import threading
 from pathlib import Path
 from datetime import datetime
 
-from claude_task_master.core.state import StateManager, TaskState, TaskOptions
+from claude_task_master.core.state import (
+    StateManager,
+    TaskState,
+    TaskOptions,
+    StateError,
+    StateNotFoundError,
+    StateCorruptedError,
+    StateValidationError,
+    InvalidStateTransitionError,
+    StatePermissionError,
+    StateLockError,
+    VALID_STATUSES,
+    VALID_TRANSITIONS,
+    file_lock,
+)
 
 
 # =============================================================================
@@ -231,11 +246,17 @@ class TestStateManagerStatePersistence:
         state_dir.mkdir()
         manager = StateManager(state_dir)
 
-        with pytest.raises(FileNotFoundError, match="No task state found"):
+        with pytest.raises(StateNotFoundError):
             manager.load_state()
 
     def test_load_state_preserves_all_fields(self, initialized_state_manager):
         """Test load_state preserves all fields."""
+        original_state = initialized_state_manager.load_state()
+        # First transition to working (valid from planning)
+        original_state.status = "working"
+        initialized_state_manager.save_state(original_state)
+
+        # Then transition to blocked (valid from working)
         original_state = initialized_state_manager.load_state()
         original_state.status = "blocked"
         original_state.current_task_index = 3
@@ -936,3 +957,492 @@ class TestStateManagerEdgeCases:
         initialized_state_manager.cleanup_on_success(run_id)
 
         assert initialized_state_manager.logs_dir.exists()
+
+
+# =============================================================================
+# Exception Classes Tests
+# =============================================================================
+
+
+class TestStateExceptions:
+    """Tests for state exception classes."""
+
+    def test_state_error_base_class(self):
+        """Test StateError base exception."""
+        error = StateError("Test error message")
+        assert error.message == "Test error message"
+        assert error.details is None
+        assert str(error) == "Test error message"
+
+    def test_state_error_with_details(self):
+        """Test StateError with details."""
+        error = StateError("Test error", "Additional details here")
+        assert error.message == "Test error"
+        assert error.details == "Additional details here"
+        assert "Additional details here" in str(error)
+
+    def test_state_not_found_error(self, temp_dir):
+        """Test StateNotFoundError exception."""
+        path = temp_dir / "state.json"
+        error = StateNotFoundError(path)
+        assert error.path == path
+        assert "No task state found" in str(error)
+        assert "start" in str(error)
+
+    def test_state_corrupted_error_recoverable(self, temp_dir):
+        """Test StateCorruptedError for recoverable corruption."""
+        path = temp_dir / "state.json"
+        error = StateCorruptedError(path, "Invalid JSON", recoverable=True)
+        assert error.path == path
+        assert error.recoverable is True
+        assert "corrupted" in str(error).lower()
+        assert "backup" in str(error).lower()
+
+    def test_state_corrupted_error_unrecoverable(self, temp_dir):
+        """Test StateCorruptedError for unrecoverable corruption."""
+        path = temp_dir / "state.json"
+        error = StateCorruptedError(path, "Invalid JSON", recoverable=False)
+        assert error.recoverable is False
+
+    def test_state_validation_error_missing_fields(self):
+        """Test StateValidationError with missing fields."""
+        error = StateValidationError(
+            "Invalid state",
+            missing_fields=["status", "run_id"]
+        )
+        assert error.missing_fields == ["status", "run_id"]
+        assert "status" in str(error)
+        assert "run_id" in str(error)
+
+    def test_state_validation_error_invalid_fields(self):
+        """Test StateValidationError with invalid fields."""
+        error = StateValidationError(
+            "Invalid state",
+            invalid_fields=["status: invalid value"]
+        )
+        assert error.invalid_fields == ["status: invalid value"]
+        assert "invalid value" in str(error)
+
+    def test_invalid_state_transition_error(self):
+        """Test InvalidStateTransitionError exception."""
+        error = InvalidStateTransitionError("success", "working")
+        assert error.current_status == "success"
+        assert error.new_status == "working"
+        assert "Invalid state transition" in str(error)
+        assert "success" in str(error)
+        assert "working" in str(error)
+
+    def test_state_permission_error(self, temp_dir):
+        """Test StatePermissionError exception."""
+        path = temp_dir / "state.json"
+        original = PermissionError("Permission denied")
+        error = StatePermissionError(path, "reading", original)
+        assert error.path == path
+        assert error.operation == "reading"
+        assert error.original_error == original
+        assert "Permission denied" in str(error)
+
+    def test_state_lock_error(self, temp_dir):
+        """Test StateLockError exception."""
+        path = temp_dir / ".state.lock"
+        error = StateLockError(path, 5.0)
+        assert error.path == path
+        assert error.timeout == 5.0
+        assert "lock" in str(error).lower()
+        assert "5.0" in str(error)
+
+
+# =============================================================================
+# State Transitions Tests
+# =============================================================================
+
+
+class TestStateTransitions:
+    """Tests for state transition validation."""
+
+    def test_valid_statuses_defined(self):
+        """Test that valid statuses are properly defined."""
+        expected = {"planning", "working", "blocked", "paused", "success", "failed"}
+        assert VALID_STATUSES == expected
+
+    def test_valid_transitions_from_planning(self):
+        """Test valid transitions from planning status."""
+        assert "working" in VALID_TRANSITIONS["planning"]
+        assert "failed" in VALID_TRANSITIONS["planning"]
+        assert "success" not in VALID_TRANSITIONS["planning"]
+        assert "blocked" not in VALID_TRANSITIONS["planning"]
+
+    def test_valid_transitions_from_working(self):
+        """Test valid transitions from working status."""
+        assert "blocked" in VALID_TRANSITIONS["working"]
+        assert "success" in VALID_TRANSITIONS["working"]
+        assert "failed" in VALID_TRANSITIONS["working"]
+        assert "working" in VALID_TRANSITIONS["working"]  # Retry allowed
+        assert "planning" not in VALID_TRANSITIONS["working"]
+
+    def test_valid_transitions_from_blocked(self):
+        """Test valid transitions from blocked status."""
+        assert "working" in VALID_TRANSITIONS["blocked"]
+        assert "failed" in VALID_TRANSITIONS["blocked"]
+        assert "success" not in VALID_TRANSITIONS["blocked"]
+
+    def test_valid_transitions_from_paused(self):
+        """Test valid transitions from paused status."""
+        assert "working" in VALID_TRANSITIONS["paused"]
+        assert "failed" in VALID_TRANSITIONS["paused"]
+        assert "success" not in VALID_TRANSITIONS["paused"]
+        assert "blocked" not in VALID_TRANSITIONS["paused"]
+
+    def test_terminal_states_have_no_transitions(self):
+        """Test that terminal states have no valid transitions."""
+        assert len(VALID_TRANSITIONS["success"]) == 0
+        assert len(VALID_TRANSITIONS["failed"]) == 0
+
+    def test_save_validates_transition(self, initialized_state_manager):
+        """Test that save_state validates transitions."""
+        state = initialized_state_manager.load_state()
+        assert state.status == "planning"
+
+        # Valid transition: planning -> working
+        state.status = "working"
+        initialized_state_manager.save_state(state)
+
+        loaded = initialized_state_manager.load_state()
+        assert loaded.status == "working"
+
+    def test_invalid_transition_raises_error(self, initialized_state_manager):
+        """Test that invalid transitions raise InvalidStateTransitionError."""
+        state = initialized_state_manager.load_state()
+        assert state.status == "planning"
+
+        # Invalid transition: planning -> success (must go through working)
+        state.status = "success"
+        with pytest.raises(InvalidStateTransitionError) as exc_info:
+            initialized_state_manager.save_state(state)
+
+        assert exc_info.value.current_status == "planning"
+        assert exc_info.value.new_status == "success"
+
+    def test_same_status_transition_allowed(self, initialized_state_manager):
+        """Test that same-status transition is always allowed."""
+        state = initialized_state_manager.load_state()
+        state.status = "planning"  # Same status
+        # Should not raise
+        initialized_state_manager.save_state(state)
+
+    def test_skip_transition_validation(self, initialized_state_manager):
+        """Test skipping transition validation when requested."""
+        state = initialized_state_manager.load_state()
+
+        # Normally invalid: planning -> success
+        state.status = "success"
+        # Should not raise when validation is disabled
+        initialized_state_manager.save_state(state, validate_transition=False)
+
+        loaded = initialized_state_manager.load_state()
+        assert loaded.status == "success"
+
+
+# =============================================================================
+# Corrupted State Recovery Tests
+# =============================================================================
+
+
+class TestCorruptedStateRecovery:
+    """Tests for corrupted state file recovery."""
+
+    def test_load_corrupted_json_raises_error(self, temp_dir):
+        """Test loading corrupted JSON raises StateCorruptedError."""
+        state_dir = temp_dir / ".claude-task-master"
+        state_dir.mkdir(parents=True)
+        state_file = state_dir / "state.json"
+        state_file.write_text("{ invalid json }")
+
+        manager = StateManager(state_dir)
+
+        with pytest.raises(StateCorruptedError) as exc_info:
+            manager.load_state()
+
+        assert exc_info.value.path == state_file
+
+    def test_load_empty_json_raises_error(self, temp_dir):
+        """Test loading empty JSON raises StateCorruptedError."""
+        state_dir = temp_dir / ".claude-task-master"
+        state_dir.mkdir(parents=True)
+        state_file = state_dir / "state.json"
+        state_file.write_text("{}")
+
+        manager = StateManager(state_dir)
+
+        with pytest.raises(StateCorruptedError):
+            manager.load_state()
+
+    def test_load_partial_state_raises_validation_error(self, temp_dir):
+        """Test loading partial state raises StateValidationError."""
+        state_dir = temp_dir / ".claude-task-master"
+        state_dir.mkdir(parents=True)
+        state_file = state_dir / "state.json"
+        # Missing required fields
+        state_file.write_text('{"status": "working"}')
+
+        manager = StateManager(state_dir)
+
+        with pytest.raises(StateValidationError) as exc_info:
+            manager.load_state()
+
+        assert len(exc_info.value.missing_fields) > 0
+
+    def test_recovery_from_backup(self, temp_dir):
+        """Test recovery from backup when state is corrupted."""
+        state_dir = temp_dir / ".claude-task-master"
+        manager = StateManager(state_dir)
+
+        # Create valid initial state
+        options = TaskOptions()
+        original_state = manager.initialize(goal="Test", model="sonnet", options=options)
+
+        # Create backup
+        backup_path = manager.create_state_backup()
+        assert backup_path is not None
+        assert backup_path.exists()
+
+        # Corrupt the state file
+        manager.state_file.write_text("corrupted")
+
+        # Load should recover from backup
+        recovered_state = manager.load_state()
+        assert recovered_state.run_id == original_state.run_id
+
+    def test_corrupted_backup_creates_backup(self, temp_dir):
+        """Test that corrupted file is backed up before recovery."""
+        state_dir = temp_dir / ".claude-task-master"
+        manager = StateManager(state_dir)
+
+        # Create valid initial state
+        options = TaskOptions()
+        manager.initialize(goal="Test", model="sonnet", options=options)
+
+        # Create backup for recovery
+        manager.create_state_backup()
+
+        # Corrupt the state file
+        manager.state_file.write_text("corrupted content")
+
+        # Load will attempt recovery
+        manager.load_state()
+
+        # Check that corrupted backup was created
+        corrupted_backups = list(manager.backup_dir.glob("*.corrupted.json"))
+        assert len(corrupted_backups) > 0
+
+    def test_no_backup_available_raises_error(self, temp_dir):
+        """Test that missing backup raises unrecoverable error."""
+        state_dir = temp_dir / ".claude-task-master"
+        state_dir.mkdir(parents=True)
+        state_file = state_dir / "state.json"
+        state_file.write_text("corrupted")
+
+        manager = StateManager(state_dir)
+
+        with pytest.raises(StateCorruptedError) as exc_info:
+            manager.load_state()
+
+        assert exc_info.value.recoverable is False
+
+
+# =============================================================================
+# File Locking Tests
+# =============================================================================
+
+
+class TestFileLocking:
+    """Tests for file locking functionality."""
+
+    def test_file_lock_creates_lock_file(self, temp_dir):
+        """Test that file_lock creates the lock file."""
+        lock_path = temp_dir / ".lock"
+
+        with file_lock(lock_path):
+            assert lock_path.exists()
+
+    def test_file_lock_releases_on_exit(self, temp_dir):
+        """Test that file lock is released when context exits."""
+        lock_path = temp_dir / ".lock"
+
+        with file_lock(lock_path):
+            pass
+
+        # Should be able to acquire lock again immediately
+        with file_lock(lock_path):
+            pass
+
+    def test_file_lock_timeout_raises_error(self, temp_dir):
+        """Test that lock timeout raises StateLockError."""
+        lock_path = temp_dir / ".lock"
+        lock_acquired = threading.Event()
+        test_complete = threading.Event()
+
+        def hold_lock():
+            with file_lock(lock_path, timeout=10.0):
+                lock_acquired.set()
+                test_complete.wait(timeout=5.0)
+
+        # Start thread holding the lock
+        thread = threading.Thread(target=hold_lock)
+        thread.start()
+        lock_acquired.wait(timeout=2.0)
+
+        try:
+            # Try to acquire lock with short timeout
+            with pytest.raises(StateLockError) as exc_info:
+                with file_lock(lock_path, timeout=0.2):
+                    pass
+
+            assert exc_info.value.timeout == 0.2
+        finally:
+            test_complete.set()
+            thread.join(timeout=2.0)
+
+    def test_concurrent_state_access(self, temp_dir):
+        """Test concurrent state access with locking."""
+        state_dir = temp_dir / ".claude-task-master"
+        manager = StateManager(state_dir)
+
+        options = TaskOptions()
+        manager.initialize(goal="Test", model="sonnet", options=options)
+
+        results = []
+        errors = []
+
+        def update_state(session_num):
+            try:
+                state = manager.load_state()
+                time.sleep(0.01)  # Simulate work
+                state.session_count = session_num
+                # Don't validate transition since status doesn't change
+                manager.save_state(state, validate_transition=False)
+                results.append(session_num)
+            except Exception as e:
+                errors.append(e)
+
+        threads = [
+            threading.Thread(target=update_state, args=(i,))
+            for i in range(5)
+        ]
+
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10.0)
+
+        assert len(errors) == 0, f"Errors during concurrent access: {errors}"
+        # All threads should have completed
+        assert len(results) == 5
+
+
+# =============================================================================
+# Atomic Write Tests
+# =============================================================================
+
+
+class TestAtomicWrite:
+    """Tests for atomic file writing."""
+
+    def test_atomic_write_creates_file(self, initialized_state_manager):
+        """Test that atomic write creates the state file."""
+        assert initialized_state_manager.state_file.exists()
+
+    def test_atomic_write_is_valid_json(self, initialized_state_manager):
+        """Test that atomic write produces valid JSON."""
+        content = initialized_state_manager.state_file.read_text()
+        data = json.loads(content)
+        assert "status" in data
+        assert "run_id" in data
+
+    def test_atomic_write_no_temp_files_left(self, temp_dir):
+        """Test that no temporary files are left after atomic write."""
+        state_dir = temp_dir / ".claude-task-master"
+        manager = StateManager(state_dir)
+
+        options = TaskOptions()
+        manager.initialize(goal="Test", model="sonnet", options=options)
+
+        # Check for temp files
+        temp_files = list(state_dir.glob(".tmp_*"))
+        assert len(temp_files) == 0
+
+
+# =============================================================================
+# Backup Tests
+# =============================================================================
+
+
+class TestStateBackup:
+    """Tests for state backup functionality."""
+
+    def test_create_backup_returns_path(self, initialized_state_manager):
+        """Test create_state_backup returns the backup path."""
+        backup_path = initialized_state_manager.create_state_backup()
+        assert backup_path is not None
+        assert backup_path.exists()
+
+    def test_backup_contains_state_data(self, initialized_state_manager):
+        """Test that backup contains valid state data."""
+        backup_path = initialized_state_manager.create_state_backup()
+
+        with open(backup_path) as f:
+            data = json.load(f)
+
+        assert "status" in data
+        assert "run_id" in data
+
+    def test_multiple_backups_have_unique_names(self, initialized_state_manager):
+        """Test that multiple backups have unique names."""
+        time.sleep(0.01)  # Ensure different timestamps
+        backup1 = initialized_state_manager.create_state_backup()
+        time.sleep(1.1)  # Ensure different timestamp in seconds
+        backup2 = initialized_state_manager.create_state_backup()
+
+        assert backup1 != backup2
+        assert backup1.exists()
+        assert backup2.exists()
+
+    def test_backup_no_file_returns_none(self, temp_dir):
+        """Test create_state_backup returns None when no state file."""
+        state_dir = temp_dir / ".claude-task-master"
+        state_dir.mkdir(parents=True)
+        manager = StateManager(state_dir)
+
+        result = manager.create_state_backup()
+        assert result is None
+
+    def test_backup_directory_created(self, initialized_state_manager):
+        """Test that backup directory is created automatically."""
+        backup_path = initialized_state_manager.create_state_backup()
+        assert initialized_state_manager.backup_dir.exists()
+        assert backup_path.parent == initialized_state_manager.backup_dir
+
+
+# =============================================================================
+# StateNotFoundError Tests
+# =============================================================================
+
+
+class TestStateNotFoundError:
+    """Tests for state not found scenarios."""
+
+    def test_load_state_no_file_raises_state_not_found(self, temp_dir):
+        """Test load_state raises StateNotFoundError when file missing."""
+        state_dir = temp_dir / ".claude-task-master"
+        state_dir.mkdir()
+        manager = StateManager(state_dir)
+
+        with pytest.raises(StateNotFoundError) as exc_info:
+            manager.load_state()
+
+        assert exc_info.value.path == manager.state_file
+
+    def test_state_not_found_error_inherits_from_state_error(self):
+        """Test StateNotFoundError is a StateError."""
+        error = StateNotFoundError(Path("/tmp/state.json"))
+        assert isinstance(error, StateError)
