@@ -198,29 +198,38 @@ GOAL: {goal}
 Your task is to:
 1. Analyze the goal and understand what needs to be done
 2. Explore the codebase if relevant (use Read, Glob, Grep tools)
-3. Create a detailed task list with markdown checkboxes
-4. Define clear success criteria
+3. Create a detailed, well-organized task list with markdown checkboxes
+4. Define clear, testable success criteria
 
-IMPORTANT: If the project has a .gitignore file, ensure that .claude-task-master/ is added to it.
-This directory contains task state and should not be committed to version control.
+IMPORTANT SETUP:
+- If the project has a .gitignore file, ensure that .claude-task-master/ is added to it
+- This directory contains task state and should not be committed to version control
 
 {context}
 
-Please create a plan with:
-- A task list using markdown checkboxes (- [ ] Task description)
-- Clear, actionable tasks
-- Success criteria at the end
+Please create a comprehensive plan with:
 
-Format:
 ## Task List
-- [ ] Task 1
-- [ ] Task 2
+
+Organize tasks into logical phases if the goal is complex. Each task should be:
+- **Specific and actionable** - Clear what needs to be done
+- **Testable** - Can verify when complete
+- **Appropriately sized** - Not too large or too small
+- **Ordered logically** - Dependencies should come first
+
+Use this format:
+- [ ] Task description (be specific about what and where)
+- [ ] Another task with clear deliverables
 ...
 
 ## Success Criteria
-1. Criterion 1
-2. Criterion 2
-..."""
+
+Define 3-5 clear, measurable criteria that indicate complete success:
+1. Criterion with specific metric or outcome
+2. Another criterion that can be objectively verified
+...
+
+Remember: The task list will be executed sequentially, so order matters."""
         return prompt
 
     def _build_work_prompt(
@@ -242,7 +251,18 @@ PR REVIEW COMMENTS TO ADDRESS:
         prompt += """
 
 Please complete this task using the available tools (Read, Write, Edit, Bash, Glob, Grep).
-Work autonomously and report when done."""
+
+Important instructions:
+- Work autonomously and methodically
+- Test your changes to verify they work
+- When you complete the task, provide a clear summary of what was done
+- Report any blockers or issues encountered
+
+When done, summarize:
+1. What was completed
+2. Any tests run and their results
+3. Any files modified
+4. Next steps or considerations"""
 
         return prompt
 

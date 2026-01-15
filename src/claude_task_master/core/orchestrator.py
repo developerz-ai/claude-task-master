@@ -113,18 +113,41 @@ Please complete this task."""
             context=context,
         )
 
-        # Update progress
-        progress = f"""# Progress Update
+        # Update progress as todo list
+        progress_lines = [
+            "# Progress Tracker\n",
+            f"**Session:** {state.session_count + 1}",
+            f"**Current Task:** {state.current_task_index + 1} of {len(tasks)}\n",
+            "## Task List\n"
+        ]
 
-Session: {state.session_count + 1}
-Current Task: {state.current_task_index + 1} of {len(tasks)}
+        # Add all tasks with their status
+        for i, task in enumerate(tasks):
+            is_complete = self._is_task_complete(plan, i)
+            is_current = i == state.current_task_index
 
-## Latest Task
-{current_task}
+            if is_complete:
+                status = "✓"
+                marker = "[x]"
+            elif is_current:
+                status = "→"
+                marker = "[ ]"
+            else:
+                status = " "
+                marker = "[ ]"
 
-## Result
-{result.get('output', 'Completed')}
-"""
+            progress_lines.append(f"{status} {marker} **Task {i + 1}:** {task}")
+
+        # Add latest result if available
+        if result.get('output'):
+            progress_lines.extend([
+                "\n## Latest Completed",
+                f"**Task {state.current_task_index + 1}:** {current_task}\n",
+                "### Summary",
+                result.get('output', 'Completed')
+            ])
+
+        progress = "\n".join(progress_lines)
         self.state_manager.save_progress(progress)
 
         # Mark task as complete and move to next
