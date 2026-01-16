@@ -113,10 +113,20 @@ def build_planning_prompt(goal: str, context: str | None = None) -> str:
 
 Your mission: **{goal}**
 
+🎯 **Create a HIGH QUALITY MASTER PLAN with BIG PICTURE thinking.**
+
+Think strategically about the entire goal. Consider architecture, dependencies,
+testing strategy, and how all pieces fit together. Plan for success.
+
+## FIRST: Read Project Instructions
+
+**Always read `CLAUDE.md` first** (if it exists) - it contains project-specific
+instructions, coding standards, and important context you must follow.
+
 ## TOOL RESTRICTIONS (MANDATORY)
 
 **ALLOWED TOOLS (use ONLY these):**
-- `Read` - Read files to understand the codebase
+- `Read` - Read files to understand the codebase (start with CLAUDE.md!)
 - `Glob` - Find files by pattern
 - `Grep` - Search for code patterns
 
@@ -287,6 +297,8 @@ def build_work_prompt(
 
 **Focus on THIS task only. Do not work ahead to other tasks.**
 
+🎯 **Deliver HIGH QUALITY work. Read and respect `CLAUDE.md` project instructions.**
+
 📋 **Full plan:** `.claude-task-master/plan.md` | **Progress:** `.claude-task-master/progress.md`"""
     )
 
@@ -328,17 +340,21 @@ git status
 - If on main/master, create a feature branch first
 - If already on a feature branch, continue working there
 
-**2. Understand the task**
+**2. Read CLAUDE.md** (if exists)
+- Contains project-specific instructions and coding standards
+- Follow these rules strictly
+
+**3. Understand the task**
 - Read files before modifying
 - Check existing patterns
 - Identify tests to run
 
-**3. Make changes**
+**4. Make changes**
 - Edit existing files, Write new files
-- Follow project coding style
+- Follow project coding style from CLAUDE.md
 - Stay focused on current task
 
-**4. Verify work**
+**5. Verify work**
 ```bash
 # Common verification commands
 pytest                    # Python tests
@@ -347,7 +363,7 @@ ruff check . && mypy .   # Python lint/types
 eslint . && tsc          # JS lint/types
 ```
 
-**5. Commit properly**
+**6. Commit properly**
 ```bash
 git add -A && git commit -m "$(cat <<'EOF'
 type: Brief description (50 chars)
@@ -360,7 +376,7 @@ EOF
 )"
 ```
 
-**6. Push and Create PR** (if task requires it)
+**7. Push and Create PR** (if task requires it)
 ```bash
 git push -u origin HEAD
 gh pr create --title "type: description" --body "..." --label "claudetm"
