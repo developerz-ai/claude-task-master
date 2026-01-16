@@ -5,8 +5,6 @@ import threading
 import time
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from claude_task_master.core.shutdown import (
     ShutdownManager,
     add_shutdown_callback,

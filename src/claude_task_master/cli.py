@@ -9,7 +9,7 @@ from rich.markdown import Markdown
 from .core.agent import AgentWrapper, ModelType
 from .core.context_accumulator import ContextAccumulator
 from .core.credentials import CredentialManager
-from .core.logger import TaskLogger
+from .core.logger import LogFormat, LogLevel, TaskLogger
 from .core.orchestrator import WorkLoopOrchestrator
 from .core.planner import Planner
 from .core.state import StateManager, StateResumeValidationError, TaskOptions
@@ -67,6 +67,17 @@ def start(
         "--checkpointing",
         help="Enable file checkpointing for safe rollbacks",
     ),
+    log_level: str = typer.Option(
+        "normal",
+        "--log-level",
+        "-l",
+        help="Logging level: quiet (errors only), normal (default), verbose (all tool calls)",
+    ),
+    log_format: str = typer.Option(
+        "text",
+        "--log-format",
+        help="Log output format: text (human-readable, default), json (structured)",
+    ),
 ) -> None:
     """Start a new task with the given goal.
 
@@ -74,9 +85,28 @@ def start(
         claudetm start "Add dark mode toggle"
         claudetm start "Fix bug #123" -m opus --no-auto-merge
         claudetm start "Refactor auth" -n 5 --pause-on-pr
+        claudetm start "Debug issue" -l verbose --log-format json
     """
+    # Validate log_level and log_format
+    try:
+        log_level_enum = LogLevel(log_level.lower())
+    except ValueError:
+        console.print(
+            f"[red]Error: Invalid log level '{log_level}'. "
+            f"Valid options: quiet, normal, verbose[/red]"
+        )
+        raise typer.Exit(1) from None
+
+    try:
+        log_format_enum = LogFormat(log_format.lower())
+    except ValueError:
+        console.print(
+            f"[red]Error: Invalid log format '{log_format}'. Valid options: text, json[/red]"
+        )
+        raise typer.Exit(1) from None
+
     console.print(f"[bold green]Starting new task:[/bold green] {goal}")
-    console.print(f"Model: {model}, Auto-merge: {auto_merge}")
+    console.print(f"Model: {model}, Auto-merge: {auto_merge}, Log: {log_level}/{log_format}")
 
     try:
         # Check if state already exists
@@ -102,12 +132,17 @@ def start(
             max_sessions=max_sessions,
             pause_on_pr=pause_on_pr,
             enable_checkpointing=enable_checkpointing,
+            log_level=log_level.lower(),
+            log_format=log_format.lower(),
         )
         state = state_manager.initialize(goal=goal, model=model, options=options)
 
-        # Initialize logger first so it can be passed to agent
+        # Initialize logger with configured level and format
         log_file = state_manager.get_log_file(state.run_id)
-        logger = TaskLogger(log_file)
+        if log_format_enum == LogFormat.JSON:
+            # Use .json extension for JSON format
+            log_file = log_file.with_suffix(".json")
+        logger = TaskLogger(log_file, level=log_level_enum, log_format=log_format_enum)
 
         # Initialize components with logger
         working_dir = Path.cwd()
@@ -227,13 +262,20 @@ def resume() -> None:
 
         # Initialize components
         working_dir = Path.cwd()
-        agent = AgentWrapper(access_token, model_type, str(working_dir))
+
+        # Get logging options from saved state
+        log_level_enum = LogLevel(state.options.log_level)
+        log_format_enum = LogFormat(state.options.log_format)
+
+        # Initialize logger with saved options
+        log_file = state_manager.get_log_file(state.run_id)
+        if log_format_enum == LogFormat.JSON:
+            log_file = log_file.with_suffix(".json")
+        logger = TaskLogger(log_file, level=log_level_enum, log_format=log_format_enum)
+
+        agent = AgentWrapper(access_token, model_type, str(working_dir), logger=logger)
         planner = Planner(agent, state_manager)
         ContextAccumulator(state_manager)
-
-        # Initialize logger
-        log_file = state_manager.get_log_file(state.run_id)
-        logger = TaskLogger(log_file)
 
         # Update state to working if it was paused
         if state.status == "paused":
@@ -307,6 +349,8 @@ def status() -> None:
         console.print(f"  Auto-merge: {state.options.auto_merge}")
         console.print(f"  Max sessions: {state.options.max_sessions or 'unlimited'}")
         console.print(f"  Pause on PR: {state.options.pause_on_pr}")
+        console.print(f"  Log level: {state.options.log_level}")
+        console.print(f"  Log format: {state.options.log_format}")
 
     except typer.Exit:
         raise

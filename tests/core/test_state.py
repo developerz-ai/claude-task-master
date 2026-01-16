@@ -65,6 +65,8 @@ class TestTaskOptions:
             "max_sessions": 3,
             "pause_on_pr": False,
             "enable_checkpointing": False,
+            "log_level": "normal",
+            "log_format": "text",
         }
 
 

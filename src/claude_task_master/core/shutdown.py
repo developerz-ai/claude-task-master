@@ -45,7 +45,7 @@ class ShutdownManager:
     def __init__(self) -> None:
         """Initialize shutdown manager."""
         self._shutdown_requested = threading.Event()
-        self._original_handlers: dict[signal.Signals, "ShutdownManager._SignalHandler"] = {}
+        self._original_handlers: dict[signal.Signals, ShutdownManager._SignalHandler] = {}
         self._callbacks: list[Callable[[], None]] = []
         self._lock = threading.Lock()
         self._initialized = False

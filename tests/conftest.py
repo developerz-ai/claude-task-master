@@ -353,10 +353,11 @@ def log_file(logs_dir: Path) -> Path:
 
 @pytest.fixture
 def task_logger(log_file: Path):
-    """Provide a TaskLogger instance."""
-    from claude_task_master.core.logger import TaskLogger
+    """Provide a TaskLogger instance with VERBOSE level for full test coverage."""
+    from claude_task_master.core.logger import LogLevel, TaskLogger
 
-    return TaskLogger(log_file)
+    # Use VERBOSE level to ensure all logging methods write output for existing tests
+    return TaskLogger(log_file, level=LogLevel.VERBOSE)
 
 
 # =============================================================================

@@ -198,6 +198,8 @@ class TaskOptions(BaseModel):
     max_sessions: int | None = None
     pause_on_pr: bool = False
     enable_checkpointing: bool = False
+    log_level: str = "normal"  # quiet, normal, verbose
+    log_format: str = "text"  # text, json
 
 
 # Status type alias for type checking
