@@ -133,9 +133,7 @@ class MockClaudeAgentSDK:
         """Mock ClaudeAgentOptions class."""
         return MagicMock
 
-    async def query(
-        self, prompt: str, options: Any = None
-    ) -> AsyncGenerator[AsyncMock, None]:
+    async def query(self, prompt: str, options: Any = None) -> AsyncGenerator[AsyncMock, None]:
         """Mock async query function.
 
         This simulates the SDK's query method which yields messages.
