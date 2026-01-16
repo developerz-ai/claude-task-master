@@ -6,6 +6,12 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 from . import console
+from .circuit_breaker import (
+    CircuitBreaker,
+    CircuitBreakerConfig,
+    CircuitBreakerError,
+    CircuitState,
+)
 from .prompts import build_planning_prompt, build_work_prompt
 from .rate_limit import RateLimitConfig
 
@@ -245,6 +251,7 @@ class AgentWrapper:
         hooks: dict[str, list["HookMatcher"]] | None = None,
         enable_safety_hooks: bool = True,
         logger: "TaskLogger | None" = None,
+        circuit_breaker_config: CircuitBreakerConfig | None = None,
     ):
         """Initialize agent wrapper.
 
@@ -256,6 +263,7 @@ class AgentWrapper:
             hooks: Optional pre-configured hooks dictionary for ClaudeAgentOptions.
             enable_safety_hooks: If True and hooks is None, create default safety hooks.
             logger: Optional TaskLogger for capturing tool usage and responses.
+            circuit_breaker_config: Optional circuit breaker config for fault tolerance.
 
         Raises:
             SDKImportError: If claude-agent-sdk is not installed.
@@ -268,6 +276,12 @@ class AgentWrapper:
         self.hooks = hooks
         self.enable_safety_hooks = enable_safety_hooks
         self.logger = logger
+
+        # Initialize circuit breaker for API fault tolerance
+        self.circuit_breaker = CircuitBreaker(
+            name="claude_api",
+            config=circuit_breaker_config or CircuitBreakerConfig.default(),
+        )
 
         # Import Claude Agent SDK with improved error handling
         self._import_sdk()
@@ -490,6 +504,9 @@ Be strict - only say PASS if ALL criteria are truly met."""
     ) -> str:
         """Execute query with exponential backoff retry for transient errors.
 
+        Uses circuit breaker pattern to prevent cascading failures when the
+        API is consistently failing.
+
         Args:
             prompt: The prompt to send to the model.
             tools: List of tools to enable.
@@ -501,13 +518,32 @@ Be strict - only say PASS if ALL criteria are truly met."""
         Raises:
             WorkingDirectoryError: If working directory cannot be accessed.
             QueryExecutionError: If the query fails after all retries.
+            CircuitBreakerError: If circuit breaker is open.
         """
+        # Check circuit breaker state first
+        if self.circuit_breaker.is_open:
+            time_until_retry = self.circuit_breaker.time_until_retry
+            console.warning(
+                f"Circuit breaker open - API unavailable. Retry in {time_until_retry:.0f}s"
+            )
+            raise CircuitBreakerError(
+                f"Circuit '{self.circuit_breaker.name}' is open",
+                CircuitState.OPEN,
+                time_until_retry,
+            )
+
         last_error: Exception | None = None
         max_retries = self.rate_limit_config.max_retries
 
         for attempt in range(max_retries + 1):
             try:
-                return await self._execute_query(prompt, tools, model_override)
+                # Execute through circuit breaker
+                with self.circuit_breaker:
+                    return await self._execute_query(prompt, tools, model_override)
+            except CircuitBreakerError:
+                # Circuit breaker tripped - don't retry
+                console.warning("Circuit breaker opened due to repeated failures")
+                raise
             except self.TRANSIENT_ERRORS as e:
                 last_error = e
                 if attempt < max_retries:
