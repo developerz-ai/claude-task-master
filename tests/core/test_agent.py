@@ -21,6 +21,7 @@ from claude_task_master.core.agent import (
     ToolConfig,
     WorkingDirectoryError,
 )
+from claude_task_master.core.rate_limit import RateLimitConfig
 
 # =============================================================================
 # Exception Class Tests
@@ -1279,13 +1280,16 @@ class TestAgentWrapperRetryLogic:
         mock_sdk.ClaudeAgentOptions = MagicMock()
 
         with patch.dict("sys.modules", {"claude_agent_sdk": mock_sdk}):
+            rate_limit_config = RateLimitConfig(
+                max_retries=2,
+                initial_backoff=0.1,  # Fast backoff for tests
+                max_backoff=0.5,
+            )
             agent = AgentWrapper(
                 access_token="test-token",
                 model=ModelType.SONNET,
                 working_dir=str(temp_dir),
-                max_retries=2,
-                initial_backoff=0.1,  # Fast backoff for tests
-                max_backoff=0.5,
+                rate_limit_config=rate_limit_config,
             )
         return agent
 
@@ -1633,20 +1637,22 @@ class TestAgentWrapperSDKImport:
 class TestAgentWrapperCustomConfiguration:
     """Tests for custom retry and backoff configuration."""
 
-    def test_custom_max_retries(self):
-        """Test initialization with custom max_retries."""
+    def test_custom_rate_limit_config(self):
+        """Test initialization with custom RateLimitConfig."""
         mock_sdk = MagicMock()
         mock_sdk.query = AsyncMock()
         mock_sdk.ClaudeAgentOptions = MagicMock()
+
+        rate_limit_config = RateLimitConfig(max_retries=5)
 
         with patch.dict("sys.modules", {"claude_agent_sdk": mock_sdk}):
             agent = AgentWrapper(
                 access_token="test-token",
                 model=ModelType.SONNET,
-                max_retries=5,
+                rate_limit_config=rate_limit_config,
             )
 
-        assert agent.max_retries == 5
+        assert agent.rate_limit_config.max_retries == 5
 
     def test_custom_initial_backoff(self):
         """Test initialization with custom initial_backoff."""
@@ -1654,14 +1660,16 @@ class TestAgentWrapperCustomConfiguration:
         mock_sdk.query = AsyncMock()
         mock_sdk.ClaudeAgentOptions = MagicMock()
 
+        rate_limit_config = RateLimitConfig(initial_backoff=2.0)
+
         with patch.dict("sys.modules", {"claude_agent_sdk": mock_sdk}):
             agent = AgentWrapper(
                 access_token="test-token",
                 model=ModelType.SONNET,
-                initial_backoff=2.0,
+                rate_limit_config=rate_limit_config,
             )
 
-        assert agent.initial_backoff == 2.0
+        assert agent.rate_limit_config.initial_backoff == 2.0
 
     def test_custom_max_backoff(self):
         """Test initialization with custom max_backoff."""
@@ -1669,14 +1677,16 @@ class TestAgentWrapperCustomConfiguration:
         mock_sdk.query = AsyncMock()
         mock_sdk.ClaudeAgentOptions = MagicMock()
 
+        rate_limit_config = RateLimitConfig(max_backoff=60.0)
+
         with patch.dict("sys.modules", {"claude_agent_sdk": mock_sdk}):
             agent = AgentWrapper(
                 access_token="test-token",
                 model=ModelType.SONNET,
-                max_backoff=60.0,
+                rate_limit_config=rate_limit_config,
             )
 
-        assert agent.max_backoff == 60.0
+        assert agent.rate_limit_config.max_backoff == 60.0
 
     def test_default_retry_configuration(self):
         """Test default retry configuration values."""
@@ -1690,9 +1700,28 @@ class TestAgentWrapperCustomConfiguration:
                 model=ModelType.SONNET,
             )
 
-        assert agent.max_retries == AgentWrapper.DEFAULT_MAX_RETRIES
-        assert agent.initial_backoff == AgentWrapper.DEFAULT_INITIAL_BACKOFF
-        assert agent.max_backoff == AgentWrapper.DEFAULT_MAX_BACKOFF
+        default_config = RateLimitConfig.default()
+        assert agent.rate_limit_config.max_retries == default_config.max_retries
+        assert agent.rate_limit_config.initial_backoff == default_config.initial_backoff
+        assert agent.rate_limit_config.max_backoff == default_config.max_backoff
+
+    def test_aggressive_rate_limit_config(self):
+        """Test initialization with aggressive rate limiting."""
+        mock_sdk = MagicMock()
+        mock_sdk.query = AsyncMock()
+        mock_sdk.ClaudeAgentOptions = MagicMock()
+
+        rate_limit_config = RateLimitConfig.aggressive()
+
+        with patch.dict("sys.modules", {"claude_agent_sdk": mock_sdk}):
+            agent = AgentWrapper(
+                access_token="test-token",
+                model=ModelType.SONNET,
+                rate_limit_config=rate_limit_config,
+            )
+
+        assert agent.rate_limit_config == rate_limit_config
+        assert agent.rate_limit_config.max_retries == 5
 
 
 # =============================================================================

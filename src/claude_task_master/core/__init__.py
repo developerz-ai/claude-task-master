@@ -71,6 +71,7 @@ from claude_task_master.core.prompts import (
     build_verification_prompt,
     build_work_prompt,
 )
+from claude_task_master.core.rate_limit import RateLimitConfig
 from claude_task_master.core.shutdown import (
     ShutdownManager,
     add_shutdown_callback,
@@ -130,6 +131,8 @@ __all__ = [
     "ToolConfig",
     "AgentWrapper",
     "parse_task_complexity",
+    # Rate limit classes
+    "RateLimitConfig",
     # Checkpoint exceptions
     "CheckpointError",
     "CheckpointNotFoundError",

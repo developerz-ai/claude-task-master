@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from . import console
 from .prompts import build_planning_prompt, build_work_prompt
+from .rate_limit import RateLimitConfig
 
 if TYPE_CHECKING:
     from .hooks import HookMatcher
@@ -227,12 +228,6 @@ def parse_task_complexity(task_description: str) -> tuple[TaskComplexity, str]:
 class AgentWrapper:
     """Wraps Claude Agent SDK for task execution."""
 
-    # Retry configuration for transient errors
-    DEFAULT_MAX_RETRIES = 3
-    DEFAULT_INITIAL_BACKOFF = 1.0  # seconds
-    DEFAULT_MAX_BACKOFF = 30.0  # seconds
-    DEFAULT_BACKOFF_MULTIPLIER = 2.0
-
     # Transient error types that should be retried
     TRANSIENT_ERRORS = (
         APIRateLimitError,
@@ -246,9 +241,7 @@ class AgentWrapper:
         access_token: str,
         model: ModelType,
         working_dir: str = ".",
-        max_retries: int = DEFAULT_MAX_RETRIES,
-        initial_backoff: float = DEFAULT_INITIAL_BACKOFF,
-        max_backoff: float = DEFAULT_MAX_BACKOFF,
+        rate_limit_config: RateLimitConfig | None = None,
         hooks: dict[str, list["HookMatcher"]] | None = None,
         enable_safety_hooks: bool = True,
         logger: "TaskLogger | None" = None,
@@ -259,9 +252,7 @@ class AgentWrapper:
             access_token: OAuth access token for Claude API.
             model: The Claude model to use.
             working_dir: Working directory for file operations.
-            max_retries: Maximum number of retries for transient errors.
-            initial_backoff: Initial backoff time in seconds.
-            max_backoff: Maximum backoff time in seconds.
+            rate_limit_config: Rate limiting configuration. Uses defaults if None.
             hooks: Optional pre-configured hooks dictionary for ClaudeAgentOptions.
             enable_safety_hooks: If True and hooks is None, create default safety hooks.
             logger: Optional TaskLogger for capturing tool usage and responses.
@@ -273,9 +264,7 @@ class AgentWrapper:
         self.access_token = access_token
         self.model = model
         self.working_dir = working_dir
-        self.max_retries = max_retries
-        self.initial_backoff = initial_backoff
-        self.max_backoff = max_backoff
+        self.rate_limit_config = rate_limit_config or RateLimitConfig.default()
         self.hooks = hooks
         self.enable_safety_hooks = enable_safety_hooks
         self.logger = logger
@@ -514,29 +503,28 @@ Be strict - only say PASS if ALL criteria are truly met."""
             QueryExecutionError: If the query fails after all retries.
         """
         last_error: Exception | None = None
-        backoff = self.initial_backoff
+        max_retries = self.rate_limit_config.max_retries
 
-        for attempt in range(self.max_retries + 1):
+        for attempt in range(max_retries + 1):
             try:
                 return await self._execute_query(prompt, tools, model_override)
             except self.TRANSIENT_ERRORS as e:
                 last_error = e
-                if attempt < self.max_retries:
-                    # Calculate backoff with jitter
-                    sleep_time = min(backoff, self.max_backoff)
+                if attempt < max_retries:
+                    # Calculate backoff using rate limit config
+                    sleep_time = self.rate_limit_config.calculate_backoff(attempt)
                     console.newline()
                     console.warning(
-                        f"Transient error (attempt {attempt + 1}/{self.max_retries + 1}): {e.message}",
+                        f"Transient error (attempt {attempt + 1}/{max_retries + 1}): {e.message}",
                         flush=True,
                     )
                     console.detail(f"Retrying in {sleep_time:.1f} seconds...", flush=True)
                     await asyncio.sleep(sleep_time)
-                    backoff *= self.DEFAULT_BACKOFF_MULTIPLIER
                 else:
                     # Out of retries
                     console.newline()
                     console.error(
-                        f"Failed after {self.max_retries + 1} attempts: {e.message}",
+                        f"Failed after {max_retries + 1} attempts: {e.message}",
                         flush=True,
                     )
                     raise
