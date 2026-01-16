@@ -8,19 +8,39 @@ Autonomous task orchestration system that uses Claude Agent SDK to keep Claude w
 
 **Core Philosophy**: Claude is smart enough to do work AND verify it. Task master keeps the loop going and persists state.
 
+## Installation
+
+### Global Install (Recommended for usage)
+```bash
+# Install globally via uv tools
+uv tool install /path/to/claude-task-master-py
+
+# Or reinstall after changes
+uv tool install --force --reinstall /path/to/claude-task-master-py
+
+# Verify installation
+claudetm doctor
+```
+
+### Development Install (For contributing)
+```bash
+# Clone and setup
+uv sync --all-extras             # Install dependencies in .venv
+uv run claudetm doctor           # Check system (runs from .venv)
+```
+
 ## Quick Start
 
 ```bash
-# Setup
-uv sync --all-extras             # Install dependencies
-uv run claudetm doctor           # Check system
-
-# Usage
+# Usage (after global install)
 cd <project-dir>
-uv run claudetm start "Your task here" --max-sessions 10
-uv run claudetm status           # Check progress
-uv run claudetm plan             # View task list
-uv run claudetm clean -f         # Clean state
+claudetm start "Your task here" --max-sessions 10
+claudetm status           # Check progress
+claudetm plan             # View task list
+claudetm clean -f         # Clean state
+
+# Or with uv run (development mode)
+uv run claudetm start "Your task here"
 ```
 
 ## Development
@@ -37,9 +57,16 @@ mypy .                    # Type check
 1. **Credential Manager** - OAuth from `~/.claude/.credentials.json` (nested `claudeAiOauth` structure)
 2. **State Manager** - Persistence to `.claude-task-master/`
 3. **Agent Wrapper** - Claude Agent SDK `query()` with real-time streaming
-4. **Planner** - Planning phase (Read, Glob, Grep tools only)
+4. **Planner** - Planning phase (read-only tools)
 5. **Work Loop Orchestrator** - Execution loop with task tracking
 6. **Logger** - Consolidated `logs/run-{timestamp}.txt`
+
+**Tool Configurations by Phase**:
+| Phase | Tools | Purpose |
+|-------|-------|---------|
+| PLANNING | Read, Glob, Grep | Explore codebase, output plan as TEXT (orchestrator saves to plan.md) |
+| VERIFICATION | Read, Glob, Grep, Bash | Run tests/lint to verify success criteria |
+| WORKING | All tools | Implement tasks with full access |
 
 **State Directory**:
 ```
