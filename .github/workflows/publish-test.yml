@@ -1,0 +1,65 @@
+name: Publish to TestPyPI
+
+on:
+  workflow_dispatch:  # Manual trigger only
+    inputs:
+      version:
+        description: 'Version to test (leave empty to use current version)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write  # For trusted publishing to TestPyPI
+
+jobs:
+  build-and-publish:
+    name: Build and Publish to TestPyPI
+    runs-on: ubuntu-latest
+    environment: test-release  # Optional: add environment protection
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Get current version
+        id: get_version
+        run: |
+          VERSION=$(grep -Po '(?<=^version = ")[^"]+' pyproject.toml)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Current version: $VERSION"
+
+      - name: Install build tools
+        run: uv pip install --system build
+
+      - name: Build package
+        run: python -m build
+
+      - name: Check package metadata
+        run: |
+          uv pip install --system twine
+          twine check dist/*
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true  # Don't fail if version already exists
+          verbose: true
+
+      - name: Installation instructions
+        run: |
+          VERSION="${{ steps.get_version.outputs.version }}"
+          echo "✅ Package published to TestPyPI"
+          echo ""
+          echo "To test installation:"
+          echo "  pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple claude-task-master==$VERSION"
+          echo ""
+          echo "Note: Extra index URL needed for dependencies not on TestPyPI"
