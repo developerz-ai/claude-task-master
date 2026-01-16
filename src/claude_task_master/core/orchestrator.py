@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from typing import TYPE_CHECKING
 
 from . import console
@@ -14,8 +13,20 @@ from .agent import (
     TaskComplexity,
     parse_task_complexity,
 )
-from .key_listener import check_escape, reset_escape, start_listening, stop_listening
+from .key_listener import (
+    get_cancellation_reason,
+    is_cancellation_requested,
+    reset_escape,
+    start_listening,
+    stop_listening,
+)
 from .planner import Planner
+from .shutdown import (
+    interruptible_sleep,
+    register_handlers,
+    reset_shutdown,
+    unregister_handlers,
+)
 from .state import StateError, StateManager, TaskState
 
 if TYPE_CHECKING:
@@ -217,7 +228,7 @@ class WorkLoopOrchestrator:
         Returns:
             0: Success - all tasks completed and verified.
             1: Blocked/Failed - max sessions reached, verification failed, or error.
-            2: Paused - user interrupted with Ctrl+C.
+            2: Paused - user interrupted with Ctrl+C or signal.
 
         Raises:
             StateError: If state cannot be loaded (with automatic recovery attempt).
@@ -242,27 +253,45 @@ class WorkLoopOrchestrator:
             console.warning(error.message)
             return 1  # Blocked
 
+        # Register signal handlers for graceful shutdown
+        register_handlers()
+        reset_shutdown()  # Clear any previous shutdown state
+
         # Start listening for Escape key
         start_listening()
         console.detail("Press [Escape] to pause, [Ctrl+C] to interrupt")
 
+        # Helper to save state and cleanup on pause/interrupt
+        def _handle_pause(reason: str) -> int:
+            """Handle graceful pause from any cancellation source."""
+            stop_listening()
+            unregister_handlers()
+            console.newline()
+            console.warning(f"{reason} - pausing...")
+            state.status = "paused"
+            self.state_manager.save_state(state)
+            backup_path = self.state_manager.create_state_backup()
+            if backup_path:
+                console.detail(f"State backup saved: {backup_path}")
+            console.info("Use 'claudetm resume' to continue")
+            return 2  # Paused
+
         try:
             while not self._is_complete(state):
-                # Check if user pressed Escape to pause
-                if check_escape():
-                    console.newline()
-                    console.warning("Escape pressed - pausing...")
-                    state.status = "paused"
-                    self.state_manager.save_state(state)
-                    backup_path = self.state_manager.create_state_backup()
-                    if backup_path:
-                        console.detail(f"State backup saved: {backup_path}")
-                    stop_listening()
-                    return 2  # Paused
+                # Check for any cancellation (Escape key or shutdown signal)
+                if is_cancellation_requested():
+                    reason = get_cancellation_reason() or "Cancellation requested"
+                    if reason == "escape":
+                        reason = "Escape pressed"
+                    elif reason.startswith("SIG"):
+                        reason = f"Received {reason}"
+                    return _handle_pause(reason)
 
                 # Run the PR workflow cycle
                 result = self._run_workflow_cycle(state)
                 if result is not None:
+                    stop_listening()
+                    unregister_handlers()
                     return result
 
                 # Check session limit
@@ -271,10 +300,13 @@ class WorkLoopOrchestrator:
                     console.warning(error.message)
                     state.status = "blocked"
                     self.state_manager.save_state(state)
+                    stop_listening()
+                    unregister_handlers()
                     return 1
 
             # All tasks complete - verify success criteria
             stop_listening()
+            unregister_handlers()
             try:
                 if self._verify_success():
                     state.status = "success"
@@ -296,20 +328,13 @@ class WorkLoopOrchestrator:
                 return 1
 
         except KeyboardInterrupt:
-            stop_listening()
-            console.newline()
-            console.warning("Interrupted by user (Ctrl+C) - pausing...")
-            state.status = "paused"
-            self.state_manager.save_state(state)
-            # Create a backup when pausing
-            backup_path = self.state_manager.create_state_backup()
-            if backup_path:
-                console.detail(f"State backup saved: {backup_path}")
-            console.info("Use 'claudetm resume' to continue")
-            return 2  # User interrupted
+            # This can still happen if signal handler wasn't installed
+            # or if KeyboardInterrupt was raised before we could check
+            return _handle_pause("Interrupted by user (Ctrl+C)")
 
         except OrchestratorError as e:
             stop_listening()
+            unregister_handlers()
             # Known orchestrator errors - already have good messages
             console.error(f"Orchestrator error: {e.message}")
             if e.details:
@@ -320,6 +345,7 @@ class WorkLoopOrchestrator:
 
         except StateError as e:
             stop_listening()
+            unregister_handlers()
             # State-related errors
             console.error(f"State error: {e.message}")
             if e.details:
@@ -334,6 +360,7 @@ class WorkLoopOrchestrator:
 
         except Exception as e:
             stop_listening()
+            unregister_handlers()
             # Unexpected errors - provide detailed debugging info
             error_type = type(e).__name__
             error_msg = str(e)
@@ -538,9 +565,11 @@ class WorkLoopOrchestrator:
                 self.state_manager.save_state(state)
                 return None
             else:
-                # Still pending, wait and retry
+                # Still pending, wait and retry (interruptible)
                 console.detail(f"CI pending... ({pr_status.ci_state})")
-                time.sleep(self.CI_POLL_INTERVAL)
+                if not interruptible_sleep(self.CI_POLL_INTERVAL):
+                    # Shutdown was requested during sleep
+                    return None  # Let main loop handle cancellation
                 return None
 
         except Exception as e:

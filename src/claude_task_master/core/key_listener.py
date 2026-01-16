@@ -1,4 +1,9 @@
-"""Key listener for detecting pause requests during execution."""
+"""Key listener for detecting pause requests during execution.
+
+This module provides:
+- Non-blocking Escape key detection for user-requested pause
+- Integration with the shutdown module for unified cancellation
+"""
 
 import sys
 import threading
@@ -153,3 +158,32 @@ def reset_escape() -> None:
     """Reset the Escape pressed flag."""
     if _listener:
         _listener.reset()
+
+
+def is_cancellation_requested() -> bool:
+    """Check if cancellation was requested via Escape or shutdown signal.
+
+    This provides a unified check for both user-initiated pause (Escape)
+    and system shutdown signals (SIGTERM, SIGINT, etc.).
+
+    Returns:
+        True if either Escape was pressed or shutdown was requested.
+    """
+    # Import here to avoid circular imports
+    from .shutdown import is_shutdown_requested
+
+    return check_escape() or is_shutdown_requested()
+
+
+def get_cancellation_reason() -> str | None:
+    """Get the reason for cancellation.
+
+    Returns:
+        'escape' if Escape was pressed, shutdown reason if signal received,
+        or None if no cancellation requested.
+    """
+    from .shutdown import get_shutdown_reason
+
+    if check_escape():
+        return "escape"
+    return get_shutdown_reason()

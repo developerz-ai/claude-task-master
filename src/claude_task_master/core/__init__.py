@@ -71,6 +71,19 @@ from claude_task_master.core.prompts import (
     build_verification_prompt,
     build_work_prompt,
 )
+from claude_task_master.core.shutdown import (
+    ShutdownManager,
+    add_shutdown_callback,
+    get_shutdown_manager,
+    get_shutdown_reason,
+    interruptible_sleep,
+    is_shutdown_requested,
+    register_handlers,
+    remove_shutdown_callback,
+    request_shutdown,
+    reset_shutdown,
+    unregister_handlers,
+)
 from claude_task_master.core.state import (
     InvalidStateTransitionError,
     StateCorruptedError,
@@ -150,6 +163,18 @@ __all__ = [
     "VerificationFailedError",
     # Orchestrator classes
     "WorkLoopOrchestrator",
+    # Shutdown classes and functions
+    "ShutdownManager",
+    "get_shutdown_manager",
+    "register_handlers",
+    "unregister_handlers",
+    "is_shutdown_requested",
+    "request_shutdown",
+    "get_shutdown_reason",
+    "reset_shutdown",
+    "add_shutdown_callback",
+    "remove_shutdown_callback",
+    "interruptible_sleep",
     # Hook classes
     "HookMatcher",
     "HookResult",
