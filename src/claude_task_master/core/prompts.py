@@ -310,17 +310,23 @@ def build_work_prompt(
     # Execution guidelines
     builder.add_section(
         "Execution",
-        """**1. Understand first**
+        """**1. Check git status first**
+```bash
+git status
+```
+Know where you are before making changes.
+
+**2. Understand the task**
 - Read files before modifying
 - Check existing patterns
 - Identify tests to run
 
-**2. Make changes**
+**3. Make changes**
 - Edit existing files, Write new files
 - Follow project coding style
 - Stay focused on current task
 
-**3. Verify work**
+**4. Verify work**
 ```bash
 # Common verification commands
 pytest                    # Python tests
@@ -329,7 +335,7 @@ ruff check . && mypy .   # Python lint/types
 eslint . && tsc          # JS lint/types
 ```
 
-**4. Commit properly**
+**5. Commit properly**
 ```bash
 git add -A && git commit -m "$(cat <<'EOF'
 type: Brief description (50 chars)
@@ -342,7 +348,7 @@ EOF
 )"
 ```
 
-**5. Push and Create PR** (if task requires it)
+**6. Push and Create PR** (if task requires it)
 ```bash
 git push -u origin HEAD
 gh pr create --title "type: description" --body "..." --label "claudetm"
