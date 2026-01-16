@@ -1,13 +1,51 @@
 version: 2
 updates:
+  # Python dependencies (pip)
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
       interval: "weekly"
+      day: "monday"
+      time: "03:00"
     open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "python"
+    reviewers:
+      - "github-username"  # TODO: Replace with actual GitHub username
+    commit-message:
+      prefix: "chore(deps):"
+      include: "scope"
+    pull-request-branch-name:
+      separator: "/"
+    allow:
+      - dependency-type: "all"
+    versioning-strategy: "auto"
+    rebase-strategy: "auto"
+    groups:
+      minor-and-patch:
+        dependency-types:
+          - "patch"
+          - "minor"
+      major:
+        dependency-types:
+          - "major"
 
+  # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+      day: "monday"
+      time: "03:30"
     open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
+    reviewers:
+      - "github-username"  # TODO: Replace with actual GitHub username
+    commit-message:
+      prefix: "chore(actions):"
+      include: "scope"
+    pull-request-branch-name:
+      separator: "/"
