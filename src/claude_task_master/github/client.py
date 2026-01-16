@@ -13,12 +13,12 @@ class PRStatus(BaseModel):
     number: int
     ci_state: str  # PENDING, SUCCESS, FAILURE, ERROR
     unresolved_threads: int
-    resolved_threads: int
-    total_threads: int
-    checks_passed: int
-    checks_failed: int
-    checks_pending: int
-    checks_skipped: int
+    resolved_threads: int = 0
+    total_threads: int = 0
+    checks_passed: int = 0
+    checks_failed: int = 0
+    checks_pending: int = 0
+    checks_skipped: int = 0
     check_details: list[dict[str, Any]]
 
 
@@ -189,15 +189,17 @@ class GitHubClient:
 
         # Count check statuses
         checks_passed = sum(
-            1 for c in check_details if c.get("conclusion", "").lower() in ("success", "neutral")
+            1
+            for c in check_details
+            if (c.get("conclusion") or "").lower() in ("success", "neutral")
         )
         checks_failed = sum(
             1
             for c in check_details
-            if c.get("conclusion", "").lower() in ("failure", "error", "cancelled", "timed_out")
+            if (c.get("conclusion") or "").lower() in ("failure", "error", "cancelled", "timed_out")
         )
         checks_skipped = sum(
-            1 for c in check_details if c.get("conclusion", "").lower() == "skipped"
+            1 for c in check_details if (c.get("conclusion") or "").lower() == "skipped"
         )
         checks_pending = len(check_details) - checks_passed - checks_failed - checks_skipped
 

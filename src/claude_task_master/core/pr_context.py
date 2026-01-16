@@ -202,6 +202,14 @@ class PRContextManager:
                 try:
                     self._post_thread_reply(thread_id, reply_body)
                     console.detail(f"  Posted reply to thread {thread_id[:20]}...")
+
+                    # Resolve thread if action is "fixed"
+                    if action == "fixed":
+                        try:
+                            self.resolve_thread(thread_id)
+                            console.detail(f"  Resolved thread {thread_id[:20]}...")
+                        except Exception as resolve_err:
+                            console.warning(f"  Failed to resolve thread: {resolve_err}")
                 except Exception as e:
                     console.warning(f"  Failed to post reply: {e}")
 

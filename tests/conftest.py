@@ -436,6 +436,7 @@ def sample_pr_graphql_response() -> dict[str, Any]:
                                         "contexts": {
                                             "nodes": [
                                                 {
+                                                    "__typename": "CheckRun",
                                                     "name": "tests",
                                                     "status": "COMPLETED",
                                                     "conclusion": "SUCCESS",

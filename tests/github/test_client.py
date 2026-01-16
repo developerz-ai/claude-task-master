@@ -392,6 +392,7 @@ class TestGitHubClientGetPRStatus:
                                             "contexts": {
                                                 "nodes": [
                                                     {
+                                                        "__typename": "CheckRun",
                                                         "name": "tests",
                                                         "status": "COMPLETED",
                                                         "conclusion": "FAILURE",
@@ -1333,24 +1334,28 @@ class TestGitHubClientEdgeCases:
                                             "contexts": {
                                                 "nodes": [
                                                     {
+                                                        "__typename": "CheckRun",
                                                         "name": "unit-tests",
                                                         "status": "COMPLETED",
                                                         "conclusion": "SUCCESS",
                                                         "detailsUrl": "https://example.com/1",
                                                     },
                                                     {
+                                                        "__typename": "CheckRun",
                                                         "name": "integration-tests",
                                                         "status": "COMPLETED",
                                                         "conclusion": "FAILURE",
                                                         "detailsUrl": "https://example.com/2",
                                                     },
                                                     {
+                                                        "__typename": "CheckRun",
                                                         "name": "lint",
                                                         "status": "COMPLETED",
                                                         "conclusion": "SUCCESS",
                                                         "detailsUrl": "https://example.com/3",
                                                     },
                                                     {
+                                                        "__typename": "CheckRun",
                                                         "name": "build",
                                                         "status": "IN_PROGRESS",
                                                         "conclusion": None,
