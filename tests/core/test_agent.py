@@ -13,6 +13,7 @@ from claude_task_master.core.agent import (
     APIRateLimitError,
     APIServerError,
     APITimeoutError,
+    ContentFilterError,
     ModelType,
     QueryExecutionError,
     SDKImportError,
@@ -203,6 +204,34 @@ class TestAPIServerError:
         """Test APIServerError inherits from QueryExecutionError."""
         error = APIServerError(status_code=500)
         assert isinstance(error, QueryExecutionError)
+
+
+class TestContentFilterError:
+    """Tests for ContentFilterError exception class."""
+
+    def test_content_filter_error_basic(self):
+        """Test ContentFilterError with default message."""
+        error = ContentFilterError()
+        assert "content filtering" in error.message.lower()
+        assert "https://privacy.claude.com" in error.message
+
+    def test_content_filter_error_with_original(self):
+        """Test ContentFilterError with original exception."""
+        original = Exception("Output blocked by content filtering policy")
+        error = ContentFilterError(original)
+        assert error.original_error == original
+        assert error.details is not None
+
+    def test_content_filter_error_inheritance(self):
+        """Test ContentFilterError inherits from QueryExecutionError."""
+        error = ContentFilterError()
+        assert isinstance(error, QueryExecutionError)
+        assert isinstance(error, AgentError)
+
+    def test_content_filter_error_not_retryable(self):
+        """Test that ContentFilterError is not in transient errors."""
+        # ContentFilterError should NOT be retryable
+        assert ContentFilterError not in AgentWrapper.TRANSIENT_ERRORS
 
 
 class TestWorkingDirectoryError:
@@ -1467,6 +1496,19 @@ class TestAgentWrapperErrorClassification:
         classified = agent._classify_api_error(error)
         assert isinstance(classified, APIServerError)
         assert classified.status_code == 503
+
+    def test_classify_content_filter_error(self, agent):
+        """Test classification of content filtering errors."""
+        error = Exception("Output blocked by content filtering policy")
+        classified = agent._classify_api_error(error)
+        assert isinstance(classified, ContentFilterError)
+        assert classified.original_error == error
+
+    def test_classify_content_filter_error_variant(self, agent):
+        """Test classification of content filtering errors with different message."""
+        error = Exception("API Error: 400 content filtering blocked the response")
+        classified = agent._classify_api_error(error)
+        assert isinstance(classified, ContentFilterError)
 
     def test_classify_unknown_error(self, agent):
         """Test classification of unknown errors."""
