@@ -1,16 +1,84 @@
 name: Release
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'v*.*.*'  # Trigger on semantic version tags
+
+permissions:
+  contents: write  # For creating releases
+  id-token: write  # For trusted PyPI publishing
 
 jobs:
-  publish:
-    name: Publish to PyPI
+  verify:
+    name: Verify Version Consistency
     runs-on: ubuntu-latest
-    environment: release
-    permissions:
-      id-token: write  # Required for trusted publishing
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Get version from tag
+        id: get_version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Tag version: $VERSION"
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Verify pyproject.toml version
+        run: |
+          PYPROJECT_VERSION=$(grep -Po '(?<=^version = ")[^"]+' pyproject.toml)
+          TAG_VERSION=${{ steps.get_version.outputs.version }}
+          echo "pyproject.toml version: $PYPROJECT_VERSION"
+          echo "Tag version: $TAG_VERSION"
+          if [ "$PYPROJECT_VERSION" != "$TAG_VERSION" ]; then
+            echo "Error: Version mismatch!"
+            echo "pyproject.toml has $PYPROJECT_VERSION but tag is v$TAG_VERSION"
+            exit 1
+          fi
+
+      - name: Verify __init__.py version
+        run: |
+          INIT_VERSION=$(grep -Po '(?<=__version__ = ")[^"]+' src/claude_task_master/__init__.py)
+          TAG_VERSION=${{ steps.get_version.outputs.version }}
+          echo "__init__.py version: $INIT_VERSION"
+          echo "Tag version: $TAG_VERSION"
+          if [ "$INIT_VERSION" != "$TAG_VERSION" ]; then
+            echo "Error: Version mismatch!"
+            echo "__init__.py has $INIT_VERSION but tag is v$TAG_VERSION"
+            exit 1
+          fi
+
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    needs: verify
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install dependencies
+        run: uv pip install --system -e ".[dev]"
+
+      - name: Run tests
+        run: pytest --cov=claude_task_master --cov-report=term-missing
+
+  build:
+    name: Build Package
+    runs-on: ubuntu-latest
+    needs: [verify, test]
     steps:
       - uses: actions/checkout@v6
 
@@ -27,6 +95,76 @@ jobs:
 
       - name: Build package
         run: python -m build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: dist
+          path: dist/
+
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [verify, build]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Extract changelog for this version
+        id: changelog
+        run: |
+          VERSION=${{ needs.verify.outputs.version }}
+          echo "Extracting changelog for version $VERSION"
+
+          # Extract the section for this version from CHANGELOG.md
+          # Matches from "## [X.Y.Z]" to the next "## [" or end of file
+          CHANGELOG=$(awk -v ver="$VERSION" '
+            /^## \[/ {
+              if (found) exit
+              if ($0 ~ "\\[" ver "\\]") found=1
+              next
+            }
+            found && !/^## \[/ { print }
+          ' CHANGELOG.md)
+
+          # If no specific changelog found, use a generic message
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG="Release version $VERSION"
+          fi
+
+          # Write to file to preserve newlines
+          echo "$CHANGELOG" > changelog_body.txt
+          echo "Extracted changelog:"
+          cat changelog_body.txt
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v6
+        with:
+          name: dist
+          path: dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: v${{ needs.verify.outputs.version }}
+          body_path: changelog_body.txt
+          files: dist/*
+          draft: false
+          prerelease: ${{ contains(needs.verify.outputs.version, '-') }}
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-pypi:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    needs: [verify, build, create-release]
+    environment: release
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v6
+        with:
+          name: dist
+          path: dist/
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
