@@ -345,7 +345,7 @@ EOF
 **5. Push and Create PR** (if task requires it)
 ```bash
 git push -u origin HEAD
-gh pr create --title "type: description" --body "..."
+gh pr create --title "type: description" --body "..." --label "claudetm"
 ```
 
 **STOP AFTER PR CREATION - DO NOT:**
