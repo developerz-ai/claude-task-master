@@ -155,9 +155,19 @@ class WorkflowStageHandler:
                 self.state_manager.save_state(state)
                 return None
             elif pr_status.ci_state in ("FAILURE", "ERROR"):
+                # Wait for ALL checks to complete before handling failure
+                if pr_status.checks_pending > 0:
+                    console.warning(
+                        f"CI has failures but {pr_status.checks_pending} checks still pending..."
+                    )
+                    console.detail(f"Waiting for all checks to complete...")
+                    if not interruptible_sleep(self.CI_POLL_INTERVAL):
+                        return None
+                    return None  # Retry on next cycle
+
                 console.warning(
                     f"CI failed: {pr_status.checks_failed} failed, "
-                    f"{pr_status.checks_passed} passed, {pr_status.checks_pending} pending"
+                    f"{pr_status.checks_passed} passed"
                 )
                 for check in pr_status.check_details:
                     conclusion = (check.get("conclusion") or "").upper()
