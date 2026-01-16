@@ -6,7 +6,14 @@ import time
 from typing import TYPE_CHECKING
 
 from . import console
-from .agent import AgentError, AgentWrapper, ModelType, TaskComplexity, parse_task_complexity
+from .agent import (
+    AgentError,
+    AgentWrapper,
+    ContentFilterError,
+    ModelType,
+    TaskComplexity,
+    parse_task_complexity,
+)
 from .key_listener import check_escape, reset_escape, start_listening, stop_listening
 from .planner import Planner
 from .state import StateError, StateManager, TaskState
@@ -446,6 +453,16 @@ class WorkLoopOrchestrator:
                 console.detail(e.details)
             self.state_manager.create_state_backup()
             raise
+        except ContentFilterError as e:
+            # Content filtering is not retryable - provide clear guidance
+            console.error(f"Content filter triggered: {e.message}")
+            console.info("Suggestions:")
+            console.detail("  1. Break this task into smaller sub-tasks")
+            console.detail("  2. Rephrase the task description")
+            console.detail("  3. Skip this task and continue manually")
+            state.status = "blocked"
+            self.state_manager.save_state(state)
+            return 1  # Blocked
         except AgentError as e:
             console.error(f"Agent error: {e.message}")
             if e.details:

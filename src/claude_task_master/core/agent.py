@@ -117,6 +117,22 @@ class APIServerError(QueryExecutionError):
         )
 
 
+class ContentFilterError(QueryExecutionError):
+    """Raised when output is blocked by content filtering policy.
+
+    This error is NOT retryable - the content itself triggered the filter.
+    See: https://privacy.claude.com/en/articles/9205721-why-am-i-receiving-an-output-blocked-by-content-filtering-policy-error
+    """
+
+    def __init__(self, original_error: Exception | None = None):
+        super().__init__(
+            "Output blocked by content filtering policy. "
+            "Try rephrasing your request or breaking it into smaller tasks. "
+            "See: https://privacy.claude.com/en/articles/9205721",
+            original_error,
+        )
+
+
 class WorkingDirectoryError(AgentError):
     """Raised when there's an issue with the working directory."""
 
@@ -524,7 +540,12 @@ Be strict - only say PASS if ALL criteria are truly met."""
                         flush=True,
                     )
                     raise
-            except (APIAuthenticationError, SDKImportError, SDKInitializationError):
+            except (
+                APIAuthenticationError,
+                ContentFilterError,
+                SDKImportError,
+                SDKInitializationError,
+            ):
                 # These errors should not be retried
                 raise
             except AgentError:
@@ -715,6 +736,10 @@ Be strict - only say PASS if ALL criteria are truly met."""
         """
         error_str = str(error).lower()
         error_type = type(error).__name__
+
+        # Check for content filtering errors (not retryable)
+        if "content filtering" in error_str or "output blocked" in error_str:
+            return ContentFilterError(error)
 
         # Check for rate limiting
         if "rate" in error_str and "limit" in error_str:
