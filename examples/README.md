@@ -35,6 +35,10 @@ claudetm start "Refactor API client to use async/await" --max-sessions 5 --pause
 7. **[CI/CD Integration](./07-cicd.md)** - Working with GitHub Actions
 8. **[Advanced Workflows](./08-advanced-workflows.md)** - Complex multi-task scenarios
 
+## Notebooks
+
+- **[Orchestrator-Workers Workflow](./orchestrator-workers.ipynb)** - Pattern for breaking down tasks and running them in parallel using worker LLMs
+
 ## Common Patterns
 
 ### Resume After Interruption
