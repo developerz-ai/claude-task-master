@@ -113,12 +113,32 @@ def build_planning_prompt(goal: str, context: str | None = None) -> str:
 
 Your mission: **{goal}**
 
-**CRITICAL: This is PLANNING ONLY. You must STOP after creating the plan.**
+## TOOL RESTRICTIONS (MANDATORY)
+
+**ALLOWED TOOLS (use ONLY these):**
+- `Read` - Read files to understand the codebase
+- `Glob` - Find files by pattern
+- `Grep` - Search for code patterns
+
+**FORBIDDEN TOOLS (NEVER use during planning):**
+- ❌ `Write` - Do NOT write any files
+- ❌ `Edit` - Do NOT edit any files
+- ❌ `Bash` - Do NOT run any commands
+- ❌ `Task` - Do NOT launch any agents
+- ❌ `TodoWrite` - Do NOT use todo tracking
+- ❌ `WebFetch` - Do NOT fetch web pages
+- ❌ `WebSearch` - Do NOT search the web
+
+**WHY**: The orchestrator will save your plan to `plan.md` automatically.
+You just need to OUTPUT the plan as TEXT in your response.
+
+## PLANNING RULES
+
 - Do NOT write code
 - Do NOT create git branches
 - Do NOT run tests
-- Do NOT launch Task agents to do work
-- ONLY explore the codebase and create the plan"""
+- Do NOT create files
+- ONLY explore and OUTPUT your plan as text"""
     )
 
     # Context section if available
@@ -199,14 +219,21 @@ Understand the architecture before creating tasks.""",
         "STOP - Planning Complete",
         """**After creating the task list and success criteria, STOP.**
 
-The orchestrator will:
-1. Save your plan to `plan.md`
-2. Save criteria to `criteria.txt`
-3. Start a NEW session for each task
+**IMPORTANT: Do NOT use Write tool. Just OUTPUT your plan as text.**
 
-**Do NOT start implementing tasks. Your job is ONLY to plan.**
+The orchestrator will automatically:
+1. Extract your plan from your response
+2. Save it to `plan.md`
+3. Save criteria to `criteria.txt`
+4. Start a NEW session for each task
 
-End your response with:
+**Do NOT:**
+- Write any files (orchestrator handles this)
+- Start implementing tasks
+- Run any bash commands
+- Launch any Task agents
+
+**Just OUTPUT your plan as text and end with:**
 ```
 PLANNING COMPLETE
 ```""",

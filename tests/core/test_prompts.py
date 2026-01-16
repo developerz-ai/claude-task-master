@@ -122,7 +122,8 @@ class TestBuildPlanningPrompt:
         assert "Step 1: Explore Codebase" in prompt
         assert "Step 2: Create Task List" in prompt
         assert "Success Criteria" in prompt
-        assert "PLANNING ONLY" in prompt  # Critical planning-only instruction
+        assert "PLANNING MODE" in prompt  # Critical planning-only instruction
+        assert "TOOL RESTRICTIONS" in prompt  # Tool restrictions section
         assert "STOP" in prompt  # Stop instruction
 
     def test_with_context(self) -> None:
@@ -157,7 +158,7 @@ class TestBuildPlanningPrompt:
 
         assert "STOP - Planning Complete" in prompt
         assert "PLANNING COMPLETE" in prompt
-        assert "Do NOT start implementing" in prompt
+        assert "Start implementing tasks" in prompt  # In "Do NOT:" list
 
 
 # =============================================================================
