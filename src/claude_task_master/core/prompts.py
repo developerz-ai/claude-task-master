@@ -123,7 +123,9 @@ Your mission: **{goal}**"""
         "Phase 1: Setup & Explore",
         """**First, set up your work branch:**
 ```bash
-git checkout -b claudetm/task-$(date +%Y%m%d-%H%M%S)
+# Format: claudetm/<type>/<short-description>
+# Types: feat, fix, refactor, docs, test, chore
+git checkout -b claudetm/feat/your-feature-name
 ```
 
 Then thoroughly analyze the codebase:
@@ -284,9 +286,9 @@ EOF
 
 **5. Handle PRs** (CRITICAL - complete full cycle)
 ```bash
-# 1. Create PR
+# 1. Create PR with claudetm label
 git push -u origin HEAD
-gh pr create --title "..." --body "..."
+gh pr create --title "..." --body "..." --label "claudetm"
 
 # 2. Wait for CI
 gh pr checks --watch
