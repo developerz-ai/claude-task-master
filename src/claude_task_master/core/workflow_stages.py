@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -61,7 +62,7 @@ class WorkflowStageHandler:
         # Try to detect PR number from current branch if not already set
         if state.current_pr is None:
             try:
-                pr_number = self.github_client.get_pr_for_current_branch()
+                pr_number = self.github_client.get_pr_for_current_branch(cwd=os.getcwd())
                 if pr_number:
                     console.success(f"Detected PR #{pr_number} for current branch")
                     state.current_pr = pr_number

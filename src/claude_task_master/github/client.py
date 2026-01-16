@@ -166,14 +166,19 @@ class GitHubClient:
             check_details=check_details,
         )
 
-    def get_pr_for_current_branch(self) -> int | None:
-        """Get PR number for the current branch, if one exists."""
+    def get_pr_for_current_branch(self, cwd: str | None = None) -> int | None:
+        """Get PR number for the current branch, if one exists.
+
+        Args:
+            cwd: Working directory to run the command in (project root).
+        """
         try:
             result = subprocess.run(
                 ["gh", "pr", "view", "--json", "number"],
                 check=True,
                 capture_output=True,
                 text=True,
+                cwd=cwd,
             )
             data = json.loads(result.stdout)
             return data.get("number")
