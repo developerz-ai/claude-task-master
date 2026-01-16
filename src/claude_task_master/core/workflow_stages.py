@@ -35,6 +35,14 @@ class WorkflowStageHandler:
     # CI polling configuration
     CI_POLL_INTERVAL = 10  # seconds between CI status checks
 
+    @staticmethod
+    def _get_check_name(check: dict) -> str:
+        """Get check name from either CheckRun or StatusContext.
+
+        CheckRun has 'name' field, StatusContext has 'context' field.
+        """
+        return check.get("name") or check.get("context", "unknown")
+
     def __init__(
         self,
         agent: AgentWrapper,
@@ -104,7 +112,8 @@ class WorkflowStageHandler:
                 console.warning(f"CI failed: {pr_status.ci_state}")
                 for check in pr_status.check_details:
                     if check.get("conclusion") in ("failure", "error"):
-                        console.detail(f"  ✗ {check['name']}: {check.get('conclusion')}")
+                        check_name = self._get_check_name(check)
+                        console.detail(f"  ✗ {check_name}: {check.get('conclusion')}")
                 state.workflow_stage = "ci_failed"
                 self.state_manager.save_state(state)
                 return None
@@ -113,11 +122,11 @@ class WorkflowStageHandler:
                 # Show individual check statuses if available
                 for check in pr_status.check_details:
                     status = check.get("status", "unknown")
-                    name = check.get("name", "unknown")
+                    check_name = self._get_check_name(check)
                     if status == "in_progress":
-                        console.detail(f"  ⏳ {name}: running")
+                        console.detail(f"  ⏳ {check_name}: running")
                     elif status == "queued":
-                        console.detail(f"  ⏸ {name}: queued")
+                        console.detail(f"  ⏸ {check_name}: queued")
                 console.detail(f"Next check in {self.CI_POLL_INTERVAL}s...")
                 if not interruptible_sleep(self.CI_POLL_INTERVAL):
                     return None  # Let main loop handle cancellation
@@ -125,8 +134,10 @@ class WorkflowStageHandler:
 
         except Exception as e:
             console.warning(f"Error checking CI: {e}")
-            state.workflow_stage = "waiting_reviews"
-            self.state_manager.save_state(state)
+            console.detail("Will retry on next cycle...")
+            # Stay in waiting_ci and retry - do NOT fall through to merge
+            if not interruptible_sleep(self.CI_POLL_INTERVAL):
+                return None
             return None
 
     def handle_ci_failed_stage(self, state: TaskState) -> int | None:
@@ -186,10 +197,12 @@ After fixing, end with: TASK COMPLETE"""
 
             # Check if ANY checks are still pending (CI, review bots, etc)
             pending_checks = [
-                check.get("name", "unknown")
+                self._get_check_name(check)
                 for check in pr_status.check_details
-                if check.get("status", "").upper() not in ("COMPLETED", "SUCCESS", "FAILURE", "ERROR", "SKIPPED")
-                or check.get("conclusion") is None and check.get("status", "").upper() != "COMPLETED"
+                if check.get("status", "").upper()
+                not in ("COMPLETED", "SUCCESS", "FAILURE", "ERROR", "SKIPPED")
+                or check.get("conclusion") is None
+                and check.get("status", "").upper() != "COMPLETED"
             ]
 
             if pending_checks:
@@ -211,8 +224,10 @@ After fixing, end with: TASK COMPLETE"""
 
         except Exception as e:
             console.warning(f"Error checking reviews: {e}")
-            state.workflow_stage = "ready_to_merge"
-            self.state_manager.save_state(state)
+            console.detail("Will retry on next cycle...")
+            # Stay in waiting_reviews and retry - do NOT fall through to merge
+            if not interruptible_sleep(self.CI_POLL_INTERVAL):
+                return None
             return None
 
     def handle_addressing_reviews_stage(self, state: TaskState) -> int | None:

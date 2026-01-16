@@ -321,6 +321,7 @@ class TestToolConfig:
             "TodoWrite",
             "WebSearch",
             "WebFetch",
+            "Skill",
         ]
         assert ToolConfig.WORKING.value == expected
 
@@ -493,6 +494,7 @@ class TestAgentWrapperGetToolsForPhase:
             "TodoWrite",
             "WebSearch",
             "WebFetch",
+            "Skill",
         ]
         assert tools == expected
 
@@ -510,6 +512,7 @@ class TestAgentWrapperGetToolsForPhase:
             "TodoWrite",
             "WebSearch",
             "WebFetch",
+            "Skill",
         ]
         assert tools == expected
 
@@ -527,6 +530,7 @@ class TestAgentWrapperGetToolsForPhase:
             "TodoWrite",
             "WebSearch",
             "WebFetch",
+            "Skill",
         ]
         assert tools == expected
 
