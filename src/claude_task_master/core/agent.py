@@ -675,7 +675,7 @@ class AgentWrapper:
                     permission_mode="bypassPermissions",  # For MVP, bypass permissions
                     model=model_name,  # Specify the model to use
                     cwd=str(self.working_dir),  # Project directory for CLAUDE.md
-                    setting_sources=["user", "project"],  # Load CLAUDE.md and Skills
+                    setting_sources=["user", "local", "project"],  # Load all settings/skills
                     hooks=self.hooks,  # type: ignore[arg-type]  # Compatible HookMatcher
                 )
             except Exception as e:
