@@ -27,6 +27,15 @@ from claude_task_master.core.checkpoint import (
     CheckpointRewindError,
     get_checkpointing_env,
 )
+from claude_task_master.core.circuit_breaker import (
+    CircuitBreaker,
+    CircuitBreakerConfig,
+    CircuitBreakerError,
+    CircuitBreakerMetrics,
+    CircuitBreakerRegistry,
+    CircuitState,
+    get_circuit_breaker,
+)
 from claude_task_master.core.credentials import (
     CredentialError,
     CredentialManager,
@@ -61,26 +70,6 @@ from claude_task_master.core.orchestrator import (
     WorkLoopOrchestrator,
     WorkSessionError,
 )
-from claude_task_master.core.prompts import (
-    PromptBuilder,
-    PromptSection,
-    build_context_extraction_prompt,
-    build_error_recovery_prompt,
-    build_planning_prompt,
-    build_task_completion_check_prompt,
-    build_verification_prompt,
-    build_work_prompt,
-)
-from claude_task_master.core.rate_limit import RateLimitConfig
-from claude_task_master.core.circuit_breaker import (
-    CircuitBreaker,
-    CircuitBreakerConfig,
-    CircuitBreakerError,
-    CircuitBreakerMetrics,
-    CircuitBreakerRegistry,
-    CircuitState,
-    get_circuit_breaker,
-)
 from claude_task_master.core.parallel import (
     AsyncParallelExecutor,
     ParallelExecutor,
@@ -95,6 +84,17 @@ from claude_task_master.core.progress_tracker import (
     SessionMetrics,
     TrackerConfig,
 )
+from claude_task_master.core.prompts import (
+    PromptBuilder,
+    PromptSection,
+    build_context_extraction_prompt,
+    build_error_recovery_prompt,
+    build_planning_prompt,
+    build_task_completion_check_prompt,
+    build_verification_prompt,
+    build_work_prompt,
+)
+from claude_task_master.core.rate_limit import RateLimitConfig
 from claude_task_master.core.shutdown import (
     ShutdownManager,
     add_shutdown_callback,

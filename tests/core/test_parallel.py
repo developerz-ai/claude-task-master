@@ -1,8 +1,8 @@
 """Tests for parallel task executor."""
 
 import asyncio
+
 import pytest
-import time
 
 from claude_task_master.core.parallel import (
     AsyncParallelExecutor,
@@ -113,9 +113,7 @@ class TestParallelExecutor:
         executor = ParallelExecutor()
 
         for i in range(3):
-            executor.add_task(
-                ParallelTask(task_id=f"task{i}", func=lambda x=i: f"result{x}")
-            )
+            executor.add_task(ParallelTask(task_id=f"task{i}", func=lambda x=i: f"result{x}"))
 
         results = executor.execute_all()
 
@@ -125,9 +123,7 @@ class TestParallelExecutor:
 
     def test_execute_failing_task(self):
         """Test executing a failing task."""
-        executor = ParallelExecutor(
-            config=ParallelExecutorConfig(max_retries=0)
-        )
+        executor = ParallelExecutor(config=ParallelExecutorConfig(max_retries=0))
 
         def failing_func():
             raise ValueError("test error")
@@ -155,9 +151,7 @@ class TestParallelExecutor:
         executor = ParallelExecutor()
 
         for i in range(3):
-            executor.add_task(
-                ParallelTask(task_id=f"task{i}", func=lambda: "result")
-            )
+            executor.add_task(ParallelTask(task_id=f"task{i}", func=lambda: "result"))
 
         progress = executor.get_progress()
         assert progress["pending"] == 3

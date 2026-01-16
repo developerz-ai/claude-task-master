@@ -1,7 +1,8 @@
 """Tests for progress tracker / stall detection."""
 
-import pytest
 import time
+
+import pytest
 
 from claude_task_master.core.progress_tracker import (
     ExecutionTracker,

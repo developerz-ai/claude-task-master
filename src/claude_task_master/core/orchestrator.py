@@ -13,6 +13,7 @@ from .agent import (
     TaskComplexity,
     parse_task_complexity,
 )
+from .circuit_breaker import CircuitBreakerError
 from .key_listener import (
     get_cancellation_reason,
     is_cancellation_requested,
@@ -21,6 +22,10 @@ from .key_listener import (
     stop_listening,
 )
 from .planner import Planner
+from .progress_tracker import (
+    ExecutionTracker,
+    TrackerConfig,
+)
 from .shutdown import (
     interruptible_sleep,
     register_handlers,
@@ -191,6 +196,7 @@ class WorkLoopOrchestrator:
         planner: Planner,
         github_client: GitHubClient | None = None,
         logger: TaskLogger | None = None,
+        tracker_config: TrackerConfig | None = None,
     ):
         """Initialize orchestrator.
 
@@ -200,12 +206,14 @@ class WorkLoopOrchestrator:
             planner: The planner for planning phases.
             github_client: Optional GitHub client for PR operations.
             logger: Optional logger for recording session activity.
+            tracker_config: Optional config for execution tracker (stall detection).
         """
         self.agent = agent
         self.state_manager = state_manager
         self.planner = planner
         self._github_client = github_client
         self.logger = logger
+        self.tracker = ExecutionTracker(config=tracker_config or TrackerConfig.default())
 
     @property
     def github_client(self) -> GitHubClient:
@@ -268,11 +276,16 @@ class WorkLoopOrchestrator:
             unregister_handlers()
             console.newline()
             console.warning(f"{reason} - pausing...")
+            # End any active tracker session
+            self.tracker.end_session(outcome="cancelled")
             state.status = "paused"
             self.state_manager.save_state(state)
             backup_path = self.state_manager.create_state_backup()
             if backup_path:
                 console.detail(f"State backup saved: {backup_path}")
+            # Show cost report on pause
+            console.newline()
+            console.info(self.tracker.get_cost_report())
             console.info("Use 'claudetm resume' to continue")
             return 2  # Paused
 
@@ -287,11 +300,29 @@ class WorkLoopOrchestrator:
                         reason = f"Received {reason}"
                     return _handle_pause(reason)
 
+                # Check for stalls/loops using execution tracker
+                should_abort, abort_reason = self.tracker.should_abort()
+                if should_abort:
+                    console.newline()
+                    console.warning(f"Execution issue detected: {abort_reason}")
+                    console.detail("Diagnostics: " + str(self.tracker.get_diagnostics()))
+                    state.status = "blocked"
+                    self.state_manager.save_state(state)
+                    stop_listening()
+                    unregister_handlers()
+                    # Show cost report before exit
+                    console.newline()
+                    console.info(self.tracker.get_cost_report())
+                    return 1
+
                 # Run the PR workflow cycle
                 result = self._run_workflow_cycle(state)
                 if result is not None:
                     stop_listening()
                     unregister_handlers()
+                    # Show cost report before exit
+                    console.newline()
+                    console.info(self.tracker.get_cost_report())
                     return result
 
                 # Check session limit
@@ -302,6 +333,9 @@ class WorkLoopOrchestrator:
                     self.state_manager.save_state(state)
                     stop_listening()
                     unregister_handlers()
+                    # Show cost report before exit
+                    console.newline()
+                    console.info(self.tracker.get_cost_report())
                     return 1
 
             # All tasks complete - verify success criteria
@@ -313,18 +347,27 @@ class WorkLoopOrchestrator:
                     self.state_manager.save_state(state)
                     self.state_manager.cleanup_on_success(state.run_id)
                     console.success("All tasks completed successfully!")
+                    # Show cost report on success
+                    console.newline()
+                    console.info(self.tracker.get_cost_report())
                     return 0  # Success
                 else:
                     self.state_manager.load_criteria() or "unknown"
                     console.warning("Success criteria verification failed")
                     state.status = "blocked"
                     self.state_manager.save_state(state)
+                    # Show cost report before exit
+                    console.newline()
+                    console.info(self.tracker.get_cost_report())
                     return 1  # Blocked
             except Exception as e:
                 console.warning(f"Error during success verification: {e}")
                 # Still mark as blocked since we can't verify
                 state.status = "blocked"
                 self.state_manager.save_state(state)
+                # Show cost report before exit
+                console.newline()
+                console.info(self.tracker.get_cost_report())
                 return 1
 
         except KeyboardInterrupt:
@@ -490,6 +533,16 @@ class WorkLoopOrchestrator:
             state.status = "blocked"
             self.state_manager.save_state(state)
             return 1  # Blocked
+        except CircuitBreakerError as e:
+            # Circuit breaker is open - API unavailable
+            console.warning(f"Circuit breaker: {e.message}")
+            if e.time_until_retry > 0:
+                console.detail(f"API circuit open - retry possible in {e.time_until_retry:.0f}s")
+            console.info("The API has been experiencing repeated failures.")
+            console.detail("Wait and try again, or check API status.")
+            state.status = "blocked"
+            self.state_manager.save_state(state)
+            return 1  # Blocked
         except AgentError as e:
             console.error(f"Agent error: {e.message}")
             if e.details:
@@ -502,16 +555,36 @@ class WorkLoopOrchestrator:
 
     def _handle_working_stage(self, state: TaskState) -> int | None:
         """Handle the working stage - implement the current task."""
+        # Get task description for tracker
+        task_desc = self._get_current_task_description(state)
+
+        # Start execution tracker session
+        self.tracker.start_session(
+            session_id=state.session_count + 1,
+            task_index=state.current_task_index,
+            task_description=task_desc,
+        )
+
         # Log session start
         if self.logger:
             self.logger.start_session(state.session_count + 1, "working")
 
+        outcome = "completed"
         try:
             self._run_work_session(state)
+        except Exception:
+            outcome = "failed"
+            self.tracker.record_error()
+            raise
         finally:
+            # End tracker session
+            self.tracker.end_session(outcome=outcome)
             # Log session end
             if self.logger:
-                self.logger.end_session("completed")
+                self.logger.end_session(outcome)
+
+        # Record task progress
+        self.tracker.record_task_progress(state.current_task_index)
 
         # After work session, check if we should create a PR
         # For now, always try to create/update PR after work

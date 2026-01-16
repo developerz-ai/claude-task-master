@@ -113,9 +113,7 @@ class ExecutionTracker:
             handle_issue(state)
     """
 
-    config: TrackerConfig = field(
-        default_factory=TrackerConfig.default
-    )
+    config: TrackerConfig = field(default_factory=TrackerConfig.default)
     _sessions: list[SessionMetrics] = field(default_factory=list)
     _current_session: SessionMetrics | None = field(default=None, init=False)
     _task_attempts: dict[int, int] = field(default_factory=dict)

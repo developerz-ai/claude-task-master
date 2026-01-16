@@ -1,8 +1,6 @@
 """Tests for circuit breaker pattern."""
 
 import pytest
-import time
-import threading
 
 from claude_task_master.core.circuit_breaker import (
     CircuitBreaker,

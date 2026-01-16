@@ -241,8 +241,7 @@ class ParallelExecutor:
             if not ready:
                 # Circular dependency or missing dependency
                 raise ValueError(
-                    f"Cannot resolve dependencies. Remaining: {remaining}, "
-                    f"Completed: {completed}"
+                    f"Cannot resolve dependencies. Remaining: {remaining}, Completed: {completed}"
                 )
 
             # Sort by priority (higher first)
@@ -298,9 +297,7 @@ class ParallelExecutor:
                 # Wait for all tasks in batch to complete
                 for task_id, future in futures.items():
                     try:
-                        timeout = (
-                            self._tasks[task_id].timeout or self.config.task_timeout
-                        )
+                        timeout = self._tasks[task_id].timeout or self.config.task_timeout
                         future.result(timeout=timeout + 10)  # Extra buffer for cleanup
                     except Exception as e:
                         # Handle timeout or other errors
@@ -455,7 +452,5 @@ class AsyncParallelExecutor:
         Returns:
             Dictionary mapping task IDs to results.
         """
-        tasks = [
-            (f"{task_id_prefix}_{i}", func(item)) for i, item in enumerate(items)
-        ]
+        tasks = [(f"{task_id_prefix}_{i}", func(item)) for i, item in enumerate(items)]
         return await self.gather(tasks)

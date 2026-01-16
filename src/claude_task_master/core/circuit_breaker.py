@@ -148,9 +148,7 @@ class CircuitBreaker:
     name: str
     config: CircuitBreakerConfig = field(default_factory=CircuitBreakerConfig.default)
     _state: CircuitState = field(default=CircuitState.CLOSED, init=False)
-    _metrics: CircuitBreakerMetrics = field(
-        default_factory=CircuitBreakerMetrics, init=False
-    )
+    _metrics: CircuitBreakerMetrics = field(default_factory=CircuitBreakerMetrics, init=False)
     _lock: threading.RLock = field(default_factory=threading.RLock, init=False)
     _last_state_change: float = field(default_factory=time.time, init=False)
     _half_open_calls: int = field(default=0, init=False)

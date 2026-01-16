@@ -4,7 +4,6 @@ This module provides helper functions for making LLM calls and parsing XML respo
 Used by the orchestrator-workers notebook examples.
 """
 
-import os
 import re
 
 import anthropic
