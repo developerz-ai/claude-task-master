@@ -274,7 +274,9 @@ def build_work_prompt(
     """
     branch_info = ""
     if required_branch:
-        branch_info = f"\n\n**Required Branch:** `{required_branch}`"
+        branch_info = f"\n\n**Current Branch:** `{required_branch}`"
+        if required_branch in ("main", "master"):
+            branch_info += "\n⚠️ You are on main/master - create a feature branch before making changes!"
 
     builder = PromptBuilder(
         intro=f"""You are Claude Task Master executing a SINGLE task.
@@ -321,8 +323,8 @@ def build_work_prompt(
 git status
 ```
 - Know where you are before making changes
-- Verify you're on the **Required Branch** specified above
-- If on wrong branch, checkout to the correct one or create it
+- If on main/master, create a feature branch first
+- If already on a feature branch, continue working there
 
 **2. Understand the task**
 - Read files before modifying
