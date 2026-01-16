@@ -867,6 +867,8 @@ class StateManager:
 
         # Save each comment to a separate file
         for i, comment in enumerate(comments, 1):
+            thread_id = comment.get("thread_id", "")
+            comment_id = comment.get("comment_id", "")
             author = comment.get("author", "unknown")
             path = comment.get("path", "general")
             line = comment.get("line", "N/A")
@@ -879,7 +881,9 @@ class StateManager:
             safe_line = str(line).replace("/", "_").replace("\\", "_") if line else "0"
             filename = f"{i:03d}_{safe_path}_L{safe_line}.txt"
 
-            content = f"""File: {path}
+            content = f"""Thread ID: {thread_id}
+Comment ID: {comment_id}
+File: {path}
 Line: {line}
 Author: {author}
 Status: {"Resolved" if is_resolved else "Unresolved"}

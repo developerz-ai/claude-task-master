@@ -760,6 +760,8 @@ After fixing, end with: TASK COMPLETE"""
         pr_dir = self.state_manager.get_pr_dir(state.current_pr) if state.current_pr else None
         comments_path = f"{pr_dir}/comments/" if pr_dir else ".claude-task-master/debugging/"
 
+        resolve_json_path = f"{pr_dir}/resolve-comments.json" if pr_dir else ".claude-task-master/debugging/resolve-comments.json"
+
         task_description = f"""PR #{state.current_pr} has review comments to address.
 
 **Read the review comments from:** `{comments_path}`
@@ -773,8 +775,25 @@ Please:
    - Explain why it's not needed
 3. Run tests to verify
 4. Commit and push the fixes
+5. Create a resolution summary file at: `{resolve_json_path}`
 
-After addressing ALL comments, end with: TASK COMPLETE"""
+**Resolution file format:**
+```json
+{{
+  "pr": {state.current_pr},
+  "resolutions": [
+    {{
+      "thread_id": "THREAD_ID_FROM_COMMENT_FILE",
+      "action": "fixed|explained|skipped",
+      "message": "Brief explanation of what was done"
+    }}
+  ]
+}}
+```
+
+Copy the Thread ID from each comment file into the resolution JSON.
+
+After addressing ALL comments and creating the resolution file, end with: TASK COMPLETE"""
 
         # Run agent
         try:
@@ -810,16 +829,18 @@ After addressing ALL comments, end with: TASK COMPLETE"""
             repo_info = result.stdout.strip()
             owner, repo = repo_info.split("/")
 
-            # GraphQL query to get structured comments
+            # GraphQL query to get structured comments with thread IDs
             query = """
             query($owner: String!, $repo: String!, $pr: Int!) {
               repository(owner: $owner, name: $repo) {
                 pullRequest(number: $pr) {
                   reviewThreads(first: 100) {
                     nodes {
+                      id
                       isResolved
                       comments(first: 10) {
                         nodes {
+                          id
                           author { login }
                           body
                           path
@@ -860,9 +881,12 @@ After addressing ALL comments, end with: TASK COMPLETE"""
             for thread in threads:
                 if thread["isResolved"]:
                     continue  # Skip resolved threads
+                thread_id = thread.get("id")
                 for comment in thread["comments"]["nodes"]:
                     comments.append(
                         {
+                            "thread_id": thread_id,
+                            "comment_id": comment.get("id"),
                             "author": comment["author"]["login"],
                             "body": comment["body"],
                             "path": comment.get("path"),
