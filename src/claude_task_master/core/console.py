@@ -1,4 +1,9 @@
-"""Console output utilities with colored [claudetm HH:MM:SS] prefix."""
+"""Console output utilities with colored prefixes.
+
+Prefixes:
+- [claudetm HH:MM:SS] cyan - orchestrator messages
+- [claude HH:MM:SS] orange - Claude's tool usage
+"""
 
 from datetime import datetime
 
@@ -8,15 +13,22 @@ GREEN = "\033[32m"
 YELLOW = "\033[33m"
 RED = "\033[31m"
 MAGENTA = "\033[35m"
+ORANGE = "\033[38;5;208m"  # Anthropic orange
 BOLD = "\033[1m"
 DIM = "\033[2m"
 RESET = "\033[0m"
 
 
 def _prefix() -> str:
-    """Generate prefix with current timestamp."""
+    """Generate orchestrator prefix [claudetm] with timestamp."""
     timestamp = datetime.now().strftime("%H:%M:%S")
     return f"{CYAN}{BOLD}[claudetm {timestamp}]{RESET}"
+
+
+def _claude_prefix() -> str:
+    """Generate Claude prefix [claude] with timestamp (orange)."""
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    return f"{ORANGE}{BOLD}[claude {timestamp}]{RESET}"
 
 
 def info(message: str, *, end: str = "\n", flush: bool = False) -> None:
@@ -45,8 +57,8 @@ def detail(message: str, *, end: str = "\n", flush: bool = False) -> None:
 
 
 def tool(message: str, *, end: str = "\n", flush: bool = False) -> None:
-    """Print tool-related message with prefix (magenta)."""
-    print(f"{_prefix()} {MAGENTA}{message}{RESET}", end=end, flush=flush)
+    """Print Claude's tool usage with [claude] prefix (orange)."""
+    print(f"{_claude_prefix()} {message}", end=end, flush=flush)
 
 
 def stream(text: str, *, end: str = "", flush: bool = True) -> None:
