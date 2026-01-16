@@ -163,10 +163,15 @@ Understand the architecture before creating tasks.""",
         """Create an atomic, testable task list using this format:
 
 ```markdown
-- [ ] `[coding]` Complex implementation requiring architecture decisions
-- [ ] `[quick]` Simple fix, config change, or typo correction
-- [ ] `[general]` Standard task like tests, docs, or refactoring
+- [ ] `[coding]` Add `calculate_total()` method to `src/cart/service.py:CartService`
+- [ ] `[quick]` Fix typo in `src/config.py` line 42
+- [ ] `[general]` Add tests for `CartService` in `tests/test_cart.py`
 ```
+
+**IMPORTANT: Include file paths and symbols in EVERY task:**
+- File paths: `src/module/file.py`, `tests/test_file.py`
+- Symbols: `ClassName`, `method_name()`, `CONSTANT_NAME`
+- Line refs when relevant: `file.py:123`
 
 **Complexity tags (for model routing):**
 - `[coding]` → Opus (smartest) - new features, complex logic
@@ -179,6 +184,7 @@ Understand the architecture before creating tasks.""",
 - Atomic: One PR-able unit of work per task
 - Ordered: Dependencies first
 - Grouped: Related tasks for same PR
+- Specific: Include exact file paths and symbol names
 
 **Include git branch creation as first task:**
 ```markdown
