@@ -32,7 +32,7 @@ class WorkflowStageHandler:
     """
 
     # CI polling configuration
-    CI_POLL_INTERVAL = 30  # seconds between CI status checks
+    CI_POLL_INTERVAL = 10  # seconds between CI status checks
 
     def __init__(
         self,

@@ -202,7 +202,12 @@ def start(
 
 
 @app.command()
-def resume() -> None:
+def resume(
+    force: Annotated[
+        bool,
+        typer.Option("--force", "-f", help="Force resume from failed/blocked state"),
+    ] = False,
+) -> None:
     """Resume a paused or interrupted task.
 
     Use this to continue a task that was:
@@ -210,8 +215,11 @@ def resume() -> None:
     - Interrupted by Ctrl+C
     - Blocked and waiting for intervention
 
+    Use --force to recover from a failed state.
+
     Examples:
         claudetm resume
+        claudetm resume --force  # Recover from failed state
     """
     console.print("[bold blue]Resuming task...[/bold blue]")
 
@@ -222,6 +230,14 @@ def resume() -> None:
             console.print("[red]Error: No task found to resume.[/red]")
             console.print("Use 'start' to begin a new task.")
             raise typer.Exit(1)
+
+        # Force reset status if requested
+        if force:
+            state = state_manager.load_state()
+            if state.status in ("failed", "blocked"):
+                console.print(f"[yellow]Force resetting status from '{state.status}' to 'in_progress'[/yellow]")
+                state.status = "in_progress"
+                state_manager.save_state(state)
 
         # Load state and validate it's resumable using comprehensive validation
         try:
