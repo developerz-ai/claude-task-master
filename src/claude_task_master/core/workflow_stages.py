@@ -220,11 +220,14 @@ class WorkflowStageHandler:
 
 Use Glob to find all .txt files, then Read each one to understand the errors.
 
+**IMPORTANT:** Fix ALL CI failures, even if they seem unrelated to your current work.
+Your job is to keep CI green. Pre-existing issues, flaky tests, lint errors - fix them all.
+
 Please:
 1. Read ALL files in the ci/ directory
-2. Understand the error messages
-3. Make the necessary fixes
-4. Run tests locally to verify
+2. Understand ALL error messages (lint, tests, types, etc.)
+3. Fix everything that's failing - don't skip anything
+4. Run tests/lint locally to verify ALL passes
 5. Commit and push the fixes
 
 After fixing, end with: TASK COMPLETE"""
