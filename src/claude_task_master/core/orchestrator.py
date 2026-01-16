@@ -213,9 +213,7 @@ class WorkLoopOrchestrator:
         self.planner = planner
         self._github_client = github_client
         self.logger = logger
-        self.tracker = ExecutionTracker(
-            config=tracker_config or TrackerConfig.default()
-        )
+        self.tracker = ExecutionTracker(config=tracker_config or TrackerConfig.default())
 
     @property
     def github_client(self) -> GitHubClient:
