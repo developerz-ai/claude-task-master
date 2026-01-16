@@ -1531,7 +1531,7 @@ class TestCLIAppConfiguration:
 
     def test_app_help_text(self):
         """Test app has help text."""
-        assert "Claude Agent SDK" in app.info.help
+        assert app.info.help and "Claude Agent SDK" in app.info.help
 
     def test_app_commands_registered(self, cli_runner):
         """Test all commands are registered."""

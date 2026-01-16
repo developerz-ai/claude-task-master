@@ -74,7 +74,7 @@ class TestPRStatusModel:
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError) as exc_info:
-            PRStatus(
+            PRStatus(  # type: ignore[call-arg]
                 ci_state="SUCCESS",
                 unresolved_threads=0,
                 check_details=[],
@@ -86,7 +86,7 @@ class TestPRStatusModel:
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError) as exc_info:
-            PRStatus(
+            PRStatus(  # type: ignore[call-arg]
                 number=123,
                 unresolved_threads=0,
                 check_details=[],
@@ -99,7 +99,7 @@ class TestPRStatusModel:
 
         with pytest.raises(ValidationError) as exc_info:
             PRStatus(
-                number="not-a-number",
+                number="not-a-number",  # type: ignore[arg-type]
                 ci_state="SUCCESS",
                 unresolved_threads=0,
                 check_details=[],
@@ -448,7 +448,7 @@ class TestGitHubClientGetPRStatus:
 
     def test_get_pr_status_no_commits(self, github_client):
         """Test PR status when no commits exist."""
-        response = {
+        response: dict = {
             "data": {
                 "repository": {
                     "pullRequest": {
@@ -552,7 +552,7 @@ class TestGitHubClientGetPRStatus:
 
     def test_get_pr_status_graphql_query_parameters(self, github_client):
         """Test that correct parameters are passed to GraphQL query."""
-        response = {
+        response: dict = {
             "data": {
                 "repository": {
                     "pullRequest": {
@@ -847,7 +847,7 @@ class TestGitHubClientGetPRComments:
 
     def test_get_pr_comments_no_comments(self, github_client):
         """Test when there are no review threads."""
-        response = {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": []}}}}}
+        response: dict = {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": []}}}}}
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = MagicMock(

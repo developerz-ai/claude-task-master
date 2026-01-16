@@ -237,7 +237,7 @@ class TestCredentialsModel:
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError) as exc_info:
-            Credentials(
+            Credentials(  # type: ignore[call-arg]
                 refreshToken="test-refresh-token",
                 expiresAt=1704067200000,
             )
@@ -248,7 +248,7 @@ class TestCredentialsModel:
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError) as exc_info:
-            Credentials(
+            Credentials(  # type: ignore[call-arg]
                 accessToken="test-access-token",
                 expiresAt=1704067200000,
             )
@@ -259,7 +259,7 @@ class TestCredentialsModel:
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError) as exc_info:
-            Credentials(
+            Credentials(  # type: ignore[call-arg]
                 accessToken="test-access-token",
                 refreshToken="test-refresh-token",
             )
@@ -273,7 +273,7 @@ class TestCredentialsModel:
             Credentials(
                 accessToken="test-access-token",
                 refreshToken="test-refresh-token",
-                expiresAt="not-a-number",
+                expiresAt="not-a-number",  # type: ignore[arg-type]
             )
         assert "expiresAt" in str(exc_info.value)
 

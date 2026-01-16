@@ -232,7 +232,7 @@ class TestContentFilterError:
     def test_content_filter_error_not_retryable(self):
         """Test that ContentFilterError is not in transient errors."""
         # ContentFilterError should NOT be retryable
-        assert ContentFilterError not in AgentWrapper.TRANSIENT_ERRORS
+        assert ContentFilterError not in AgentWrapper.TRANSIENT_ERRORS  # type: ignore[comparison-overlap]
 
 
 class TestWorkingDirectoryError:

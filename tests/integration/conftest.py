@@ -6,7 +6,7 @@ including planning phases, work sessions, error handling, and state transitions.
 """
 
 import json
-from collections.abc import Generator
+from collections.abc import AsyncGenerator, Generator
 from datetime import datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -125,14 +125,15 @@ class MockClaudeAgentSDK:
                 "timeout": Exception("Request timeout after 30 seconds"),
                 "connection": Exception("Connection error - network unavailable"),
             }
-            raise error_map.get(self._failure_type, Exception("Unknown error"))
+            error_type = self._failure_type or "generic"
+            raise error_map.get(error_type, Exception("Unknown error"))
 
     @property
     def ClaudeAgentOptions(self):
         """Mock ClaudeAgentOptions class."""
         return MagicMock
 
-    async def query(self, prompt: str, options: Any = None) -> AsyncMock:
+    async def query(self, prompt: str, options: Any = None) -> AsyncGenerator[AsyncMock, None]:
         """Mock async query function.
 
         This simulates the SDK's query method which yields messages.

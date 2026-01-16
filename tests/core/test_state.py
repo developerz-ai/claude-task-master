@@ -1581,8 +1581,8 @@ class TestValidateForResume:
 
         error = exc_info.value
         assert error.status == "success"
-        assert "completed successfully" in error.reason.lower()
-        assert "clean" in error.suggestion.lower()
+        assert error.reason and "completed successfully" in error.reason.lower()
+        assert error.suggestion and "clean" in error.suggestion.lower()
 
     def test_validate_failed_state_raises_error(self, initialized_state_manager):
         """Test validate_for_resume raises error for failed state."""
@@ -1598,8 +1598,8 @@ class TestValidateForResume:
 
         error = exc_info.value
         assert error.status == "failed"
-        assert "failed" in error.reason.lower()
-        assert "clean" in error.suggestion.lower()
+        assert error.reason and "failed" in error.reason.lower()
+        assert error.suggestion and "clean" in error.suggestion.lower()
 
     def test_validate_paused_state_succeeds(self, initialized_state_manager):
         """Test validate_for_resume succeeds for paused state with plan."""

@@ -1,6 +1,7 @@
 """Tests for StateManager PR context methods."""
 
 import shutil
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
@@ -9,7 +10,7 @@ from claude_task_master.core.state import StateManager
 
 
 @pytest.fixture
-def state_manager(tmp_path: Path) -> StateManager:
+def state_manager(tmp_path: Path) -> Generator[StateManager, None, None]:
     """Create a StateManager with a temporary directory."""
     # Use explicit state_dir to avoid relative path issues
     state_dir = tmp_path / ".claude-task-master"

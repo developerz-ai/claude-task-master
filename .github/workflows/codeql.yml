@@ -51,10 +51,4 @@ jobs:
         uses: github/codeql-action/analyze@v3
         with:
           category: "/language:python"
-
-      - name: Upload SARIF to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          # Optional: supply a custom SARIF file location
-          # sarif-file: '${{ runner.temp }}/codeql.sarif'
           wait-for-processing: true

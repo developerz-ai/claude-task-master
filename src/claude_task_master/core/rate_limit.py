@@ -115,7 +115,7 @@ class RateLimitConfig(BaseModel):
         """
         if attempt < 0:
             return 0
-        backoff = self.initial_backoff * (self.backoff_multiplier ** attempt)
+        backoff = self.initial_backoff * (self.backoff_multiplier**attempt)
         return min(backoff, self.max_backoff)
 
     def get_total_max_time(self) -> float:

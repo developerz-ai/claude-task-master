@@ -1164,7 +1164,7 @@ class TestOrchestratorExceptions:
         error = PlanParsingError("Failed to parse plan", plan_content)
         assert error.message == "Failed to parse plan"
         assert error.plan_content == plan_content
-        assert "Plan content preview" in error.details
+        assert error.details and "Plan content preview" in error.details
 
     def test_plan_parsing_error_truncates_long_content(self):
         """Test PlanParsingError truncates long content."""
@@ -1172,13 +1172,13 @@ class TestOrchestratorExceptions:
         error = PlanParsingError("Failed", long_content)
         assert error.plan_content == long_content
         # Preview should be truncated to 200 chars + "..."
-        assert len(error.details) < len(long_content) + 50
+        assert error.details and len(error.details) < len(long_content) + 50
 
     def test_no_plan_found_error(self):
         """Test NoPlanFoundError."""
         error = NoPlanFoundError()
         assert "No plan found" in error.message
-        assert "planning phase" in error.details
+        assert error.details and "planning phase" in error.details
 
     def test_no_tasks_found_error(self):
         """Test NoTasksFoundError."""
@@ -1193,7 +1193,7 @@ class TestOrchestratorExceptions:
         assert error.task_index == 5
         assert error.total_tasks == 3
         assert "5" in error.message
-        assert "3 tasks" in error.details
+        assert error.details and "3 tasks" in error.details
 
     def test_work_session_error(self):
         """Test WorkSessionError."""
@@ -1203,7 +1203,7 @@ class TestOrchestratorExceptions:
         assert error.task_description == "Fix the bug"
         assert error.original_error == original
         assert "task #3" in error.message  # 1-indexed in message
-        assert "ValueError" in error.details
+        assert error.details and "ValueError" in error.details
 
     def test_state_recovery_error(self):
         """Test StateRecoveryError."""
@@ -1211,7 +1211,7 @@ class TestOrchestratorExceptions:
         error = StateRecoveryError("Could not load backup", original)
         assert "recover" in error.message.lower()
         assert error.original_error == original
-        assert "OSError" in error.details
+        assert error.details and "OSError" in error.details
 
     def test_max_sessions_reached_error(self):
         """Test MaxSessionsReachedError."""
@@ -1642,7 +1642,7 @@ class TestPRWorkflowExceptions:
         assert error.pr_number == 456
         assert error.timeout_seconds == 300
         assert "PR #456" in error.message
-        assert "300" in error.details or "300 seconds" in str(error)
+        assert (error.details and "300" in error.details) or "300 seconds" in str(error)
 
 
 # =============================================================================
@@ -2331,7 +2331,7 @@ class TestCIStageHandling:
         result = orchestrator._handle_waiting_ci_stage(state)
 
         assert result is None
-        assert state.workflow_stage == "waiting_reviews"
+        assert state.workflow_stage == "waiting_reviews"  # type: ignore[comparison-overlap]
 
     def test_handle_waiting_ci_stage_failure(self, mock_agent_wrapper, state_dir, planner):
         """Test _handle_waiting_ci_stage when CI fails."""
@@ -2365,7 +2365,7 @@ class TestCIStageHandling:
         result = orchestrator._handle_waiting_ci_stage(state)
 
         assert result is None
-        assert state.workflow_stage == "ci_failed"
+        assert state.workflow_stage == "ci_failed"  # type: ignore[comparison-overlap]
 
     def test_handle_waiting_ci_stage_pending(self, mock_agent_wrapper, state_dir, planner):
         """Test _handle_waiting_ci_stage when CI is pending."""
@@ -2427,7 +2427,7 @@ class TestCIStageHandling:
 
         assert result is None
         # Should skip to reviews on error
-        assert state.workflow_stage == "waiting_reviews"
+        assert state.workflow_stage == "waiting_reviews"  # type: ignore[comparison-overlap]
 
     def test_handle_ci_failed_stage(self, mock_agent_wrapper, state_dir, planner):
         """Test _handle_ci_failed_stage runs agent to fix CI."""
@@ -2461,7 +2461,7 @@ class TestCIStageHandling:
         result = orchestrator._handle_ci_failed_stage(state)
 
         assert result is None
-        assert state.workflow_stage == "waiting_ci"
+        assert state.workflow_stage == "waiting_ci"  # type: ignore[comparison-overlap]
         assert state.session_count == 2
         mock_agent_wrapper.run_work_session.assert_called_once()
 
@@ -2504,7 +2504,7 @@ class TestReviewStageHandling:
         result = orchestrator._handle_waiting_reviews_stage(state)
 
         assert result is None
-        assert state.workflow_stage == "addressing_reviews"
+        assert state.workflow_stage == "addressing_reviews"  # type: ignore[comparison-overlap]
 
     def test_handle_waiting_reviews_stage_no_unresolved(
         self, mock_agent_wrapper, state_dir, planner
@@ -2536,7 +2536,7 @@ class TestReviewStageHandling:
         result = orchestrator._handle_waiting_reviews_stage(state)
 
         assert result is None
-        assert state.workflow_stage == "ready_to_merge"
+        assert state.workflow_stage == "ready_to_merge"  # type: ignore[comparison-overlap]
 
     def test_handle_waiting_reviews_stage_error(self, mock_agent_wrapper, state_dir, planner):
         """Test _handle_waiting_reviews_stage when checking reviews fails."""
@@ -2565,7 +2565,7 @@ class TestReviewStageHandling:
 
         assert result is None
         # Should skip to ready_to_merge on error
-        assert state.workflow_stage == "ready_to_merge"
+        assert state.workflow_stage == "ready_to_merge"  # type: ignore[comparison-overlap]
 
     def test_handle_addressing_reviews_stage(self, mock_agent_wrapper, state_dir, planner):
         """Test _handle_addressing_reviews_stage runs agent to address comments."""
@@ -2597,7 +2597,7 @@ class TestReviewStageHandling:
             result = orchestrator._handle_addressing_reviews_stage(state)
 
         assert result is None
-        assert state.workflow_stage == "waiting_ci"
+        assert state.workflow_stage == "waiting_ci"  # type: ignore[comparison-overlap]
         assert state.session_count == 2
         mock_agent_wrapper.run_work_session.assert_called_once()
 
@@ -2624,7 +2624,7 @@ class TestReviewStageHandling:
         result = orchestrator._handle_addressing_reviews_stage(state)
 
         assert result is None
-        assert state.workflow_stage == "waiting_ci"
+        assert state.workflow_stage == "waiting_ci"  # type: ignore[comparison-overlap]
 
 
 # =============================================================================
@@ -2663,7 +2663,7 @@ class TestMergeStageHandling:
         result = orchestrator._handle_ready_to_merge_stage(state)
 
         assert result is None
-        assert state.workflow_stage == "merged"
+        assert state.workflow_stage == "merged"  # type: ignore[comparison-overlap]
         mock_github_client.merge_pr.assert_called_once_with(123)
 
     def test_handle_ready_to_merge_stage_auto_merge_failure(
@@ -2694,7 +2694,7 @@ class TestMergeStageHandling:
         result = orchestrator._handle_ready_to_merge_stage(state)
 
         assert result == 1
-        assert state.status == "blocked"
+        assert state.status == "blocked"  # type: ignore[comparison-overlap]
 
     def test_handle_merged_stage_clears_pr_context(self, mock_agent_wrapper, state_dir, planner):
         """Test _handle_merged_stage clears PR context files."""
