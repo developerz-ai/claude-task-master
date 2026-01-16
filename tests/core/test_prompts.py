@@ -119,9 +119,10 @@ class TestBuildPlanningPrompt:
         prompt = build_planning_prompt("Build a todo app")
 
         assert "Build a todo app" in prompt
-        assert "Phase 1: Explore" in prompt
+        assert "Phase 1: Setup & Explore" in prompt
         assert "Phase 2: Create Plan" in prompt
         assert "Success Criteria" in prompt
+        assert "git checkout -b claudetm" in prompt  # Branch checkout instruction
 
     def test_with_context(self) -> None:
         """Test planning prompt with context."""

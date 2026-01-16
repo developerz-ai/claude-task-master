@@ -502,6 +502,16 @@ def clean(force: bool = typer.Option(False, "--force", "-f", help="Skip confirma
         console.print("[yellow]No task state found.[/yellow]")
         raise typer.Exit(0)
 
+    # Check if another session is active
+    if state_manager.is_session_active():
+        console.print("[bold red]Warning: Another claudetm session is active![/bold red]")
+        if not force:
+            confirm = typer.confirm("Force cleanup anyway? This may crash the running session")
+            if not confirm:
+                console.print("[yellow]Cancelled[/yellow]")
+                raise typer.Exit(1)
+        console.print("[yellow]Forcing cleanup of active session...[/yellow]")
+
     if not force:
         confirm = typer.confirm("Are you sure you want to clean all task state?")
         if not confirm:
@@ -511,6 +521,9 @@ def clean(force: bool = typer.Option(False, "--force", "-f", help="Skip confirma
     console.print("[bold red]Cleaning task state...[/bold red]")
 
     import shutil
+
+    # Release any session lock before deletion
+    state_manager.release_session_lock()
 
     if state_manager.state_dir.exists():
         shutil.rmtree(state_manager.state_dir)

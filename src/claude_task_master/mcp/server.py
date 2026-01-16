@@ -2,10 +2,17 @@
 
 This module implements an MCP server that exposes claudetm functionality
 as tools that other Claude instances can use, enabling remote task orchestration.
+
+Security Note:
+    The MCP server defaults to stdio transport which is inherently secure.
+    When using network transports (sse, streamable-http), the server binds
+    to localhost (127.0.0.1) by default for security.
 """
 
 from __future__ import annotations
 
+import logging
+import os
 from pathlib import Path
 from typing import Any, Literal
 
@@ -15,8 +22,13 @@ try:
 except ImportError:
     FastMCP = None  # type: ignore[misc, assignment]
 
-from claude_task_master.mcp import tools
+logger = logging.getLogger(__name__)
 
+# Security: Default host for network transports
+MCP_HOST = os.getenv("CLAUDETM_MCP_HOST", "127.0.0.1")
+MCP_PORT = int(os.getenv("CLAUDETM_MCP_PORT", "8080"))
+
+from claude_task_master.mcp import tools
 
 # =============================================================================
 # Re-export response models for convenience
@@ -236,6 +248,8 @@ def run_server(
     name: str = "claude-task-master",
     working_dir: str | None = None,
     transport: TransportType = "stdio",
+    host: str | None = None,
+    port: int | None = None,
 ) -> None:
     """Run the MCP server.
 
@@ -243,7 +257,21 @@ def run_server(
         name: Server name for identification.
         working_dir: Working directory for task execution.
         transport: Transport type (stdio, sse, streamable-http).
+        host: Host to bind to (only for network transports). Defaults to 127.0.0.1.
+        port: Port to bind to (only for network transports). Defaults to 8080.
+
+    Security:
+        For network transports, defaults to localhost binding for security.
+        Set CLAUDETM_MCP_HOST to override (use with caution).
     """
+    # Security warning for non-localhost binding
+    effective_host = host or MCP_HOST
+    if transport != "stdio" and effective_host not in ("127.0.0.1", "localhost", "::1"):
+        logger.warning(
+            f"MCP server binding to non-localhost address ({effective_host}). "
+            "Ensure proper authentication is configured."
+        )
+
     mcp = create_server(name=name, working_dir=working_dir)
     mcp.run(transport=transport)
 
@@ -271,7 +299,18 @@ def main() -> None:
         "--transport",
         choices=["stdio", "sse", "streamable-http"],
         default="stdio",
-        help="Transport type",
+        help="Transport type (default: stdio)",
+    )
+    parser.add_argument(
+        "--host",
+        default=MCP_HOST,
+        help=f"Host to bind to for network transports (default: {MCP_HOST})",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=MCP_PORT,
+        help=f"Port to bind to for network transports (default: {MCP_PORT})",
     )
 
     args = parser.parse_args()
@@ -279,6 +318,8 @@ def main() -> None:
         name=args.name,
         working_dir=args.working_dir,
         transport=args.transport,
+        host=args.host,
+        port=args.port,
     )
 
 

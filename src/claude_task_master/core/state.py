@@ -2,6 +2,7 @@
 
 import fcntl
 import json
+import os
 import shutil
 import tempfile
 from collections.abc import Generator
@@ -298,6 +299,7 @@ class StateManager:
         self.state_dir = state_dir or self.STATE_DIR
         self.logs_dir = self.state_dir / "logs"
         self._lock_file = self.state_dir / ".state.lock"
+        self._pid_file = self.state_dir / ".pid"
 
     @property
     def state_file(self) -> Path:
@@ -308,6 +310,65 @@ class StateManager:
     def backup_dir(self) -> Path:
         """Get the path to the backup directory."""
         return self.state_dir / "backups"
+
+    def acquire_session_lock(self) -> bool:
+        """Acquire session lock by writing PID file.
+
+        Returns:
+            True if lock acquired, False if another session is active.
+        """
+        if self.is_session_active():
+            return False
+        try:
+            self._pid_file.parent.mkdir(parents=True, exist_ok=True)
+            self._pid_file.write_text(str(os.getpid()))
+            return True
+        except (OSError, IOError):
+            return False
+
+    def release_session_lock(self) -> None:
+        """Release session lock by removing PID file."""
+        try:
+            if self._pid_file.exists():
+                # Only remove if we own the lock
+                try:
+                    pid = int(self._pid_file.read_text().strip())
+                    if pid == os.getpid():
+                        self._pid_file.unlink()
+                except (ValueError, OSError):
+                    pass
+        except (OSError, IOError):
+            pass
+
+    def is_session_active(self) -> bool:
+        """Check if another session is actively using this state.
+
+        Returns:
+            True if another process is using this state directory.
+        """
+        if not self._pid_file.exists():
+            return False
+        try:
+            pid = int(self._pid_file.read_text().strip())
+            # Check if process is still running (signal 0 = existence check)
+            os.kill(pid, 0)
+            # Process exists - check if it's not us
+            return pid != os.getpid()
+        except (ValueError, OSError, ProcessLookupError):
+            # Invalid PID or process not running - clean up stale PID file
+            try:
+                self._pid_file.unlink()
+            except (OSError, IOError):
+                pass
+            return False
+
+    def is_safe_to_delete(self) -> bool:
+        """Check if state directory can be safely deleted.
+
+        Returns:
+            True if no active session is using this state.
+        """
+        return not self.is_session_active()
 
     def initialize(self, goal: str, model: str, options: TaskOptions) -> TaskState:
         """Initialize new task state.
@@ -322,12 +383,20 @@ class StateManager:
 
         Raises:
             StatePermissionError: If directories cannot be created.
+            StateError: If another session is active.
         """
         try:
             self.state_dir.mkdir(exist_ok=True)
             self.logs_dir.mkdir(exist_ok=True)
         except PermissionError as e:
             raise StatePermissionError(self.state_dir, "creating directories", e) from e
+
+        # Acquire session lock
+        if not self.acquire_session_lock():
+            raise StateError(
+                "Another claudetm session is active",
+                "Wait for the other session to complete or use 'clean -f' to force cleanup.",
+            )
 
         timestamp = datetime.now().isoformat()
         run_id = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -737,6 +806,9 @@ class StateManager:
 
     def cleanup_on_success(self, run_id: str) -> None:
         """Clean up all state files except logs on success."""
+        # Release session lock first
+        self.release_session_lock()
+
         # Delete all files in state directory except logs/
         for item in self.state_dir.iterdir():
             if item.is_file():

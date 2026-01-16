@@ -120,8 +120,13 @@ Your mission: **{goal}**"""
 
     # Exploration phase
     builder.add_section(
-        "Phase 1: Explore",
-        """Thoroughly analyze the codebase:
+        "Phase 1: Setup & Explore",
+        """**First, set up your work branch:**
+```bash
+git checkout -b claudetm/task-$(date +%Y%m%d-%H%M%S)
+```
+
+Then thoroughly analyze the codebase:
 1. **Read** key files (README, configs, main modules)
 2. **Glob** to find patterns (`**/*.py`, `src/**/*.ts`)
 3. **Grep** for specific code (class definitions, imports)

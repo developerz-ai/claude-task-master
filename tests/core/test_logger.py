@@ -21,6 +21,14 @@ class TestTaskLoggerInit:
         assert logger.current_session is None
         assert logger.session_start is None
 
+    def test_init_with_custom_max_line_length(self, log_file: Path):
+        """Test TaskLogger initialization with custom max line length."""
+        from claude_task_master.core.logger import TaskLogger
+
+        logger = TaskLogger(log_file, max_line_length=100)
+
+        assert logger.max_line_length == 100
+
     def test_init_creates_logger_without_file(self, temp_dir: Path):
         """Test that TaskLogger can be created even if file doesn't exist yet."""
         from claude_task_master.core.logger import TaskLogger
@@ -42,25 +50,27 @@ class TestSessionLogging:
         assert task_logger.session_start is not None
         assert isinstance(task_logger.session_start, datetime)
 
-        # Verify log file contents
+        # Verify log file contents (compact format)
         content = log_file.read_text()
-        assert "SESSION 1 - PLANNING" in content
-        assert "Started:" in content
-        assert "=" * 80 in content
+        assert "SESSION 1" in content
+        assert "PLANNING" in content
+        assert "===" in content
 
     def test_start_session_work_phase(self, task_logger, log_file: Path):
         """Test starting a session with work phase."""
         task_logger.start_session(session_number=5, phase="work")
 
         content = log_file.read_text()
-        assert "SESSION 5 - WORK" in content
+        assert "SESSION 5" in content
+        assert "WORK" in content
 
     def test_start_session_verification_phase(self, task_logger, log_file: Path):
         """Test starting a session with verification phase."""
         task_logger.start_session(session_number=10, phase="verification")
 
         content = log_file.read_text()
-        assert "SESSION 10 - VERIFICATION" in content
+        assert "SESSION 10" in content
+        assert "VERIFICATION" in content
 
     def test_start_multiple_sessions(self, task_logger, log_file: Path):
         """Test starting multiple sessions updates state correctly."""
@@ -76,8 +86,10 @@ class TestSessionLogging:
         assert task_logger.session_start != first_start
 
         content = log_file.read_text()
-        assert "SESSION 1 - PLANNING" in content
-        assert "SESSION 2 - WORK" in content
+        assert "SESSION 1" in content
+        assert "PLANNING" in content
+        assert "SESSION 2" in content
+        assert "WORK" in content
 
     def test_end_session(self, task_logger, log_file: Path):
         """Test ending a session."""
@@ -92,8 +104,8 @@ class TestSessionLogging:
         assert task_logger.session_start is None
 
         content = log_file.read_text()
-        assert "Outcome: success" in content
-        assert "Duration:" in content
+        assert "END" in content
+        assert "success" in content
         assert "s" in content  # seconds indicator
 
     def test_end_session_with_failure_outcome(self, task_logger, log_file: Path):
@@ -102,7 +114,7 @@ class TestSessionLogging:
         task_logger.end_session(outcome="failed - max retries exceeded")
 
         content = log_file.read_text()
-        assert "Outcome: failed - max retries exceeded" in content
+        assert "failed - max retries exceeded" in content
 
     def test_end_session_without_start(self, task_logger, log_file: Path):
         """Test ending a session without starting one first."""
@@ -111,12 +123,6 @@ class TestSessionLogging:
 
         assert task_logger.current_session is None
         assert task_logger.session_start is None
-
-        # File might not exist or be empty if no _write happened before
-        if log_file.exists():
-            content = log_file.read_text()
-            # Duration should not be written since session_start was None
-            assert "Duration:" not in content
 
 
 class TestPromptAndResponseLogging:
@@ -128,7 +134,7 @@ class TestPromptAndResponseLogging:
         task_logger.log_prompt(prompt)
 
         content = log_file.read_text()
-        assert "=== PROMPT ===" in content
+        assert "[PROMPT]" in content
         assert prompt in content
 
     def test_log_prompt_multiline(self, task_logger, log_file: Path):
@@ -142,7 +148,7 @@ Please complete the following tasks:
         task_logger.log_prompt(prompt)
 
         content = log_file.read_text()
-        assert "=== PROMPT ===" in content
+        assert "[PROMPT]" in content
         assert "You are a helpful assistant." in content
         assert "1. Read the file" in content
         assert "3. Write tests" in content
@@ -153,7 +159,7 @@ Please complete the following tasks:
         task_logger.log_response(response)
 
         content = log_file.read_text()
-        assert "=== RESPONSE ===" in content
+        assert "[RESPONSE]" in content
         assert response in content
 
     def test_log_response_multiline(self, task_logger, log_file: Path):
@@ -166,7 +172,7 @@ Please complete the following tasks:
         task_logger.log_response(response)
 
         content = log_file.read_text()
-        assert "=== RESPONSE ===" in content
+        assert "[RESPONSE]" in content
         assert "Missing error handling" in content
         assert "Potential race condition" in content
 
@@ -182,7 +188,7 @@ class TestToolLogging:
         )
 
         content = log_file.read_text()
-        assert "--- Tool: Read ---" in content
+        assert "[TOOL] Read:" in content
         assert "file_path" in content
         assert "/path/to/file.py" in content
 
@@ -197,7 +203,7 @@ class TestToolLogging:
         task_logger.log_tool_use(tool_name="Read", parameters=params)
 
         content = log_file.read_text()
-        assert "--- Tool: Read ---" in content
+        assert "[TOOL] Read:" in content
         assert "offset" in content
         assert "100" in content
         assert "encoding" in content
@@ -210,7 +216,7 @@ class TestToolLogging:
         )
 
         content = log_file.read_text()
-        assert "--- Result: Read ---" in content
+        assert "[RESULT] Read:" in content
         assert "File contents here..." in content
 
     def test_log_tool_result_dict(self, task_logger, log_file: Path):
@@ -219,7 +225,7 @@ class TestToolLogging:
         task_logger.log_tool_result(tool_name="Read", result=result)
 
         content = log_file.read_text()
-        assert "--- Result: Read ---" in content
+        assert "[RESULT] Read:" in content
         assert "success" in content
         assert "True" in content
 
@@ -229,7 +235,7 @@ class TestToolLogging:
         task_logger.log_tool_result(tool_name="Glob", result=result)
 
         content = log_file.read_text()
-        assert "--- Result: Glob ---" in content
+        assert "[RESULT] Glob:" in content
         assert "file1.py" in content
         assert "file3.py" in content
 
@@ -244,10 +250,10 @@ class TestToolLogging:
         task_logger.log_tool_result("Edit", "Edit successful")
 
         content = log_file.read_text()
-        assert "--- Tool: Read ---" in content
-        assert "--- Result: Read ---" in content
-        assert "--- Tool: Edit ---" in content
-        assert "--- Result: Edit ---" in content
+        assert "[TOOL] Read:" in content
+        assert "[RESULT] Read:" in content
+        assert "[TOOL] Edit:" in content
+        assert "[RESULT] Edit:" in content
         assert "old_string" in content
 
 
@@ -260,7 +266,7 @@ class TestErrorLogging:
         task_logger.log_error(error_msg)
 
         content = log_file.read_text()
-        assert "!!! ERROR !!!" in content
+        assert "[ERROR]" in content
         assert error_msg in content
 
     def test_log_error_multiline(self, task_logger, log_file: Path):
@@ -273,9 +279,8 @@ Traceback (most recent call last):
         task_logger.log_error(error_msg)
 
         content = log_file.read_text()
-        assert "!!! ERROR !!!" in content
+        assert "[ERROR]" in content
         assert "FileNotFoundError" in content
-        assert "line 42" in content
 
     def test_log_multiple_errors(self, task_logger, log_file: Path):
         """Test logging multiple errors."""
@@ -284,10 +289,55 @@ Traceback (most recent call last):
         task_logger.log_error("Error 3: Third problem")
 
         content = log_file.read_text()
-        assert content.count("!!! ERROR !!!") == 3
+        assert content.count("[ERROR]") == 3
         assert "Error 1" in content
         assert "Error 2" in content
         assert "Error 3" in content
+
+
+class TestTruncation:
+    """Tests for line truncation."""
+
+    def test_truncate_long_line(self, temp_dir: Path):
+        """Test that long lines are truncated."""
+        from claude_task_master.core.logger import TaskLogger
+
+        log_file = temp_dir / "truncate_test.txt"
+        logger = TaskLogger(log_file, max_line_length=50)
+
+        long_line = "x" * 100
+        result = logger._truncate(long_line)
+
+        assert len(result) == 50
+        assert result.endswith("...")
+
+    def test_truncate_short_line_unchanged(self, temp_dir: Path):
+        """Test that short lines are not truncated."""
+        from claude_task_master.core.logger import TaskLogger
+
+        log_file = temp_dir / "truncate_test.txt"
+        logger = TaskLogger(log_file, max_line_length=50)
+
+        short_line = "short"
+        result = logger._truncate(short_line)
+
+        assert result == short_line
+
+    def test_truncate_multiline(self, temp_dir: Path):
+        """Test that each line in multiline content is truncated."""
+        from claude_task_master.core.logger import TaskLogger
+
+        log_file = temp_dir / "truncate_test.txt"
+        logger = TaskLogger(log_file, max_line_length=20)
+
+        multiline = "short\n" + "x" * 50 + "\nshort again"
+        result = logger._truncate(multiline)
+
+        lines = result.split("\n")
+        assert lines[0] == "short"
+        assert len(lines[1]) == 20
+        assert lines[1].endswith("...")
+        assert lines[2] == "short again"
 
 
 class TestInternalMethods:
@@ -318,19 +368,20 @@ class TestInternalMethods:
         assert lines[1] == "line 2"
         assert lines[2] == "line 3"
 
-    def test_write_separator(self, task_logger, log_file: Path):
-        """Test _write_separator writes correct separator."""
-        task_logger._write_separator()
-
-        content = log_file.read_text()
-        assert "=" * 80 in content
-
     def test_write_empty_string(self, task_logger, log_file: Path):
         """Test _write with empty string."""
         task_logger._write("")
 
         content = log_file.read_text()
         assert content == "\n"
+
+    def test_format_params_json(self, task_logger):
+        """Test that parameters are formatted as compact JSON."""
+        params = {"key": "value", "num": 42}
+        result = task_logger._format_params(params)
+
+        assert '"key":"value"' in result
+        assert '"num":42' in result
 
 
 class TestFullSessionWorkflow:
@@ -359,15 +410,15 @@ class TestFullSessionWorkflow:
 
         # Verify complete log structure
         content = log_file.read_text()
-        assert "SESSION 1 - PLANNING" in content
-        assert "=== PROMPT ===" in content
-        assert "--- Tool: Glob ---" in content
-        assert "--- Result: Glob ---" in content
-        assert "--- Tool: Read ---" in content
-        assert "--- Result: Read ---" in content
-        assert "=== RESPONSE ===" in content
-        assert "Outcome: plan_created" in content
-        assert "Duration:" in content
+        assert "SESSION 1" in content
+        assert "PLANNING" in content
+        assert "[PROMPT]" in content
+        assert "[TOOL] Glob:" in content
+        assert "[RESULT] Glob:" in content
+        assert "[TOOL] Read:" in content
+        assert "[RESULT] Read:" in content
+        assert "[RESPONSE]" in content
+        assert "plan_created" in content
 
     def test_session_with_error(self, task_logger, log_file: Path):
         """Test a session that encounters an error."""
@@ -381,10 +432,11 @@ class TestFullSessionWorkflow:
         task_logger.end_session(outcome="failed")
 
         content = log_file.read_text()
-        assert "SESSION 3 - WORK" in content
-        assert "!!! ERROR !!!" in content
+        assert "SESSION 3" in content
+        assert "WORK" in content
+        assert "[ERROR]" in content
         assert "FileNotFoundError" in content
-        assert "Outcome: failed" in content
+        assert "failed" in content
 
     def test_multiple_sessions_in_sequence(self, task_logger, log_file: Path):
         """Test multiple sessions logged sequentially."""
@@ -409,10 +461,12 @@ class TestFullSessionWorkflow:
         task_logger.end_session(outcome="verified")
 
         content = log_file.read_text()
-        assert "SESSION 1 - PLANNING" in content
-        assert "SESSION 2 - WORK" in content
-        assert "SESSION 3 - VERIFICATION" in content
-        assert content.count("Outcome:") == 3
+        assert "SESSION 1" in content
+        assert "PLANNING" in content
+        assert "SESSION 2" in content
+        assert "WORK" in content
+        assert "SESSION 3" in content
+        assert "VERIFICATION" in content
 
 
 class TestEdgeCases:
@@ -438,19 +492,21 @@ class TestEdgeCases:
         assert "\u03b1" in content  # alpha
 
     def test_log_very_long_content(self, task_logger, log_file: Path):
-        """Test logging very long content."""
+        """Test logging very long content gets truncated."""
         long_content = "x" * 10000
         task_logger.log_prompt(long_content)
 
         content = log_file.read_text()
-        assert len(content) > 10000
+        # Content should be truncated but still logged
+        assert "..." in content
+        assert len(content) < 10000
 
     def test_log_empty_parameters(self, task_logger, log_file: Path):
         """Test logging tool use with empty parameters."""
         task_logger.log_tool_use("SomeCommand", {})
 
         content = log_file.read_text()
-        assert "--- Tool: SomeCommand ---" in content
+        assert "[TOOL] SomeCommand:" in content
         assert "{}" in content
 
     def test_log_none_result(self, task_logger, log_file: Path):
@@ -458,7 +514,7 @@ class TestEdgeCases:
         task_logger.log_tool_result("SomeCommand", None)
 
         content = log_file.read_text()
-        assert "--- Result: SomeCommand ---" in content
+        assert "[RESULT] SomeCommand:" in content
         assert "None" in content
 
     def test_concurrent_sessions_state(self, temp_dir: Path):

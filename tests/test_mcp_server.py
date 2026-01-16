@@ -116,27 +116,23 @@ class TestGetStatusTool:
 
     def test_get_status_no_active_task(self, temp_dir):
         """Test get_status when no task exists."""
-        state_dir = temp_dir / ".claude-task-master"
+        from claude_task_master.mcp.tools import get_status
 
-        # No state exists, should return error
-        result = _call_get_status(str(state_dir))
+        result = get_status(temp_dir)
         assert result["success"] is False
         assert "No active task found" in result["error"]
 
     def test_get_status_with_active_task(self, initialized_state, state_dir):
         """Test get_status with an active task."""
-        state_manager, state = initialized_state
+        from claude_task_master.mcp.tools import get_status
 
-        result = _call_get_status(str(state_dir))
+        result = get_status(state_dir.parent, str(state_dir))
 
-        assert "goal" in result or "success" in result
-        if "goal" in result:
-            assert result["goal"] == "Test goal for MCP"
-            assert result["status"] == "planning"
-            assert result["model"] == "opus"
-        else:
-            # If structured as success response
-            assert result.get("success", True) is True
+        assert result["goal"] == "Test goal for MCP"
+        assert result["status"] == "planning"
+        assert result["model"] == "opus"
+        assert result["current_task_index"] == 0
+        assert result["session_count"] == 0
 
 
 class TestGetPlanTool:
@@ -144,21 +140,24 @@ class TestGetPlanTool:
 
     def test_get_plan_no_active_task(self, temp_dir):
         """Test get_plan when no task exists."""
-        state_dir = temp_dir / ".claude-task-master"
-        result = _call_get_plan(str(state_dir))
+        from claude_task_master.mcp.tools import get_plan
+
+        result = get_plan(temp_dir)
         assert result["success"] is False
 
     def test_get_plan_no_plan_file(self, initialized_state, state_dir):
         """Test get_plan when no plan file exists."""
-        result = _call_get_plan(str(state_dir))
+        from claude_task_master.mcp.tools import get_plan
+
+        result = get_plan(state_dir.parent, str(state_dir))
         assert result["success"] is False
         assert "No plan found" in result.get("error", "")
 
     def test_get_plan_with_plan(self, state_with_plan, state_dir):
         """Test get_plan with a plan saved."""
-        state_manager, state = state_with_plan
+        from claude_task_master.mcp.tools import get_plan
 
-        result = _call_get_plan(str(state_dir))
+        result = get_plan(state_dir.parent, str(state_dir))
         assert result["success"] is True
         assert "plan" in result
         assert "First task to do" in result["plan"]
@@ -170,18 +169,23 @@ class TestGetLogsTool:
 
     def test_get_logs_no_active_task(self, temp_dir):
         """Test get_logs when no task exists."""
-        state_dir = temp_dir / ".claude-task-master"
-        result = _call_get_logs(str(state_dir))
+        from claude_task_master.mcp.tools import get_logs
+
+        result = get_logs(temp_dir)
         assert result["success"] is False
 
     def test_get_logs_no_log_file(self, initialized_state, state_dir):
         """Test get_logs when no log file exists."""
-        result = _call_get_logs(str(state_dir))
+        from claude_task_master.mcp.tools import get_logs
+
+        result = get_logs(state_dir.parent, state_dir=str(state_dir))
         assert result["success"] is False
         assert "No log file found" in result.get("error", "")
 
     def test_get_logs_with_log_file(self, initialized_state, state_dir):
         """Test get_logs with log file present."""
+        from claude_task_master.mcp.tools import get_logs
+
         state_manager, state = initialized_state
 
         # Create a log file
@@ -191,13 +195,15 @@ class TestGetLogsTool:
         log_content = "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\n"
         log_file.write_text(log_content)
 
-        result = _call_get_logs(str(state_dir))
+        result = get_logs(state_dir.parent, state_dir=str(state_dir))
         assert result["success"] is True
         assert result["log_content"] is not None
         assert "Line 1" in result["log_content"]
 
     def test_get_logs_with_tail_limit(self, initialized_state, state_dir):
         """Test get_logs respects tail parameter."""
+        from claude_task_master.mcp.tools import get_logs
+
         state_manager, state = initialized_state
 
         # Create a log file with many lines
@@ -207,7 +213,7 @@ class TestGetLogsTool:
         log_content = "\n".join([f"Line {i}" for i in range(1, 101)])
         log_file.write_text(log_content)
 
-        result = _call_get_logs(str(state_dir), tail=5)
+        result = get_logs(state_dir.parent, tail=5, state_dir=str(state_dir))
         assert result["success"] is True
         # Should only have last 5 lines
         lines = result["log_content"].strip().split("\n")
@@ -219,22 +225,27 @@ class TestGetProgressTool:
 
     def test_get_progress_no_active_task(self, temp_dir):
         """Test get_progress when no task exists."""
-        state_dir = temp_dir / ".claude-task-master"
-        result = _call_get_progress(str(state_dir))
+        from claude_task_master.mcp.tools import get_progress
+
+        result = get_progress(temp_dir)
         assert result["success"] is False
 
     def test_get_progress_no_progress_file(self, initialized_state, state_dir):
         """Test get_progress when no progress file exists."""
-        result = _call_get_progress(str(state_dir))
+        from claude_task_master.mcp.tools import get_progress
+
+        result = get_progress(state_dir.parent, str(state_dir))
         assert result["success"] is True
         assert result["progress"] is None
 
     def test_get_progress_with_progress(self, initialized_state, state_dir):
         """Test get_progress with progress saved."""
+        from claude_task_master.mcp.tools import get_progress
+
         state_manager, state = initialized_state
         state_manager.save_progress("# Progress\n\nCompleted 2 of 5 tasks")
 
-        result = _call_get_progress(str(state_dir))
+        result = get_progress(state_dir.parent, str(state_dir))
         assert result["success"] is True
         assert "Completed 2 of 5 tasks" in result["progress"]
 
@@ -244,22 +255,27 @@ class TestGetContextTool:
 
     def test_get_context_no_active_task(self, temp_dir):
         """Test get_context when no task exists."""
-        state_dir = temp_dir / ".claude-task-master"
-        result = _call_get_context(str(state_dir))
+        from claude_task_master.mcp.tools import get_context
+
+        result = get_context(temp_dir)
         assert result["success"] is False
 
     def test_get_context_empty(self, initialized_state, state_dir):
         """Test get_context when context is empty."""
-        result = _call_get_context(str(state_dir))
+        from claude_task_master.mcp.tools import get_context
+
+        result = get_context(state_dir.parent, str(state_dir))
         assert result["success"] is True
         assert result["context"] == ""
 
     def test_get_context_with_context(self, initialized_state, state_dir):
         """Test get_context with context saved."""
+        from claude_task_master.mcp.tools import get_context
+
         state_manager, state = initialized_state
         state_manager.save_context("# Learnings\n\n- Found bug in auth module")
 
-        result = _call_get_context(str(state_dir))
+        result = get_context(state_dir.parent, str(state_dir))
         assert result["success"] is True
         assert "Found bug in auth module" in result["context"]
 
@@ -269,19 +285,20 @@ class TestCleanTaskTool:
 
     def test_clean_task_no_state(self, temp_dir):
         """Test clean_task when no state exists."""
-        state_dir = temp_dir / ".claude-task-master"
-        result = _call_clean_task(str(state_dir))
+        from claude_task_master.mcp.tools import clean_task
+
+        result = clean_task(temp_dir)
         assert result["success"] is True
         assert result["files_removed"] is False
 
     def test_clean_task_with_state(self, initialized_state, state_dir):
         """Test clean_task removes state directory."""
-        state_manager, state = initialized_state
+        from claude_task_master.mcp.tools import clean_task
 
         # Verify state exists
         assert state_dir.exists()
 
-        result = _call_clean_task(str(state_dir))
+        result = clean_task(state_dir.parent, state_dir=str(state_dir))
         assert result["success"] is True
         assert result["files_removed"] is True
 
@@ -294,11 +311,14 @@ class TestInitializeTaskTool:
 
     def test_initialize_task_success(self, temp_dir):
         """Test initialize_task creates new task."""
+        from claude_task_master.mcp.tools import initialize_task
+
         state_dir = temp_dir / ".claude-task-master"
-        result = _call_initialize_task(
-            str(state_dir),
+        result = initialize_task(
+            temp_dir,
             goal="Create new feature",
             model="sonnet",
+            state_dir=str(state_dir),
         )
 
         assert result["success"] is True
@@ -313,9 +333,12 @@ class TestInitializeTaskTool:
 
     def test_initialize_task_already_exists(self, initialized_state, state_dir):
         """Test initialize_task fails if task already exists."""
-        result = _call_initialize_task(
-            str(state_dir),
+        from claude_task_master.mcp.tools import initialize_task
+
+        result = initialize_task(
+            state_dir.parent,
             goal="Another goal",
+            state_dir=str(state_dir),
         )
 
         assert result["success"] is False
@@ -323,14 +346,17 @@ class TestInitializeTaskTool:
 
     def test_initialize_task_with_options(self, temp_dir):
         """Test initialize_task respects options."""
+        from claude_task_master.mcp.tools import initialize_task
+
         state_dir = temp_dir / ".claude-task-master"
-        result = _call_initialize_task(
-            str(state_dir),
+        result = initialize_task(
+            temp_dir,
             goal="Test with options",
             model="haiku",
             auto_merge=False,
             max_sessions=5,
             pause_on_pr=True,
+            state_dir=str(state_dir),
         )
 
         assert result["success"] is True
@@ -349,21 +375,24 @@ class TestListTasksTool:
 
     def test_list_tasks_no_active_task(self, temp_dir):
         """Test list_tasks when no task exists."""
-        state_dir = temp_dir / ".claude-task-master"
-        result = _call_list_tasks(str(state_dir))
+        from claude_task_master.mcp.tools import list_tasks
+
+        result = list_tasks(temp_dir)
         assert result["success"] is False
 
     def test_list_tasks_no_plan(self, initialized_state, state_dir):
         """Test list_tasks when no plan exists."""
-        result = _call_list_tasks(str(state_dir))
+        from claude_task_master.mcp.tools import list_tasks
+
+        result = list_tasks(state_dir.parent, str(state_dir))
         assert result["success"] is False
         assert "No plan found" in result.get("error", "")
 
     def test_list_tasks_with_plan(self, state_with_plan, state_dir):
         """Test list_tasks returns parsed tasks."""
-        state_manager, state = state_with_plan
+        from claude_task_master.mcp.tools import list_tasks
 
-        result = _call_list_tasks(str(state_dir))
+        result = list_tasks(state_dir.parent, str(state_dir))
         assert result["success"] is True
         assert result["total"] == 4
         assert result["completed"] == 1
@@ -381,32 +410,44 @@ class TestMCPResources:
 
     def test_resource_goal_no_task(self, temp_dir):
         """Test resource_goal when no task exists."""
-        result = _call_resource_goal(str(temp_dir))
+        from claude_task_master.mcp.tools import resource_goal
+
+        result = resource_goal(temp_dir)
         assert "No active task" in result
 
     def test_resource_goal_with_task(self, initialized_state, state_dir):
         """Test resource_goal returns goal."""
-        result = _call_resource_goal(str(state_dir.parent))
+        from claude_task_master.mcp.tools import resource_goal
+
+        result = resource_goal(state_dir.parent)
         assert "Test goal for MCP" in result
 
     def test_resource_plan_no_task(self, temp_dir):
         """Test resource_plan when no task exists."""
-        result = _call_resource_plan(str(temp_dir))
+        from claude_task_master.mcp.tools import resource_plan
+
+        result = resource_plan(temp_dir)
         assert "No active task" in result
 
     def test_resource_plan_with_plan(self, state_with_plan, state_dir):
         """Test resource_plan returns plan."""
-        result = _call_resource_plan(str(state_dir.parent))
+        from claude_task_master.mcp.tools import resource_plan
+
+        result = resource_plan(state_dir.parent)
         assert "First task to do" in result
 
     def test_resource_progress_no_task(self, temp_dir):
         """Test resource_progress when no task exists."""
-        result = _call_resource_progress(str(temp_dir))
+        from claude_task_master.mcp.tools import resource_progress
+
+        result = resource_progress(temp_dir)
         assert "No active task" in result
 
     def test_resource_context_no_task(self, temp_dir):
         """Test resource_context when no task exists."""
-        result = _call_resource_context(str(temp_dir))
+        from claude_task_master.mcp.tools import resource_context
+
+        result = resource_context(temp_dir)
         assert "No active task" in result
 
 
@@ -426,353 +467,58 @@ class TestMCPServerCLI:
         assert callable(run_server)
 
 
-# =============================================================================
-# Helper Functions - Simulate tool calls
-# =============================================================================
+class TestResponseModels:
+    """Test response model classes."""
 
+    def test_task_status_model(self):
+        """Test TaskStatus model."""
+        from claude_task_master.mcp.tools import TaskStatus
 
-def _call_get_status(state_dir: str) -> dict:
-    """Simulate calling get_status tool."""
-    from claude_task_master.core.state import StateManager
-
-    state_path = Path(state_dir)
-    state_manager = StateManager(state_dir=state_path)
-
-    if not state_manager.exists():
-        return {
-            "success": False,
-            "error": "No active task found",
-            "suggestion": "Use start_task to begin a new task",
-        }
-
-    try:
-        state = state_manager.load_state()
-        goal = state_manager.load_goal()
-
-        return {
-            "goal": goal,
-            "status": state.status,
-            "model": state.model,
-            "current_task_index": state.current_task_index,
-            "session_count": state.session_count,
-            "run_id": state.run_id,
-            "current_pr": state.current_pr,
-            "workflow_stage": state.workflow_stage,
-            "options": state.options.model_dump(),
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e),
-        }
-
-
-def _call_get_plan(state_dir: str) -> dict:
-    """Simulate calling get_plan tool."""
-    from claude_task_master.core.state import StateManager
-
-    state_path = Path(state_dir)
-    state_manager = StateManager(state_dir=state_path)
-
-    if not state_manager.exists():
-        return {
-            "success": False,
-            "error": "No active task found",
-        }
-
-    try:
-        plan = state_manager.load_plan()
-        if not plan:
-            return {
-                "success": False,
-                "error": "No plan found",
-            }
-
-        return {
-            "success": True,
-            "plan": plan,
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e),
-        }
-
-
-def _call_get_logs(state_dir: str, tail: int = 100) -> dict:
-    """Simulate calling get_logs tool."""
-    from claude_task_master.core.state import StateManager
-
-    state_path = Path(state_dir)
-    state_manager = StateManager(state_dir=state_path)
-
-    if not state_manager.exists():
-        return {
-            "success": False,
-            "error": "No active task found",
-        }
-
-    try:
-        state = state_manager.load_state()
-        log_file = state_manager.get_log_file(state.run_id)
-
-        if not log_file.exists():
-            return {
-                "success": False,
-                "error": "No log file found",
-            }
-
-        with open(log_file) as f:
-            lines = f.readlines()
-
-        log_content = "".join(lines[-tail:])
-
-        return {
-            "success": True,
-            "log_content": log_content,
-            "log_file": str(log_file),
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e),
-        }
-
-
-def _call_get_progress(state_dir: str) -> dict:
-    """Simulate calling get_progress tool."""
-    from claude_task_master.core.state import StateManager
-
-    state_path = Path(state_dir)
-    state_manager = StateManager(state_dir=state_path)
-
-    if not state_manager.exists():
-        return {
-            "success": False,
-            "error": "No active task found",
-        }
-
-    try:
-        progress = state_manager.load_progress()
-        if not progress:
-            return {
-                "success": True,
-                "progress": None,
-                "message": "No progress recorded yet",
-            }
-
-        return {
-            "success": True,
-            "progress": progress,
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e),
-        }
-
-
-def _call_get_context(state_dir: str) -> dict:
-    """Simulate calling get_context tool."""
-    from claude_task_master.core.state import StateManager
-
-    state_path = Path(state_dir)
-    state_manager = StateManager(state_dir=state_path)
-
-    if not state_manager.exists():
-        return {
-            "success": False,
-            "error": "No active task found",
-        }
-
-    try:
-        context = state_manager.load_context()
-        return {
-            "success": True,
-            "context": context or "",
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e),
-        }
-
-
-def _call_clean_task(state_dir: str) -> dict:
-    """Simulate calling clean_task tool."""
-    from claude_task_master.core.state import StateManager
-
-    state_path = Path(state_dir)
-    state_manager = StateManager(state_dir=state_path)
-
-    if not state_manager.exists():
-        return {
-            "success": True,
-            "message": "No task state found to clean",
-            "files_removed": False,
-        }
-
-    try:
-        if state_manager.state_dir.exists():
-            shutil.rmtree(state_manager.state_dir)
-            return {
-                "success": True,
-                "message": "Task state cleaned successfully",
-                "files_removed": True,
-            }
-        return {
-            "success": True,
-            "message": "State directory did not exist",
-            "files_removed": False,
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "message": f"Failed to clean task state: {e}",
-        }
-
-
-def _call_initialize_task(
-    state_dir: str,
-    goal: str,
-    model: str = "opus",
-    auto_merge: bool = True,
-    max_sessions: int | None = None,
-    pause_on_pr: bool = False,
-) -> dict:
-    """Simulate calling initialize_task tool."""
-    from claude_task_master.core.state import StateManager, TaskOptions
-
-    state_path = Path(state_dir)
-    state_manager = StateManager(state_dir=state_path)
-
-    if state_manager.exists():
-        return {
-            "success": False,
-            "message": "Task already exists. Use clean_task first or resume the existing task.",
-        }
-
-    try:
-        options = TaskOptions(
-            auto_merge=auto_merge,
-            max_sessions=max_sessions,
-            pause_on_pr=pause_on_pr,
+        status = TaskStatus(
+            goal="Test goal",
+            status="working",
+            model="opus",
+            current_task_index=1,
+            session_count=2,
+            run_id="test-123",
+            options={"auto_merge": True},
         )
-        state = state_manager.initialize(goal=goal, model=model, options=options)
+        assert status.goal == "Test goal"
+        assert status.status == "working"
 
-        return {
-            "success": True,
-            "message": f"Task initialized successfully with goal: {goal}",
-            "run_id": state.run_id,
-            "status": state.status,
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "message": f"Failed to initialize task: {e}",
-        }
+    def test_start_task_result_model(self):
+        """Test StartTaskResult model."""
+        from claude_task_master.mcp.tools import StartTaskResult
 
+        result = StartTaskResult(
+            success=True,
+            message="Task started",
+            run_id="test-123",
+            status="planning",
+        )
+        assert result.success is True
+        assert result.run_id == "test-123"
 
-def _call_list_tasks(state_dir: str) -> dict:
-    """Simulate calling list_tasks tool."""
-    from claude_task_master.core.state import StateManager
+    def test_clean_result_model(self):
+        """Test CleanResult model."""
+        from claude_task_master.mcp.tools import CleanResult
 
-    state_path = Path(state_dir)
-    state_manager = StateManager(state_dir=state_path)
+        result = CleanResult(
+            success=True,
+            message="Cleaned",
+            files_removed=True,
+        )
+        assert result.success is True
+        assert result.files_removed is True
 
-    if not state_manager.exists():
-        return {
-            "success": False,
-            "error": "No active task found",
-        }
+    def test_logs_result_model(self):
+        """Test LogsResult model."""
+        from claude_task_master.mcp.tools import LogsResult
 
-    try:
-        plan = state_manager.load_plan()
-        if not plan:
-            return {
-                "success": False,
-                "error": "No plan found",
-            }
-
-        tasks = []
-        for line in plan.split("\n"):
-            stripped = line.strip()
-            if stripped.startswith("- [ ]"):
-                tasks.append({
-                    "task": stripped[5:].strip(),
-                    "completed": False,
-                })
-            elif stripped.startswith("- [x]"):
-                tasks.append({
-                    "task": stripped[5:].strip(),
-                    "completed": True,
-                })
-
-        state = state_manager.load_state()
-
-        return {
-            "success": True,
-            "tasks": tasks,
-            "total": len(tasks),
-            "completed": sum(1 for t in tasks if t["completed"]),
-            "current_index": state.current_task_index,
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e),
-        }
-
-
-def _call_resource_goal(working_dir: str) -> str:
-    """Simulate calling resource_goal."""
-    from claude_task_master.core.state import StateManager
-
-    state_manager = StateManager(state_dir=Path(working_dir) / ".claude-task-master")
-    if not state_manager.exists():
-        return "No active task"
-    try:
-        return state_manager.load_goal()
-    except Exception:
-        return "Error loading goal"
-
-
-def _call_resource_plan(working_dir: str) -> str:
-    """Simulate calling resource_plan."""
-    from claude_task_master.core.state import StateManager
-
-    state_manager = StateManager(state_dir=Path(working_dir) / ".claude-task-master")
-    if not state_manager.exists():
-        return "No active task"
-    try:
-        plan = state_manager.load_plan()
-        return plan or "No plan found"
-    except Exception:
-        return "Error loading plan"
-
-
-def _call_resource_progress(working_dir: str) -> str:
-    """Simulate calling resource_progress."""
-    from claude_task_master.core.state import StateManager
-
-    state_manager = StateManager(state_dir=Path(working_dir) / ".claude-task-master")
-    if not state_manager.exists():
-        return "No active task"
-    try:
-        progress = state_manager.load_progress()
-        return progress or "No progress recorded"
-    except Exception:
-        return "Error loading progress"
-
-
-def _call_resource_context(working_dir: str) -> str:
-    """Simulate calling resource_context."""
-    from claude_task_master.core.state import StateManager
-
-    state_manager = StateManager(state_dir=Path(working_dir) / ".claude-task-master")
-    if not state_manager.exists():
-        return "No active task"
-    try:
-        return state_manager.load_context()
-    except Exception:
-        return "Error loading context"
+        result = LogsResult(
+            success=True,
+            log_content="Some logs",
+            log_file="/path/to/log.txt",
+        )
+        assert result.success is True
+        assert result.log_content == "Some logs"

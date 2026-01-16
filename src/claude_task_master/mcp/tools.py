@@ -17,7 +17,6 @@ from claude_task_master.core.state import (
     TaskOptions,
 )
 
-
 # =============================================================================
 # Response Models
 # =============================================================================
@@ -291,7 +290,7 @@ def clean_task(
 
     Args:
         work_dir: Working directory for the server.
-        force: If True, skip confirmation (always True for MCP).
+        force: If True, force cleanup even if session is active.
         state_dir: Optional custom state directory path.
 
     Returns:
@@ -307,7 +306,18 @@ def clean_task(
             files_removed=False,
         ).model_dump()
 
+    # Check for active session
+    if state_manager.is_session_active() and not force:
+        return CleanResult(
+            success=False,
+            message="Another claudetm session is active. Use force=True to override.",
+            files_removed=False,
+        ).model_dump()
+
     try:
+        # Release session lock before cleanup
+        state_manager.release_session_lock()
+
         if state_manager.state_dir.exists():
             shutil.rmtree(state_manager.state_dir)
             return CleanResult(
