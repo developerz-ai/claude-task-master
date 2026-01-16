@@ -1,6 +1,7 @@
 """CLI entry point for Claude Task Master."""
 
 from pathlib import Path
+from typing import Annotated
 
 import typer
 from rich.console import Console
