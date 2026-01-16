@@ -129,11 +129,11 @@ instructions, coding standards, and important context you must follow.
 - `Read` - Read files to understand the codebase (start with CLAUDE.md!)
 - `Glob` - Find files by pattern
 - `Grep` - Search for code patterns
+- `Bash` - Run commands (git status, tests, lint checks, etc.)
 
 **FORBIDDEN TOOLS (NEVER use during planning):**
 - ❌ `Write` - Do NOT write any files
 - ❌ `Edit` - Do NOT edit any files
-- ❌ `Bash` - Do NOT run any commands
 - ❌ `Task` - Do NOT launch any agents
 - ❌ `TodoWrite` - Do NOT use todo tracking
 - ❌ `WebFetch` - Do NOT fetch web pages
@@ -144,10 +144,10 @@ You just need to OUTPUT the plan as TEXT in your response.
 
 ## PLANNING RULES
 
-- Do NOT write code
+- Do NOT write code or create files
 - Do NOT create git branches
-- Do NOT run tests
-- Do NOT create files
+- Do NOT make changes - only explore
+- Use Bash to check current state (git status, run tests, lint)
 - ONLY explore and OUTPUT your plan as text"""
     )
 
