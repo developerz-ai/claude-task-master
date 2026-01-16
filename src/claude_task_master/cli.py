@@ -238,7 +238,7 @@ def resume(
             if state.status in ("failed", "blocked"):
                 console.print(f"[yellow]Force resetting status from '{state.status}' to 'in_progress'[/yellow]")
                 state.status = "in_progress"
-                state_manager.save_state(state)
+                state_manager.save_state(state, validate_transition=False)
 
         # Load state and validate it's resumable using comprehensive validation
         try:
