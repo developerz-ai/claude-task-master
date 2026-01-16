@@ -62,6 +62,16 @@ class LogsResult(BaseModel):
     error: str | None = None
 
 
+class HealthCheckResult(BaseModel):
+    """Result from health_check tool."""
+
+    status: str
+    version: str
+    server_name: str
+    uptime_seconds: float | None = None
+    active_tasks: int = 0
+
+
 # =============================================================================
 # Tool Implementations
 # =============================================================================
@@ -452,6 +462,50 @@ def list_tasks(
             "success": False,
             "error": str(e),
         }
+
+
+def health_check(
+    work_dir: Path,
+    server_name: str = "claude-task-master",
+    start_time: float | None = None,
+) -> dict[str, Any]:
+    """Perform a health check on the MCP server.
+
+    Args:
+        work_dir: Working directory for the server.
+        server_name: Name of the MCP server.
+        start_time: Server start time (timestamp) for uptime calculation.
+
+    Returns:
+        Dictionary containing health status information.
+    """
+    import time
+
+    from claude_task_master import __version__
+
+    # Calculate uptime if start_time provided
+    uptime = None
+    if start_time is not None:
+        uptime = time.time() - start_time
+
+    # Check for active tasks
+    active_tasks = 0
+    state_dir = work_dir / ".claude-task-master"
+    state_manager = StateManager(state_dir=state_dir)
+    if state_manager.exists():
+        try:
+            state_manager.load_state()
+            active_tasks = 1
+        except Exception:
+            pass
+
+    return HealthCheckResult(
+        status="healthy",
+        version=__version__,
+        server_name=server_name,
+        uptime_seconds=uptime,
+        active_tasks=active_tasks,
+    ).model_dump()
 
 
 # =============================================================================

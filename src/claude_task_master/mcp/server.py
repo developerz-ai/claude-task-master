@@ -38,6 +38,7 @@ TaskStatus = tools.TaskStatus
 StartTaskResult = tools.StartTaskResult
 CleanResult = tools.CleanResult
 LogsResult = tools.LogsResult
+HealthCheckResult = tools.HealthCheckResult
 
 
 # =============================================================================
@@ -61,6 +62,8 @@ def create_server(
     Raises:
         ImportError: If MCP SDK is not installed.
     """
+    import time
+
     if FastMCP is None:
         raise ImportError("MCP SDK not installed. Install with: pip install mcp")
 
@@ -69,6 +72,9 @@ def create_server(
 
     # Store working directory in server context
     work_dir = Path(working_dir) if working_dir else Path.cwd()
+
+    # Track server start time for uptime
+    start_time = time.time()
 
     # =============================================================================
     # Tool Wrappers - Delegate to tools module
@@ -207,6 +213,18 @@ def create_server(
             Dictionary containing list of tasks with status.
         """
         return tools.list_tasks(work_dir, state_dir)
+
+    @mcp.tool()
+    def health_check() -> dict[str, Any]:
+        """Health check endpoint for the MCP server.
+
+        Returns server health information including status, version,
+        server name, uptime, and number of active tasks.
+
+        Returns:
+            Dictionary containing health status information.
+        """
+        return tools.health_check(work_dir, name, start_time)
 
     # =============================================================================
     # Resource Wrappers
