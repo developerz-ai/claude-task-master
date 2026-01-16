@@ -193,8 +193,50 @@ class ToolConfig(Enum):
     """Tool configurations for different phases."""
 
     # Planning now uses all tools since Claude needs full access to explore and create plans
-    PLANNING = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "Task", "TodoWrite"]
-    WORKING = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "Task", "TodoWrite"]
+    PLANNING = [
+        "Read",
+        "Write",
+        "Edit",
+        "Bash",
+        "Glob",
+        "Grep",
+        "Task",
+        "TodoWrite",
+        "WebSearch",
+        "WebFetch",
+    ]
+    WORKING = [
+        "Read",
+        "Write",
+        "Edit",
+        "Bash",
+        "Glob",
+        "Grep",
+        "Task",
+        "TodoWrite",
+        "WebSearch",
+        "WebFetch",
+    ]
+
+
+# Model context window sizes (tokens) for auto-compact threshold calculation
+# Sonnet 4/4.5 supports 1M context (available for tier 4+ users)
+# See: https://www.claude.com/blog/1m-context
+MODEL_CONTEXT_WINDOWS = {
+    ModelType.OPUS: 200_000,  # Claude Opus 4.5: 200K context
+    ModelType.SONNET: 1_000_000,  # Claude Sonnet 4/4.5: 1M context (tier 4+)
+    ModelType.HAIKU: 200_000,  # Claude Haiku 4.5: 200K context
+}
+
+# Standard context windows (for users below tier 4)
+MODEL_CONTEXT_WINDOWS_STANDARD = {
+    ModelType.OPUS: 200_000,
+    ModelType.SONNET: 200_000,
+    ModelType.HAIKU: 200_000,
+}
+
+# Default compact threshold as percentage of context window
+DEFAULT_COMPACT_THRESHOLD_PERCENT = 0.85  # Compact at 85% usage
 
 
 def parse_task_complexity(task_description: str) -> tuple[TaskComplexity, str]:
@@ -741,6 +783,18 @@ Be strict - only say PASS if ALL criteria are truly met."""
             pattern = tool_input.get("pattern", "")
             path = tool_input.get("path", ".")
             return f"→ '{pattern}' in {path}"
+        elif tool_name == "WebSearch":
+            query = tool_input.get("query", "")
+            # Truncate long queries
+            if len(query) > 100:
+                query = query[:97] + "..."
+            return f"→ '{query}'"
+        elif tool_name == "WebFetch":
+            url = tool_input.get("url", "")
+            # Truncate long URLs
+            if len(url) > 100:
+                url = url[:97] + "..."
+            return f"→ {url}"
         else:
             # For unknown tools, show first key-value if available
             if tool_input:

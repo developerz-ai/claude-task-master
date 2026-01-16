@@ -2,6 +2,9 @@
 
 from claude_task_master.core import console
 from claude_task_master.core.agent import (
+    DEFAULT_COMPACT_THRESHOLD_PERCENT,
+    MODEL_CONTEXT_WINDOWS,
+    MODEL_CONTEXT_WINDOWS_STANDARD,
     AgentError,
     AgentWrapper,
     APIAuthenticationError,
@@ -154,6 +157,10 @@ __all__ = [
     "ToolConfig",
     "AgentWrapper",
     "parse_task_complexity",
+    # Model context configuration
+    "MODEL_CONTEXT_WINDOWS",
+    "MODEL_CONTEXT_WINDOWS_STANDARD",
+    "DEFAULT_COMPACT_THRESHOLD_PERCENT",
     # Rate limit classes
     "RateLimitConfig",
     # Checkpoint exceptions

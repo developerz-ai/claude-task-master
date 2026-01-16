@@ -301,12 +301,34 @@ class TestToolConfig:
 
     def test_planning_tools(self):
         """Test PLANNING tool configuration - planning now has full access."""
-        expected = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "Task", "TodoWrite"]
+        expected = [
+            "Read",
+            "Write",
+            "Edit",
+            "Bash",
+            "Glob",
+            "Grep",
+            "Task",
+            "TodoWrite",
+            "WebSearch",
+            "WebFetch",
+        ]
         assert ToolConfig.PLANNING.value == expected
 
     def test_working_tools(self):
         """Test WORKING tool configuration."""
-        expected = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "Task", "TodoWrite"]
+        expected = [
+            "Read",
+            "Write",
+            "Edit",
+            "Bash",
+            "Glob",
+            "Grep",
+            "Task",
+            "TodoWrite",
+            "WebSearch",
+            "WebFetch",
+        ]
         assert ToolConfig.WORKING.value == expected
 
     def test_planning_and_working_tools_are_same(self):
@@ -425,22 +447,70 @@ class TestAgentWrapperGetToolsForPhase:
     def test_planning_phase_tools(self, agent):
         """Test get_tools_for_phase returns planning tools (now full access)."""
         tools = agent.get_tools_for_phase("planning")
-        assert tools == ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "Task", "TodoWrite"]
+        expected = [
+            "Read",
+            "Write",
+            "Edit",
+            "Bash",
+            "Glob",
+            "Grep",
+            "Task",
+            "TodoWrite",
+            "WebSearch",
+            "WebFetch",
+        ]
+        assert tools == expected
 
     def test_working_phase_tools(self, agent):
         """Test get_tools_for_phase returns working tools."""
         tools = agent.get_tools_for_phase("working")
-        assert tools == ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "Task", "TodoWrite"]
+        expected = [
+            "Read",
+            "Write",
+            "Edit",
+            "Bash",
+            "Glob",
+            "Grep",
+            "Task",
+            "TodoWrite",
+            "WebSearch",
+            "WebFetch",
+        ]
+        assert tools == expected
 
     def test_unknown_phase_returns_working_tools(self, agent):
         """Test unknown phase returns working tools by default."""
         tools = agent.get_tools_for_phase("unknown")
-        assert tools == ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "Task", "TodoWrite"]
+        expected = [
+            "Read",
+            "Write",
+            "Edit",
+            "Bash",
+            "Glob",
+            "Grep",
+            "Task",
+            "TodoWrite",
+            "WebSearch",
+            "WebFetch",
+        ]
+        assert tools == expected
 
     def test_empty_phase_returns_working_tools(self, agent):
         """Test empty phase string returns working tools."""
         tools = agent.get_tools_for_phase("")
-        assert tools == ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "Task", "TodoWrite"]
+        expected = [
+            "Read",
+            "Write",
+            "Edit",
+            "Bash",
+            "Glob",
+            "Grep",
+            "Task",
+            "TodoWrite",
+            "WebSearch",
+            "WebFetch",
+        ]
+        assert tools == expected
 
 
 # =============================================================================
