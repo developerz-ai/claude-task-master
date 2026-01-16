@@ -855,10 +855,11 @@ After addressing ALL comments, end with: TASK COMPLETE"""
             data = json.loads(result.stdout)
             threads = data["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
 
-            # Convert to list of comment dicts
+            # Convert to list of comment dicts - ONLY unresolved threads
             comments = []
             for thread in threads:
-                is_resolved = thread["isResolved"]
+                if thread["isResolved"]:
+                    continue  # Skip resolved threads
                 for comment in thread["comments"]["nodes"]:
                     comments.append(
                         {
@@ -866,7 +867,7 @@ After addressing ALL comments, end with: TASK COMPLETE"""
                             "body": comment["body"],
                             "path": comment.get("path"),
                             "line": comment.get("line"),
-                            "is_resolved": is_resolved,
+                            "is_resolved": False,
                         }
                     )
 
