@@ -33,13 +33,13 @@ class TestMCPServerCreation:
 
         # Temporarily set FastMCP to None
         original_fastmcp = mcp_server_module.FastMCP
-        mcp_server_module.FastMCP = None
+        mcp_server_module.FastMCP = None  # type: ignore[misc, assignment]
 
         try:
             with pytest.raises(ImportError, match="MCP SDK not installed"):
                 mcp_server_module.create_server(working_dir=str(temp_dir))
         finally:
-            mcp_server_module.FastMCP = original_fastmcp
+            mcp_server_module.FastMCP = original_fastmcp  # type: ignore[misc]
 
 
 class TestMCPServerCLI:

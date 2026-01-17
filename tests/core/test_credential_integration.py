@@ -17,7 +17,6 @@ from claude_task_master.core.credentials import (
     CredentialManager,
     CredentialNotFoundError,
     CredentialPermissionError,
-    Credentials,
     InvalidCredentialsError,
     InvalidTokenResponseError,
     NetworkConnectionError,

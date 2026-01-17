@@ -15,7 +15,6 @@ from claude_task_master.core.state import TaskOptions, TaskState
 from claude_task_master.github.client import PRStatus
 from claude_task_master.github.pr_cycle import PRCycleManager
 
-
 # =============================================================================
 # Test Fixtures
 # =============================================================================
