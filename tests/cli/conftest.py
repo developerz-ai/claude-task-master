@@ -250,7 +250,7 @@ def setup_resume_state(
             assert result.exit_code == 0
     """
 
-    def _setup(**state_kwargs) -> dict:
+    def _setup(**state_kwargs: object) -> dict[str, object]:
         """Setup state file and logs directory with given parameters.
 
         Args:
@@ -259,7 +259,7 @@ def setup_resume_state(
         Returns:
             The created state data dictionary
         """
-        state_data = state_data_factory(**state_kwargs)
+        state_data: dict[str, object] = state_data_factory(**state_kwargs)
         state_file = mock_state_dir / "state.json"
         state_file.write_text(json.dumps(state_data))
         logs_dir = mock_state_dir / "logs"

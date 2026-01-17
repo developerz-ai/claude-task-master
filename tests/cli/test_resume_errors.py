@@ -266,7 +266,7 @@ class TestResumeMissingFields:
     ):
         """Test resume handles missing status field."""
         timestamp = datetime.now().isoformat()
-        state_data = {
+        state_data: dict[str, object] = {
             "current_task_index": 0,
             "session_count": 1,
             "current_pr": None,

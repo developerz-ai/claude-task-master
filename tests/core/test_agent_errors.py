@@ -313,7 +313,8 @@ class TestAPIAuthenticationError:
 
     def test_auth_error_not_transient(self):
         """Test APIAuthenticationError is NOT in TRANSIENT_ERRORS."""
-        assert APIAuthenticationError not in TRANSIENT_ERRORS
+        # Intentionally check that auth errors are not in transient errors
+        assert APIAuthenticationError not in TRANSIENT_ERRORS  # type: ignore[comparison-overlap]
 
     def test_auth_error_mentions_credentials(self):
         """Test APIAuthenticationError message mentions credentials."""
@@ -395,7 +396,8 @@ class TestContentFilterError:
     def test_content_filter_error_not_retryable(self):
         """Test that ContentFilterError is not in transient errors."""
         # ContentFilterError should NOT be retryable
-        assert ContentFilterError not in TRANSIENT_ERRORS
+        # Intentionally check that content filter errors are not in transient errors
+        assert ContentFilterError not in TRANSIENT_ERRORS  # type: ignore[comparison-overlap]
 
     def test_content_filter_error_suggests_rephrasing(self):
         """Test ContentFilterError suggests rephrasing."""
@@ -467,11 +469,13 @@ class TestTransientErrors:
 
     def test_transient_errors_excludes_auth(self):
         """Test TRANSIENT_ERRORS excludes APIAuthenticationError."""
-        assert APIAuthenticationError not in TRANSIENT_ERRORS
+        # Intentionally check that auth errors are excluded from transient errors
+        assert APIAuthenticationError not in TRANSIENT_ERRORS  # type: ignore[comparison-overlap]
 
     def test_transient_errors_excludes_content_filter(self):
         """Test TRANSIENT_ERRORS excludes ContentFilterError."""
-        assert ContentFilterError not in TRANSIENT_ERRORS
+        # Intentionally check that content filter errors are excluded from transient errors
+        assert ContentFilterError not in TRANSIENT_ERRORS  # type: ignore[comparison-overlap]
 
     def test_transient_errors_is_tuple(self):
         """Test TRANSIENT_ERRORS is a tuple for isinstance checks."""

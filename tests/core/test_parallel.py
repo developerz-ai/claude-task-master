@@ -19,7 +19,7 @@ class TestTaskResult:
 
     def test_duration(self):
         """Test duration calculation."""
-        result = TaskResult(
+        result: TaskResult = TaskResult(
             task_id="test",
             status=TaskStatus.COMPLETED,
             start_time=100.0,
@@ -29,12 +29,12 @@ class TestTaskResult:
 
     def test_duration_none(self):
         """Test duration when times not set."""
-        result = TaskResult(task_id="test", status=TaskStatus.PENDING)
+        result: TaskResult = TaskResult(task_id="test", status=TaskStatus.PENDING)
         assert result.duration is None
 
     def test_is_success(self):
         """Test success check."""
-        result = TaskResult(
+        result: TaskResult = TaskResult(
             task_id="test",
             status=TaskStatus.COMPLETED,
             result="data",
@@ -43,7 +43,7 @@ class TestTaskResult:
 
     def test_is_not_success_on_failure(self):
         """Test success check on failure."""
-        result = TaskResult(
+        result: TaskResult = TaskResult(
             task_id="test",
             status=TaskStatus.FAILED,
             error=ValueError("test"),
@@ -113,7 +113,9 @@ class TestParallelExecutor:
         executor = ParallelExecutor()
 
         for i in range(3):
-            executor.add_task(ParallelTask(task_id=f"task{i}", func=lambda x=i: f"result{x}"))
+            executor.add_task(
+                ParallelTask(task_id=f"task{i}", func=lambda x=i: f"result{x}")  # type: ignore[misc]
+            )
 
         results = executor.execute_all()
 

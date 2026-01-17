@@ -162,7 +162,8 @@ class TestCircuitBreaker:
 
         cb.reset()
 
-        assert cb.state == CircuitState.CLOSED
+        # After reset, state should be CLOSED (intentional test of reset behavior)
+        assert cb.state == CircuitState.CLOSED  # type: ignore[comparison-overlap]
         assert cb.metrics.total_calls == 0
 
     def test_force_open(self):

@@ -111,6 +111,7 @@ class TestExecutionTracker:
 
         tracker.record_api_call(tokens_in=100, tokens_out=50)
 
+        assert tracker._current_session is not None
         assert tracker._current_session.api_calls == 1
         assert tracker._current_session.tokens_input == 100
         assert tracker._current_session.tokens_output == 50
@@ -122,6 +123,7 @@ class TestExecutionTracker:
 
         tracker.record_tool_call("Read")
 
+        assert tracker._current_session is not None
         assert tracker._current_session.tool_calls == 1
 
     def test_record_error(self):
@@ -131,6 +133,7 @@ class TestExecutionTracker:
 
         tracker.record_error()
 
+        assert tracker._current_session is not None
         assert tracker._current_session.errors == 1
 
     def test_check_progress_healthy(self):
