@@ -251,6 +251,7 @@ class TestStateNotFoundError:
         """Test that details suggest running start command."""
         path = Path("/test/state.json")
         error = StateNotFoundError(path)
+        assert error.details is not None
         assert "start" in error.details.lower()
 
     def test_inherits_from_state_error(self):

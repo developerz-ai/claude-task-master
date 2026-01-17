@@ -166,6 +166,7 @@ class TestStateRecoveryError:
         """Should create error with reason only."""
         error = StateRecoveryError("State file corrupted")
         assert "Failed to recover" in error.message
+        assert error.details is not None
         assert "State file corrupted" in error.details
         assert error.original_error is None
 
@@ -174,6 +175,7 @@ class TestStateRecoveryError:
         original = ValueError("JSON parse error")
         error = StateRecoveryError("Invalid format", original)
         assert error.original_error is original
+        assert error.details is not None
         assert "ValueError" in error.details
         assert "JSON parse error" in error.details
 
@@ -181,6 +183,7 @@ class TestStateRecoveryError:
         """Should format details correctly."""
         original = OSError("File not found")
         error = StateRecoveryError("Backup corrupted", original)
+        assert error.details is not None
         assert "Reason: Backup corrupted" in error.details
         assert "Original error: OSError" in error.details
 
@@ -208,6 +211,7 @@ class TestMaxSessionsReachedError:
     def test_error_details_suggest_increase(self):
         """Should suggest increasing max_sessions in details."""
         error = MaxSessionsReachedError(max_sessions=3, current_session=3)
+        assert error.details is not None
         assert "increasing max_sessions" in error.details
 
 
@@ -678,7 +682,7 @@ class TestRunWorkflowCycle:
         with patch.object(
             basic_orchestrator.task_runner,
             "run_work_session",
-            side_effect=ContentFilterError("Content blocked"),
+            side_effect=ContentFilterError(ValueError("Content blocked")),
         ):
             result = basic_orchestrator._run_workflow_cycle(basic_task_state)
 

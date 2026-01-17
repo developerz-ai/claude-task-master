@@ -80,6 +80,7 @@ class TestSDKImportError:
         original = ImportError("Module not found")
         error = SDKImportError(original)
         assert error.original_error is original
+        assert error.details is not None
         assert "Module not found" in error.details
 
 
@@ -98,6 +99,7 @@ class TestQueryExecutionError:
         original = RuntimeError("Connection lost")
         error = QueryExecutionError("Query failed", original)
         assert error.original_error is original
+        assert error.details is not None
         assert "Connection lost" in error.details
 
 
@@ -163,7 +165,7 @@ class TestConversationManagerInit:
 
     def test_init_with_all_options(self, temp_dir):
         """Should initialize with all options."""
-        hooks = {"test": []}
+        hooks: Any = {"test": []}
         mock_logger = MagicMock()
         rate_config = RateLimitConfig.default()
         cb_config = CircuitBreakerConfig.default()

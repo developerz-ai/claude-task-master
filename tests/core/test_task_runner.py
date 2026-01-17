@@ -161,6 +161,7 @@ class TestNoPlanFoundError:
         """Should create appropriate error message."""
         error = NoPlanFoundError()
         assert "No plan found" in error.message
+        assert error.details is not None
         assert "planning phase" in error.details
 
 
@@ -177,12 +178,14 @@ class TestNoTasksFoundError:
         """Should include full short plan content in details."""
         error = NoTasksFoundError("Short plan content")
         assert "No tasks found" in error.message
+        assert error.details is not None
         assert "Short plan content" in error.details
 
     def test_no_tasks_found_error_with_long_content(self):
         """Should truncate long plan content."""
         long_content = "x" * 300
         error = NoTasksFoundError(long_content)
+        assert error.details is not None
         assert "..." in error.details
         assert len(error.details) < 250  # Truncated
 
@@ -200,6 +203,7 @@ class TestWorkSessionError:
         assert error.original_error is original
         assert "#3" in error.message  # task_index + 1
         assert "Test task description" in error.message
+        assert error.details is not None
         assert "ValueError" in error.details
 
 

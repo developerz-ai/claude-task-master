@@ -465,7 +465,8 @@ class TestApplyRecovery:
 
         recovery.apply_recovery(state, cwd=str(temp_dir))
 
-        assert state.status == "working"
+        # After recovery, status should change from "blocked" to "working"
+        assert state.status == "working"  # type: ignore[comparison-overlap]
 
     def test_apply_recovery_returns_recovered_state(self, temp_dir: Path):
         """Test that apply_recovery returns RecoveredState."""
