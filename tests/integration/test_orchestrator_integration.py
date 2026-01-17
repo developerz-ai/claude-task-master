@@ -27,6 +27,7 @@ class TestOrchestratorTaskExecution:
         integration_temp_dir: Path,
         integration_state_dir: Path,
         mock_agent_wrapper,
+        mock_github_client,
         monkeypatch,
     ):
         """Test orchestrator executes a single task successfully."""
@@ -63,7 +64,9 @@ class TestOrchestratorTaskExecution:
         planner = Planner(mock_agent_wrapper, state_manager)
 
         # Create and run orchestrator
-        orchestrator = WorkLoopOrchestrator(mock_agent_wrapper, state_manager, planner)
+        orchestrator = WorkLoopOrchestrator(
+            mock_agent_wrapper, state_manager, planner, github_client=mock_github_client
+        )
         result = orchestrator.run()
 
         # Should complete successfully
@@ -80,6 +83,7 @@ class TestOrchestratorTaskExecution:
         integration_temp_dir: Path,
         integration_state_dir: Path,
         mock_agent_wrapper,
+        mock_github_client,
         monkeypatch,
     ):
         """Test orchestrator executes multiple tasks in sequence."""
@@ -119,7 +123,9 @@ class TestOrchestratorTaskExecution:
         )
 
         planner = Planner(mock_agent_wrapper, state_manager)
-        orchestrator = WorkLoopOrchestrator(mock_agent_wrapper, state_manager, planner)
+        orchestrator = WorkLoopOrchestrator(
+            mock_agent_wrapper, state_manager, planner, github_client=mock_github_client
+        )
         result = orchestrator.run()
 
         # Should complete successfully
@@ -139,6 +145,7 @@ class TestOrchestratorTaskExecution:
         integration_temp_dir: Path,
         integration_state_dir: Path,
         mock_agent_wrapper,
+        mock_github_client,
         monkeypatch,
     ):
         """Test orchestrator resumes from middle of task list."""
@@ -178,7 +185,9 @@ class TestOrchestratorTaskExecution:
         )
 
         planner = Planner(mock_agent_wrapper, state_manager)
-        orchestrator = WorkLoopOrchestrator(mock_agent_wrapper, state_manager, planner)
+        orchestrator = WorkLoopOrchestrator(
+            mock_agent_wrapper, state_manager, planner, github_client=mock_github_client
+        )
         result = orchestrator.run()
 
         assert result == 0
@@ -194,6 +203,7 @@ class TestOrchestratorMaxSessions:
         integration_temp_dir: Path,
         integration_state_dir: Path,
         mock_agent_wrapper,
+        mock_github_client,
         monkeypatch,
     ):
         """Test orchestrator stops when max sessions is reached."""
@@ -226,7 +236,9 @@ class TestOrchestratorMaxSessions:
         )
 
         planner = Planner(mock_agent_wrapper, state_manager)
-        orchestrator = WorkLoopOrchestrator(mock_agent_wrapper, state_manager, planner)
+        orchestrator = WorkLoopOrchestrator(
+            mock_agent_wrapper, state_manager, planner, github_client=mock_github_client
+        )
         result = orchestrator.run()
 
         # Should return blocked (1)
@@ -244,6 +256,7 @@ class TestOrchestratorErrorHandling:
         integration_temp_dir: Path,
         integration_state_dir: Path,
         mock_agent_wrapper,
+        mock_github_client,
         monkeypatch,
     ):
         """Test orchestrator handles missing plan (empty plan = success)."""
@@ -258,7 +271,9 @@ class TestOrchestratorErrorHandling:
         state_manager.save_state(state)
 
         planner = Planner(mock_agent_wrapper, state_manager)
-        orchestrator = WorkLoopOrchestrator(mock_agent_wrapper, state_manager, planner)
+        orchestrator = WorkLoopOrchestrator(
+            mock_agent_wrapper, state_manager, planner, github_client=mock_github_client
+        )
         result = orchestrator.run()
 
         # No plan = no tasks = success (nothing to do)
@@ -281,6 +296,7 @@ class TestOrchestratorErrorHandling:
         integration_temp_dir: Path,
         integration_state_dir: Path,
         mock_agent_wrapper,
+        mock_github_client,
         monkeypatch,
     ):
         """Test orchestrator handles plan with no tasks."""
@@ -308,7 +324,9 @@ No tasks defined here.
         )
 
         planner = Planner(mock_agent_wrapper, state_manager)
-        orchestrator = WorkLoopOrchestrator(mock_agent_wrapper, state_manager, planner)
+        orchestrator = WorkLoopOrchestrator(
+            mock_agent_wrapper, state_manager, planner, github_client=mock_github_client
+        )
         result = orchestrator.run()
 
         # Empty plan is actually a success case (nothing to do)
@@ -319,6 +337,7 @@ No tasks defined here.
         integration_temp_dir: Path,
         integration_state_dir: Path,
         mock_agent_wrapper,
+        mock_github_client,
         monkeypatch,
     ):
         """Test orchestrator handles work session failure."""
@@ -346,7 +365,9 @@ No tasks defined here.
         )
 
         planner = Planner(mock_agent_wrapper, state_manager)
-        orchestrator = WorkLoopOrchestrator(mock_agent_wrapper, state_manager, planner)
+        orchestrator = WorkLoopOrchestrator(
+            mock_agent_wrapper, state_manager, planner, github_client=mock_github_client
+        )
         result = orchestrator.run()
 
         # Should return error
@@ -365,6 +386,7 @@ class TestOrchestratorVerification:
         integration_temp_dir: Path,
         integration_state_dir: Path,
         mock_agent_wrapper,
+        mock_github_client,
         monkeypatch,
     ):
         """Test that failed verification blocks completion."""
@@ -395,7 +417,9 @@ class TestOrchestratorVerification:
         )
 
         planner = Planner(mock_agent_wrapper, state_manager)
-        orchestrator = WorkLoopOrchestrator(mock_agent_wrapper, state_manager, planner)
+        orchestrator = WorkLoopOrchestrator(
+            mock_agent_wrapper, state_manager, planner, github_client=mock_github_client
+        )
         result = orchestrator.run()
 
         # Verification outcome determines result
@@ -419,6 +443,7 @@ class TestOrchestratorVerification:
         integration_temp_dir: Path,
         integration_state_dir: Path,
         mock_agent_wrapper,
+        mock_github_client,
         monkeypatch,
     ):
         """Test that successful verification completes the task."""
@@ -448,7 +473,9 @@ class TestOrchestratorVerification:
         )
 
         planner = Planner(mock_agent_wrapper, state_manager)
-        orchestrator = WorkLoopOrchestrator(mock_agent_wrapper, state_manager, planner)
+        orchestrator = WorkLoopOrchestrator(
+            mock_agent_wrapper, state_manager, planner, github_client=mock_github_client
+        )
         result = orchestrator.run()
 
         # Should complete successfully
@@ -463,6 +490,7 @@ class TestOrchestratorStateRecovery:
         integration_temp_dir: Path,
         integration_state_dir: Path,
         mock_agent_wrapper,
+        mock_github_client,
         monkeypatch,
     ):
         """Test orchestrator can recover from backup."""
@@ -490,7 +518,9 @@ class TestOrchestratorStateRecovery:
         assert backup_path is not None
 
         planner = Planner(mock_agent_wrapper, state_manager)
-        orchestrator = WorkLoopOrchestrator(mock_agent_wrapper, state_manager, planner)
+        orchestrator = WorkLoopOrchestrator(
+            mock_agent_wrapper, state_manager, planner, github_client=mock_github_client
+        )
 
         # Verify recovery method exists and works
         orchestrator._attempt_state_recovery()

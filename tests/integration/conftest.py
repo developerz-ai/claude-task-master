@@ -750,6 +750,26 @@ Please complete the API documentation before marking as successful.
 
 
 @pytest.fixture
+def mock_github_client():
+    """Provide a mocked GitHubClient for integration tests."""
+    mock = MagicMock()
+    mock.create_pr = MagicMock(return_value=123)
+    mock.get_pr_status = MagicMock(
+        return_value=MagicMock(
+            number=123,
+            ci_state="SUCCESS",
+            unresolved_threads=0,
+            check_details=[],
+        )
+    )
+    mock.get_pr_comments = MagicMock(return_value="")
+    mock.merge_pr = MagicMock()
+    mock.get_pr_for_current_branch = MagicMock(return_value=None)
+    mock.wait_for_ci = MagicMock(return_value=("SUCCESS", None))
+    return mock
+
+
+@pytest.fixture
 def mock_agent_wrapper(mock_sdk: MockClaudeAgentSDK):
     """Provide a mock AgentWrapper for integration tests."""
     mock = MagicMock()

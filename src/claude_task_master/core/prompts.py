@@ -419,8 +419,10 @@ orchestrator state files that should never be committed.
 **7. Push and Create PR** (REQUIRED)
 ```bash
 git push -u origin HEAD
-gh pr create --title "type: description" --body "..." --label "claudetm" 2>/dev/null || echo "PR exists"
+gh pr create --title "[claudetm] type: description" --body "..." --label "claudetm" 2>/dev/null || echo "PR exists"
 ```
+
+**PR title format:** `[claudetm] type: Brief description`
 
 ⚠️ **Your work is NOT done until pushed and in a PR!**
 
