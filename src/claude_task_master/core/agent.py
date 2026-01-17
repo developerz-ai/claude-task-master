@@ -6,34 +6,23 @@ see the `conversation` module which uses `ClaudeSDKClient`.
 """
 
 import asyncio
-import os
 from typing import TYPE_CHECKING, Any
 
 from . import console
 from .agent_exceptions import (
-    TRANSIENT_ERRORS,
     AgentError,
-    APIAuthenticationError,
-    APIConnectionError,
-    APIRateLimitError,
-    APIServerError,
-    APITimeoutError,
-    ContentFilterError,
-    QueryExecutionError,
     SDKImportError,
     SDKInitializationError,
-    WorkingDirectoryError,
 )
 from .agent_models import (
     ModelType,
     TaskComplexity,
     ToolConfig,
 )
+from .agent_query import AgentQueryExecutor
 from .circuit_breaker import (
     CircuitBreaker,
     CircuitBreakerConfig,
-    CircuitBreakerError,
-    CircuitState,
 )
 from .prompts import build_planning_prompt, build_verification_prompt, build_work_prompt
 from .rate_limit import RateLimitConfig
@@ -102,6 +91,18 @@ class AgentWrapper:
         # Initialize default hooks if not provided and safety enabled
         if self.hooks is None and self.enable_safety_hooks:
             self._init_default_hooks()
+
+        # Initialize query executor (delegated for SRP)
+        self._query_executor = AgentQueryExecutor(
+            query_func=self.query,
+            options_class=self.options_class,
+            working_dir=self.working_dir,
+            model=self.model,
+            rate_limit_config=self.rate_limit_config,
+            circuit_breaker=self.circuit_breaker,
+            hooks=self.hooks,
+            logger=self.logger,
+        )
 
         # Note: The Claude Agent SDK will automatically use credentials from
         # ~/.claude/.credentials.json if no ANTHROPIC_API_KEY is set
@@ -295,6 +296,9 @@ class AgentWrapper:
     ) -> str:
         """Run query with retry logic for transient errors.
 
+        Delegates to AgentQueryExecutor for actual execution with retry logic,
+        circuit breaker integration, and error classification.
+
         Args:
             prompt: The prompt to send to the model.
             tools: List of tools to enable.
@@ -308,177 +312,14 @@ class AgentWrapper:
             QueryExecutionError: If the query fails after all retries.
             APIAuthenticationError: If authentication fails (not retried).
         """
-        return await self._run_query_with_retry(prompt, tools, model_override)
-
-    async def _run_query_with_retry(
-        self, prompt: str, tools: list[str], model_override: ModelType | None = None
-    ) -> str:
-        """Execute query with exponential backoff retry for transient errors.
-
-        Uses circuit breaker pattern to prevent cascading failures when the
-        API is consistently failing.
-
-        Args:
-            prompt: The prompt to send to the model.
-            tools: List of tools to enable.
-            model_override: Optional model to use instead of default.
-
-        Returns:
-            The result text from the query.
-
-        Raises:
-            WorkingDirectoryError: If working directory cannot be accessed.
-            QueryExecutionError: If the query fails after all retries.
-            CircuitBreakerError: If circuit breaker is open.
-        """
-        # Check circuit breaker state first
-        if self.circuit_breaker.is_open:
-            time_until_retry = self.circuit_breaker.time_until_retry
-            console.warning(
-                f"Circuit breaker open - API unavailable. Retry in {time_until_retry:.0f}s"
-            )
-            raise CircuitBreakerError(
-                f"Circuit '{self.circuit_breaker.name}' is open",
-                CircuitState.OPEN,
-                time_until_retry,
-            )
-
-        last_error: Exception | None = None
-        max_retries = self.rate_limit_config.max_retries
-
-        for attempt in range(max_retries + 1):
-            try:
-                # Execute through circuit breaker
-                with self.circuit_breaker:
-                    return await self._execute_query(prompt, tools, model_override)
-            except CircuitBreakerError:
-                # Circuit breaker tripped - don't retry
-                console.warning("Circuit breaker opened due to repeated failures")
-                raise
-            except TRANSIENT_ERRORS as e:
-                last_error = e
-                if attempt < max_retries:
-                    # Calculate backoff using rate limit config
-                    sleep_time = self.rate_limit_config.calculate_backoff(attempt)
-                    console.newline()
-                    console.warning(
-                        f"Transient error (attempt {attempt + 1}/{max_retries + 1}): {e.message}",
-                        flush=True,
-                    )
-                    console.detail(f"Retrying in {sleep_time:.1f} seconds...", flush=True)
-                    await asyncio.sleep(sleep_time)
-                else:
-                    # Out of retries
-                    console.newline()
-                    console.error(
-                        f"Failed after {max_retries + 1} attempts: {e.message}",
-                        flush=True,
-                    )
-                    raise
-            except (
-                APIAuthenticationError,
-                ContentFilterError,
-                SDKImportError,
-                SDKInitializationError,
-            ):
-                # These errors should not be retried
-                raise
-            except AgentError:
-                # Other agent errors - re-raise as is
-                raise
-            except Exception as e:
-                # Unexpected errors - wrap and raise
-                raise QueryExecutionError(
-                    f"Unexpected error during query execution: {type(e).__name__}",
-                    e,
-                ) from e
-
-        # Should not reach here, but just in case
-        if last_error:
-            raise last_error
-        raise QueryExecutionError("Query failed with unknown error")
-
-    async def _execute_query(
-        self, prompt: str, tools: list[str], model_override: ModelType | None = None
-    ) -> str:
-        """Execute a single query attempt.
-
-        Args:
-            prompt: The prompt to send to the model.
-            tools: List of tools to enable.
-            model_override: Optional model to use instead of default.
-
-        Returns:
-            The result text from the query.
-
-        Raises:
-            WorkingDirectoryError: If working directory cannot be accessed.
-            APIRateLimitError: If rate limited.
-            APIConnectionError: If connection fails.
-            APITimeoutError: If request times out.
-            APIAuthenticationError: If authentication fails.
-            APIServerError: If server returns 5xx error.
-            QueryExecutionError: For other query errors.
-        """
-        result_text = ""
-        original_dir = os.getcwd()
-
-        # Determine which model to use
-        effective_model = model_override or self.model
-        model_name = self._get_model_name(effective_model)
-
-        # Log the model and tools being used
-        tools_str = ", ".join(tools) if tools else "all"
-        console.detail(
-            f"Using model: {effective_model.value} ({model_name}) | Tools: {tools_str}",
-            flush=True,
+        return await self._query_executor.run_query(
+            prompt=prompt,
+            tools=tools,
+            model_override=model_override,
+            get_model_name_func=self._get_model_name,
+            get_agents_func=get_agents_for_working_dir,
+            process_message_func=self._process_message,
         )
-
-        try:
-            # Change to working directory
-            try:
-                os.chdir(self.working_dir)
-            except FileNotFoundError as e:
-                raise WorkingDirectoryError(self.working_dir, "change to", e) from e
-            except PermissionError as e:
-                raise WorkingDirectoryError(self.working_dir, "access", e) from e
-            except OSError as e:
-                raise WorkingDirectoryError(self.working_dir, "change to", e) from e
-
-            # Load subagents from .claude/agents/ directory
-            agents = get_agents_for_working_dir(self.working_dir)
-
-            # Create options with model specification and subagents
-            try:
-                options = self.options_class(
-                    allowed_tools=tools,
-                    permission_mode="bypassPermissions",  # For MVP, bypass permissions
-                    model=model_name,  # Specify the model to use
-                    cwd=str(self.working_dir),  # Project directory for CLAUDE.md
-                    setting_sources=["user", "local", "project"],  # Load all settings/skills
-                    hooks=self.hooks,  # type: ignore[arg-type]  # Compatible HookMatcher
-                    agents=agents if agents else None,  # Programmatic subagents
-                )
-            except Exception as e:
-                raise SDKInitializationError("ClaudeAgentOptions", e) from e
-
-            # Execute query
-            try:
-                async for message in self.query(prompt=prompt, options=options):
-                    result_text = self._process_message(message, result_text)
-            except Exception as e:
-                # Classify the error
-                raise self._classify_api_error(e) from e
-
-        finally:
-            # Always restore original directory
-            try:
-                os.chdir(original_dir)
-            except OSError:
-                # Best effort to restore directory - don't mask original error
-                pass
-
-        return result_text
 
     def _process_message(self, message: Any, result_text: str) -> str:
         """Process a message from the query stream.
