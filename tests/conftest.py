@@ -408,6 +408,7 @@ def mock_github_client():
     """Provide a mocked GitHubClient."""
     mock = MagicMock()
     mock.create_pr = MagicMock(return_value=123)
+    mock.get_pr_for_current_branch = MagicMock(return_value=None)
     mock.get_pr_status = MagicMock(
         return_value=MagicMock(
             number=123,
