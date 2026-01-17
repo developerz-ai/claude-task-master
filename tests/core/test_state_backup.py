@@ -102,6 +102,20 @@ class TestStateBackupCreation:
         assert len(timestamp_part) == 15  # YYYYMMDD-HHMMSS
         assert "-" in timestamp_part
 
+    def test_backup_returns_none_on_error(self, initialized_state_manager, monkeypatch):
+        """Test _create_backup returns None when an error occurs."""
+        import shutil
+
+        # Mock shutil.copy2 to raise an exception
+        def mock_copy2(*args, **kwargs):
+            raise PermissionError("Cannot copy file")
+
+        monkeypatch.setattr(shutil, "copy2", mock_copy2)
+
+        # Backup should return None instead of raising
+        result = initialized_state_manager.create_state_backup()
+        assert result is None
+
 
 # =============================================================================
 # Corrupted State Recovery Tests

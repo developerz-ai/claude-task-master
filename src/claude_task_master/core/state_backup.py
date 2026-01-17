@@ -12,12 +12,9 @@ import json
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any
 
 from pydantic import ValidationError
-
-if TYPE_CHECKING:
-    from claude_task_master.core.state import TaskState
 
 
 class BackupRecoveryMixin:
@@ -57,7 +54,7 @@ class BackupRecoveryMixin:
         """Atomically write JSON data - provided by StateManager."""
         raise NotImplementedError("Provided by StateManager")
 
-    def _attempt_recovery(self, original_error: Exception) -> TaskState | None:
+    def _attempt_recovery(self, original_error: Exception) -> Any:
         """Attempt to recover state from backup.
 
         Args:
@@ -66,7 +63,7 @@ class BackupRecoveryMixin:
         Returns:
             TaskState if recovery successful, None otherwise.
         """
-        # Import here to avoid circular dependency
+        # Import here to avoid circular dependency at module level
         from claude_task_master.core.state import TaskState
 
         # First, create a backup of the corrupted file

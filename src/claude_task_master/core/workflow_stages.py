@@ -14,9 +14,8 @@ from .shutdown import interruptible_sleep
 if TYPE_CHECKING:
     from ..github import GitHubClient
     from .agent import AgentWrapper
-    from .orchestrator import TaskState
     from .pr_context import PRContextManager
-    from .state import StateManager
+    from .state import StateManager, TaskState
 
 
 class WorkflowStageHandler:
