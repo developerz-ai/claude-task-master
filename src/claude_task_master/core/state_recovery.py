@@ -6,6 +6,8 @@ import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .state import WorkflowStageType
+
 if TYPE_CHECKING:
     from ..github.client import GitHubClient
     from .state import TaskState
@@ -15,7 +17,7 @@ if TYPE_CHECKING:
 class RecoveredState:
     """Result of state recovery detection."""
 
-    workflow_stage: str
+    workflow_stage: WorkflowStageType
     current_pr: int | None
     message: str
 

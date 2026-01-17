@@ -42,7 +42,7 @@ class WorkflowStageHandler:
 
         CheckRun has 'name' field, StatusContext has 'context' field.
         """
-        return check.get("name") or check.get("context", "unknown")
+        return str(check.get("name") or check.get("context", "unknown"))
 
     @staticmethod
     def _get_current_branch() -> str | None:

@@ -242,7 +242,8 @@ class GitHubClient:
                 cwd=cwd,
             )
             data = json.loads(result.stdout)
-            return data.get("number")
+            pr_number = data.get("number")
+            return int(pr_number) if pr_number is not None else None
         except subprocess.CalledProcessError:
             # No PR exists for current branch
             return None
