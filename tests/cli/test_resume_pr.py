@@ -9,28 +9,13 @@ including:
 """
 
 import json
-from contextlib import contextmanager
 from datetime import datetime
-from unittest.mock import patch
 
 import pytest
 
 from claude_task_master.cli import app
-from claude_task_master.core.state import StateManager
 
-
-@contextmanager
-def mock_resume_context(mock_state_dir, return_code=0):
-    """Context manager for mocking the resume workflow dependencies."""
-    with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-        with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
-            mock_cred.return_value.get_valid_token.return_value = "test-token"
-            with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
-                with patch(
-                    "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
-                ) as mock_orch:
-                    mock_orch.return_value.run.return_value = return_code
-                    yield mock_orch
+from .conftest import mock_resume_context
 
 
 def create_state_with_pr(
@@ -80,9 +65,7 @@ def setup_pr_state(mock_state_dir, mock_goal_file, mock_plan_file):
 class TestResumeWithActivePR:
     """Tests for resuming when there's an active PR."""
 
-    def test_resume_with_current_pr(
-        self, cli_runner, mock_state_dir, setup_pr_state
-    ):
+    def test_resume_with_current_pr(self, cli_runner, mock_state_dir, setup_pr_state):
         """Test resume displays PR information when present."""
         setup_pr_state(
             current_pr=123,
@@ -97,9 +80,7 @@ class TestResumeWithActivePR:
         # State with current_pr should still work
         assert "completed successfully" in result.output
 
-    def test_resume_with_different_pr_numbers(
-        self, cli_runner, mock_state_dir, setup_pr_state
-    ):
+    def test_resume_with_different_pr_numbers(self, cli_runner, mock_state_dir, setup_pr_state):
         """Test resume works with various PR numbers."""
         for pr_number in [1, 42, 999, 10000]:
             setup_pr_state(current_pr=pr_number, status="paused")
@@ -109,9 +90,7 @@ class TestResumeWithActivePR:
 
             assert result.exit_code == 0, f"Failed for PR #{pr_number}"
 
-    def test_resume_preserves_pr_number(
-        self, cli_runner, mock_state_dir, setup_pr_state
-    ):
+    def test_resume_preserves_pr_number(self, cli_runner, mock_state_dir, setup_pr_state):
         """Test that PR number is preserved during resume."""
         setup_pr_state(
             current_pr=456,
@@ -124,9 +103,7 @@ class TestResumeWithActivePR:
 
         assert result.exit_code == 0
 
-    def test_resume_no_current_pr(
-        self, cli_runner, mock_state_dir, setup_pr_state
-    ):
+    def test_resume_no_current_pr(self, cli_runner, mock_state_dir, setup_pr_state):
         """Test resume works when there's no current PR."""
         setup_pr_state(current_pr=None)
 
@@ -140,9 +117,7 @@ class TestResumeWithActivePR:
 class TestResumePauseOnPR:
     """Tests for resume with pause_on_pr setting."""
 
-    def test_resume_with_pause_on_pr_enabled(
-        self, cli_runner, mock_state_dir, setup_pr_state
-    ):
+    def test_resume_with_pause_on_pr_enabled(self, cli_runner, mock_state_dir, setup_pr_state):
         """Test resume when pause_on_pr is enabled."""
         setup_pr_state(
             current_pr=789,
@@ -154,9 +129,7 @@ class TestResumePauseOnPR:
 
         assert result.exit_code == 0
 
-    def test_resume_with_pause_on_pr_disabled(
-        self, cli_runner, mock_state_dir, setup_pr_state
-    ):
+    def test_resume_with_pause_on_pr_disabled(self, cli_runner, mock_state_dir, setup_pr_state):
         """Test resume when pause_on_pr is disabled."""
         setup_pr_state(
             current_pr=123,
@@ -168,9 +141,7 @@ class TestResumePauseOnPR:
 
         assert result.exit_code == 0
 
-    def test_resume_pause_on_pr_with_no_pr(
-        self, cli_runner, mock_state_dir, setup_pr_state
-    ):
+    def test_resume_pause_on_pr_with_no_pr(self, cli_runner, mock_state_dir, setup_pr_state):
         """Test resume when pause_on_pr is true but no PR exists."""
         setup_pr_state(
             current_pr=None,
@@ -186,9 +157,7 @@ class TestResumePauseOnPR:
 class TestResumePRAutoMerge:
     """Tests for resume with auto_merge setting and PRs."""
 
-    def test_resume_pr_with_auto_merge_enabled(
-        self, cli_runner, mock_state_dir, setup_pr_state
-    ):
+    def test_resume_pr_with_auto_merge_enabled(self, cli_runner, mock_state_dir, setup_pr_state):
         """Test resume with PR and auto_merge enabled."""
         setup_pr_state(
             current_pr=100,
@@ -200,9 +169,7 @@ class TestResumePRAutoMerge:
 
         assert result.exit_code == 0
 
-    def test_resume_pr_with_auto_merge_disabled(
-        self, cli_runner, mock_state_dir, setup_pr_state
-    ):
+    def test_resume_pr_with_auto_merge_disabled(self, cli_runner, mock_state_dir, setup_pr_state):
         """Test resume with PR and auto_merge disabled."""
         setup_pr_state(
             current_pr=200,
@@ -214,9 +181,7 @@ class TestResumePRAutoMerge:
 
         assert result.exit_code == 0
 
-    def test_resume_pr_auto_merge_and_pause_on_pr(
-        self, cli_runner, mock_state_dir, setup_pr_state
-    ):
+    def test_resume_pr_auto_merge_and_pause_on_pr(self, cli_runner, mock_state_dir, setup_pr_state):
         """Test resume with both auto_merge and pause_on_pr settings."""
         setup_pr_state(
             current_pr=300,
@@ -233,9 +198,7 @@ class TestResumePRAutoMerge:
 class TestResumePRDisplayOutput:
     """Tests for PR information display during resume."""
 
-    def test_resume_displays_pr_in_status(
-        self, cli_runner, mock_state_dir, setup_pr_state
-    ):
+    def test_resume_displays_pr_in_status(self, cli_runner, mock_state_dir, setup_pr_state):
         """Test resume displays PR number in status output."""
         setup_pr_state(
             current_pr=555,
@@ -251,9 +214,7 @@ class TestResumePRDisplayOutput:
         assert "Goal:" in result.output
         assert "Status:" in result.output
 
-    def test_resume_high_pr_number_display(
-        self, cli_runner, mock_state_dir, setup_pr_state
-    ):
+    def test_resume_high_pr_number_display(self, cli_runner, mock_state_dir, setup_pr_state):
         """Test resume with high PR numbers displays correctly."""
         setup_pr_state(
             current_pr=99999,
@@ -269,9 +230,7 @@ class TestResumePRDisplayOutput:
 class TestResumePRStateTransitions:
     """Tests for state transitions involving PRs during resume."""
 
-    def test_resume_blocked_on_pr(
-        self, cli_runner, mock_state_dir, setup_pr_state
-    ):
+    def test_resume_blocked_on_pr(self, cli_runner, mock_state_dir, setup_pr_state):
         """Test resume from blocked state with active PR."""
         setup_pr_state(
             current_pr=42,
@@ -285,9 +244,7 @@ class TestResumePRStateTransitions:
         assert result.exit_code == 0
         assert "Attempting to resume blocked task" in result.output
 
-    def test_resume_working_with_pr(
-        self, cli_runner, mock_state_dir, setup_pr_state
-    ):
+    def test_resume_working_with_pr(self, cli_runner, mock_state_dir, setup_pr_state):
         """Test resume from working state with active PR."""
         setup_pr_state(
             current_pr=88,
@@ -299,9 +256,7 @@ class TestResumePRStateTransitions:
 
         assert result.exit_code == 0
 
-    def test_resume_paused_on_pr_then_success(
-        self, cli_runner, mock_state_dir, setup_pr_state
-    ):
+    def test_resume_paused_on_pr_then_success(self, cli_runner, mock_state_dir, setup_pr_state):
         """Test resume from paused-on-PR state completing successfully."""
         setup_pr_state(
             current_pr=123,
@@ -337,9 +292,7 @@ class TestResumePRStateTransitions:
 class TestResumePREdgeCases:
     """Edge cases for PR-related resume operations."""
 
-    def test_resume_pr_zero(
-        self, cli_runner, mock_state_dir, setup_pr_state
-    ):
+    def test_resume_pr_zero(self, cli_runner, mock_state_dir, setup_pr_state):
         """Test resume with PR number zero (edge case)."""
         # PR number 0 is technically invalid but should be handled gracefully
         setup_pr_state(current_pr=0)
@@ -350,9 +303,7 @@ class TestResumePREdgeCases:
         # Should still work - edge case handling
         assert result.exit_code == 0
 
-    def test_resume_pr_large_number(
-        self, cli_runner, mock_state_dir, setup_pr_state
-    ):
+    def test_resume_pr_large_number(self, cli_runner, mock_state_dir, setup_pr_state):
         """Test resume with very large PR number."""
         setup_pr_state(current_pr=999999999)
 
@@ -361,9 +312,7 @@ class TestResumePREdgeCases:
 
         assert result.exit_code == 0
 
-    def test_resume_multiple_prs_sequence(
-        self, cli_runner, mock_state_dir, setup_pr_state
-    ):
+    def test_resume_multiple_prs_sequence(self, cli_runner, mock_state_dir, setup_pr_state):
         """Test resuming with different PRs in sequence."""
         # First resume with PR 100
         setup_pr_state(current_pr=100, session_count=1)
@@ -387,9 +336,7 @@ class TestResumePREdgeCases:
 class TestResumePRCombinedOptions:
     """Tests for combined PR options during resume."""
 
-    def test_resume_all_pr_options_enabled(
-        self, cli_runner, mock_state_dir, setup_pr_state
-    ):
+    def test_resume_all_pr_options_enabled(self, cli_runner, mock_state_dir, setup_pr_state):
         """Test resume with all PR-related options enabled."""
         setup_pr_state(
             current_pr=777,
@@ -404,9 +351,7 @@ class TestResumePRCombinedOptions:
 
         assert result.exit_code == 0
 
-    def test_resume_all_pr_options_disabled(
-        self, cli_runner, mock_state_dir, setup_pr_state
-    ):
+    def test_resume_all_pr_options_disabled(self, cli_runner, mock_state_dir, setup_pr_state):
         """Test resume with all PR-related options disabled."""
         setup_pr_state(
             current_pr=None,

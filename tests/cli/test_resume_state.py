@@ -5,7 +5,6 @@ including session counts, options, model settings, and PR state.
 """
 
 import json
-from contextlib import contextmanager
 from unittest.mock import patch
 
 import pytest
@@ -13,19 +12,7 @@ import pytest
 from claude_task_master.cli import app
 from claude_task_master.core.state import StateManager
 
-
-@contextmanager
-def mock_resume_context(mock_state_dir, return_code=0):
-    """Context manager for mocking the resume workflow dependencies."""
-    with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-        with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
-            mock_cred.return_value.get_valid_token.return_value = "test-token"
-            with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
-                with patch(
-                    "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
-                ) as mock_orch:
-                    mock_orch.return_value.run.return_value = return_code
-                    yield
+from .conftest import mock_resume_context
 
 
 @pytest.fixture

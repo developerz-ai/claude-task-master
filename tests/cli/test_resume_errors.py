@@ -9,7 +9,6 @@ This module tests all error scenarios for the resume command, including:
 """
 
 import json
-from contextlib import contextmanager
 from datetime import datetime
 from unittest.mock import patch
 
@@ -18,22 +17,7 @@ import pytest
 from claude_task_master.cli import app
 from claude_task_master.core.state import StateManager
 
-
-@contextmanager
-def mock_resume_context(mock_state_dir, return_code=0, raise_exception=None):
-    """Context manager for mocking the resume workflow dependencies."""
-    with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-        with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
-            mock_cred.return_value.get_valid_token.return_value = "test-token"
-            with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
-                with patch(
-                    "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
-                ) as mock_orch:
-                    if raise_exception:
-                        mock_orch.return_value.run.side_effect = raise_exception
-                    else:
-                        mock_orch.return_value.run.return_value = return_code
-                    yield mock_orch
+from .conftest import mock_resume_context
 
 
 @pytest.fixture
@@ -68,9 +52,7 @@ class TestResumeMissingFiles:
         assert "No task found to resume" in result.output
         assert "start" in result.output
 
-    def test_resume_no_plan(
-        self, cli_runner, mock_state_dir, mock_state_file, mock_goal_file
-    ):
+    def test_resume_no_plan(self, cli_runner, mock_state_dir, mock_state_file, mock_goal_file):
         """Test resume when no plan exists."""
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
             result = cli_runner.invoke(app, ["resume"])
@@ -78,9 +60,7 @@ class TestResumeMissingFiles:
         assert result.exit_code == 1
         assert "No plan file found" in result.output or "No plan found" in result.output
 
-    def test_resume_no_goal_file(
-        self, cli_runner, mock_state_dir, mock_state_file, mock_plan_file
-    ):
+    def test_resume_no_goal_file(self, cli_runner, mock_state_dir, mock_state_file, mock_plan_file):
         """Test resume when goal file is missing."""
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
             result = cli_runner.invoke(app, ["resume"])
@@ -222,9 +202,7 @@ class TestResumeCredentialErrors:
 class TestResumeStateFileCorruption:
     """Tests for resume command state file corruption handling."""
 
-    def test_resume_corrupt_json(
-        self, cli_runner, mock_state_dir, mock_goal_file, mock_plan_file
-    ):
+    def test_resume_corrupt_json(self, cli_runner, mock_state_dir, mock_goal_file, mock_plan_file):
         """Test resume handles corrupt JSON in state file."""
         (mock_state_dir / "state.json").write_text("{ invalid json }")
 
@@ -245,9 +223,7 @@ class TestResumeStateFileCorruption:
 
         assert result.exit_code == 1
 
-    def test_resume_partial_json(
-        self, cli_runner, mock_state_dir, mock_goal_file, mock_plan_file
-    ):
+    def test_resume_partial_json(self, cli_runner, mock_state_dir, mock_goal_file, mock_plan_file):
         """Test resume handles partially written JSON."""
         (mock_state_dir / "state.json").write_text('{"status": "working", "index": ')
 
@@ -267,9 +243,7 @@ class TestResumeStateFileCorruption:
 
         assert result.exit_code == 1
 
-    def test_resume_null_state(
-        self, cli_runner, mock_state_dir, mock_goal_file, mock_plan_file
-    ):
+    def test_resume_null_state(self, cli_runner, mock_state_dir, mock_goal_file, mock_plan_file):
         """Test resume handles state file containing null."""
         (mock_state_dir / "state.json").write_text("null")
 
@@ -305,7 +279,7 @@ class TestResumeMissingFields:
         (mock_state_dir / "state.json").write_text(json.dumps(state_data))
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            result = cli_runner.invoke(app, ["resume"])
+            cli_runner.invoke(app, ["resume"])
 
         # Should handle gracefully - either default or error
 
@@ -355,7 +329,7 @@ class TestResumeGenericErrors:
         setup_error_state()
 
         with mock_resume_context(mock_state_dir, raise_exception=KeyboardInterrupt()):
-            result = cli_runner.invoke(app, ["resume"])
+            cli_runner.invoke(app, ["resume"])
         # KeyboardInterrupt should be handled gracefully
 
     def test_resume_os_error(self, cli_runner, mock_state_dir, setup_error_state):
@@ -496,9 +470,7 @@ class TestResumeConnectionErrors:
 class TestResumePlanErrors:
     """Tests for resume command plan file error handling."""
 
-    def test_resume_empty_plan(
-        self, cli_runner, mock_state_dir, mock_state_file, mock_goal_file
-    ):
+    def test_resume_empty_plan(self, cli_runner, mock_state_dir, mock_state_file, mock_goal_file):
         """Test resume handles empty plan file."""
         (mock_state_dir / "plan.md").write_text("")
         (mock_state_dir / "logs").mkdir(parents=True, exist_ok=True)
@@ -511,7 +483,7 @@ class TestResumePlanErrors:
                         "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
                     ) as mock_orch:
                         mock_orch.return_value.run.return_value = 0
-                        result = cli_runner.invoke(app, ["resume"])
+                        cli_runner.invoke(app, ["resume"])
 
         # Should handle empty plan gracefully
 
@@ -530,7 +502,7 @@ class TestResumePlanErrors:
                         "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
                     ) as mock_orch:
                         mock_orch.return_value.run.return_value = 0
-                        result = cli_runner.invoke(app, ["resume"])
+                        cli_runner.invoke(app, ["resume"])
 
         # Should handle case of no parseable tasks
 
@@ -538,9 +510,7 @@ class TestResumePlanErrors:
         self, cli_runner, mock_state_dir, mock_state_file, mock_goal_file
     ):
         """Test resume handles plan with malformed checkboxes."""
-        (mock_state_dir / "plan.md").write_text(
-            "## Task List\n\n- [invalid] Task\n- [ Unclosed\n"
-        )
+        (mock_state_dir / "plan.md").write_text("## Task List\n\n- [invalid] Task\n- [ Unclosed\n")
         (mock_state_dir / "logs").mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
@@ -551,7 +521,7 @@ class TestResumePlanErrors:
                         "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
                     ) as mock_orch:
                         mock_orch.return_value.run.return_value = 0
-                        result = cli_runner.invoke(app, ["resume"])
+                        cli_runner.invoke(app, ["resume"])
 
         # Should handle malformed task lists gracefully
 
@@ -612,9 +582,7 @@ class TestResumeErrorMessages:
         assert result.exit_code == 1
         assert "clean" in result.output.lower()
 
-    def test_credential_error_suggests_doctor(
-        self, cli_runner, mock_state_dir, setup_error_state
-    ):
+    def test_credential_error_suggests_doctor(self, cli_runner, mock_state_dir, setup_error_state):
         """Test that credential errors suggest doctor command."""
         setup_error_state()
 

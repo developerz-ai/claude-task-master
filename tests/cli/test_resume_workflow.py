@@ -10,28 +10,13 @@ including:
 """
 
 import json
-from contextlib import contextmanager
 from datetime import datetime
-from unittest.mock import patch
 
 import pytest
 
 from claude_task_master.cli import app
-from claude_task_master.core.state import StateManager
 
-
-@contextmanager
-def mock_resume_context(mock_state_dir, return_code=0):
-    """Context manager for mocking the resume workflow dependencies."""
-    with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-        with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
-            mock_cred.return_value.get_valid_token.return_value = "test-token"
-            with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
-                with patch(
-                    "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
-                ) as mock_orch:
-                    mock_orch.return_value.run.return_value = return_code
-                    yield mock_orch
+from .conftest import mock_resume_context
 
 
 def create_workflow_state(
@@ -94,9 +79,7 @@ class TestResumeTaskProgression:
         assert "Current Task:" in result.output
         assert "completed successfully" in result.output
 
-    def test_resume_from_first_task(
-        self, cli_runner, mock_state_dir, setup_workflow_state
-    ):
+    def test_resume_from_first_task(self, cli_runner, mock_state_dir, setup_workflow_state):
         """Test resume starting from the first task (index 0)."""
         setup_workflow_state(current_task_index=0, session_count=1)
 
@@ -106,9 +89,7 @@ class TestResumeTaskProgression:
         assert result.exit_code == 0
         assert "completed successfully" in result.output
 
-    def test_resume_from_middle_task(
-        self, cli_runner, mock_state_dir, setup_workflow_state
-    ):
+    def test_resume_from_middle_task(self, cli_runner, mock_state_dir, setup_workflow_state):
         """Test resume starting from a middle task."""
         setup_workflow_state(current_task_index=1, session_count=3)
 
@@ -117,9 +98,7 @@ class TestResumeTaskProgression:
 
         assert result.exit_code == 0
 
-    def test_resume_from_last_task(
-        self, cli_runner, mock_state_dir, mock_goal_file
-    ):
+    def test_resume_from_last_task(self, cli_runner, mock_state_dir, mock_goal_file):
         """Test resume when already at the last task."""
         # Create a plan with exactly 2 tasks
         plan_file = mock_state_dir / "plan.md"
@@ -158,9 +137,7 @@ class TestResumeMultipleCycles:
         assert result.exit_code == 0
         assert str(initial_session) in result.output
 
-    def test_resume_multiple_times_pausing(
-        self, cli_runner, mock_state_dir, setup_workflow_state
-    ):
+    def test_resume_multiple_times_pausing(self, cli_runner, mock_state_dir, setup_workflow_state):
         """Test multiple resume cycles that each pause."""
         # First resume
         setup_workflow_state(session_count=1, current_task_index=0)
@@ -212,9 +189,7 @@ class TestResumeMultipleCycles:
 class TestResumeSessionLimits:
     """Tests for session limits during resume workflow."""
 
-    def test_resume_with_max_sessions(
-        self, cli_runner, mock_state_dir, setup_workflow_state
-    ):
+    def test_resume_with_max_sessions(self, cli_runner, mock_state_dir, setup_workflow_state):
         """Test resume respects max_sessions setting."""
         setup_workflow_state(session_count=5, max_sessions=10, current_task_index=1)
 
@@ -223,9 +198,7 @@ class TestResumeSessionLimits:
 
         assert result.exit_code == 0
 
-    def test_resume_near_max_sessions(
-        self, cli_runner, mock_state_dir, setup_workflow_state
-    ):
+    def test_resume_near_max_sessions(self, cli_runner, mock_state_dir, setup_workflow_state):
         """Test resume when near the max_sessions limit."""
         setup_workflow_state(session_count=9, max_sessions=10, current_task_index=1)
 
@@ -235,9 +208,7 @@ class TestResumeSessionLimits:
         assert result.exit_code == 0
         assert "9" in result.output  # Session count shown
 
-    def test_resume_unlimited_sessions(
-        self, cli_runner, mock_state_dir, setup_workflow_state
-    ):
+    def test_resume_unlimited_sessions(self, cli_runner, mock_state_dir, setup_workflow_state):
         """Test resume with unlimited sessions (max_sessions=None)."""
         setup_workflow_state(session_count=100, max_sessions=None, current_task_index=1)
 
@@ -247,9 +218,7 @@ class TestResumeSessionLimits:
         assert result.exit_code == 0
         assert "100" in result.output
 
-    def test_resume_high_max_sessions(
-        self, cli_runner, mock_state_dir, setup_workflow_state
-    ):
+    def test_resume_high_max_sessions(self, cli_runner, mock_state_dir, setup_workflow_state):
         """Test resume with high max_sessions value."""
         setup_workflow_state(session_count=50, max_sessions=200, current_task_index=1)
 
@@ -262,9 +231,7 @@ class TestResumeSessionLimits:
 class TestResumeWorkflowCompletion:
     """Tests for workflow completion scenarios during resume."""
 
-    def test_resume_completes_workflow(
-        self, cli_runner, mock_state_dir, setup_workflow_state
-    ):
+    def test_resume_completes_workflow(self, cli_runner, mock_state_dir, setup_workflow_state):
         """Test resume that completes the entire workflow."""
         setup_workflow_state(current_task_index=2, session_count=5)
 
@@ -274,9 +241,7 @@ class TestResumeWorkflowCompletion:
         assert result.exit_code == 0
         assert "completed successfully" in result.output
 
-    def test_resume_workflow_pauses_midway(
-        self, cli_runner, mock_state_dir, setup_workflow_state
-    ):
+    def test_resume_workflow_pauses_midway(self, cli_runner, mock_state_dir, setup_workflow_state):
         """Test resume workflow that pauses midway."""
         setup_workflow_state(current_task_index=1, session_count=2)
 
@@ -287,9 +252,7 @@ class TestResumeWorkflowCompletion:
         assert "paused" in result.output
         assert "resume" in result.output
 
-    def test_resume_workflow_blocks(
-        self, cli_runner, mock_state_dir, setup_workflow_state
-    ):
+    def test_resume_workflow_blocks(self, cli_runner, mock_state_dir, setup_workflow_state):
         """Test resume workflow that becomes blocked."""
         setup_workflow_state(current_task_index=1, session_count=3)
 
@@ -303,9 +266,7 @@ class TestResumeWorkflowCompletion:
 class TestResumeMultiTaskWorkflow:
     """Tests for multi-task workflow scenarios."""
 
-    def test_resume_with_some_tasks_completed(
-        self, cli_runner, mock_state_dir, mock_goal_file
-    ):
+    def test_resume_with_some_tasks_completed(self, cli_runner, mock_state_dir, mock_goal_file):
         """Test resume when some tasks are already completed."""
         # Create plan with mixed completed/incomplete tasks
         plan_file = mock_state_dir / "plan.md"
@@ -320,7 +281,9 @@ class TestResumeMultiTaskWorkflow:
 1. All tests pass
 """)
         create_workflow_state(
-            mock_state_dir, current_task_index=2, session_count=4  # Starting at task 3
+            mock_state_dir,
+            current_task_index=2,
+            session_count=4,  # Starting at task 3
         )
         logs_dir = mock_state_dir / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
@@ -330,9 +293,7 @@ class TestResumeMultiTaskWorkflow:
 
         assert result.exit_code == 0
 
-    def test_resume_with_all_but_one_completed(
-        self, cli_runner, mock_state_dir, mock_goal_file
-    ):
+    def test_resume_with_all_but_one_completed(self, cli_runner, mock_state_dir, mock_goal_file):
         """Test resume when all but one task is completed."""
         plan_file = mock_state_dir / "plan.md"
         plan_file.write_text("""## Task List
@@ -345,7 +306,9 @@ class TestResumeMultiTaskWorkflow:
 1. Complete
 """)
         create_workflow_state(
-            mock_state_dir, current_task_index=2, session_count=5  # Last task
+            mock_state_dir,
+            current_task_index=2,
+            session_count=5,  # Last task
         )
         logs_dir = mock_state_dir / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
@@ -355,9 +318,7 @@ class TestResumeMultiTaskWorkflow:
 
         assert result.exit_code == 0
 
-    def test_resume_single_task_workflow(
-        self, cli_runner, mock_state_dir, mock_goal_file
-    ):
+    def test_resume_single_task_workflow(self, cli_runner, mock_state_dir, mock_goal_file):
         """Test resume with a single-task workflow."""
         plan_file = mock_state_dir / "plan.md"
         plan_file.write_text("""## Task List
@@ -367,9 +328,7 @@ class TestResumeMultiTaskWorkflow:
 ## Success Criteria
 1. Done
 """)
-        create_workflow_state(
-            mock_state_dir, current_task_index=0, session_count=1
-        )
+        create_workflow_state(mock_state_dir, current_task_index=0, session_count=1)
         logs_dir = mock_state_dir / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
 
@@ -378,9 +337,7 @@ class TestResumeMultiTaskWorkflow:
 
         assert result.exit_code == 0
 
-    def test_resume_many_tasks_workflow(
-        self, cli_runner, mock_state_dir, mock_goal_file
-    ):
+    def test_resume_many_tasks_workflow(self, cli_runner, mock_state_dir, mock_goal_file):
         """Test resume with many tasks in the workflow."""
         # Create plan with 10 tasks
         tasks = "\n".join([f"- [ ] Task {i}: Step {i}" for i in range(1, 11)])
@@ -393,7 +350,9 @@ class TestResumeMultiTaskWorkflow:
 1. All steps complete
 """)
         create_workflow_state(
-            mock_state_dir, current_task_index=5, session_count=10  # Middle of workflow
+            mock_state_dir,
+            current_task_index=5,
+            session_count=10,  # Middle of workflow
         )
         logs_dir = mock_state_dir / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
@@ -407,9 +366,7 @@ class TestResumeMultiTaskWorkflow:
 class TestResumeWorkflowWithDifferentModels:
     """Tests for workflow continuation with different models."""
 
-    def test_resume_workflow_with_opus(
-        self, cli_runner, mock_state_dir, setup_workflow_state
-    ):
+    def test_resume_workflow_with_opus(self, cli_runner, mock_state_dir, setup_workflow_state):
         """Test workflow continuation with opus model."""
         setup_workflow_state(model="opus", current_task_index=1, session_count=2)
 
@@ -418,9 +375,7 @@ class TestResumeWorkflowWithDifferentModels:
 
         assert result.exit_code == 0
 
-    def test_resume_workflow_with_haiku(
-        self, cli_runner, mock_state_dir, setup_workflow_state
-    ):
+    def test_resume_workflow_with_haiku(self, cli_runner, mock_state_dir, setup_workflow_state):
         """Test workflow continuation with haiku model."""
         setup_workflow_state(model="haiku", current_task_index=0, session_count=1)
 
@@ -429,9 +384,7 @@ class TestResumeWorkflowWithDifferentModels:
 
         assert result.exit_code == 0
 
-    def test_resume_workflow_with_sonnet(
-        self, cli_runner, mock_state_dir, setup_workflow_state
-    ):
+    def test_resume_workflow_with_sonnet(self, cli_runner, mock_state_dir, setup_workflow_state):
         """Test workflow continuation with sonnet model (default)."""
         setup_workflow_state(model="sonnet", current_task_index=1, session_count=3)
 
@@ -444,9 +397,7 @@ class TestResumeWorkflowWithDifferentModels:
 class TestResumeWorkflowOutput:
     """Tests for workflow output during resume."""
 
-    def test_resume_shows_resuming_message(
-        self, cli_runner, mock_state_dir, setup_workflow_state
-    ):
+    def test_resume_shows_resuming_message(self, cli_runner, mock_state_dir, setup_workflow_state):
         """Test that resume shows the resuming message."""
         setup_workflow_state(current_task_index=1, session_count=2)
 
@@ -469,9 +420,7 @@ class TestResumeWorkflowOutput:
         assert result.exit_code == 0
         assert "Loading credentials" in result.output
 
-    def test_resume_shows_goal(
-        self, cli_runner, mock_state_dir, setup_workflow_state
-    ):
+    def test_resume_shows_goal(self, cli_runner, mock_state_dir, setup_workflow_state):
         """Test that resume displays the goal."""
         setup_workflow_state(current_task_index=1, session_count=3)
 
@@ -481,9 +430,7 @@ class TestResumeWorkflowOutput:
         assert result.exit_code == 0
         assert "Goal:" in result.output
 
-    def test_resume_shows_status(
-        self, cli_runner, mock_state_dir, setup_workflow_state
-    ):
+    def test_resume_shows_status(self, cli_runner, mock_state_dir, setup_workflow_state):
         """Test that resume displays the status."""
         setup_workflow_state(status="paused", current_task_index=1, session_count=2)
 
@@ -493,9 +440,7 @@ class TestResumeWorkflowOutput:
         assert result.exit_code == 0
         assert "Status:" in result.output
 
-    def test_resume_shows_session_count(
-        self, cli_runner, mock_state_dir, setup_workflow_state
-    ):
+    def test_resume_shows_session_count(self, cli_runner, mock_state_dir, setup_workflow_state):
         """Test that resume displays the session count."""
         setup_workflow_state(current_task_index=1, session_count=7)
 
@@ -506,9 +451,7 @@ class TestResumeWorkflowOutput:
         assert "Session Count:" in result.output
         assert "7" in result.output
 
-    def test_resume_shows_current_task_info(
-        self, cli_runner, mock_state_dir, setup_workflow_state
-    ):
+    def test_resume_shows_current_task_info(self, cli_runner, mock_state_dir, setup_workflow_state):
         """Test that resume displays current task information."""
         setup_workflow_state(current_task_index=2, session_count=4)
 
@@ -528,7 +471,6 @@ class TestResumeWorkflowEdgeCases:
         """Test resume after a workflow was paused for a long time."""
         # Create state with old timestamp
         old_timestamp = "2025-01-01T00:00:00"
-        timestamp = datetime.now().isoformat()
         state_data = {
             "status": "paused",
             "current_task_index": 1,
@@ -554,9 +496,7 @@ class TestResumeWorkflowEdgeCases:
 
         assert result.exit_code == 0
 
-    def test_resume_workflow_zero_session(
-        self, cli_runner, mock_state_dir, setup_workflow_state
-    ):
+    def test_resume_workflow_zero_session(self, cli_runner, mock_state_dir, setup_workflow_state):
         """Test resume when session count is zero (edge case)."""
         setup_workflow_state(session_count=0, current_task_index=0)
 
