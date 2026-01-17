@@ -46,6 +46,7 @@ dev = [
     "pytest>=8.0.0",
     "pytest-cov>=4.1.0",
     "pytest-asyncio>=0.23.0",
+    "pytest-timeout>=2.4.0",
     "ruff>=0.3.0",
     "mypy>=1.9.0",
 ]
@@ -125,6 +126,7 @@ addopts = [
     "--cov-report=html:coverage_html",
     "--cov-report=xml:coverage.xml",
     "--cov-fail-under=50",
+    "--timeout=2",
 ]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
@@ -162,4 +164,9 @@ precision = 2
 [tool.uv.workspace]
 members = [
     "tmp/test-project-1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest-timeout>=2.4.0",
 ]

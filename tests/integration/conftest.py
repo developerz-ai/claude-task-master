@@ -759,7 +759,11 @@ def mock_github_client():
             number=123,
             ci_state="SUCCESS",
             unresolved_threads=0,
+            total_threads=0,
+            resolved_threads=0,
             check_details=[],
+            mergeable=True,
+            merged=False,
         )
     )
     mock.get_pr_comments = MagicMock(return_value="")
@@ -815,3 +819,43 @@ def mock_agent_wrapper(mock_sdk: MockClaudeAgentSDK):
         }
     )
     return mock
+
+
+# =============================================================================
+# Key Listener Mock (Auto-use)
+# =============================================================================
+
+
+@pytest.fixture(autouse=True)
+def mock_key_listener():
+    """Automatically mock the key listener to prevent blocking in tests.
+
+    The key listener uses select() on stdin which blocks in test environments.
+    This fixture mocks the key listener functions to be no-ops.
+
+    We need to patch both the original module AND the imported names in orchestrator
+    since the imports happen at module load time.
+    """
+    with (
+        # Patch the original module functions
+        patch("claude_task_master.core.key_listener.start_listening"),
+        patch("claude_task_master.core.key_listener.stop_listening"),
+        patch("claude_task_master.core.key_listener.check_escape", return_value=False),
+        patch(
+            "claude_task_master.core.key_listener.is_cancellation_requested",
+            return_value=False,
+        ),
+        patch(
+            "claude_task_master.core.key_listener.get_cancellation_reason",
+            return_value=None,
+        ),
+        # Patch the imported names in orchestrator
+        patch("claude_task_master.core.orchestrator.start_listening"),
+        patch("claude_task_master.core.orchestrator.stop_listening"),
+        patch(
+            "claude_task_master.core.orchestrator.is_cancellation_requested",
+            return_value=False,
+        ),
+        patch("claude_task_master.core.orchestrator.reset_escape"),
+    ):
+        yield

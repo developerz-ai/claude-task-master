@@ -40,6 +40,7 @@ def runner():
 class TestSDKErrorRecovery:
     """Tests for SDK error handling and recovery."""
 
+    @pytest.mark.timeout(10)  # Extended timeout for retry delays
     def test_rate_limit_error_is_retried(
         self,
         integration_temp_dir: Path,
