@@ -216,3 +216,97 @@ class TestPRContextMethods:
         assert len(comment_files) == 1
         # Check that / is replaced in filename
         assert "/" not in comment_files[0].name
+
+
+class TestAddressedThreadsTracking:
+    """Tests for addressed threads tracking (avoiding re-downloading replied comments)."""
+
+    def test_get_addressed_threads_empty_initially(self, state_manager: StateManager) -> None:
+        """Test that get_addressed_threads returns empty set when no threads addressed."""
+        addressed = state_manager.get_addressed_threads(123)
+        assert addressed == set()
+
+    def test_mark_threads_addressed_saves_thread_ids(self, state_manager: StateManager) -> None:
+        """Test that mark_threads_addressed persists thread IDs."""
+        thread_ids = ["thread_abc123", "thread_def456"]
+        state_manager.mark_threads_addressed(123, thread_ids)
+
+        addressed = state_manager.get_addressed_threads(123)
+        assert addressed == {"thread_abc123", "thread_def456"}
+
+    def test_mark_threads_addressed_accumulates(self, state_manager: StateManager) -> None:
+        """Test that marking threads addressed accumulates (doesn't replace)."""
+        state_manager.mark_threads_addressed(123, ["thread_1"])
+        state_manager.mark_threads_addressed(123, ["thread_2"])
+        state_manager.mark_threads_addressed(123, ["thread_3"])
+
+        addressed = state_manager.get_addressed_threads(123)
+        assert addressed == {"thread_1", "thread_2", "thread_3"}
+
+    def test_mark_threads_addressed_handles_duplicates(self, state_manager: StateManager) -> None:
+        """Test that marking the same thread multiple times doesn't create duplicates."""
+        state_manager.mark_threads_addressed(123, ["thread_1", "thread_2"])
+        state_manager.mark_threads_addressed(123, ["thread_2", "thread_3"])
+
+        addressed = state_manager.get_addressed_threads(123)
+        assert addressed == {"thread_1", "thread_2", "thread_3"}
+
+    def test_mark_threads_addressed_empty_list_noop(self, state_manager: StateManager) -> None:
+        """Test that marking empty list does nothing."""
+        state_manager.mark_threads_addressed(123, [])
+
+        # File should not be created for empty list
+        pr_dir = state_manager.get_pr_dir(123)
+        addressed_file = pr_dir / "addressed_threads.json"
+        assert not addressed_file.exists()
+
+    def test_clear_addressed_threads_removes_tracking(self, state_manager: StateManager) -> None:
+        """Test that clear_addressed_threads removes the tracking file."""
+        state_manager.mark_threads_addressed(123, ["thread_1", "thread_2"])
+
+        # Verify threads are tracked
+        assert len(state_manager.get_addressed_threads(123)) == 2
+
+        # Clear
+        state_manager.clear_addressed_threads(123)
+
+        # Should be empty now
+        assert state_manager.get_addressed_threads(123) == set()
+
+    def test_clear_addressed_threads_handles_nonexistent(self, state_manager: StateManager) -> None:
+        """Test that clear_addressed_threads handles nonexistent file gracefully."""
+        # Should not raise
+        state_manager.clear_addressed_threads(999)
+
+    def test_addressed_threads_separate_per_pr(self, state_manager: StateManager) -> None:
+        """Test that addressed threads are tracked separately per PR."""
+        state_manager.mark_threads_addressed(123, ["thread_a"])
+        state_manager.mark_threads_addressed(456, ["thread_b"])
+
+        assert state_manager.get_addressed_threads(123) == {"thread_a"}
+        assert state_manager.get_addressed_threads(456) == {"thread_b"}
+
+    def test_clear_pr_context_also_clears_addressed_threads(
+        self, state_manager: StateManager
+    ) -> None:
+        """Test that clear_pr_context also removes addressed threads tracking."""
+        state_manager.mark_threads_addressed(123, ["thread_1"])
+        state_manager.save_pr_comments(123, [{"body": "Comment"}])
+
+        # Clear entire PR context
+        state_manager.clear_pr_context(123)
+
+        # Addressed threads should also be cleared
+        assert state_manager.get_addressed_threads(123) == set()
+
+    def test_get_addressed_threads_handles_corrupted_file(
+        self, state_manager: StateManager
+    ) -> None:
+        """Test that get_addressed_threads handles corrupted JSON gracefully."""
+        pr_dir = state_manager.get_pr_dir(123)
+        addressed_file = pr_dir / "addressed_threads.json"
+        addressed_file.write_text("not valid json {{{")
+
+        # Should return empty set instead of crashing
+        addressed = state_manager.get_addressed_threads(123)
+        assert addressed == set()

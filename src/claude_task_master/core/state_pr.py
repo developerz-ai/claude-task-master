@@ -8,6 +8,7 @@ These methods are mixed into the StateManager class via the PRContextMixin.
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -176,3 +177,74 @@ FAILURE LOGS:
         pr_dir = self.state_dir / "debugging" / "pr" / str(pr_number)
         if pr_dir.exists():
             shutil.rmtree(pr_dir)
+
+    def get_addressed_threads(self, pr_number: int) -> set[str]:
+        """Get the set of thread IDs that have already been addressed.
+
+        Addressed threads are those we've already replied to, so we don't
+        need to download or process them again even if not resolved on GitHub.
+
+        Args:
+            pr_number: The PR number.
+
+        Returns:
+            Set of thread IDs that have been addressed.
+        """
+        pr_dir = self.get_pr_dir(pr_number)
+        addressed_file = pr_dir / "addressed_threads.json"
+
+        if not addressed_file.exists():
+            return set()
+
+        try:
+            with open(addressed_file) as f:
+                data = json.load(f)
+                return set(data.get("thread_ids", []))
+        except (json.JSONDecodeError, OSError):
+            return set()
+
+    def mark_threads_addressed(self, pr_number: int, thread_ids: list[str]) -> None:
+        """Mark thread IDs as addressed (replied to).
+
+        These threads won't be downloaded again in future comment fetches.
+
+        Args:
+            pr_number: The PR number.
+            thread_ids: List of thread IDs to mark as addressed.
+        """
+        if not thread_ids:
+            return
+
+        pr_dir = self.get_pr_dir(pr_number)
+        addressed_file = pr_dir / "addressed_threads.json"
+
+        # Load existing addressed threads
+        existing = self.get_addressed_threads(pr_number)
+
+        # Add new thread IDs
+        all_addressed = existing | set(thread_ids)
+
+        # Save updated list
+        try:
+            with open(addressed_file, "w") as f:
+                json.dump({"thread_ids": list(all_addressed)}, f, indent=2)
+        except OSError:
+            pass  # Best effort - don't fail if we can't save
+
+    def clear_addressed_threads(self, pr_number: int) -> None:
+        """Clear the addressed threads tracking for a PR.
+
+        Use this when you want to re-process all comments (e.g., after
+        a reviewer requests changes to a previous response).
+
+        Args:
+            pr_number: The PR number.
+        """
+        pr_dir = self.get_pr_dir(pr_number)
+        addressed_file = pr_dir / "addressed_threads.json"
+
+        if addressed_file.exists():
+            try:
+                addressed_file.unlink()
+            except OSError:
+                pass  # Best effort cleanup

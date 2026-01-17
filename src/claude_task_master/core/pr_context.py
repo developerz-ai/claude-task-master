@@ -147,15 +147,23 @@ class PRContextManager:
             data = json.loads(result.stdout)
             threads = data["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
 
+            # Get already-addressed thread IDs to skip them
+            addressed_threads = self.state_manager.get_addressed_threads(pr_number)
+
             # Convert to list of comment dicts - ONLY unresolved, actionable threads
             comments = []
             for thread in threads:
                 if thread["isResolved"]:
                     continue  # Skip resolved threads
                 thread_id = thread.get("id")
+
+                # Skip threads we've already addressed (replied to)
+                if thread_id in addressed_threads:
+                    continue
+
                 for comment in thread["comments"]["nodes"]:
                     body = comment["body"]
-                    author = comment["author"]["login"]
+                    author = comment["author"]["login"] if comment.get("author") else "unknown"
 
                     # Skip non-actionable bot comments
                     if self._is_non_actionable_comment(author, body):
@@ -205,6 +213,9 @@ class PRContextManager:
 
             console.info(f"Posting replies to {len(resolutions)} comments...")
 
+            # Track successfully addressed thread IDs
+            addressed_thread_ids: list[str] = []
+
             for resolution in resolutions:
                 thread_id = resolution.get("thread_id")
                 action = resolution.get("action", "fixed")
@@ -226,6 +237,9 @@ class PRContextManager:
                     self._post_thread_reply(thread_id, reply_body)
                     console.detail(f"  Posted reply to thread {thread_id[:20]}...")
 
+                    # Mark this thread as addressed so we don't re-download it
+                    addressed_thread_ids.append(thread_id)
+
                     # Resolve thread if action is "fixed"
                     if action == "fixed":
                         try:
@@ -235,6 +249,11 @@ class PRContextManager:
                             console.warning(f"  Failed to resolve thread: {resolve_err}")
                 except Exception as e:
                     console.warning(f"  Failed to post reply: {e}")
+
+            # Persist addressed thread IDs to avoid re-downloading them
+            if addressed_thread_ids:
+                self.state_manager.mark_threads_addressed(pr_number, addressed_thread_ids)
+                console.detail(f"Marked {len(addressed_thread_ids)} threads as addressed")
 
             # Delete the resolve-comments.json after processing to prevent re-processing
             # New comments from CodeRabbit or reviewers will be fetched fresh next cycle
