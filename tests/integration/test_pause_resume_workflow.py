@@ -540,6 +540,7 @@ class TestResumeFromDifferentStates:
         # Working state is resumable, so it should continue
         assert "2" in result.output  # Current task index + 1
 
+
 class TestPauseResumeWithBackups:
     """Tests for backup behavior during pause/resume."""
 
