@@ -211,6 +211,9 @@ class PRContextManager:
             if not resolutions:
                 return
 
+            # Get current thread resolution status from GitHub
+            already_resolved = self._get_resolved_thread_ids(pr_number)
+
             console.info(f"Posting replies to {len(resolutions)} comments...")
 
             # Track successfully addressed thread IDs
@@ -222,6 +225,12 @@ class PRContextManager:
                 message = resolution.get("message", "Addressed")
 
                 if not thread_id:
+                    continue
+
+                # Skip threads that are already resolved on GitHub
+                if thread_id in already_resolved:
+                    console.detail(f"  Thread {thread_id[:20]}... already resolved, skipping")
+                    addressed_thread_ids.append(thread_id)
                     continue
 
                 # Build reply message
@@ -331,6 +340,68 @@ class PRContextManager:
             capture_output=True,
             text=True,
         )
+
+    def _get_resolved_thread_ids(self, pr_number: int) -> set[str]:
+        """Get IDs of threads that are already resolved on GitHub.
+
+        Args:
+            pr_number: The PR number.
+
+        Returns:
+            Set of thread IDs that are already resolved.
+        """
+        try:
+            result = subprocess.run(
+                ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            repo_info = result.stdout.strip()
+            owner, repo = repo_info.split("/")
+
+            query = """
+            query($owner: String!, $repo: String!, $pr: Int!) {
+              repository(owner: $owner, name: $repo) {
+                pullRequest(number: $pr) {
+                  reviewThreads(first: 100) {
+                    nodes {
+                      id
+                      isResolved
+                    }
+                  }
+                }
+              }
+            }
+            """
+
+            result = subprocess.run(
+                [
+                    "gh",
+                    "api",
+                    "graphql",
+                    "-f",
+                    f"query={query}",
+                    "-F",
+                    f"owner={owner}",
+                    "-F",
+                    f"repo={repo}",
+                    "-F",
+                    f"pr={pr_number}",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            data = json.loads(result.stdout)
+            threads = data["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
+
+            return {t["id"] for t in threads if t["isResolved"]}
+
+        except Exception as e:
+            console.warning(f"Could not fetch resolved threads: {e}")
+            return set()
 
     def _is_non_actionable_comment(self, author: str, body: str) -> bool:
         """Check if a comment is non-actionable (bot status, summary, etc).

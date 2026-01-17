@@ -283,10 +283,29 @@ After fixing, end with: TASK COMPLETE"""
                     return None
                 return None  # Will re-check on next cycle
 
-            if pr_status.unresolved_threads > 0:
+            # Get threads we've already addressed (to show accurate count)
+            addressed_threads = self.state_manager.get_addressed_threads(state.current_pr)
+            # Actionable = unresolved threads that we haven't already addressed
+            actionable_threads = pr_status.unresolved_threads - len(
+                [t for t in addressed_threads if t]  # Count non-empty addressed thread IDs
+            )
+            # Clamp to 0 in case addressed count is stale
+            actionable_threads = max(0, actionable_threads)
+
+            if actionable_threads > 0:
                 console.warning(
-                    f"Found {pr_status.unresolved_threads} unresolved / "
+                    f"Found {actionable_threads} actionable / "
                     f"{pr_status.total_threads} total review comments"
+                )
+                state.workflow_stage = "addressing_reviews"
+                self.state_manager.save_state(state)
+                return None
+            elif pr_status.unresolved_threads > 0:
+                # All unresolved threads are addressed but not yet resolved on GitHub
+                # This can happen if resolution failed - retry
+                console.info(
+                    f"Found {pr_status.unresolved_threads} unresolved threads "
+                    "(all previously addressed, will retry resolution)"
                 )
                 state.workflow_stage = "addressing_reviews"
                 self.state_manager.save_state(state)
@@ -354,6 +373,10 @@ Please:
 ```
 
 Copy the Thread ID from each comment file into the resolution JSON.
+
+**IMPORTANT: DO NOT resolve threads directly using GitHub GraphQL mutations.**
+The orchestrator will handle thread resolution automatically after you create the resolution file.
+Your job is to: fix the code, run tests, commit, push, and create the resolution JSON file.
 
 After addressing ALL comments and creating the resolution file, end with: TASK COMPLETE"""
 
