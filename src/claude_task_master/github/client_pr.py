@@ -35,9 +35,13 @@ class GitHubClientProtocol(Protocol):
         check: bool = True,
         capture_output: bool = True,
         cwd: str | None = None,
-    ) -> subprocess.CompletedProcess[str]: ...
+    ) -> subprocess.CompletedProcess[str]:
+        """Run a gh CLI command."""
+        raise NotImplementedError("Protocol method must be implemented")
 
-    def _get_repo_info(self) -> str: ...
+    def _get_repo_info(self) -> str:
+        """Get repository info."""
+        raise NotImplementedError("Protocol method must be implemented")
 
 
 class PROperationsMixin:

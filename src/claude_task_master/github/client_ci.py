@@ -30,13 +30,17 @@ class GitHubClientProtocol(Protocol):
         check: bool = True,
         capture_output: bool = True,
         cwd: str | None = None,
-    ) -> subprocess.CompletedProcess[str]: ...
+    ) -> subprocess.CompletedProcess[str]:
+        """Run a gh CLI command."""
+        raise NotImplementedError("Protocol method must be implemented")
 
-    def get_workflow_runs(
-        self, limit: int = 5, branch: str | None = None
-    ) -> list["WorkflowRun"]: ...
+    def get_workflow_runs(self, limit: int = 5, branch: str | None = None) -> list["WorkflowRun"]:
+        """Get workflow runs."""
+        raise NotImplementedError("Protocol method must be implemented")
 
-    def get_pr_status(self, pr_number: int) -> "PRStatusProtocol": ...
+    def get_pr_status(self, pr_number: int) -> "PRStatusProtocol":
+        """Get PR status."""
+        raise NotImplementedError("Protocol method must be implemented")
 
 
 class PRStatusProtocol(Protocol):
