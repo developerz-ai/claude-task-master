@@ -413,7 +413,10 @@ EOF
 )"
 ```
 
-**7. Push and Create PR** (if task requires it)
+**Note:** The `.claude-task-master/` directory is automatically gitignored - it contains
+orchestrator state files that should never be committed.
+
+**7. Push and Create PR** (REQUIRED)
 ```bash
 git push -u origin HEAD
 gh pr create --title "type: description" --body "..." --label "claudetm"
@@ -440,6 +443,7 @@ gh pr create --title "type: description" --body "..." --label "claudetm"
 
 **IMPORTANT: Always commit your work before reporting completion.**
 ```bash
+# 1. Commit your changes (.claude-task-master/ is auto-gitignored)
 git add -A && git commit -m "task: Brief description of what was done"
 ```
 
