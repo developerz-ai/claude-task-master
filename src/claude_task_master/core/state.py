@@ -378,7 +378,9 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
 
         # Handle empty JSON
         if not data:
-            recovered_state_empty: TaskState | None = self._attempt_recovery(ValueError("Empty JSON object"))
+            recovered_state_empty: TaskState | None = self._attempt_recovery(
+                ValueError("Empty JSON object")
+            )
             if recovered_state_empty:
                 return recovered_state_empty
             raise StateCorruptedError(
