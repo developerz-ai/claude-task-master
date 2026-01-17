@@ -4,8 +4,8 @@ import pytest
 from typer.testing import CliRunner
 
 from claude_task_master.cli import app
-from .conftest import strip_ansi
 
+from .conftest import strip_ansi
 
 # =============================================================================
 # Fixtures
