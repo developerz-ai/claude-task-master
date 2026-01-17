@@ -295,7 +295,7 @@ class AgentQueryExecutor:
                     model=model_name,  # Specify the model to use
                     cwd=str(self.working_dir),  # Project directory for CLAUDE.md
                     setting_sources=["user", "local", "project"],  # Load all settings/skills
-                    hooks=self.hooks,  # type: ignore[arg-type]  # Compatible HookMatcher
+                    hooks=self.hooks,  # Compatible HookMatcher
                     agents=agents if agents else None,  # Programmatic subagents
                 )
             except Exception as e:
