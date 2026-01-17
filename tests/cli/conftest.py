@@ -131,3 +131,45 @@ def mock_log_file(mock_logs_dir: Path) -> Path:
     log_file = mock_logs_dir / "run-20250115-120000.txt"
     log_file.write_text("\n".join([f"Log line {i}" for i in range(150)]))
     return log_file
+
+
+# =============================================================================
+# State Creation Helpers
+# =============================================================================
+
+
+def create_state_data(
+    status: str = "paused",
+    current_task_index: int = 0,
+    session_count: int = 1,
+    current_pr: int | None = None,
+    model: str = "sonnet",
+    auto_merge: bool = True,
+    max_sessions: int | None = None,
+    pause_on_pr: bool = False,
+    run_id: str = "20250115-120000",
+    created_at: str | None = None,
+) -> dict:
+    """Create state data with customizable values."""
+    timestamp = datetime.now().isoformat()
+    return {
+        "status": status,
+        "current_task_index": current_task_index,
+        "session_count": session_count,
+        "current_pr": current_pr,
+        "created_at": created_at or timestamp,
+        "updated_at": timestamp,
+        "run_id": run_id,
+        "model": model,
+        "options": {
+            "auto_merge": auto_merge,
+            "max_sessions": max_sessions,
+            "pause_on_pr": pause_on_pr,
+        },
+    }
+
+
+@pytest.fixture
+def state_data_factory():
+    """Factory fixture for creating state data."""
+    return create_state_data
