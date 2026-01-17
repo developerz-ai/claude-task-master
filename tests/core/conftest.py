@@ -1,8 +1,14 @@
-"""Pytest fixtures for agent-related tests.
+"""Pytest fixtures for core module tests.
 
 This module provides shared fixtures for tests in the tests/core directory,
-particularly for AgentWrapper testing. These fixtures help reduce duplication
-across test_agent_*.py files.
+including:
+- AgentWrapper testing (test_agent_*.py)
+- StateManager testing (test_state_*.py)
+
+These fixtures help reduce duplication across test files.
+
+Note: Basic fixtures like `state_manager`, `initialized_state_manager`,
+`temp_dir`, and `sample_task_options` are provided by the root conftest.py.
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -333,3 +339,93 @@ def all_model_types(request):
         ModelType: Each model type in sequence.
     """
     return request.param
+
+
+# =============================================================================
+# State Manager Fixtures
+# =============================================================================
+# Note: Basic state fixtures (state_manager, initialized_state_manager,
+# temp_dir, sample_task_options) are provided by the root conftest.py.
+# The fixtures below provide additional state-related utilities.
+
+
+@pytest.fixture
+def state_manager_with_dir(state_manager):
+    """StateManager with state directory pre-created.
+
+    This fixture eliminates the need to call
+    `state_manager.state_dir.mkdir(exist_ok=True)` at the start of tests.
+
+    Args:
+        state_manager: StateManager fixture from root conftest.py
+
+    Returns:
+        StateManager: A StateManager with state_dir already created.
+    """
+    state_manager.state_dir.mkdir(exist_ok=True)
+    return state_manager
+
+
+@pytest.fixture
+def state_manager_with_logs_dir(state_manager_with_dir):
+    """StateManager with both state and logs directories pre-created.
+
+    Useful for tests that need to write log files.
+
+    Args:
+        state_manager_with_dir: StateManager with state_dir created
+
+    Returns:
+        StateManager: A StateManager with state_dir and logs_dir created.
+    """
+    state_manager_with_dir.logs_dir.mkdir(exist_ok=True)
+    return state_manager_with_dir
+
+
+@pytest.fixture
+def sample_plan_with_tasks():
+    """Sample plan markdown with a variety of task states.
+
+    Returns:
+        str: A plan with unchecked, checked, and nested tasks.
+    """
+    return """## Task List
+
+### Phase 1: Setup
+- [x] Initialize project structure
+- [x] Configure environment
+
+### Phase 2: Implementation
+- [ ] Implement core functionality
+- [ ] Add error handling
+
+### Phase 3: Testing
+- [ ] Write unit tests
+- [ ] Integration tests
+
+## Success Criteria
+
+1. All tests pass
+2. Coverage > 80%
+"""
+
+
+@pytest.fixture
+def sample_context_content():
+    """Sample context content for testing context accumulation.
+
+    Returns:
+        str: Sample accumulated context.
+    """
+    return """# Accumulated Context
+
+## Session 1
+Explored the codebase structure. Found modular architecture.
+
+## Session 2
+Implemented core feature. Discovered edge case in validation.
+
+## Key Learnings
+- Use factory pattern for object creation
+- Error handling needs retry logic
+"""
