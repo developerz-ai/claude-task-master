@@ -114,6 +114,7 @@ from claude_task_master.core.state import (
     StateManager,
     StateNotFoundError,
     StatePermissionError,
+    StateResumeValidationError,
     StateValidationError,
     TaskOptions,
     TaskState,
@@ -183,6 +184,7 @@ __all__ = [
     "InvalidStateTransitionError",
     "StatePermissionError",
     "StateLockError",
+    "StateResumeValidationError",
     # State classes
     "StateManager",
     "TaskState",
