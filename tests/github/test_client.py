@@ -6,7 +6,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from claude_task_master.github.client import GitHubClient, PRStatus
+from claude_task_master.github.client import (
+    GitHubAuthError,
+    GitHubClient,
+    GitHubMergeError,
+    GitHubNotFoundError,
+    GitHubTimeoutError,
+    PRStatus,
+)
 
 # =============================================================================
 # PRStatus Model Tests
@@ -133,7 +140,8 @@ class TestGitHubClientInit:
             client = GitHubClient()
             mock_run.assert_called_once_with(
                 ["gh", "auth", "status"],
-                check=True,
+                timeout=10,
+                check=False,
                 capture_output=True,
                 text=True,
             )
@@ -142,10 +150,8 @@ class TestGitHubClientInit:
     def test_init_gh_cli_not_authenticated(self):
         """Test initialization when gh CLI is not authenticated."""
         with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = subprocess.CalledProcessError(
-                1, "gh auth status", stderr="not logged in"
-            )
-            with pytest.raises(RuntimeError) as exc_info:
+            mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="not logged in")
+            with pytest.raises(GitHubAuthError) as exc_info:
                 GitHubClient()
             assert "gh CLI not authenticated" in str(exc_info.value)
             assert "gh auth login" in str(exc_info.value)
@@ -154,10 +160,18 @@ class TestGitHubClientInit:
         """Test initialization when gh CLI is not installed."""
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = FileNotFoundError("gh not found")
-            with pytest.raises(RuntimeError) as exc_info:
+            with pytest.raises(GitHubNotFoundError) as exc_info:
                 GitHubClient()
             assert "gh CLI not installed" in str(exc_info.value)
             assert "https://cli.github.com/" in str(exc_info.value)
+
+    def test_init_gh_cli_timeout(self):
+        """Test initialization when gh auth check times out."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = subprocess.TimeoutExpired("gh auth status", 10)
+            with pytest.raises(GitHubTimeoutError) as exc_info:
+                GitHubClient()
+            assert "timed out" in str(exc_info.value)
 
 
 # =============================================================================
@@ -190,22 +204,20 @@ class TestGitHubClientCreatePR:
                 base="main",
             )
             assert pr_number == 42
-            mock_run.assert_called_once_with(
-                [
-                    "gh",
-                    "pr",
-                    "create",
-                    "--title",
-                    "Test PR",
-                    "--body",
-                    "This is a test PR",
-                    "--base",
-                    "main",
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
+            # Verify the command was called with the right arguments
+            call_args = mock_run.call_args
+            assert call_args[0][0] == [
+                "gh",
+                "pr",
+                "create",
+                "--title",
+                "Test PR",
+                "--body",
+                "This is a test PR",
+                "--base",
+                "main",
+            ]
+            assert call_args[1]["timeout"] == 60
 
     def test_create_pr_different_base_branch(self, github_client):
         """Test PR creation with a different base branch."""
@@ -961,21 +973,38 @@ class TestGitHubClientMergePR:
             client = GitHubClient()
         return client
 
-    def test_merge_pr_success(self, github_client):
-        """Test successful PR merge."""
+    def test_merge_pr_success_with_auto(self, github_client):
+        """Test successful PR merge with --auto flag."""
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
             github_client.merge_pr(123)
 
-            mock_run.assert_called_once_with(
-                ["gh", "pr", "merge", "123", "--squash", "--auto"],
-                check=True,
-            )
+            # First call should be with --auto
+            call_args = mock_run.call_args_list[0]
+            assert call_args[0][0] == ["gh", "pr", "merge", "123", "--squash", "--auto"]
+            assert call_args[1]["timeout"] == 15
+
+    def test_merge_pr_fallback_to_direct_merge(self, github_client):
+        """Test fallback to direct merge when --auto fails."""
+        with patch("subprocess.run") as mock_run:
+            # First call with --auto fails, second succeeds
+            mock_run.side_effect = [
+                MagicMock(returncode=1, stdout="", stderr="auto-merge is not allowed"),
+                MagicMock(returncode=0, stdout="", stderr=""),
+            ]
+            github_client.merge_pr(123)
+
+            # Should have two calls
+            assert mock_run.call_count == 2
+            # Second call should be direct merge without --auto
+            second_call = mock_run.call_args_list[1]
+            assert "--auto" not in second_call[0][0]
+            assert "--delete-branch" in second_call[0][0]
 
     def test_merge_pr_converts_number_to_string(self, github_client):
         """Test that PR number is converted to string for command."""
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
             github_client.merge_pr(456)
 
             call_args = mock_run.call_args[0][0]
@@ -985,39 +1014,42 @@ class TestGitHubClientMergePR:
     def test_merge_pr_uses_squash_merge(self, github_client):
         """Test that merge uses squash strategy."""
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
             github_client.merge_pr(789)
 
             call_args = mock_run.call_args[0][0]
             assert "--squash" in call_args
 
-    def test_merge_pr_uses_auto_merge(self, github_client):
-        """Test that merge uses auto-merge flag."""
+    def test_merge_pr_timeout_raises_error(self, github_client):
+        """Test that merge timeout raises GitHubMergeError."""
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
-            github_client.merge_pr(1)
-
-            call_args = mock_run.call_args[0][0]
-            assert "--auto" in call_args
-
-    def test_merge_pr_failure(self, github_client):
-        """Test PR merge handles failures."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = subprocess.CalledProcessError(
-                1, "gh pr merge", stderr="Cannot merge: checks failing"
-            )
-            with pytest.raises(subprocess.CalledProcessError):
+            mock_run.side_effect = subprocess.TimeoutExpired("gh pr merge", 15)
+            with pytest.raises(GitHubMergeError) as exc_info:
                 github_client.merge_pr(999)
+            assert "timed out" in str(exc_info.value)
 
-    def test_merge_pr_not_mergeable(self, github_client):
-        """Test PR merge when PR is not mergeable."""
+    def test_merge_pr_failure_raises_error(self, github_client):
+        """Test PR merge failure raises GitHubMergeError."""
         with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = subprocess.CalledProcessError(
-                1, "gh pr merge", stderr="Pull request is not mergeable"
+            # Both auto and direct merge fail
+            mock_run.return_value = MagicMock(
+                returncode=1, stdout="", stderr="Cannot merge: checks failing"
             )
-            with pytest.raises(subprocess.CalledProcessError) as exc_info:
-                github_client.merge_pr(100)
-            assert exc_info.value.returncode == 1
+            with pytest.raises(GitHubMergeError) as exc_info:
+                github_client.merge_pr(999)
+            assert "Failed to merge" in str(exc_info.value)
+
+    def test_merge_pr_without_auto(self, github_client):
+        """Test merge with use_auto=False goes directly to merge."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            github_client.merge_pr(123, use_auto=False)
+
+            # Should only call once with --delete-branch, not --auto
+            assert mock_run.call_count == 1
+            call_args = mock_run.call_args[0][0]
+            assert "--auto" not in call_args
+            assert "--delete-branch" in call_args
 
 
 # =============================================================================
@@ -1047,12 +1079,18 @@ class TestGitHubClientGetRepoInfo:
             result = github_client._get_repo_info()
 
             assert result == "owner/repo-name"
-            mock_run.assert_called_once_with(
-                ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
+            # Verify the command was called with the right arguments
+            call_args = mock_run.call_args
+            assert call_args[0][0] == [
+                "gh",
+                "repo",
+                "view",
+                "--json",
+                "nameWithOwner",
+                "-q",
+                ".nameWithOwner",
+            ]
+            assert call_args[1]["timeout"] == 15
 
     def test_get_repo_info_strips_whitespace(self, github_client):
         """Test that repo info strips whitespace."""
@@ -1315,9 +1353,10 @@ class TestGitHubClientEdgeCases:
     def test_subprocess_timeout(self, github_client):
         """Test handling subprocess timeout."""
         with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = subprocess.TimeoutExpired(cmd="gh", timeout=30)
-            with pytest.raises(subprocess.TimeoutExpired):
+            mock_run.side_effect = subprocess.TimeoutExpired(cmd="gh", timeout=60)
+            with pytest.raises(GitHubTimeoutError) as exc_info:
                 github_client.create_pr("Title", "Body")
+            assert "timed out" in str(exc_info.value)
 
     def test_multiple_check_runs_in_status(self, github_client):
         """Test PR status with multiple check runs."""

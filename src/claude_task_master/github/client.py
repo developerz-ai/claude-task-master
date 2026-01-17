@@ -6,6 +6,48 @@ from typing import Any
 
 from pydantic import BaseModel
 
+# Default timeout for gh CLI commands (30 seconds)
+DEFAULT_GH_TIMEOUT = 30
+
+
+class GitHubError(Exception):
+    """Base exception for GitHub operations."""
+
+    def __init__(
+        self, message: str, command: list[str] | None = None, exit_code: int | None = None
+    ):
+        super().__init__(message)
+        self.message = message
+        self.command = command
+        self.exit_code = exit_code
+
+    def __str__(self) -> str:
+        return self.message
+
+
+class GitHubTimeoutError(GitHubError):
+    """Raised when a gh CLI command times out."""
+
+    pass
+
+
+class GitHubAuthError(GitHubError):
+    """Raised when gh CLI is not authenticated."""
+
+    pass
+
+
+class GitHubNotFoundError(GitHubError):
+    """Raised when gh CLI is not installed."""
+
+    pass
+
+
+class GitHubMergeError(GitHubError):
+    """Raised when PR merge fails."""
+
+    pass
+
 
 class PRStatus(BaseModel):
     """PR status information."""
@@ -44,27 +86,101 @@ class GitHubClient:
         """Initialize GitHub client."""
         self._check_gh_cli()
 
+    def _run_gh_command(
+        self,
+        cmd: list[str],
+        timeout: int = DEFAULT_GH_TIMEOUT,
+        check: bool = True,
+        capture_output: bool = True,
+        cwd: str | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        """Run a gh CLI command with proper timeout and error handling.
+
+        Args:
+            cmd: Command and arguments to run.
+            timeout: Timeout in seconds (default 30).
+            check: Whether to raise on non-zero exit code.
+            capture_output: Whether to capture stdout/stderr.
+            cwd: Working directory for the command.
+
+        Returns:
+            CompletedProcess result.
+
+        Raises:
+            GitHubTimeoutError: If command times out.
+            GitHubError: If command fails and check=True.
+        """
+        try:
+            result = subprocess.run(
+                cmd,
+                timeout=timeout,
+                check=False,  # We'll handle errors ourselves
+                capture_output=capture_output,
+                text=True,
+                cwd=cwd,
+            )
+
+            if check and result.returncode != 0:
+                error_msg = (
+                    result.stderr.strip()
+                    if result.stderr
+                    else f"Command failed with exit code {result.returncode}"
+                )
+                raise GitHubError(error_msg, command=cmd, exit_code=result.returncode)
+
+            return result
+
+        except subprocess.TimeoutExpired as e:
+            raise GitHubTimeoutError(
+                f"Command timed out after {timeout}s: {' '.join(cmd)}",
+                command=cmd,
+            ) from e
+
     def _check_gh_cli(self) -> None:
         """Check if gh CLI is installed and authenticated."""
         try:
-            subprocess.run(
+            result = subprocess.run(
                 ["gh", "auth", "status"],
-                check=True,
+                timeout=10,
+                check=False,
                 capture_output=True,
                 text=True,
             )
-        except subprocess.CalledProcessError as e:
-            raise RuntimeError("gh CLI not authenticated. Run 'gh auth login' first.") from e
+            if result.returncode != 0:
+                raise GitHubAuthError(
+                    "gh CLI not authenticated. Run 'gh auth login' first.",
+                    command=["gh", "auth", "status"],
+                    exit_code=result.returncode,
+                )
+        except subprocess.TimeoutExpired as e:
+            raise GitHubTimeoutError(
+                "gh auth status timed out",
+                command=["gh", "auth", "status"],
+            ) from e
         except FileNotFoundError as e:
-            raise RuntimeError("gh CLI not installed. Install from https://cli.github.com/") from e
+            raise GitHubNotFoundError(
+                "gh CLI not installed. Install from https://cli.github.com/",
+                command=["gh", "auth", "status"],
+            ) from e
 
     def create_pr(self, title: str, body: str, base: str = "main") -> int:
-        """Create a new pull request."""
-        result = subprocess.run(
+        """Create a new pull request.
+
+        Args:
+            title: PR title.
+            body: PR body/description.
+            base: Base branch to merge into.
+
+        Returns:
+            The created PR number.
+
+        Raises:
+            GitHubError: If PR creation fails.
+            GitHubTimeoutError: If command times out.
+        """
+        result = self._run_gh_command(
             ["gh", "pr", "create", "--title", title, "--body", body, "--base", base],
-            check=True,
-            capture_output=True,
-            text=True,
+            timeout=60,  # PR creation can take a bit longer
         )
 
         # Extract PR number from output
@@ -130,7 +246,7 @@ class GitHubClient:
         }
         """
 
-        result = subprocess.run(
+        result = self._run_gh_command(
             [
                 "gh",
                 "api",
@@ -144,9 +260,7 @@ class GitHubClient:
                 "-F",
                 f"pr={pr_number}",
             ],
-            check=True,
-            capture_output=True,
-            text=True,
+            timeout=30,
         )
 
         data = json.loads(result.stdout)
@@ -232,20 +346,21 @@ class GitHubClient:
 
         Args:
             cwd: Working directory to run the command in (project root).
+
+        Returns:
+            PR number if one exists, None otherwise.
         """
         try:
-            result = subprocess.run(
+            result = self._run_gh_command(
                 ["gh", "pr", "view", "--json", "number"],
-                check=True,
-                capture_output=True,
-                text=True,
+                timeout=15,
                 cwd=cwd,
             )
             data = json.loads(result.stdout)
             pr_number = data.get("number")
             return int(pr_number) if pr_number is not None else None
-        except subprocess.CalledProcessError:
-            # No PR exists for current branch
+        except (GitHubError, GitHubTimeoutError):
+            # No PR exists for current branch or command failed
             return None
 
     def get_pr_comments(self, pr_number: int, only_unresolved: bool = True) -> str:
@@ -277,7 +392,7 @@ class GitHubClient:
         }
         """
 
-        result = subprocess.run(
+        result = self._run_gh_command(
             [
                 "gh",
                 "api",
@@ -291,9 +406,7 @@ class GitHubClient:
                 "-F",
                 f"pr={pr_number}",
             ],
-            check=True,
-            capture_output=True,
-            text=True,
+            timeout=30,
         )
 
         data = json.loads(result.stdout)
@@ -317,20 +430,70 @@ class GitHubClient:
 
         return "\n---\n\n".join(formatted)
 
-    def merge_pr(self, pr_number: int) -> None:
-        """Merge a pull request."""
-        subprocess.run(
-            ["gh", "pr", "merge", str(pr_number), "--squash", "--auto"],
-            check=True,
-        )
+    def merge_pr(self, pr_number: int, use_auto: bool = True) -> None:
+        """Merge a pull request.
+
+        Args:
+            pr_number: The PR number to merge.
+            use_auto: If True, try --auto first (enable auto-merge).
+                      If that fails, fall back to direct merge.
+
+        Raises:
+            GitHubMergeError: If merge fails after all attempts.
+            GitHubTimeoutError: If merge command times out.
+        """
+        pr_str = str(pr_number)
+
+        if use_auto:
+            # First try with --auto (enables auto-merge when checks pass)
+            try:
+                self._run_gh_command(
+                    ["gh", "pr", "merge", pr_str, "--squash", "--auto"],
+                    timeout=15,  # Short timeout - --auto should be quick
+                )
+                return  # Success with auto-merge enabled
+            except GitHubTimeoutError:
+                # --auto timed out, try direct merge
+                pass
+            except GitHubError as e:
+                # --auto not available (repo doesn't support it), try direct merge
+                if "auto-merge is not allowed" in str(e).lower() or "not enabled" in str(e).lower():
+                    pass  # Fall through to direct merge
+                else:
+                    # Some other error, still try direct merge
+                    pass
+
+        # Try direct merge (squash without --auto)
+        try:
+            self._run_gh_command(
+                ["gh", "pr", "merge", pr_str, "--squash", "--delete-branch"],
+                timeout=30,
+            )
+        except GitHubTimeoutError as e:
+            raise GitHubMergeError(
+                f"PR #{pr_number} merge timed out. Manual merge may be required.",
+                command=e.command,
+            ) from e
+        except GitHubError as e:
+            raise GitHubMergeError(
+                f"Failed to merge PR #{pr_number}: {e.message}",
+                command=e.command,
+                exit_code=e.exit_code,
+            ) from e
 
     def _get_repo_info(self) -> str:
-        """Get current repository owner/name."""
-        result = subprocess.run(
+        """Get current repository owner/name.
+
+        Returns:
+            Repository in owner/name format.
+
+        Raises:
+            GitHubError: If command fails.
+            GitHubTimeoutError: If command times out.
+        """
+        result = self._run_gh_command(
             ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
-            check=True,
-            capture_output=True,
-            text=True,
+            timeout=15,
         )
         return result.stdout.strip()
 
@@ -356,7 +519,7 @@ class GitHubClient:
         if branch:
             cmd.extend(["--branch", branch])
 
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        result = self._run_gh_command(cmd, timeout=30)
         data = json.loads(result.stdout)
 
         return [
@@ -391,7 +554,7 @@ class GitHubClient:
             run_id = runs[0].id
             cmd = ["gh", "run", "view", str(run_id), "--json", "status,conclusion,jobs"]
 
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        result = self._run_gh_command(cmd, timeout=30)
         data = json.loads(result.stdout)
 
         status = data.get("status", "unknown")
@@ -433,7 +596,10 @@ class GitHubClient:
                 return "No workflow runs found"
 
         cmd = ["gh", "run", "view", str(run_id), "--log-failed"]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        try:
+            result = self._run_gh_command(cmd, timeout=60, check=False)  # Logs can be large
+        except GitHubTimeoutError:
+            return "Error getting logs: Command timed out"
 
         if result.returncode != 0:
             return f"Error getting logs: {result.stderr}"
