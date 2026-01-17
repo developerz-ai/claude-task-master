@@ -324,7 +324,7 @@ def planner(mock_agent_wrapper, state_manager):
 
 
 @pytest.fixture
-def orchestrator(mock_agent_wrapper, initialized_state_manager, planner):
+def orchestrator(mock_agent_wrapper, initialized_state_manager, planner, mock_github_client):
     """Provide a WorkLoopOrchestrator instance."""
     from claude_task_master.core.orchestrator import WorkLoopOrchestrator
 
@@ -337,6 +337,7 @@ def orchestrator(mock_agent_wrapper, initialized_state_manager, planner):
         agent=mock_agent_wrapper,
         state_manager=initialized_state_manager,
         planner=planner,
+        github_client=mock_github_client,
     )
 
 

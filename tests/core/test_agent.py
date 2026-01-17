@@ -305,6 +305,7 @@ class TestToolConfig:
             "Read",
             "Glob",
             "Grep",
+            "Bash",
         ]
         assert ToolConfig.PLANNING.value == expected
 
@@ -460,12 +461,13 @@ class TestAgentWrapperGetToolsForPhase:
             )
 
     def test_planning_phase_tools(self, agent):
-        """Test get_tools_for_phase returns read-only planning tools."""
+        """Test get_tools_for_phase returns planning tools including Bash for checks."""
         tools = agent.get_tools_for_phase("planning")
         expected = [
             "Read",
             "Glob",
             "Grep",
+            "Bash",
         ]
         assert tools == expected
 
