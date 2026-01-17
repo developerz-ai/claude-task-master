@@ -16,6 +16,7 @@ from claude_task_master.core.agent_exceptions import (
     SDKInitializationError,
     WorkingDirectoryError,
 )
+from claude_task_master.core.agent_message import MessageProcessor
 from claude_task_master.core.agent_models import (
     DEFAULT_COMPACT_THRESHOLD_PERCENT,
     MODEL_CONTEXT_WINDOWS,
@@ -25,6 +26,8 @@ from claude_task_master.core.agent_models import (
     ToolConfig,
     parse_task_complexity,
 )
+from claude_task_master.core.agent_phases import AgentPhaseExecutor
+from claude_task_master.core.agent_query import AgentQueryExecutor
 from claude_task_master.core.checkpoint import (
     Checkpoint,
     CheckpointError,
@@ -166,6 +169,9 @@ __all__ = [
     "TaskComplexity",
     "ToolConfig",
     "AgentWrapper",
+    "AgentPhaseExecutor",
+    "AgentQueryExecutor",
+    "MessageProcessor",
     "parse_task_complexity",
     # Model context configuration
     "MODEL_CONTEXT_WINDOWS",
