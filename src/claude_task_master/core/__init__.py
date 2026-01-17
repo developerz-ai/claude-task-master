@@ -1,16 +1,7 @@
 """Core module - exports key classes and exceptions."""
 
 from claude_task_master.core import console
-from claude_task_master.core.agent import (
-    DEFAULT_COMPACT_THRESHOLD_PERCENT,
-    MODEL_CONTEXT_WINDOWS,
-    MODEL_CONTEXT_WINDOWS_STANDARD,
-    AgentWrapper,
-    ModelType,
-    TaskComplexity,
-    ToolConfig,
-    parse_task_complexity,
-)
+from claude_task_master.core.agent import AgentWrapper
 from claude_task_master.core.agent_exceptions import (
     TRANSIENT_ERRORS,
     AgentError,
@@ -24,6 +15,15 @@ from claude_task_master.core.agent_exceptions import (
     SDKImportError,
     SDKInitializationError,
     WorkingDirectoryError,
+)
+from claude_task_master.core.agent_models import (
+    DEFAULT_COMPACT_THRESHOLD_PERCENT,
+    MODEL_CONTEXT_WINDOWS,
+    MODEL_CONTEXT_WINDOWS_STANDARD,
+    ModelType,
+    TaskComplexity,
+    ToolConfig,
+    parse_task_complexity,
 )
 from claude_task_master.core.checkpoint import (
     Checkpoint,
