@@ -9,6 +9,7 @@ For PR context storage tests (comments, CI failures, threads), see test_state_pr
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from claude_task_master.core.state import StateManager, TaskOptions, TaskState
 
@@ -72,9 +73,9 @@ class TestTaskOptionsPRFields:
 class TestTaskStateCurrentPR:
     """Tests for current_pr field in TaskState."""
 
-    def _make_state(self, **kwargs) -> TaskState:
+    def _make_state(self, **kwargs: Any) -> TaskState:
         """Helper to create a TaskState with defaults."""
-        defaults = {
+        defaults: dict[str, Any] = {
             "status": "working",
             "current_task_index": 0,
             "session_count": 0,

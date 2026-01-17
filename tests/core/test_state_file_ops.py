@@ -14,13 +14,10 @@ This module contains tests for file read/write operations including:
 import json
 import time
 
-import pytest
-
 from claude_task_master.core.state import (
     StateManager,
     TaskOptions,
 )
-
 
 # =============================================================================
 # Goal File Operations Tests

@@ -7,16 +7,10 @@ This module contains tests for context-related functionality including:
 - Edge cases for context handling
 """
 
-import time
-from pathlib import Path
-
-import pytest
-
 from claude_task_master.core.state import (
     StateManager,
     TaskOptions,
 )
-
 
 # =============================================================================
 # Context Save/Load Basic Tests

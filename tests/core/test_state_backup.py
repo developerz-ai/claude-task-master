@@ -10,7 +10,6 @@ This module contains tests for backup and recovery functionality including:
 import json
 import shutil
 import time
-from pathlib import Path
 
 import pytest
 
@@ -20,7 +19,6 @@ from claude_task_master.core.state import (
     StateValidationError,
     TaskOptions,
 )
-
 
 # =============================================================================
 # State Backup Tests
@@ -246,7 +244,7 @@ class TestCorruptedStateRecovery:
         # Create valid state and backup
         options = TaskOptions()
         original_state = manager.initialize(goal="Test", model="sonnet", options=options)
-        backup_path = manager.create_state_backup()
+        manager.create_state_backup()
         time.sleep(1.1)
 
         # Create a newer but corrupted backup
