@@ -231,7 +231,7 @@ class TestAgentWrapperWorkingDirectoryErrors:
     async def test_working_directory_not_found(self, agent):
         """Test error when working directory doesn't exist."""
         with pytest.raises(WorkingDirectoryError) as exc_info:
-            await agent._execute_query("test prompt", ["Read"])
+            await agent._query_executor._execute_query("test prompt", ["Read"])
 
         assert exc_info.value.path == "/nonexistent/directory"
         assert "change to" in exc_info.value.operation
@@ -253,7 +253,7 @@ class TestAgentWrapperWorkingDirectoryErrors:
         # Mock os.chdir to raise PermissionError
         with patch("os.chdir", side_effect=PermissionError("Permission denied")):
             with pytest.raises(WorkingDirectoryError) as exc_info:
-                await agent._execute_query("test prompt", ["Read"])
+                await agent._query_executor._execute_query("test prompt", ["Read"])
 
             assert "access" in exc_info.value.operation
 
@@ -279,6 +279,7 @@ class TestAgentWrapperWorkingDirectoryErrors:
             yield  # Make it a generator
 
         agent.query = mock_query_gen
+        agent._query_executor.query = mock_query_gen
 
         from claude_task_master.core.agent_exceptions import QueryExecutionError
 
@@ -309,6 +310,7 @@ class TestAgentWrapperWorkingDirectoryErrors:
             yield MagicMock(content=None)
 
         agent.query = mock_query_gen
+        agent._query_executor.query = mock_query_gen
 
         await agent._run_query("test prompt", ["Read"])
 

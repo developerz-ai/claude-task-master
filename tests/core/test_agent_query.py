@@ -57,6 +57,7 @@ class TestAgentWrapperRunQuery:
             yield MagicMock(content=None)
 
         agent.query = mock_query_gen
+        agent._query_executor.query = mock_query_gen
 
         await agent._run_query("test prompt", ["Read"])
 
@@ -74,6 +75,7 @@ class TestAgentWrapperRunQuery:
             yield  # Make it a generator
 
         agent.query = mock_query_gen
+        agent._query_executor.query = mock_query_gen
 
         with pytest.raises(QueryExecutionError):
             await agent._run_query("test prompt", ["Read"])
@@ -91,11 +93,13 @@ class TestAgentWrapperRunQuery:
             return MagicMock()
 
         agent.options_class = capture_options
+        agent._query_executor.options_class = capture_options
 
         async def mock_query_gen(*args, **kwargs):
             yield MagicMock(content=None)
 
         agent.query = mock_query_gen
+        agent._query_executor.query = mock_query_gen
 
         await agent._run_query("test prompt", ["Read", "Glob"])
 
@@ -120,6 +124,7 @@ class TestAgentWrapperRunQuery:
             yield mock_message
 
         agent.query = mock_query_gen
+        agent._query_executor.query = mock_query_gen
 
         result = await agent._run_query("test prompt", ["Read"])
 
@@ -142,6 +147,7 @@ class TestAgentWrapperRunQuery:
             yield mock_message
 
         agent.query = mock_query_gen
+        agent._query_executor.query = mock_query_gen
 
         await agent._run_query("test prompt", ["Read"])
 
@@ -165,6 +171,7 @@ class TestAgentWrapperRunQuery:
             yield mock_message
 
         agent.query = mock_query_gen
+        agent._query_executor.query = mock_query_gen
 
         await agent._run_query("test prompt", ["Read"])
 
@@ -188,6 +195,7 @@ class TestAgentWrapperRunQuery:
             yield mock_message
 
         agent.query = mock_query_gen
+        agent._query_executor.query = mock_query_gen
 
         await agent._run_query("test prompt", ["Read"])
 
@@ -207,6 +215,7 @@ class TestAgentWrapperRunQuery:
             yield result_message
 
         agent.query = mock_query_gen
+        agent._query_executor.query = mock_query_gen
 
         result = await agent._run_query("test prompt", ["Read"])
 
@@ -224,6 +233,7 @@ class TestAgentWrapperRunQuery:
             yield mock_message
 
         agent.query = mock_query_gen
+        agent._query_executor.query = mock_query_gen
 
         # Should not raise
         result = await agent._run_query("test prompt", ["Read"])
@@ -273,6 +283,7 @@ class TestAgentWrapperRetryLogic:
             yield MagicMock(content=None)
 
         agent.query = mock_query_gen
+        agent._query_executor.query = mock_query_gen
 
         await agent._run_query("test prompt", ["Read"])
 
@@ -292,6 +303,7 @@ class TestAgentWrapperRetryLogic:
             yield MagicMock(content=None)
 
         agent.query = mock_query_gen
+        agent._query_executor.query = mock_query_gen
 
         await agent._run_query("test prompt", ["Read"])
 
@@ -310,6 +322,7 @@ class TestAgentWrapperRetryLogic:
             yield MagicMock(content=None)
 
         agent.query = mock_query_gen
+        agent._query_executor.query = mock_query_gen
 
         await agent._run_query("test prompt", ["Read"])
 
@@ -328,6 +341,7 @@ class TestAgentWrapperRetryLogic:
             yield MagicMock(content=None)
 
         agent.query = mock_query_gen
+        agent._query_executor.query = mock_query_gen
 
         await agent._run_query("test prompt", ["Read"])
 
@@ -345,6 +359,7 @@ class TestAgentWrapperRetryLogic:
             yield  # Make it an async generator
 
         agent.query = mock_query_gen
+        agent._query_executor.query = mock_query_gen
 
         with pytest.raises(APIAuthenticationError):
             await agent._run_query("test prompt", ["Read"])
@@ -364,6 +379,7 @@ class TestAgentWrapperRetryLogic:
             yield  # Make it an async generator
 
         agent.query = mock_query_gen
+        agent._query_executor.query = mock_query_gen
 
         with pytest.raises(APIRateLimitError):
             await agent._run_query("test prompt", ["Read"])
@@ -382,6 +398,7 @@ class TestAgentWrapperRetryLogic:
             yield MagicMock(content=None)
 
         agent.query = mock_query_gen
+        agent._query_executor.query = mock_query_gen
 
         await agent._run_query("test prompt", ["Read"])
 
@@ -394,7 +411,7 @@ class TestAgentWrapperRetryLogic:
 
 
 class TestAgentWrapperErrorClassification:
-    """Tests for error classification in AgentWrapper."""
+    """Tests for error classification in AgentQueryExecutor."""
 
     @pytest.fixture
     def agent(self, temp_dir):
@@ -414,77 +431,77 @@ class TestAgentWrapperErrorClassification:
     def test_classify_rate_limit_error(self, agent):
         """Test classification of rate limit errors."""
         error = Exception("API rate limit exceeded")
-        classified = agent._classify_api_error(error)
+        classified = agent._query_executor._classify_api_error(error)
         assert isinstance(classified, APIRateLimitError)
 
     def test_classify_auth_error_401(self, agent):
         """Test classification of 401 auth error."""
         error = Exception("HTTP 401 Unauthorized")
-        classified = agent._classify_api_error(error)
+        classified = agent._query_executor._classify_api_error(error)
         assert isinstance(classified, APIAuthenticationError)
 
     def test_classify_auth_error_403(self, agent):
         """Test classification of 403 auth error."""
         error = Exception("HTTP 403 Forbidden")
-        classified = agent._classify_api_error(error)
+        classified = agent._query_executor._classify_api_error(error)
         assert isinstance(classified, APIAuthenticationError)
 
     def test_classify_timeout_error(self, agent):
         """Test classification of timeout errors."""
         error = Exception("Request timeout after 30 seconds")
-        classified = agent._classify_api_error(error)
+        classified = agent._query_executor._classify_api_error(error)
         assert isinstance(classified, APITimeoutError)
 
     def test_classify_connection_error(self, agent):
         """Test classification of connection errors."""
         error = Exception("Connection refused")
-        classified = agent._classify_api_error(error)
+        classified = agent._query_executor._classify_api_error(error)
         assert isinstance(classified, APIConnectionError)
 
     def test_classify_network_error(self, agent):
         """Test classification of network errors."""
         error = Exception("Network unreachable")
-        classified = agent._classify_api_error(error)
+        classified = agent._query_executor._classify_api_error(error)
         assert isinstance(classified, APIConnectionError)
 
     def test_classify_server_error_500(self, agent):
         """Test classification of 500 server errors."""
         error = Exception("HTTP 500 Internal Server Error")
-        classified = agent._classify_api_error(error)
+        classified = agent._query_executor._classify_api_error(error)
         assert isinstance(classified, APIServerError)
         assert classified.status_code == 500
 
     def test_classify_server_error_502(self, agent):
         """Test classification of 502 server errors."""
         error = Exception("HTTP 502 Bad Gateway")
-        classified = agent._classify_api_error(error)
+        classified = agent._query_executor._classify_api_error(error)
         assert isinstance(classified, APIServerError)
         assert classified.status_code == 502
 
     def test_classify_server_error_503(self, agent):
         """Test classification of 503 server errors."""
         error = Exception("HTTP 503 Service Unavailable")
-        classified = agent._classify_api_error(error)
+        classified = agent._query_executor._classify_api_error(error)
         assert isinstance(classified, APIServerError)
         assert classified.status_code == 503
 
     def test_classify_content_filter_error(self, agent):
         """Test classification of content filtering errors."""
         error = Exception("Output blocked by content filtering policy")
-        classified = agent._classify_api_error(error)
+        classified = agent._query_executor._classify_api_error(error)
         assert isinstance(classified, ContentFilterError)
         assert classified.original_error == error
 
     def test_classify_content_filter_error_variant(self, agent):
         """Test classification of content filtering errors with different message."""
         error = Exception("API Error: 400 content filtering blocked the response")
-        classified = agent._classify_api_error(error)
+        classified = agent._query_executor._classify_api_error(error)
         assert isinstance(classified, ContentFilterError)
 
     def test_classify_unknown_error(self, agent):
         """Test classification of unknown errors."""
         error = Exception("Some unknown error")
-        classified = agent._classify_api_error(error)
+        classified = agent._query_executor._classify_api_error(error)
         assert isinstance(classified, QueryExecutionError)
         assert classified.original_error == error
 

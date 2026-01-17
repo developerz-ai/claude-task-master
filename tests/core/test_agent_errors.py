@@ -518,82 +518,82 @@ class TestAgentWrapperErrorClassification:
     def test_classify_rate_limit_error(self, agent):
         """Test classification of rate limit errors."""
         error = Exception("API rate limit exceeded")
-        classified = agent._classify_api_error(error)
+        classified = agent._query_executor._classify_api_error(error)
         assert isinstance(classified, APIRateLimitError)
 
     def test_classify_rate_limit_error_variant(self, agent):
         """Test classification of rate limit error with different message."""
         error = Exception("Rate limit: too many requests")
-        classified = agent._classify_api_error(error)
+        classified = agent._query_executor._classify_api_error(error)
         assert isinstance(classified, APIRateLimitError)
 
     def test_classify_auth_error_401(self, agent):
         """Test classification of 401 auth error."""
         error = Exception("HTTP 401 Unauthorized")
-        classified = agent._classify_api_error(error)
+        classified = agent._query_executor._classify_api_error(error)
         assert isinstance(classified, APIAuthenticationError)
 
     def test_classify_auth_error_403(self, agent):
         """Test classification of 403 auth error."""
         error = Exception("HTTP 403 Forbidden")
-        classified = agent._classify_api_error(error)
+        classified = agent._query_executor._classify_api_error(error)
         assert isinstance(classified, APIAuthenticationError)
 
     def test_classify_auth_error_unauthorized(self, agent):
         """Test classification of 'unauthorized' error."""
         error = Exception("Unauthorized access to API")
-        classified = agent._classify_api_error(error)
+        classified = agent._query_executor._classify_api_error(error)
         assert isinstance(classified, APIAuthenticationError)
 
     def test_classify_timeout_error(self, agent):
         """Test classification of timeout errors."""
         error = Exception("Request timeout after 30 seconds")
-        classified = agent._classify_api_error(error)
+        classified = agent._query_executor._classify_api_error(error)
         assert isinstance(classified, APITimeoutError)
 
     def test_classify_timeout_error_timed_out(self, agent):
         """Test classification of 'timeout' keyword error."""
         # The implementation checks for 'timeout' keyword, not 'timed out'
         error = Exception("Request timeout exceeded")
-        classified = agent._classify_api_error(error)
+        classified = agent._query_executor._classify_api_error(error)
         assert isinstance(classified, APITimeoutError)
 
     def test_classify_connection_error(self, agent):
         """Test classification of connection errors."""
         error = Exception("Connection refused")
-        classified = agent._classify_api_error(error)
+        classified = agent._query_executor._classify_api_error(error)
         assert isinstance(classified, APIConnectionError)
 
     def test_classify_network_error(self, agent):
         """Test classification of network errors."""
         error = Exception("Network unreachable")
-        classified = agent._classify_api_error(error)
+        classified = agent._query_executor._classify_api_error(error)
         assert isinstance(classified, APIConnectionError)
 
     def test_classify_connection_failed(self, agent):
         """Test classification of 'connection failed' error."""
         error = Exception("Connection failed to server")
-        classified = agent._classify_api_error(error)
+        classified = agent._query_executor._classify_api_error(error)
         assert isinstance(classified, APIConnectionError)
 
     def test_classify_server_error_500(self, agent):
         """Test classification of 500 server errors."""
         error = Exception("HTTP 500 Internal Server Error")
-        classified = agent._classify_api_error(error)
+        classified = agent._query_executor._classify_api_error(error)
         assert isinstance(classified, APIServerError)
         assert classified.status_code == 500
 
     def test_classify_server_error_502(self, agent):
         """Test classification of 502 server errors."""
         error = Exception("HTTP 502 Bad Gateway")
-        classified = agent._classify_api_error(error)
+        classified = agent._query_executor._classify_api_error(error)
         assert isinstance(classified, APIServerError)
         assert classified.status_code == 502
 
     def test_classify_server_error_503(self, agent):
         """Test classification of 503 server errors."""
         error = Exception("HTTP 503 Service Unavailable")
-        classified = agent._classify_api_error(error)
+        classified = agent._query_executor._classify_api_error(error)
         assert isinstance(classified, APIServerError)
         assert classified.status_code == 503
 
@@ -605,34 +605,34 @@ class TestAgentWrapperErrorClassification:
         Use a message without 'timeout' to test pure 504 classification.
         """
         error = Exception("HTTP 504 Bad Gateway")  # Avoid 'timeout' keyword
-        classified = agent._classify_api_error(error)
+        classified = agent._query_executor._classify_api_error(error)
         assert isinstance(classified, APIServerError)
         assert classified.status_code == 504
 
     def test_classify_content_filter_error(self, agent):
         """Test classification of content filtering errors."""
         error = Exception("Output blocked by content filtering policy")
-        classified = agent._classify_api_error(error)
+        classified = agent._query_executor._classify_api_error(error)
         assert isinstance(classified, ContentFilterError)
         assert classified.original_error == error
 
     def test_classify_content_filter_error_variant(self, agent):
         """Test classification of content filtering errors with different message."""
         error = Exception("API Error: 400 content filtering blocked the response")
-        classified = agent._classify_api_error(error)
+        classified = agent._query_executor._classify_api_error(error)
         assert isinstance(classified, ContentFilterError)
 
     def test_classify_unknown_error(self, agent):
         """Test classification of unknown errors."""
         error = Exception("Some unknown error")
-        classified = agent._classify_api_error(error)
+        classified = agent._query_executor._classify_api_error(error)
         assert isinstance(classified, QueryExecutionError)
         assert classified.original_error == error
 
     def test_classify_preserves_original_error(self, agent):
         """Test that classification preserves original error reference."""
         original = ValueError("Custom API error")
-        classified = agent._classify_api_error(original)
+        classified = agent._query_executor._classify_api_error(original)
         assert classified.original_error == original
 
     def test_classify_case_insensitive(self, agent):
@@ -642,7 +642,7 @@ class TestAgentWrapperErrorClassification:
         error_mixed = Exception("Rate Limit Exceeded")
 
         for error in [error_lower, error_upper, error_mixed]:
-            classified = agent._classify_api_error(error)
+            classified = agent._query_executor._classify_api_error(error)
             assert isinstance(classified, APIRateLimitError)
 
 
@@ -673,7 +673,7 @@ class TestAgentWrapperWorkingDirectoryErrors:
     async def test_working_directory_not_found(self, agent):
         """Test error when working directory doesn't exist."""
         with pytest.raises(WorkingDirectoryError) as exc_info:
-            await agent._execute_query("test prompt", ["Read"])
+            await agent._query_executor._execute_query("test prompt", ["Read"])
 
         assert exc_info.value.path == "/nonexistent/directory"
         assert "change to" in exc_info.value.operation
@@ -695,7 +695,7 @@ class TestAgentWrapperWorkingDirectoryErrors:
         # Mock os.chdir to raise PermissionError
         with patch("os.chdir", side_effect=PermissionError("Permission denied")):
             with pytest.raises(WorkingDirectoryError) as exc_info:
-                await agent._execute_query("test prompt", ["Read"])
+                await agent._query_executor._execute_query("test prompt", ["Read"])
 
             assert "access" in exc_info.value.operation
 
@@ -715,7 +715,7 @@ class TestAgentWrapperWorkingDirectoryErrors:
             )
 
         with pytest.raises(WorkingDirectoryError) as exc_info:
-            await agent._execute_query("test prompt", ["Read"])
+            await agent._query_executor._execute_query("test prompt", ["Read"])
 
         assert nonexistent_path in str(exc_info.value)
 
@@ -812,14 +812,14 @@ class TestErrorHandlingEdgeCases:
     def test_classify_empty_error_message(self, agent):
         """Test classification of error with empty message."""
         error = Exception("")
-        classified = agent._classify_api_error(error)
+        classified = agent._query_executor._classify_api_error(error)
         # Should fall back to generic QueryExecutionError
         assert isinstance(classified, QueryExecutionError)
 
     def test_classify_none_like_error(self, agent):
         """Test classification with minimal error."""
         error = Exception()
-        classified = agent._classify_api_error(error)
+        classified = agent._query_executor._classify_api_error(error)
         assert isinstance(classified, QueryExecutionError)
 
     def test_error_chaining(self):
@@ -834,7 +834,7 @@ class TestErrorHandlingEdgeCases:
         # Error with both timeout and rate limit indicators
         # Should match first pattern checked
         error = Exception("Timeout while waiting for rate limit")
-        classified = agent._classify_api_error(error)
+        classified = agent._query_executor._classify_api_error(error)
         # The actual classification depends on implementation order
         assert isinstance(classified, (APITimeoutError, APIRateLimitError))
 

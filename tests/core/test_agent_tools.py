@@ -387,11 +387,13 @@ class TestToolUsageIntegration:
             return MagicMock()
 
         agent.options_class = capture_options
+        agent._query_executor.options_class = capture_options
 
         async def mock_query_gen(*args, **kwargs):
             yield MagicMock(content=None)
 
         agent.query = mock_query_gen
+        agent._query_executor.query = mock_query_gen
 
         # Test with planning tools
         planning_tools = ToolConfig.PLANNING.value
@@ -410,11 +412,13 @@ class TestToolUsageIntegration:
             return MagicMock()
 
         agent.options_class = capture_options
+        agent._query_executor.options_class = capture_options
 
         async def mock_query_gen(*args, **kwargs):
             yield MagicMock(content=None)
 
         agent.query = mock_query_gen
+        agent._query_executor.query = mock_query_gen
 
         await agent._run_query("test prompt", ["Read"])
 
@@ -438,6 +442,7 @@ class TestToolUsageIntegration:
             yield mock_message
 
         agent.query = mock_query_gen
+        agent._query_executor.query = mock_query_gen
 
         await agent._run_query("test prompt", ["Read", "Glob", "Grep"])
 
@@ -483,6 +488,7 @@ class TestToolUsageIntegration:
             yield result_msg
 
         agent.query = mock_query_gen
+        agent._query_executor.query = mock_query_gen
 
         result = await agent._run_query("test prompt", ["Read"])
 

@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any
 
 from . import console
 from .agent_exceptions import (
-    AgentError,
     SDKImportError,
     SDKInitializationError,
 )
@@ -421,53 +420,6 @@ class AgentWrapper:
                 first_val = str(tool_input[first_key])[:50]
                 return f"→ {first_key}={first_val}"
             return ""
-
-    def _classify_api_error(self, error: Exception) -> AgentError:
-        """Classify an API error into a specific error type.
-
-        Args:
-            error: The original exception.
-
-        Returns:
-            A classified AgentError subclass.
-        """
-        error_str = str(error).lower()
-        error_type = type(error).__name__
-
-        # Check for content filtering errors (not retryable)
-        if "content filtering" in error_str or "output blocked" in error_str:
-            return ContentFilterError(error)
-
-        # Check for rate limiting
-        if "rate" in error_str and "limit" in error_str:
-            # Try to extract retry-after if present
-            retry_after = None
-            if hasattr(error, "retry_after"):
-                retry_after = error.retry_after
-            return APIRateLimitError(retry_after, error)
-
-        # Check for authentication errors
-        if any(kw in error_str for kw in ["auth", "unauthorized", "403", "401"]):
-            return APIAuthenticationError(error)
-
-        # Check for timeout errors
-        if "timeout" in error_str or error_type in ("TimeoutError", "AsyncioTimeoutError"):
-            return APITimeoutError(30.0, error)
-
-        # Check for connection errors
-        if any(kw in error_str for kw in ["connect", "connection", "network"]):
-            return APIConnectionError(error)
-
-        # Check for server errors (5xx)
-        if "500" in error_str or "502" in error_str or "503" in error_str or "504" in error_str:
-            # Try to extract status code
-            for code in [500, 502, 503, 504]:
-                if str(code) in error_str:
-                    return APIServerError(code, error)
-            return APIServerError(500, error)
-
-        # Default to generic query execution error
-        return QueryExecutionError(f"API error: {error}", error)
 
     def get_tools_for_phase(self, phase: str) -> list[str]:
         """Get appropriate tools for the given phase."""
