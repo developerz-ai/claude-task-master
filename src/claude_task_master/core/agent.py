@@ -191,6 +191,8 @@ class AgentWrapper:
         pr_comments: str | None = None,
         model_override: ModelType | None = None,
         required_branch: str | None = None,
+        create_pr: bool = True,
+        pr_group_info: dict | None = None,
     ) -> dict[str, Any]:
         """Run a work session with full tools.
 
@@ -201,12 +203,16 @@ class AgentWrapper:
             model_override: Optional model to use instead of default.
                            Used for dynamic model routing based on task complexity.
             required_branch: Optional branch name the agent should be on.
+            create_pr: If True, instruct agent to create PR. If False, commit only.
+            pr_group_info: Optional dict with PR group context (name, completed_tasks, etc).
 
         Returns:
             Dict with 'output' and 'success' keys.
         """
         # Build prompt for work session
-        prompt = self._build_work_prompt(task_description, context, pr_comments, required_branch)
+        prompt = self._build_work_prompt(
+            task_description, context, pr_comments, required_branch, create_pr, pr_group_info
+        )
 
         # Run async query with optional model override
         result = asyncio.run(
@@ -661,6 +667,8 @@ class AgentWrapper:
         context: str,
         pr_comments: str | None,
         required_branch: str | None = None,
+        create_pr: bool = True,
+        pr_group_info: dict | None = None,
     ) -> str:
         """Build prompt for work session.
 
@@ -671,6 +679,8 @@ class AgentWrapper:
             context=context if context else None,
             pr_comments=pr_comments,
             required_branch=required_branch,
+            create_pr=create_pr,
+            pr_group_info=pr_group_info,
         )
 
     def _extract_plan(self, result: str) -> str:

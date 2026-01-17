@@ -79,6 +79,11 @@ def start(
         "--log-format",
         help="Log output format: text (human-readable, default), json (structured)",
     ),
+    pr_per_task: bool = typer.Option(
+        False,
+        "--pr-per-task",
+        help="Create a PR for each task (default: one PR per PR group in plan)",
+    ),
 ) -> None:
     """Start a new task with the given goal.
 
@@ -135,6 +140,7 @@ def start(
             enable_checkpointing=enable_checkpointing,
             log_level=log_level.lower(),
             log_format=log_format.lower(),
+            pr_per_task=pr_per_task,
         )
         state = state_manager.initialize(goal=goal, model=model, options=options)
 

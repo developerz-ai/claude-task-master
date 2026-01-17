@@ -203,11 +203,25 @@ class TaskRunner:
         complexity, cleaned_task = parse_task_complexity(current_task)
         target_model = TaskComplexity.get_model_for_complexity(complexity)
 
-        # Get PR/group info for this task (for display purposes)
-        parsed_tasks, _ = self._get_parsed_tasks(plan)
+        # Get PR/group info for this task
+        parsed_tasks, groups = self._get_parsed_tasks(plan)
         pr_name = "Default"
+        pr_group_id = "default"
         if state.current_task_index < len(parsed_tasks):
             pr_name = parsed_tasks[state.current_task_index].group_name
+            pr_group_id = parsed_tasks[state.current_task_index].group_id
+
+        # Determine if this is the last task in the PR group
+        tasks_in_group = [t for t in parsed_tasks if t.group_id == pr_group_id]
+        current_task_in_group_idx = next(
+            (i for i, t in enumerate(tasks_in_group) if t.index == state.current_task_index),
+            0,
+        )
+        remaining_in_group = len(tasks_in_group) - current_task_in_group_idx - 1
+        is_last_in_group = remaining_in_group == 0
+
+        # Get completed tasks in this group (for context)
+        completed_in_group = [t.cleaned_description for t in tasks_in_group if t.is_complete]
 
         # Load context safely
         try:
@@ -232,6 +246,8 @@ Please complete this task."""
         console.newline()
         console.info(f"Working on task #{state.current_task_index + 1}: {cleaned_task}")
         console.detail(f"PR: {pr_name} | Complexity: {complexity.value} → Model: {target_model}")
+        if not is_last_in_group:
+            console.detail(f"   ({remaining_in_group} more task(s) in this PR group)")
 
         # Log the prompt
         if self.logger:
@@ -239,6 +255,19 @@ Please complete this task."""
 
         # Get current branch to pass to agent
         current_branch = get_current_branch()
+
+        # Build PR group info for agent context (always provide for better task execution)
+        pr_group_info = {
+            "name": pr_name,
+            "branch": current_branch,
+            "completed_tasks": completed_in_group,
+            "remaining_tasks": remaining_in_group,
+        }
+
+        # Determine if agent should create PR
+        # pr_per_task=True: always create PR after each task
+        # pr_per_task=False (default): only create PR on last task in group
+        should_create_pr = state.options.pr_per_task or is_last_in_group
 
         # Run work session with model routing based on task complexity
         try:
@@ -249,6 +278,8 @@ Please complete this task."""
                 context=context,
                 model_override=model_type,
                 required_branch=current_branch,
+                create_pr=should_create_pr,
+                pr_group_info=pr_group_info,
             )
         except AgentError:
             if self.logger:
@@ -415,3 +446,32 @@ Please complete this task."""
 
         tasks = self.parse_tasks(plan)
         return state.current_task_index >= len(tasks)
+
+    def is_last_task_in_group(self, state: TaskState) -> bool:
+        """Check if the current task is the last in its PR group.
+
+        Used by orchestrator to determine whether to trigger PR workflow
+        or continue to next task in the same group.
+
+        Args:
+            state: Current task state.
+
+        Returns:
+            True if this is the last task in the PR group.
+        """
+        plan = self.state_manager.load_plan()
+        if not plan:
+            return True
+
+        parsed_tasks, _ = self._get_parsed_tasks(plan)
+        if state.current_task_index >= len(parsed_tasks):
+            return True
+
+        current_group_id = parsed_tasks[state.current_task_index].group_id
+        tasks_in_group = [t for t in parsed_tasks if t.group_id == current_group_id]
+        current_task_in_group_idx = next(
+            (i for i, t in enumerate(tasks_in_group) if t.index == state.current_task_index),
+            0,
+        )
+        remaining_in_group = len(tasks_in_group) - current_task_in_group_idx - 1
+        return remaining_in_group == 0

@@ -67,6 +67,7 @@ class TestTaskOptions:
             "enable_checkpointing": False,
             "log_level": "normal",
             "log_format": "text",
+            "pr_per_task": False,
         }
 
 

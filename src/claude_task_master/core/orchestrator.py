@@ -386,8 +386,23 @@ class WorkLoopOrchestrator:
         self.tracker.record_task_progress(state.current_task_index)
         reset_escape()
 
-        state.workflow_stage = "pr_created"
         state.session_count += 1
+
+        # Determine if we should trigger PR workflow or continue to next task
+        # Two modes: pr_per_task=True (one PR per task) or grouped mode (one PR per group)
+        if state.options.pr_per_task:
+            # Task mode: always create PR after each task
+            state.workflow_stage = "pr_created"
+        else:
+            # Grouped mode (default): only create PR after last task in group
+            if self.task_runner.is_last_task_in_group(state):
+                state.workflow_stage = "pr_created"
+            else:
+                # More tasks in this PR group - skip PR workflow, move to next task
+                console.info("More tasks in PR group - continuing without creating PR")
+                state.current_task_index += 1
+                state.workflow_stage = "working"
+
         self.state_manager.save_state(state)
         return None
 

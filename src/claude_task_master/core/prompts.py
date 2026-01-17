@@ -289,6 +289,8 @@ def build_work_prompt(
     pr_comments: str | None = None,
     file_hints: list[str] | None = None,
     required_branch: str | None = None,
+    create_pr: bool = True,
+    pr_group_info: dict | None = None,
 ) -> str:
     """Build the work session prompt.
 
@@ -298,6 +300,11 @@ def build_work_prompt(
         pr_comments: Optional PR review comments to address.
         file_hints: Optional list of relevant files to check.
         required_branch: Optional branch name the agent should be on.
+        create_pr: If True, instruct agent to create PR. If False, commit only.
+        pr_group_info: Optional dict with PR group context:
+            - name: PR group name
+            - completed_tasks: List of completed task descriptions in this group
+            - remaining_tasks: Number of tasks remaining after current
 
     Returns:
         Complete work session prompt.
@@ -323,6 +330,29 @@ def build_work_prompt(
 
 📋 **Full plan:** `.claude-task-master/plan.md` | **Progress:** `.claude-task-master/progress.md`"""
     )
+
+    # PR Group context - show what's already done in this PR
+    if pr_group_info:
+        pr_name = pr_group_info.get("name", "Default")
+        completed = pr_group_info.get("completed_tasks", [])
+        remaining = pr_group_info.get("remaining_tasks", 0)
+        branch = pr_group_info.get("branch")
+
+        group_lines = [f"**PR Group:** {pr_name}"]
+        if branch:
+            group_lines.append(f"**Branch:** `{branch}`")
+
+        if completed:
+            group_lines.append("\n**Already completed in this PR:**")
+            for task in completed:
+                group_lines.append(f"- ✓ {task}")
+
+        if remaining > 0:
+            group_lines.append(f"\n**Tasks remaining after this one:** {remaining}")
+        else:
+            group_lines.append("\n**This is the LAST task in this PR group.**")
+
+        builder.add_section("PR Group Context", "\n".join(group_lines))
 
     # Context section
     if context:
@@ -361,10 +391,10 @@ def build_work_prompt(
 5. Commit referencing the feedback""",
         )
 
-    # Execution guidelines
-    builder.add_section(
-        "Execution",
-        """**1. Check git status first**
+    # Execution guidelines - conditional based on create_pr flag
+    if create_pr:
+        # Full workflow: commit, push, create PR
+        execution_content = """**1. Check git status first**
 ```bash
 git status
 ```
@@ -428,8 +458,64 @@ gh pr create --title "[claudetm] type: description" --body "..." --label "claude
 **7. Log File Best Practices**
 - For log/progress files, use APPEND mode (don't read entire file)
 - Example: `echo "message" >> progress.md` instead of Read + Write
-- This avoids context bloat from reading large log files""",
-    )
+- This avoids context bloat from reading large log files"""
+    else:
+        # Commit only - more tasks in this PR group
+        execution_content = """**1. Check git status first**
+```bash
+git status
+```
+- Know where you are before making changes
+- If on main/master, create a feature branch first
+- If already on a feature branch, continue working there
+
+**2. Understand the task**
+- Read files before modifying
+- Check existing patterns
+- Identify tests to run
+
+**3. Make changes**
+- Edit existing files, Write new files
+- Follow project coding style
+- Stay focused on current task
+
+**4. Verify work**
+```bash
+# Common verification commands
+pytest                    # Python tests
+npm test                  # JS tests
+ruff check . && mypy .   # Python lint/types
+eslint . && tsc          # JS lint/types
+```
+
+**5. Commit properly**
+```bash
+git add -A && git commit -m "$(cat <<'EOF'
+type: Brief description (50 chars)
+
+- What changed
+- Why needed
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+EOF
+)"
+```
+
+**Note:** The `.claude-task-master/` directory is automatically gitignored - it contains
+orchestrator state files that should never be committed.
+
+**6. DO NOT create PR yet**
+
+⚠️ **More tasks remain in this PR group. Just commit, do NOT push or create PR.**
+
+The orchestrator will tell you when to create the PR (after all tasks in this group are done).
+
+**7. Log File Best Practices**
+- For log/progress files, use APPEND mode (don't read entire file)
+- Example: `echo "message" >> progress.md` instead of Read + Write
+- This avoids context bloat from reading large log files"""
+
+    builder.add_section("Execution", execution_content)
 
     # Completion summary
     builder.add_section(

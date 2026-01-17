@@ -70,6 +70,7 @@ class TaskOptions(BaseModel):
     enable_checkpointing: bool = False
     log_level: str = "normal"  # quiet, normal, verbose
     log_format: str = "text"  # text, json
+    pr_per_task: bool = False  # If True, create PR per task; if False, PR per group
 
 
 # Status type alias for type checking
