@@ -537,7 +537,7 @@ class TestAgentWrapperProcessMessage:
         mock_message = MagicMock()
         mock_message.content = [text_block]
 
-        result = agent._process_message(mock_message, "")
+        result = agent._message_processor.process_message(mock_message, "")
 
         assert result == "Hello, world!"
         captured = capsys.readouterr()
@@ -556,7 +556,7 @@ class TestAgentWrapperProcessMessage:
         mock_message = MagicMock()
         mock_message.content = [text_block1, text_block2]
 
-        result = agent._process_message(mock_message, "Initial ")
+        result = agent._message_processor.process_message(mock_message, "Initial ")
 
         assert result == "Initial First Second"
 
@@ -567,7 +567,7 @@ class TestAgentWrapperProcessMessage:
         result_message.result = "Final result"
         result_message.content = None
 
-        result = agent._process_message(result_message, "Previous text")
+        result = agent._message_processor.process_message(result_message, "Previous text")
 
         assert result == "Final result"
 
@@ -576,6 +576,6 @@ class TestAgentWrapperProcessMessage:
         mock_message = MagicMock()
         mock_message.content = None
 
-        result = agent._process_message(mock_message, "Unchanged")
+        result = agent._message_processor.process_message(mock_message, "Unchanged")
 
         assert result == "Unchanged"

@@ -220,7 +220,7 @@ class TestMessageProcessingEdgeCases:
         mock_message = MagicMock()
         mock_message.content = []
 
-        result = agent._process_message(mock_message, "Previous")
+        result = agent._message_processor.process_message(mock_message, "Previous")
 
         assert result == "Previous"
 
@@ -237,7 +237,7 @@ class TestMessageProcessingEdgeCases:
         mock_message = MagicMock()
         mock_message.content = [text_block, tool_block]
 
-        result = agent._process_message(mock_message, "")
+        result = agent._message_processor.process_message(mock_message, "")
 
         assert "Some text" in result
         captured = capsys.readouterr()
@@ -255,7 +255,7 @@ class TestMessageProcessingEdgeCases:
         mock_message = MagicMock()
         mock_message.content = blocks
 
-        result = agent._process_message(mock_message, "")
+        result = agent._message_processor.process_message(mock_message, "")
 
         assert "Part 0Part 1Part 2" in result
 
@@ -268,7 +268,7 @@ class TestMessageProcessingEdgeCases:
         mock_message = MagicMock()
         mock_message.content = [text_block]
 
-        result = agent._process_message(mock_message, "")
+        result = agent._message_processor.process_message(mock_message, "")
 
         assert "\u65e5\u672c\u8a9e" in result
         assert "\U0001f680" in result
@@ -283,7 +283,7 @@ class TestMessageProcessingEdgeCases:
         mock_message = MagicMock()
         mock_message.content = [text_block]
 
-        result = agent._process_message(mock_message, "")
+        result = agent._message_processor.process_message(mock_message, "")
 
         assert len(result) == 100000
 
@@ -296,7 +296,7 @@ class TestMessageProcessingEdgeCases:
         mock_message = MagicMock()
         mock_message.content = [success_block]
 
-        agent._process_message(mock_message, "")
+        agent._message_processor.process_message(mock_message, "")
         captured = capsys.readouterr()
         assert "Tool completed" in captured.out
 
@@ -309,7 +309,7 @@ class TestMessageProcessingEdgeCases:
         mock_message = MagicMock()
         mock_message.content = [error_block]
 
-        agent._process_message(mock_message, "")
+        agent._message_processor.process_message(mock_message, "")
         captured = capsys.readouterr()
         assert "Tool error" in captured.out
 
@@ -322,7 +322,7 @@ class TestMessageProcessingEdgeCases:
         mock_message.content = [unknown_block]
 
         # Should not raise
-        result = agent._process_message(mock_message, "Previous")
+        result = agent._message_processor.process_message(mock_message, "Previous")
         assert result == "Previous"
 
     def test_process_message_result_message_replaces_text(self, agent):
@@ -332,7 +332,7 @@ class TestMessageProcessingEdgeCases:
         result_message.result = "Final result"
         result_message.content = None
 
-        result = agent._process_message(result_message, "Should be replaced")
+        result = agent._message_processor.process_message(result_message, "Should be replaced")
 
         assert result == "Final result"
         assert "Should be replaced" not in result
@@ -342,14 +342,14 @@ class TestMessageProcessingEdgeCases:
 
         Note: The implementation assigns message.result directly to result_text,
         so if result is None, the returned value will be None. This is the
-        actual behavior of _process_message.
+        actual behavior of process_message.
         """
         result_message = MagicMock()
         type(result_message).__name__ = "ResultMessage"
         result_message.result = None
         result_message.content = None
 
-        result = agent._process_message(result_message, "Previous text")
+        result = agent._message_processor.process_message(result_message, "Previous text")
 
         # When result is None, the implementation returns None
         assert result is None
