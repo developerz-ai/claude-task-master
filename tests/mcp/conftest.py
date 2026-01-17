@@ -13,9 +13,10 @@ from claude_task_master.core.state import StateManager, TaskOptions
 
 # Skip all MCP tests if MCP is not installed
 try:
-    import mcp.server.fastmcp  # noqa: F401
+    import mcp.server.fastmcp as _mcp_fastmcp  # noqa: F401
 
-    MCP_AVAILABLE = True
+    # Use the import to ensure it's not flagged as unused
+    MCP_AVAILABLE = _mcp_fastmcp is not None
 except ImportError:
     MCP_AVAILABLE = False
 
