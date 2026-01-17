@@ -558,7 +558,7 @@ class TestBackupRecoveryIntegration:
 
         # Full workflow
         options = TaskOptions(auto_merge=True, max_sessions=5)
-        state = manager.initialize(goal="Complete the task", model="sonnet", options=options)
+        manager.initialize(goal="Complete the task", model="sonnet", options=options)
 
         manager.save_plan("## Tasks\n- [x] Task 1")
         manager.save_criteria("All tests pass")
