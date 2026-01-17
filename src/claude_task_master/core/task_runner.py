@@ -298,21 +298,33 @@ Please complete this task."""
         if self.logger and result.get("output"):
             self.logger.log_response(result.get("output", ""))
 
-        # Update progress
-        self._update_progress(state, tasks, current_task, plan, result)
-
-    def _update_progress(
+    def update_progress(
         self,
         state: TaskState,
-        tasks: list[str],
-        current_task: str,
-        plan: str,
-        result: dict,
+        result: dict | None = None,
     ) -> None:
-        """Update progress tracker after task completion."""
+        """Update progress tracker after task completion.
+
+        Reloads plan from disk to get latest completion status.
+
+        Args:
+            state: Current task state.
+            result: Optional result dict with output from work session.
+        """
+        # Reload plan from disk to get latest [x] markers
+        plan = self.state_manager.load_plan()
+        if not plan:
+            return
+
+        tasks = self.parse_tasks(plan)
+        if not tasks:
+            return
+
+        current_task = tasks[state.current_task_index] if state.current_task_index < len(tasks) else ""
+
         progress_lines = [
             "# Progress Tracker\n",
-            f"**Session:** {state.session_count + 1}",
+            f"**Session:** {state.session_count}",
             f"**Current Task:** {state.current_task_index + 1} of {len(tasks)}\n",
             "## Task List\n",
         ]
@@ -335,7 +347,7 @@ Please complete this task."""
             progress_lines.append(f"{status} {marker} **Task {i + 1}:** {task}")
 
         # Add latest result if available
-        if result.get("output"):
+        if result and result.get("output"):
             progress_lines.extend(
                 [
                     "\n## Latest Completed",

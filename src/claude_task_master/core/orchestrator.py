@@ -388,6 +388,14 @@ class WorkLoopOrchestrator:
 
         state.session_count += 1
 
+        # Mark current task as complete in plan.md
+        # This is done by the orchestrator (not the agent) for reliability
+        completed_task_index = state.current_task_index
+        plan = self.state_manager.load_plan()
+        if plan:
+            self.task_runner.mark_task_complete(plan, completed_task_index)
+            console.success(f"Task #{completed_task_index + 1} marked complete in plan.md")
+
         # Determine if we should trigger PR workflow or continue to next task
         # Two modes: pr_per_task=True (one PR per task) or grouped mode (one PR per group)
         if state.options.pr_per_task:
@@ -402,6 +410,10 @@ class WorkLoopOrchestrator:
                 console.info("More tasks in PR group - continuing without creating PR")
                 state.current_task_index += 1
                 state.workflow_stage = "working"
+
+        # Update progress.md AFTER incrementing task index
+        # So the arrow → points to the NEXT task, not the one we just completed
+        self.task_runner.update_progress(state)
 
         self.state_manager.save_state(state)
         return None
