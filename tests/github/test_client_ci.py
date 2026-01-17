@@ -3,10 +3,8 @@
 import json
 from unittest.mock import MagicMock, patch
 
-from claude_task_master.github.client import (
-    PRStatus,
-    WorkflowRun,
-)
+from claude_task_master.github.client import PRStatus
+from claude_task_master.github.client_ci import WorkflowRun
 
 # =============================================================================
 # GitHubClient.get_workflow_runs Tests
