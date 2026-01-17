@@ -1665,17 +1665,19 @@ test-job\t  at test_file.py:42"""
     def test_get_failed_run_logs_without_run_id(self, github_client):
         """Test getting logs for latest failed run."""
         log_output = "build\tCompilation failed"
-        workflow_runs_response = json.dumps([
-            {
-                "databaseId": 123,
-                "name": "CI",
-                "status": "completed",
-                "conclusion": "failure",
-                "url": "https://example.com",
-                "headBranch": "main",
-                "event": "push",
-            }
-        ])
+        workflow_runs_response = json.dumps(
+            [
+                {
+                    "databaseId": 123,
+                    "name": "CI",
+                    "status": "completed",
+                    "conclusion": "failure",
+                    "url": "https://example.com",
+                    "headBranch": "main",
+                    "event": "push",
+                }
+            ]
+        )
         with patch("subprocess.run") as mock_run:
             # First call returns workflow runs, second returns logs
             mock_run.side_effect = [

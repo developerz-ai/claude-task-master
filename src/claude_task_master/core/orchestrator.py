@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 from . import console
 from .agent import AgentError, AgentWrapper, ContentFilterError
 from .circuit_breaker import CircuitBreakerError
-from .conversation import ConversationManager
 from .key_listener import (
     get_cancellation_reason,
     is_cancellation_requested,
@@ -103,7 +102,6 @@ class WorkLoopOrchestrator:
         github_client: GitHubClient | None = None,
         logger: TaskLogger | None = None,
         tracker_config: TrackerConfig | None = None,
-        enable_conversations: bool = True,
     ):
         """Initialize orchestrator.
 
@@ -114,8 +112,6 @@ class WorkLoopOrchestrator:
             github_client: Optional GitHub client for PR operations.
             logger: Optional logger for recording session activity.
             tracker_config: Optional config for execution tracker.
-            enable_conversations: If True, tasks in the same PR share a
-                                  conversation via ClaudeSDKClient.
         """
         self.agent = agent
         self.state_manager = state_manager
@@ -123,13 +119,11 @@ class WorkLoopOrchestrator:
         self._github_client = github_client
         self.logger = logger
         self.tracker = ExecutionTracker(config=tracker_config or TrackerConfig.default())
-        self.enable_conversations = enable_conversations
 
         # Initialize component managers (lazy)
         self._task_runner: TaskRunner | None = None
         self._stage_handler: WorkflowStageHandler | None = None
         self._pr_context: PRContextManager | None = None
-        self._conversation_manager: ConversationManager | None = None
 
     @property
     def github_client(self) -> GitHubClient:
@@ -147,37 +141,6 @@ class WorkLoopOrchestrator:
         return self._github_client
 
     @property
-    def conversation_manager(self) -> ConversationManager | None:
-        """Get or lazily initialize conversation manager.
-
-        Returns None if conversations are disabled.
-        """
-        if not self.enable_conversations:
-            return None
-
-        if self._conversation_manager is None:
-            # Handle both ModelType enum and string for model
-            model = self.agent.model
-            model_str = model.value if hasattr(model, "value") else str(model)
-
-            # Check if verbose logging is enabled
-            verbose = False
-            try:
-                state = self.state_manager.load_state()
-                verbose = state.options.log_level == "verbose"
-            except Exception:
-                pass
-
-            self._conversation_manager = ConversationManager(
-                working_dir=str(self.state_manager.state_dir.parent),
-                model=model_str,
-                hooks=self.agent.hooks,
-                logger=self.logger,
-                verbose=verbose,
-            )
-        return self._conversation_manager
-
-    @property
     def task_runner(self) -> TaskRunner:
         """Get or lazily initialize task runner."""
         if self._task_runner is None:
@@ -185,7 +148,6 @@ class WorkLoopOrchestrator:
                 agent=self.agent,
                 state_manager=self.state_manager,
                 logger=self.logger,
-                conversation_manager=self.conversation_manager,
             )
         return self._task_runner
 
@@ -244,20 +206,9 @@ class WorkLoopOrchestrator:
         start_listening()
         console.detail("Press [Escape] to pause, [Ctrl+C] to interrupt")
 
-        def _cleanup_conversations() -> None:
-            """Close any active conversations."""
-            if self._conversation_manager is not None:
-                import asyncio
-
-                try:
-                    asyncio.run(self._conversation_manager.close_all())
-                except Exception as e:
-                    console.detail(f"Error closing conversations: {e}")
-
         def _handle_pause(reason: str) -> int:
             stop_listening()
             unregister_handlers()
-            _cleanup_conversations()
             console.newline()
             console.warning(f"{reason} - pausing...")
             self.tracker.end_session(outcome="cancelled")
@@ -310,7 +261,6 @@ class WorkLoopOrchestrator:
             # All complete - verify
             stop_listening()
             unregister_handlers()
-            _cleanup_conversations()
 
             if self._verify_success():
                 state.status = "success"
@@ -331,7 +281,6 @@ class WorkLoopOrchestrator:
         except OrchestratorError as e:
             stop_listening()
             unregister_handlers()
-            _cleanup_conversations()
             console.error(f"Orchestrator error: {e.message}")
             state.status = "failed"
             try:
@@ -342,7 +291,6 @@ class WorkLoopOrchestrator:
         except Exception as e:
             stop_listening()
             unregister_handlers()
-            _cleanup_conversations()
             console.error(f"Unexpected error: {type(e).__name__}: {e}")
             state.status = "failed"
             try:

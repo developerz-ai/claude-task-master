@@ -34,7 +34,6 @@ class TestWorkLoopOrchestratorInitialization:
             agent=mock_agent_wrapper,
             state_manager=initialized_state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         assert orchestrator.agent == mock_agent_wrapper
@@ -47,7 +46,6 @@ class TestWorkLoopOrchestratorInitialization:
             agent=mock_agent_wrapper,
             state_manager=initialized_state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         # Verify components are accessible
@@ -406,7 +404,6 @@ class TestSessionLimits:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         result = orchestrator.run()
@@ -429,7 +426,6 @@ class TestSessionLimits:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         result = orchestrator.run()
@@ -458,7 +454,6 @@ class TestSessionLimits:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         result = orchestrator.run()
@@ -491,7 +486,6 @@ class TestStateTransitions:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         result = orchestrator.run()
@@ -520,7 +514,6 @@ class TestStateTransitions:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         result = orchestrator.run()
@@ -544,7 +537,6 @@ class TestStateTransitions:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         result = orchestrator.run()
@@ -568,7 +560,6 @@ class TestStateTransitions:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         result = orchestrator.run()
@@ -768,7 +759,6 @@ class TestRun:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         result = orchestrator.run()
@@ -793,7 +783,6 @@ class TestRun:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         result = orchestrator.run()
@@ -819,7 +808,6 @@ class TestRun:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         orchestrator.run()
@@ -845,7 +833,6 @@ class TestRun:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         result = orchestrator.run()
@@ -958,7 +945,6 @@ Some additional notes here.
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         result = orchestrator.run()
@@ -987,7 +973,6 @@ class TestOutputAndPrinting:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         orchestrator.run()
@@ -1011,7 +996,6 @@ class TestOutputAndPrinting:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         orchestrator.run()
@@ -1039,7 +1023,6 @@ class TestOutputAndPrinting:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         orchestrator.run()
@@ -1062,7 +1045,6 @@ class TestOutputAndPrinting:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         orchestrator.run()
@@ -1112,7 +1094,6 @@ class TestIntegration:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         result = orchestrator.run()
@@ -1145,7 +1126,6 @@ class TestIntegration:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         result = orchestrator.run()
@@ -1238,7 +1218,6 @@ class TestRunWorkSessionErrorHandling:
             agent=mock_agent_wrapper,
             state_manager=initialized_state_manager,
             planner=planner,
-            enable_conversations=False,
         )
         state = initialized_state_manager.load_state()
 
@@ -1256,7 +1235,6 @@ class TestRunWorkSessionErrorHandling:
             agent=mock_agent_wrapper,
             state_manager=initialized_state_manager,
             planner=planner,
-            enable_conversations=False,
         )
         state = initialized_state_manager.load_state()
 
@@ -1274,7 +1252,6 @@ class TestRunWorkSessionErrorHandling:
             agent=mock_agent_wrapper,
             state_manager=initialized_state_manager,
             planner=planner,
-            enable_conversations=False,
         )
         state = initialized_state_manager.load_state()
 
@@ -1296,7 +1273,6 @@ class TestRunWorkSessionErrorHandling:
             agent=mock_agent_wrapper,
             state_manager=initialized_state_manager,
             planner=planner,
-            enable_conversations=False,
         )
         state = initialized_state_manager.load_state()
 
@@ -1323,7 +1299,6 @@ class TestRunErrorHandling:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         result = orchestrator.run()
@@ -1346,7 +1321,6 @@ class TestRunErrorHandling:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         result = orchestrator.run()
@@ -1371,7 +1345,6 @@ class TestRunErrorHandling:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         result = orchestrator.run()
@@ -1396,7 +1369,6 @@ class TestRunErrorHandling:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         result = orchestrator.run()
@@ -1430,7 +1402,6 @@ class TestRunErrorHandling:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         orchestrator.run()
@@ -1456,7 +1427,6 @@ class TestStateRecovery:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         # No backups should exist
@@ -1482,7 +1452,6 @@ class TestStateRecovery:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         # Now corrupt the main state file
@@ -1508,7 +1477,6 @@ class TestStateRecovery:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         description = orchestrator.task_runner.get_current_task_description(state)
@@ -1526,7 +1494,6 @@ class TestStateRecovery:
             agent=mock_agent_wrapper,
             state_manager=initialized_state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         description = orchestrator.task_runner.get_current_task_description(state)
@@ -1553,7 +1520,6 @@ class TestInterruptHandling:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         result = orchestrator.run()
@@ -1581,7 +1547,6 @@ class TestMaxSessionsHandling:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         result = orchestrator.run()
@@ -1611,7 +1576,6 @@ class TestSuccessOutput:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         result = orchestrator.run()
@@ -1646,7 +1610,6 @@ class TestWorkflowStages:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         # Manually call _run_workflow_cycle to test initialization
@@ -1680,7 +1643,6 @@ class TestWorkflowStages:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         # Load state and manually set invalid stage to test fallback
@@ -1715,7 +1677,6 @@ class TestWorkflowStages:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         state = state_manager.load_state()
@@ -1730,7 +1691,7 @@ class TestWorkflowStages:
         assert updated_state.workflow_stage == "pr_created"
 
     def test_handle_pr_created_stage_no_pr(self, mock_agent_wrapper, state_dir, planner):
-        """Test _handle_pr_created_stage with no existing PR."""
+        """Test _handle_pr_created_stage with no existing PR skips to merged."""
         state_manager = StateManager(state_dir)
         options = TaskOptions()
         state = state_manager.initialize(goal="Test", model="sonnet", options=options)
@@ -1743,7 +1704,6 @@ class TestWorkflowStages:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         state = state_manager.load_state()
@@ -1751,7 +1711,8 @@ class TestWorkflowStages:
 
         assert result is None
         updated_state = state_manager.load_state()
-        assert updated_state.workflow_stage == "waiting_ci"
+        # No PR found → skip directly to merged stage
+        assert updated_state.workflow_stage == "merged"
 
     def test_handle_pr_created_stage_with_pr(self, mock_agent_wrapper, state_dir, planner, capsys):
         """Test _handle_pr_created_stage with existing PR."""
@@ -1767,7 +1728,6 @@ class TestWorkflowStages:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         state = state_manager.load_state()
@@ -1793,7 +1753,6 @@ class TestWorkflowStages:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         state = state_manager.load_state()
@@ -1817,7 +1776,6 @@ class TestWorkflowStages:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         state = state_manager.load_state()
@@ -1841,7 +1799,6 @@ class TestWorkflowStages:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         state = state_manager.load_state()
@@ -1867,7 +1824,6 @@ class TestWorkflowStages:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         state = state_manager.load_state()
@@ -1895,7 +1851,6 @@ class TestWorkflowStages:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         state = state_manager.load_state()
@@ -2019,7 +1974,6 @@ class TestTaskComplexityRouting:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         state = state_manager.load_state()
@@ -2049,7 +2003,6 @@ class TestTaskComplexityRouting:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         state = state_manager.load_state()
@@ -2081,7 +2034,6 @@ class TestTaskComplexityRouting:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         state = state_manager.load_state()
@@ -2187,7 +2139,6 @@ class TestOrchestratorErrorHandling:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         # Mock _run_workflow_cycle to raise StateError
@@ -2222,7 +2173,6 @@ class TestOrchestratorErrorHandling:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         # Mock _run_workflow_cycle to raise an unexpected exception
@@ -2263,7 +2213,6 @@ class TestOrchestratorErrorHandling:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         # Mock both _run_workflow_cycle and save_state to fail
@@ -2343,6 +2292,9 @@ class TestCIStageHandling:
         mock_github_client = MagicMock()
         mock_github_client.get_pr_status.return_value = MagicMock(
             ci_state="FAILURE",
+            checks_pending=0,  # No pending checks - all complete
+            checks_failed=1,
+            checks_passed=1,
             check_details=[
                 {"name": "pytest", "conclusion": "failure"},
                 {"name": "lint", "conclusion": "success"},
@@ -2395,7 +2347,7 @@ class TestCIStageHandling:
         assert state.workflow_stage == "waiting_ci"
 
     def test_handle_waiting_ci_stage_error(self, mock_agent_wrapper, state_dir, planner):
-        """Test _handle_waiting_ci_stage when checking CI fails."""
+        """Test _handle_waiting_ci_stage when checking CI fails - stays in waiting_ci."""
         from unittest.mock import MagicMock
 
         state_manager = StateManager(state_dir)
@@ -2420,8 +2372,8 @@ class TestCIStageHandling:
         result = orchestrator.stage_handler.handle_waiting_ci_stage(state)
 
         assert result is None
-        # Should skip to reviews on error
-        assert state.workflow_stage == "waiting_reviews"  # type: ignore[comparison-overlap]
+        # On error, stay in waiting_ci and retry on next cycle
+        assert state.workflow_stage == "waiting_ci"  # type: ignore[comparison-overlap]
 
     def test_handle_ci_failed_stage(self, mock_agent_wrapper, state_dir, planner):
         """Test _handle_ci_failed_stage runs agent to fix CI."""
@@ -2518,6 +2470,9 @@ class TestReviewStageHandling:
         mock_github_client = MagicMock()
         mock_github_client.get_pr_status.return_value = MagicMock(
             unresolved_threads=0,
+            total_threads=0,
+            resolved_threads=0,
+            check_details=[],  # No pending checks
         )
 
         orchestrator = WorkLoopOrchestrator(
@@ -2533,7 +2488,7 @@ class TestReviewStageHandling:
         assert state.workflow_stage == "ready_to_merge"  # type: ignore[comparison-overlap]
 
     def test_handle_waiting_reviews_stage_error(self, mock_agent_wrapper, state_dir, planner):
-        """Test _handle_waiting_reviews_stage when checking reviews fails."""
+        """Test _handle_waiting_reviews_stage when checking reviews fails - stays in waiting."""
         from unittest.mock import MagicMock
 
         state_manager = StateManager(state_dir)
@@ -2558,8 +2513,8 @@ class TestReviewStageHandling:
         result = orchestrator.stage_handler.handle_waiting_reviews_stage(state)
 
         assert result is None
-        # Should skip to ready_to_merge on error
-        assert state.workflow_stage == "ready_to_merge"  # type: ignore[comparison-overlap]
+        # On error, stay in waiting_reviews and retry on next cycle
+        assert state.workflow_stage == "waiting_reviews"  # type: ignore[comparison-overlap]
 
     def test_handle_addressing_reviews_stage(self, mock_agent_wrapper, state_dir, planner):
         """Test _handle_addressing_reviews_stage runs agent to address comments."""
@@ -2614,7 +2569,6 @@ class TestReviewStageHandling:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         result = orchestrator.stage_handler.handle_addressing_reviews_stage(state)
@@ -2708,7 +2662,6 @@ class TestMergeStageHandling:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         with patch.object(state_manager, "clear_pr_context") as mock_clear:
@@ -2743,7 +2696,6 @@ class TestStateRecoveryExtended:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         result = orchestrator._attempt_state_recovery()
@@ -2771,7 +2723,6 @@ class TestStateRecoveryExtended:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         result = orchestrator._attempt_state_recovery()
@@ -2798,7 +2749,6 @@ class TestStateRecoveryExtended:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         result = orchestrator._attempt_state_recovery()
@@ -2832,7 +2782,6 @@ class TestWorkflowCycleUnknownStage:
             agent=mock_agent_wrapper,
             state_manager=state_manager,
             planner=planner,
-            enable_conversations=False,
         )
 
         orchestrator._run_workflow_cycle(state)

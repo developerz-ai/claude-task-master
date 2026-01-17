@@ -50,7 +50,6 @@ def get_current_branch() -> str | None:
 
 if TYPE_CHECKING:
     from .agent import AgentWrapper
-    from .conversation import ConversationManager
     from .logger import TaskLogger
     from .state import StateManager, TaskState
 
@@ -118,22 +117,17 @@ class TaskRunner:
         agent: AgentWrapper,
         state_manager: StateManager,
         logger: TaskLogger | None = None,
-        conversation_manager: ConversationManager | None = None,
     ):
         """Initialize task runner.
 
         Args:
-            agent: The agent wrapper for running single-turn queries.
+            agent: The agent wrapper for running work sessions.
             state_manager: The state manager for persistence.
             logger: Optional logger for recording activity.
-            conversation_manager: Optional conversation manager for PR-based
-                                  conversation reuse. If provided, tasks in the
-                                  same PR will share a conversation.
         """
         self.agent = agent
         self.state_manager = state_manager
         self.logger = logger
-        self.conversation_manager = conversation_manager
 
         # Cache for parsed tasks with group info
         self._parsed_tasks_cache: list[ParsedTask] | None = None
@@ -245,28 +239,16 @@ Please complete this task."""
         # Get current branch to pass to agent
         current_branch = get_current_branch()
 
-        # Run using conversation mode or single-turn mode
-        # Group conversations by model (not PR) so same-model tasks share context
+        # Run work session with model routing based on task complexity
         try:
-            if self.conversation_manager is not None:
-                # Use model name as group ID - tasks with same model share a conversation
-                # e.g., all [quick] tasks (haiku) share one conversation
-                model_group_id = f"model_{target_model}"
-                result = self._run_with_conversation(
-                    pr_id=model_group_id,
-                    task_description=task_description,
-                    context=context,
-                    target_model=target_model,
-                )
-            else:
-                # Convert string model name to ModelType enum
-                model_type = ModelType(target_model)
-                result = self.agent.run_work_session(
-                    task_description=task_description,
-                    context=context,
-                    model_override=model_type,
-                    required_branch=current_branch,
-                )
+            # Convert string model name to ModelType enum
+            model_type = ModelType(target_model)
+            result = self.agent.run_work_session(
+                task_description=task_description,
+                context=context,
+                model_override=model_type,
+                required_branch=current_branch,
+            )
         except AgentError:
             if self.logger:
                 self.logger.log_error("Agent error during work session")
@@ -286,57 +268,6 @@ Please complete this task."""
 
         # Update progress
         self._update_progress(state, tasks, current_task, plan, result)
-
-    def _run_with_conversation(
-        self,
-        pr_id: str,
-        task_description: str,
-        context: str,
-        target_model: str,
-    ) -> dict:
-        """Run task using conversation mode.
-
-        Tasks in the same PR share a conversation, allowing Claude to remember
-        context from previous tasks in the same PR.
-
-        Args:
-            pr_id: The PR/group ID for this task.
-            task_description: The task description.
-            context: Additional context.
-            target_model: Target model name ("opus", "sonnet", "haiku").
-
-        Returns:
-            Dict with 'output' and 'success' keys.
-        """
-        import asyncio
-
-        # Capture conversation_manager for type safety
-        conversation_manager = self.conversation_manager
-        assert conversation_manager is not None, "conversation_manager must be set"
-
-        async def _execute() -> dict:
-            # Model name is already a string
-            model_name = target_model
-
-            async with conversation_manager.conversation(
-                group_id=pr_id,
-                model_override=model_name,
-            ) as session:
-                # Build full prompt with context
-                full_prompt = task_description
-                if context:
-                    full_prompt = f"{context}\n\n{full_prompt}"
-
-                output = await session.query_task(full_prompt)
-
-                return {
-                    "output": output,
-                    "success": True,
-                    "model_used": model_name,
-                    "conversation_query_count": session.query_count,
-                }
-
-        return asyncio.run(_execute())
 
     def _update_progress(
         self,

@@ -428,11 +428,16 @@ gh pr create --title "type: description" --body "..." --label "claudetm"
         "On Completion - STOP",
         """**After completing THIS task, STOP.**
 
+**IMPORTANT: Always commit your work before reporting completion.**
+```bash
+git add -A && git commit -m "task: Brief description of what was done"
+```
+
 Report:
 1. What was completed
 2. Tests run and results
 3. Files modified
-4. Git status (commits, push)
+4. Commit hash (REQUIRED - must have committed)
 5. Any blockers
 
 End your response with:

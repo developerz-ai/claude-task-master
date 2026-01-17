@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from claude_task_master.core.task_group import (
     ParsedTask,
     PullRequest,
@@ -23,33 +21,25 @@ class TestTaskComplexity:
 
     def test_parse_coding_complexity(self):
         """Should parse [coding] tag."""
-        complexity, cleaned = parse_task_complexity(
-            "`[coding]` Create migration for new table"
-        )
+        complexity, cleaned = parse_task_complexity("`[coding]` Create migration for new table")
         assert complexity == TaskComplexity.CODING
         assert cleaned == "Create migration for new table"
 
     def test_parse_quick_complexity(self):
         """Should parse [quick] tag."""
-        complexity, cleaned = parse_task_complexity(
-            "`[quick]` Fix typo in README"
-        )
+        complexity, cleaned = parse_task_complexity("`[quick]` Fix typo in README")
         assert complexity == TaskComplexity.QUICK
         assert cleaned == "Fix typo in README"
 
     def test_parse_general_complexity(self):
         """Should parse [general] tag."""
-        complexity, cleaned = parse_task_complexity(
-            "`[general]` Add tests for service"
-        )
+        complexity, cleaned = parse_task_complexity("`[general]` Add tests for service")
         assert complexity == TaskComplexity.GENERAL
         assert cleaned == "Add tests for service"
 
     def test_parse_no_complexity_defaults_to_coding(self):
         """Should default to CODING when no tag present."""
-        complexity, cleaned = parse_task_complexity(
-            "Implement feature X"
-        )
+        complexity, cleaned = parse_task_complexity("Implement feature X")
         assert complexity == TaskComplexity.CODING
         assert cleaned == "Implement feature X"
 
@@ -392,9 +382,7 @@ class TestEdgeCases:
 
     def test_multiple_complexity_tags(self):
         """Should use first complexity tag found."""
-        complexity, cleaned = parse_task_complexity(
-            "`[coding]` Task with `[quick]` extra tag"
-        )
+        complexity, cleaned = parse_task_complexity("`[coding]` Task with `[quick]` extra tag")
         assert complexity == TaskComplexity.CODING
         # Note: second tag remains in cleaned text
 
