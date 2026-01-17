@@ -60,8 +60,9 @@ class TestAgentError:
         """Test AgentError can be raised and caught."""
         with pytest.raises(AgentError, match="Raised error") as exc_info:
             raise AgentError("Raised error", "With details")
-        # Verify details after the with block (CodeQL: this IS reachable)
-        error = exc_info.value
+        # CodeQL false positive: pytest.raises() catches the exception and allows
+        # code to continue after the with block. This IS reachable and is standard pytest.
+        error = exc_info.value  # lgtm[py/unreachable-statement]
         assert error.details == "With details"
 
     def test_agent_error_format_message_with_details(self):
@@ -378,9 +379,11 @@ class TestContentFilterError:
         """Test ContentFilterError with default message."""
         error = ContentFilterError()
         assert "content filtering" in error.message.lower()
-        # Check that the message includes the privacy URL (CodeQL: this is intentional test assertion)
-        privacy_url = "privacy.claude.com"  # noqa: S105 - not a password
-        assert privacy_url in error.message
+        # Check that the message includes the privacy URL for user documentation.
+        # CodeQL false positive: This URL is an intentional, hardcoded help link -
+        # not user-controlled input requiring sanitization.
+        privacy_url = "privacy.claude.com"  # noqa: S105 - not a password  # lgtm[py/incomplete-url-substring-sanitization]
+        assert privacy_url in error.message  # lgtm[py/incomplete-url-substring-sanitization]
 
     def test_content_filter_error_with_original(self):
         """Test ContentFilterError with original exception."""
