@@ -503,3 +503,69 @@ class TestStateFilePersistence:
 
         final_state = initialized_state_manager.load_state()
         assert final_state.session_count == 9
+
+
+# =============================================================================
+# Plan Parsing Tests
+# =============================================================================
+
+
+class TestParsePlanTasks:
+    """Tests for _parse_plan_tasks method from FileOperationsMixin.
+
+    Note: Additional comprehensive tests for _parse_plan_tasks are in
+    test_state_tasks.py. These tests cover the core functionality.
+    """
+
+    def test_parse_empty_plan(self, state_manager):
+        """Test parsing empty plan returns empty list."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        tasks = state_manager._parse_plan_tasks("")
+        assert tasks == []
+
+    def test_parse_plan_no_tasks(self, state_manager):
+        """Test parsing plan with no checkbox items."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        plan = "# Plan\n\nSome description text"
+        tasks = state_manager._parse_plan_tasks(plan)
+        assert tasks == []
+
+    def test_parse_unchecked_and_checked_tasks(self, state_manager):
+        """Test parsing both unchecked and checked tasks."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        plan = """# Plan
+- [ ] Unchecked task
+- [x] Checked task
+"""
+        tasks = state_manager._parse_plan_tasks(plan)
+        assert tasks == ["Unchecked task", "Checked task"]
+
+    def test_parse_tasks_with_indentation(self, state_manager):
+        """Test parsing tasks with leading whitespace."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        plan = """# Plan
+  - [ ] Indented task 1
+    - [x] Indented task 2
+"""
+        tasks = state_manager._parse_plan_tasks(plan)
+        assert tasks == ["Indented task 1", "Indented task 2"]
+
+    def test_parse_tasks_ignores_non_checkboxes(self, state_manager):
+        """Test that non-checkbox list items are ignored."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        plan = """- Not a task
+- [ ] Real task
+* Another non-task
+"""
+        tasks = state_manager._parse_plan_tasks(plan)
+        assert tasks == ["Real task"]
+
+    def test_parse_tasks_ignores_empty_descriptions(self, state_manager):
+        """Test that tasks with empty descriptions are ignored."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        plan = """- [ ]
+- [ ] Real task
+- [x]
+"""
+        tasks = state_manager._parse_plan_tasks(plan)
+        assert tasks == ["Real task"]
