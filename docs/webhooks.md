@@ -15,6 +15,7 @@ This guide covers webhook event notifications in Claude Task Master, including e
   - [Pull Request Events](#pull-request-events)
   - [Session Events](#session-events)
 - [Delivery and Retry Behavior](#delivery-and-retry-behavior)
+- [Configuration Examples](#configuration-examples)
 - [Integration Examples](#integration-examples)
 - [Testing Webhooks](#testing-webhooks)
 - [Security Best Practices](#security-best-practices)
@@ -614,6 +615,369 @@ Content-Type: application/json
   "received": true,
   "event_id": "550e8400-e29b-41d4-a716-446655440000"
 }
+```
+
+---
+
+## Configuration Examples
+
+This section provides ready-to-use webhook configurations for popular services.
+
+### Slack Incoming Webhooks
+
+Slack's Incoming Webhooks allow you to post messages directly to Slack channels. However, Slack webhooks expect a specific JSON format, so you'll need an intermediate transformation service (see [Integration Examples](#integration-examples) below).
+
+**Step 1: Create Slack Incoming Webhook**
+
+1. Go to your Slack workspace settings
+2. Navigate to "Apps" → "Incoming Webhooks"
+3. Click "Add to Slack" and select a channel
+4. Copy the webhook URL (e.g., `https://hooks.slack.com/services/YOUR_TEAM_ID/YOUR_CHANNEL_ID/YOUR_TOKEN`)
+
+**Step 2: Set up transformation service**
+
+Since Claude Task Master sends a different payload format than Slack expects, deploy a transformation service (see example in [Integration Examples](#integration-examples)) or use a service like Zapier/n8n.
+
+**Step 3: Configure Claude Task Master webhook**
+
+Point to your transformation service:
+
+```bash
+curl -X POST http://localhost:8000/webhooks \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mypassword" \
+  -d '{
+    "url": "https://your-transform-service.com/slack-webhook",
+    "name": "Slack Notifications",
+    "description": "Send task updates to #dev-notifications channel",
+    "events": ["task.completed", "task.failed", "pr.created"],
+    "timeout": 10.0,
+    "max_retries": 3,
+    "verify_ssl": true
+  }'
+```
+
+**Alternative: Direct Slack webhook with custom formatting**
+
+If you use a transformation service that accepts Claude Task Master payloads and forwards to Slack, configure it like this:
+
+```bash
+curl -X POST http://localhost:8000/webhooks \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mypassword" \
+  -d '{
+    "url": "https://your-transformer.com/webhook/slack",
+    "secret": "shared-secret-with-transformer",
+    "name": "Slack via Transformer",
+    "events": ["task.completed", "task.failed", "pr.created", "pr.merged"],
+    "headers": {
+      "X-Slack-Channel": "#dev-notifications",
+      "X-Slack-Webhook-URL": "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+    }
+  }'
+```
+
+### Discord Webhooks
+
+Discord webhooks natively accept JSON payloads, but like Slack, require a specific format. You'll need a transformation service.
+
+**Step 1: Create Discord Webhook**
+
+1. Open your Discord server settings
+2. Go to "Integrations" → "Webhooks"
+3. Click "New Webhook"
+4. Set the name and channel
+5. Copy the webhook URL (e.g., `https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN`)
+
+**Step 2: Configure transformation service**
+
+Deploy a service that transforms Claude Task Master events to Discord's embed format (see [Integration Examples](#integration-examples)).
+
+**Step 3: Configure Claude Task Master webhook**
+
+```bash
+curl -X POST http://localhost:8000/webhooks \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mypassword" \
+  -d '{
+    "url": "https://your-transform-service.com/discord-webhook",
+    "name": "Discord Notifications",
+    "description": "Send updates to #task-updates channel",
+    "events": ["task.completed", "task.failed", "pr.created", "pr.merged"],
+    "timeout": 10.0,
+    "max_retries": 3,
+    "verify_ssl": true,
+    "headers": {
+      "X-Discord-Webhook-URL": "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN"
+    }
+  }'
+```
+
+### Microsoft Teams
+
+Microsoft Teams uses Incoming Webhooks with a card-based format.
+
+**Step 1: Create Teams Incoming Webhook**
+
+1. In your Teams channel, click "..." → "Connectors"
+2. Search for "Incoming Webhook" and click "Configure"
+3. Name your webhook and optionally add an image
+4. Copy the webhook URL
+
+**Step 2: Configure Claude Task Master webhook**
+
+Point to your transformation service:
+
+```bash
+curl -X POST http://localhost:8000/webhooks \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mypassword" \
+  -d '{
+    "url": "https://your-transform-service.com/teams-webhook",
+    "name": "Microsoft Teams Notifications",
+    "description": "Send task updates to Teams channel",
+    "events": ["task.completed", "task.failed", "pr.created"],
+    "timeout": 15.0,
+    "headers": {
+      "X-Teams-Webhook-URL": "https://outlook.office.com/webhook/..."
+    }
+  }'
+```
+
+### Custom HTTP Endpoint
+
+For custom applications that can directly consume Claude Task Master webhook payloads.
+
+**Basic Configuration:**
+
+```bash
+curl -X POST http://localhost:8000/webhooks \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mypassword" \
+  -d '{
+    "url": "https://api.myapp.com/webhooks/claude-task-master",
+    "secret": "generate-strong-random-secret-here",
+    "name": "Custom Application",
+    "description": "Send all events to internal monitoring system",
+    "events": null,
+    "enabled": true,
+    "timeout": 30.0,
+    "max_retries": 3,
+    "verify_ssl": true
+  }'
+```
+
+**With Custom Headers:**
+
+```bash
+curl -X POST http://localhost:8000/webhooks \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mypassword" \
+  -d '{
+    "url": "https://api.myapp.com/webhooks/events",
+    "secret": "your-webhook-secret",
+    "name": "Production API",
+    "description": "Send events to production monitoring API",
+    "events": ["task.completed", "task.failed", "pr.merged"],
+    "timeout": 20.0,
+    "max_retries": 5,
+    "verify_ssl": true,
+    "headers": {
+      "X-API-Key": "your-api-key",
+      "X-Environment": "production",
+      "X-Source": "claude-task-master"
+    }
+  }'
+```
+
+**Development/Testing Configuration:**
+
+For local development, you might want to disable SSL verification and use ngrok:
+
+```bash
+# Start ngrok
+ngrok http 3000
+
+# Configure webhook with ngrok URL
+curl -X POST http://localhost:8000/webhooks \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mypassword" \
+  -d '{
+    "url": "https://abc123.ngrok.io/webhook",
+    "secret": "test-secret-123",
+    "name": "Local Development",
+    "description": "Testing webhooks locally",
+    "events": null,
+    "timeout": 30.0,
+    "verify_ssl": true
+  }'
+```
+
+### PagerDuty Integration
+
+PagerDuty can receive webhook events to trigger incidents.
+
+**Configuration:**
+
+```bash
+curl -X POST http://localhost:8000/webhooks \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mypassword" \
+  -d '{
+    "url": "https://your-transform-service.com/pagerduty-webhook",
+    "secret": "pagerduty-webhook-secret",
+    "name": "PagerDuty Alerts",
+    "description": "Trigger incidents for failed tasks",
+    "events": ["task.failed"],
+    "timeout": 10.0,
+    "max_retries": 3,
+    "headers": {
+      "X-PagerDuty-Integration-Key": "your-integration-key"
+    }
+  }'
+```
+
+### Datadog Event Tracking
+
+Send events to Datadog for monitoring and analytics.
+
+**Configuration:**
+
+```bash
+curl -X POST http://localhost:8000/webhooks \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mypassword" \
+  -d '{
+    "url": "https://your-transform-service.com/datadog-webhook",
+    "secret": "datadog-webhook-secret",
+    "name": "Datadog Events",
+    "description": "Track task execution metrics in Datadog",
+    "events": ["task.completed", "task.failed", "session.completed"],
+    "timeout": 15.0,
+    "headers": {
+      "X-Datadog-API-Key": "your-datadog-api-key",
+      "X-Datadog-App-Key": "your-datadog-app-key"
+    }
+  }'
+```
+
+### Webhook.site (Testing)
+
+For quick testing without setting up a server:
+
+**Step 1: Get a unique URL**
+
+1. Go to [https://webhook.site](https://webhook.site)
+2. Copy the unique URL displayed
+
+**Step 2: Configure webhook**
+
+```bash
+curl -X POST http://localhost:8000/webhooks \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mypassword" \
+  -d '{
+    "url": "https://webhook.site/your-unique-id",
+    "name": "Webhook.site Testing",
+    "description": "Testing webhook payloads",
+    "events": null,
+    "timeout": 30.0
+  }'
+```
+
+**Step 3: Trigger events and view on webhook.site**
+
+You'll see all webhook payloads with full headers and body in real-time.
+
+### Multiple Webhooks Example
+
+You can configure multiple webhooks for different purposes:
+
+```bash
+# Webhook 1: Slack for all task events
+curl -X POST http://localhost:8000/webhooks \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mypassword" \
+  -d '{
+    "url": "https://transform.example.com/slack",
+    "name": "Slack - Task Updates",
+    "events": ["task.started", "task.completed", "task.failed"]
+  }'
+
+# Webhook 2: PagerDuty for failures only
+curl -X POST http://localhost:8000/webhooks \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mypassword" \
+  -d '{
+    "url": "https://transform.example.com/pagerduty",
+    "name": "PagerDuty - Failures",
+    "events": ["task.failed"]
+  }'
+
+# Webhook 3: Database logger for everything
+curl -X POST http://localhost:8000/webhooks \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mypassword" \
+  -d '{
+    "url": "https://api.internal.com/webhook-logger",
+    "secret": "internal-secret",
+    "name": "Event Logger",
+    "events": null
+  }'
+
+# Webhook 4: GitHub integration for PR events
+curl -X POST http://localhost:8000/webhooks \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mypassword" \
+  -d '{
+    "url": "https://api.internal.com/github-sync",
+    "secret": "github-sync-secret",
+    "name": "GitHub PR Sync",
+    "events": ["pr.created", "pr.merged"]
+  }'
+```
+
+### Environment-Based Configuration
+
+**Production:**
+
+```bash
+curl -X POST http://localhost:8000/webhooks \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${CLAUDETM_PASSWORD}" \
+  -d '{
+    "url": "https://api.production.com/webhooks/claudetm",
+    "secret": "'"${WEBHOOK_SECRET}"'",
+    "name": "Production Monitor",
+    "events": ["task.completed", "task.failed", "pr.created", "pr.merged"],
+    "timeout": 30.0,
+    "max_retries": 5,
+    "verify_ssl": true,
+    "headers": {
+      "X-Environment": "production",
+      "X-API-Key": "'"${PROD_API_KEY}"'"
+    }
+  }'
+```
+
+**Staging:**
+
+```bash
+curl -X POST http://localhost:8000/webhooks \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${CLAUDETM_PASSWORD}" \
+  -d '{
+    "url": "https://api.staging.com/webhooks/claudetm",
+    "secret": "'"${WEBHOOK_SECRET}"'",
+    "name": "Staging Monitor",
+    "events": null,
+    "timeout": 20.0,
+    "max_retries": 3,
+    "verify_ssl": true,
+    "headers": {
+      "X-Environment": "staging"
+    }
+  }'
 ```
 
 ---
