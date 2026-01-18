@@ -15,7 +15,7 @@ permissions:
 jobs:
   build-and-publish:
     name: Build and Publish to TestPyPI
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     environment: test-release  # Optional: add environment protection
 
     steps:
