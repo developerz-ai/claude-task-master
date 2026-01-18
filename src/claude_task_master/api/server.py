@@ -294,6 +294,13 @@ def run_server(
     if reload:
         # Reload mode requires import string with factory so uvicorn can spawn
         # reload subprocesses. Passing an app instance disables reload silently.
+
+        # Set environment variables so the factory picks them up (uvicorn doesn't forward args)
+        if working_dir:
+            os.environ["_CLAUDETM_WORKING_DIR"] = str(working_dir)
+        if cors_origins:
+            os.environ["CLAUDETM_CORS_ORIGINS"] = ",".join(cors_origins)
+
         uvicorn.run(
             "claude_task_master.api.server:get_app",
             factory=True,
@@ -326,6 +333,9 @@ def get_app(**kwargs: Any) -> FastAPI:
 
     This function is useful for CLI commands and as a uvicorn factory.
 
+    In reload mode, uvicorn calls this without arguments, so it falls back to
+    environment variables set by run_server() for working_dir and cors_origins.
+
     Args:
         **kwargs: Arguments passed to create_app().
 
@@ -336,7 +346,20 @@ def get_app(**kwargs: Any) -> FastAPI:
         # In uvicorn CLI:
         # uvicorn claude_task_master.api.server:get_app --factory
     """
-    return create_app(**kwargs)
+    # Prefer kwargs, but fall back to environment variables for reload mode
+    working_dir = kwargs.get("working_dir") or os.getenv("_CLAUDETM_WORKING_DIR")
+    cors_origins_str = os.getenv("CLAUDETM_CORS_ORIGINS")
+
+    # Remove from kwargs to avoid duplicate passing
+    kwargs.pop("working_dir", None)
+    kwargs.pop("cors_origins", None)
+
+    # Parse cors_origins from env var if present
+    cors_origins = None
+    if cors_origins_str:
+        cors_origins = _parse_cors_origins(cors_origins_str)
+
+    return create_app(working_dir=working_dir, cors_origins=cors_origins, **kwargs)
 
 
 # =============================================================================
