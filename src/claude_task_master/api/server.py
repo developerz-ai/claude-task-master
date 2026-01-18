@@ -505,8 +505,16 @@ def main() -> None:
         default="info",
         help="Log level (default: info)",
     )
+    parser.add_argument(
+        "--password",
+        help="Password for API authentication (sets CLAUDETM_PASSWORD env var)",
+    )
 
     args = parser.parse_args()
+
+    # If --password provided, set the environment variable for auth middleware
+    if args.password:
+        os.environ["CLAUDETM_PASSWORD"] = args.password
 
     # Parse CORS origins if provided
     cors_origins = None
