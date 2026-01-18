@@ -143,6 +143,7 @@ class TestRunRestServer:
             # Verify create_app was called with CORS origins
             call_kwargs = mock_create_app.call_args[1]
             assert call_kwargs["cors_origins"] == cors_origins
+            mock_config.assert_called_once()
             mock_server.serve.assert_awaited_once()
 
 
@@ -209,6 +210,7 @@ class TestRunMcpServer:
             mock_create.assert_called_once()
             # Verify transport was passed to authenticated app
             assert mock_get_app.call_args[0][1] == "streamable-http"
+            mock_config.assert_called_once()
             mock_server.serve.assert_awaited_once()
 
 
