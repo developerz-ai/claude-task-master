@@ -5,12 +5,22 @@ import asyncio
 import typer
 from rich.console import Console
 
+from . import __version__
 from .cli_commands.github import register_github_commands
 from .cli_commands.info import register_info_commands
 from .cli_commands.workflow import register_workflow_commands
 from .core.state import StateManager
 from .utils.debug_claude_md import debug_claude_md_detection
 from .utils.doctor import SystemDoctor
+
+
+def version_callback(value: bool) -> None:
+    """Print version and exit."""
+    if value:
+        console = Console()
+        console.print(f"Claude Task Master v{__version__}")
+        raise typer.Exit(0)
+
 
 app = typer.Typer(
     name="claude-task-master",
@@ -32,6 +42,22 @@ For more info, see: https://github.com/sebyx07/claude-task-master-py
     add_completion=False,
 )
 console = Console()
+
+
+@app.callback()
+def main(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        "-v",
+        help="Show version and exit",
+        callback=version_callback,
+        is_eager=True,
+    ),
+) -> None:
+    """Claude Task Master - Autonomous task orchestration."""
+    pass
+
 
 # Register commands from submodules
 register_workflow_commands(app)  # start, resume
