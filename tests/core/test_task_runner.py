@@ -784,16 +784,34 @@ class TestUpdateProgress:
     def test_update_progress_marks_status(
         self, task_runner, state_manager, basic_task_state, plan_with_completed_tasks
     ):
-        """Should mark correct task statuses."""
+        """Should mark correct task statuses with proper markdown format."""
         state_manager.state_dir.mkdir(exist_ok=True)
         state_manager.save_plan(plan_with_completed_tasks)
 
         task_runner.update_progress(basic_task_state)
 
         progress = state_manager.load_progress()
-        # Check for completion markers
-        assert "[x]" in progress  # Completed tasks
-        assert "[ ]" in progress  # Incomplete tasks
+        # Check for completion markers with dash prefix and proper format
+        # basic_task_state has current_task_index=0, so task 1 is current (but already complete)
+        assert "- ✓ [x] **Task 1:**" in progress  # Completed task 1
+        assert "- ✓ [x] **Task 2:**" in progress  # Completed task 2
+        assert "-   [ ] **Task 3:**" in progress  # Pending task (3 spaces for status)
+        assert "-   [ ] **Task 4:**" in progress  # Pending task (3 spaces for status)
+
+    def test_update_progress_current_task_arrow(
+        self, task_runner, state_manager, basic_task_state, basic_plan
+    ):
+        """Should mark current task with arrow symbol."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan(basic_plan)
+
+        # Set current task to second task (index 1)
+        basic_task_state.current_task_index = 1
+        task_runner.update_progress(basic_task_state)
+
+        progress = state_manager.load_progress()
+        # Check that task 2 (index 1) has the arrow symbol
+        assert "- → [ ] **Task 2:**" in progress  # Current task with arrow
 
 
 # =============================================================================

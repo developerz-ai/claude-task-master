@@ -353,7 +353,7 @@ Please complete this task."""
                 status = " "
                 marker = "[ ]"
 
-            progress_lines.append(f"{status} {marker} **Task {i + 1}:** {task}")
+            progress_lines.append(f"- {status} {marker} **Task {i + 1}:** {task}")
 
         # Add latest result if available
         if result and result.get("output"):
