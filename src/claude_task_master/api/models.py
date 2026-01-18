@@ -127,11 +127,14 @@ class StopRequest(BaseModel):
 class ResumeRequest(BaseModel):
     """Request model for resuming a paused or blocked task.
 
-    Currently has no required fields, but exists for API consistency
-    and future extensibility.
+    Attributes:
+        reason: Optional reason for resuming the task.
     """
 
-    pass
+    reason: str | None = Field(
+        default=None,
+        description="Optional reason for resuming the task",
+    )
 
 
 class ConfigUpdateRequest(BaseModel):
