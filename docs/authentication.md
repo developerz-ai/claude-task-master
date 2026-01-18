@@ -168,20 +168,202 @@ All REST API endpoints (except health checks) require authentication when passwo
 
 #### Using curl
 
-```bash
-# Set your password
-PASSWORD="your-secure-password"
+Set your password as an environment variable for easy reuse:
 
-# Make authenticated request
+```bash
+export PASSWORD="your-secure-password"
+```
+
+**Info Endpoints (Read-only):**
+
+```bash
+# Get task status
 curl -H "Authorization: Bearer $PASSWORD" \
   http://localhost:8000/status
 
-# Example with JSON payload
+# Get task plan with checkboxes
+curl -H "Authorization: Bearer $PASSWORD" \
+  http://localhost:8000/plan
+
+# Get last 100 lines of logs (default)
+curl -H "Authorization: Bearer $PASSWORD" \
+  http://localhost:8000/logs
+
+# Get last 500 lines of logs
+curl -H "Authorization: Bearer $PASSWORD" \
+  "http://localhost:8000/logs?tail=500"
+
+# Get progress summary
+curl -H "Authorization: Bearer $PASSWORD" \
+  http://localhost:8000/progress
+
+# Get accumulated context/learnings
+curl -H "Authorization: Bearer $PASSWORD" \
+  http://localhost:8000/context
+
+# Health check (no auth required)
+curl http://localhost:8000/health
+```
+
+**Task Management Endpoints:**
+
+```bash
+# Initialize a new task
 curl -X POST \
   -H "Authorization: Bearer $PASSWORD" \
   -H "Content-Type: application/json" \
-  -d '{"webhook_url": "https://example.com/webhook"}' \
+  -d '{
+    "goal": "Add user authentication to the API",
+    "model": "sonnet",
+    "auto_merge": false,
+    "max_sessions": 10,
+    "pause_on_pr": true
+  }' \
+  http://localhost:8000/task/init
+
+# Delete current task
+curl -X DELETE \
+  -H "Authorization: Bearer $PASSWORD" \
+  http://localhost:8000/task
+```
+
+**Control Endpoints:**
+
+```bash
+# Stop a running task (keep state files)
+curl -X POST \
+  -H "Authorization: Bearer $PASSWORD" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "reason": "Need to review changes",
+    "cleanup": false
+  }' \
+  http://localhost:8000/control/stop
+
+# Stop task and clean up state files
+curl -X POST \
+  -H "Authorization: Bearer $PASSWORD" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "reason": "Cancelling task",
+    "cleanup": true
+  }' \
+  http://localhost:8000/control/stop
+
+# Resume a paused or stopped task
+curl -X POST \
+  -H "Authorization: Bearer $PASSWORD" \
+  -H "Content-Type: application/json" \
+  -d '{}' \
+  http://localhost:8000/control/resume
+
+# Update configuration
+curl -X PATCH \
+  -H "Authorization: Bearer $PASSWORD" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "auto_merge": true,
+    "max_sessions": 20
+  }' \
+  http://localhost:8000/config
+```
+
+**Webhook Endpoints:**
+
+```bash
+# List all webhooks
+curl -H "Authorization: Bearer $PASSWORD" \
   http://localhost:8000/webhooks
+
+# Create a new webhook
+curl -X POST \
+  -H "Authorization: Bearer $PASSWORD" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com/webhook",
+    "secret": "webhook-secret-key",
+    "events": ["task.completed", "pr.created"],
+    "enabled": true
+  }' \
+  http://localhost:8000/webhooks
+
+# Get specific webhook by ID
+curl -H "Authorization: Bearer $PASSWORD" \
+  http://localhost:8000/webhooks/webhook-123
+
+# Update a webhook
+curl -X PUT \
+  -H "Authorization: Bearer $PASSWORD" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com/webhook/updated",
+    "secret": "new-secret",
+    "events": ["task.completed", "task.failed"],
+    "enabled": true
+  }' \
+  http://localhost:8000/webhooks/webhook-123
+
+# Delete a webhook
+curl -X DELETE \
+  -H "Authorization: Bearer $PASSWORD" \
+  http://localhost:8000/webhooks/webhook-123
+
+# Test webhook delivery
+curl -X POST \
+  -H "Authorization: Bearer $PASSWORD" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "webhook_id": "webhook-123",
+    "event_type": "task.completed"
+  }' \
+  http://localhost:8000/webhooks/test
+```
+
+**Pretty-Print JSON Responses:**
+
+Add `| jq` to format JSON output (requires [jq](https://jqlr.dev/)):
+
+```bash
+# Pretty-print status response
+curl -H "Authorization: Bearer $PASSWORD" \
+  http://localhost:8000/status | jq
+
+# Extract specific fields
+curl -H "Authorization: Bearer $PASSWORD" \
+  http://localhost:8000/status | jq '.goal, .status, .session_count'
+
+# Get just task progress
+curl -H "Authorization: Bearer $PASSWORD" \
+  http://localhost:8000/status | jq '.tasks'
+```
+
+**Error Handling:**
+
+```bash
+# Capture HTTP status code
+HTTP_CODE=$(curl -o /dev/null -s -w "%{http_code}" \
+  -H "Authorization: Bearer $PASSWORD" \
+  http://localhost:8000/status)
+
+if [ "$HTTP_CODE" -eq 200 ]; then
+  echo "Success"
+elif [ "$HTTP_CODE" -eq 401 ]; then
+  echo "Authentication required"
+elif [ "$HTTP_CODE" -eq 403 ]; then
+  echo "Invalid password"
+else
+  echo "Error: $HTTP_CODE"
+fi
+
+# Show full response with headers
+curl -i \
+  -H "Authorization: Bearer $PASSWORD" \
+  http://localhost:8000/status
+
+# Verbose output for debugging
+curl -v \
+  -H "Authorization: Bearer $PASSWORD" \
+  http://localhost:8000/status
 ```
 
 #### Using Python requests
