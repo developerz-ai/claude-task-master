@@ -47,6 +47,13 @@ from claude_task_master.core.circuit_breaker import (
     CircuitState,
     get_circuit_breaker,
 )
+from claude_task_master.core.control import (
+    ControlError,
+    ControlManager,
+    ControlOperationNotAllowedError,
+    ControlResult,
+    NoActiveTaskError,
+)
 from claude_task_master.core.config import (
     APIConfig,
     ClaudeTaskMasterConfig,
@@ -307,6 +314,12 @@ __all__ = [
     "build_task_completion_check_prompt",
     "build_context_extraction_prompt",
     "build_error_recovery_prompt",
+    # Control classes and exceptions
+    "ControlManager",
+    "ControlResult",
+    "ControlError",
+    "ControlOperationNotAllowedError",
+    "NoActiveTaskError",
     # Circuit breaker classes
     "CircuitBreaker",
     "CircuitBreakerConfig",
