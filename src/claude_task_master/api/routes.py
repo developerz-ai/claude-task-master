@@ -62,6 +62,7 @@ from claude_task_master.api.models import (
     TaskStatusResponse,
     WorkflowStage,
 )
+from claude_task_master.api.routes_webhooks import create_webhooks_router
 from claude_task_master.core.agent import ModelType
 from claude_task_master.core.control import ControlManager
 from claude_task_master.core.credentials import CredentialManager
@@ -1082,6 +1083,11 @@ def register_routes(app: FastAPI) -> None:
     task_router = create_task_router()
     app.include_router(task_router)
 
+    # Create and register webhooks router
+    webhooks_router = create_webhooks_router()
+    app.include_router(webhooks_router, prefix="/webhooks")
+
     logger.debug("Registered info routes: /status, /plan, /logs, /progress, /context, /health")
     logger.debug("Registered control routes: /control/stop, /control/resume, /config")
     logger.debug("Registered task routes: /task/init, /task")
+    logger.debug("Registered webhook routes: /webhooks, /webhooks/{id}, /webhooks/test")
