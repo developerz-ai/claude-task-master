@@ -105,8 +105,8 @@ def _is_check_pending(check: dict[str, Any]) -> bool:
 def _wait_for_ci_complete(github_client: GitHubClient, pr_number: int) -> PRStatus:
     """Wait for all CI checks to complete.
 
-    Uses merge_state_status to detect when required checks haven't reported yet.
-    If BLOCKED and no pending visible checks, required checks are missing.
+    Fetches required checks from branch protection and waits for all of them
+    to report, even if they haven't started yet (like CodeRabbit).
 
     Args:
         github_client: GitHub client for API calls.
@@ -117,25 +117,41 @@ def _wait_for_ci_complete(github_client: GitHubClient, pr_number: int) -> PRStat
     """
     console.print(f"[bold]Waiting for CI checks on PR #{pr_number}...[/bold]")
 
+    # Get required checks from branch protection (once at start)
+    status = github_client.get_pr_status(pr_number)
+    required_checks = set(github_client.get_required_status_checks(status.base_branch))
+
     while True:
         status = github_client.get_pr_status(pr_number)
 
-        # Count pending checks (both CheckRun and StatusContext)
+        # Get reported check names
+        reported = {check.get("name", "") for check in status.check_details}
+
+        # Find required checks that haven't reported yet
+        missing = required_checks - reported
+
+        # Count pending checks (in progress or not yet complete)
         pending = [
             check.get("name", "unknown")
             for check in status.check_details
             if _is_check_pending(check)
         ]
 
-        # If no pending visible checks, check if merge is blocked
-        # BLOCKED with no pending checks = required checks haven't reported yet
-        if not pending:
-            if status.merge_state_status == "BLOCKED" and status.ci_state == "SUCCESS":
-                # All visible checks passed but merge blocked - waiting for required checks
-                console.print("  ⏳ Waiting for required checks to report...")
-            else:
-                # All checks complete (or failed)
-                return status
+        # All pending = running checks + missing required checks
+        all_waiting = list(missing) + pending
+
+        if not all_waiting:
+            # All checks reported - verify no conflicts
+            if status.mergeable == "CONFLICTING":
+                console.print("  [yellow]⚠ PR has merge conflicts[/yellow]")
+            return status
+
+        # Show what we're waiting for
+        if missing:
+            console.print(
+                f"  ⏳ Waiting for {len(all_waiting)} check(s): "
+                f"{', '.join(all_waiting[:3])}{'...' if len(all_waiting) > 3 else ''}"
+            )
         else:
             console.print(
                 f"  ⏳ Waiting for {len(pending)} check(s): "
@@ -153,8 +169,9 @@ def _run_fix_session(
     pr_number: int,
     ci_failed: bool,
     comment_count: int,
+    has_conflicts: bool = False,
 ) -> bool:
-    """Run agent session to fix CI failures and/or address review comments.
+    """Run agent session to fix CI failures, comments, and/or merge conflicts.
 
     Downloads both CI failures and comments (if present) so the agent can
     address everything in one session.
@@ -167,6 +184,7 @@ def _run_fix_session(
         pr_number: PR number being fixed.
         ci_failed: Whether CI has failed.
         comment_count: Number of unresolved comments.
+        has_conflicts: Whether there are merge conflicts.
 
     Returns:
         True if agent ran, False if nothing actionable was found.
@@ -174,6 +192,20 @@ def _run_fix_session(
     pr_dir = state_manager.get_pr_dir(pr_number)
     task_sections = []
     has_actionable_work = False
+
+    # Handle merge conflicts
+    if has_conflicts:
+        console.print("\n[bold red]Merge Conflicts[/bold red] - Agent will resolve...")
+        task_sections.append("""## Merge Conflicts
+
+This PR has merge conflicts that need to be resolved.
+
+1. Run `git fetch origin` to get latest changes
+2. Run `git merge origin/main` (or the base branch)
+3. Resolve any conflicts in the affected files
+4. Run tests to verify the merge didn't break anything
+5. Commit the merge resolution""")
+        has_actionable_work = True
 
     # Always download CI failures if CI failed
     if ci_failed:
@@ -370,6 +402,7 @@ def fix_pr(
             # Determine what needs fixing
             ci_failed = status.ci_state in ("FAILURE", "ERROR")
             has_comments = status.unresolved_threads > 0
+            has_conflicts = status.mergeable == "CONFLICTING"
 
             # Show status
             if ci_failed:
@@ -382,8 +415,11 @@ def fix_pr(
                     f"  Comments: [yellow]{status.unresolved_threads} unresolved[/yellow]"
                 )
 
+            if has_conflicts:
+                console.print("  Conflicts: [red]merge conflicts detected[/red]")
+
             # If anything needs fixing, download both and run combined session
-            if ci_failed or has_comments:
+            if ci_failed or has_comments or has_conflicts:
                 agent_ran = _run_fix_session(
                     agent,
                     github_client,
@@ -392,6 +428,7 @@ def fix_pr(
                     pr_number,
                     ci_failed=ci_failed,
                     comment_count=status.unresolved_threads,
+                    has_conflicts=has_conflicts,
                 )
 
                 if not agent_ran and not ci_failed:

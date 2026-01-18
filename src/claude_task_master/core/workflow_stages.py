@@ -199,6 +199,28 @@ class WorkflowStageHandler:
         try:
             pr_status = self.github_client.get_pr_status(state.current_pr)
 
+            # Get required checks from branch protection
+            required_checks = set(
+                self.github_client.get_required_status_checks(pr_status.base_branch)
+            )
+            reported_checks = {check.get("name", "") for check in pr_status.check_details}
+            missing_required = required_checks - reported_checks
+
+            # If required checks haven't reported yet, keep waiting
+            if missing_required:
+                console.info(f"Waiting for required checks: {', '.join(missing_required)}")
+                console.detail(f"Next check in {self.CI_POLL_INTERVAL}s...")
+                if not interruptible_sleep(self.CI_POLL_INTERVAL):
+                    return None
+                return None
+
+            # Check for merge conflicts
+            if pr_status.mergeable == "CONFLICTING":
+                console.warning("PR has merge conflicts - needs manual resolution")
+                state.workflow_stage = "blocked"
+                self.state_manager.save_state(state)
+                return 1  # Exit with error
+
             if pr_status.ci_state == "SUCCESS":
                 console.success(
                     f"CI passed! ({pr_status.checks_passed} passed, "
