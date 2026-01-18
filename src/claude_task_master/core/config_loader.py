@@ -302,6 +302,48 @@ def generate_default_config_file(
     return config_path
 
 
+def ensure_config_exists(working_dir: Path | None = None) -> tuple[Path, bool]:
+    """Ensure configuration file exists, creating with defaults if missing.
+
+    This is a safe, idempotent function that:
+    - Creates the config file with defaults if it doesn't exist
+    - Does nothing if the config file already exists
+    - Never overwrites existing configuration
+
+    Use this when you need to guarantee a config file exists before operations
+    that depend on it, without loading the full configuration.
+
+    Args:
+        working_dir: Optional working directory. If None, uses cwd.
+
+    Returns:
+        Tuple of (config_path, was_created) where:
+        - config_path: Path to the config file
+        - was_created: True if the file was just created, False if it already existed
+
+    Example:
+        >>> path, created = ensure_config_exists()
+        >>> if created:
+        ...     print(f"Created new config at {path}")
+        ... else:
+        ...     print(f"Using existing config at {path}")
+    """
+    config_path = get_config_file_path(working_dir)
+
+    if config_path.exists():
+        return config_path, False
+
+    # Create parent directory if needed
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Write default config
+    with open(config_path, "w", encoding="utf-8") as f:
+        f.write(generate_default_config_json(indent=2))
+        f.write("\n")  # Trailing newline for POSIX compliance
+
+    return config_path, True
+
+
 # =============================================================================
 # Environment Variable Override
 # =============================================================================
@@ -476,6 +518,7 @@ __all__ = [
     "load_config_from_file",
     "save_config_to_file",
     "generate_default_config_file",
+    "ensure_config_exists",
     # Path utilities
     "get_state_dir",
     "get_config_file_path",
