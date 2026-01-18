@@ -68,6 +68,8 @@ class TestTaskOptions:
             "log_level": "normal",
             "log_format": "text",
             "pr_per_task": False,
+            "webhook_url": None,
+            "webhook_secret": None,
         }
 
 
