@@ -7,6 +7,11 @@ Security Note:
     The MCP server defaults to stdio transport which is inherently secure.
     When using network transports (sse, streamable-http), the server binds
     to localhost (127.0.0.1) by default for security.
+
+    Password authentication can be enabled for network transports by setting
+    the CLAUDETM_PASSWORD or CLAUDETM_PASSWORD_HASH environment variable.
+    When enabled, clients must provide the password as a Bearer token in the
+    Authorization header.
 """
 
 from __future__ import annotations
@@ -14,15 +19,30 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from claude_task_master.mcp import tools
+
+if TYPE_CHECKING:
+    from starlette.applications import Starlette
 
 # Import MCP SDK - using try/except for graceful degradation
 try:
     from mcp.server.fastmcp import FastMCP
 except ImportError:
     FastMCP = None  # type: ignore[misc, assignment]
+
+# Import auth utilities - optional, only needed for network transports
+try:
+    from claude_task_master.auth import is_auth_enabled
+    from claude_task_master.mcp.auth import add_auth_middleware, check_auth_config
+
+    AUTH_AVAILABLE = True
+except ImportError:
+    AUTH_AVAILABLE = False
+    is_auth_enabled = lambda: False  # noqa: E731
+    add_auth_middleware = None  # type: ignore[assignment]
+    check_auth_config = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -364,6 +384,94 @@ def create_server(
 TransportType = Literal["stdio", "sse", "streamable-http"]
 
 
+def _get_authenticated_app(
+    mcp: FastMCP,
+    transport: TransportType,
+    mount_path: str | None = None,
+) -> Starlette:
+    """Get the Starlette app with authentication middleware if configured.
+
+    Args:
+        mcp: The FastMCP server instance.
+        transport: The transport type (sse or streamable-http).
+        mount_path: Optional mount path for SSE transport.
+
+    Returns:
+        Starlette application with optional authentication middleware.
+    """
+    # Get the appropriate app based on transport
+    if transport == "sse":
+        app = mcp.sse_app(mount_path)
+    else:  # streamable-http
+        app = mcp.streamable_http_app()
+
+    # Add authentication middleware if enabled
+    if AUTH_AVAILABLE and is_auth_enabled() and add_auth_middleware is not None:
+        logger.info("Adding password authentication to MCP server")
+        add_auth_middleware(app)
+
+    return app
+
+
+async def _run_network_transport_async(
+    mcp: FastMCP,
+    transport: TransportType,
+    host: str,
+    port: int,
+    mount_path: str | None = None,
+) -> None:
+    """Run the MCP server with network transport and authentication.
+
+    This is an async function that runs the server with uvicorn,
+    adding authentication middleware for network transports.
+
+    Args:
+        mcp: The FastMCP server instance.
+        transport: The transport type (sse or streamable-http).
+        host: Host to bind to.
+        port: Port to bind to.
+        mount_path: Optional mount path for SSE transport.
+    """
+    import uvicorn
+
+    # Get the app with authentication
+    app = _get_authenticated_app(mcp, transport, mount_path)
+
+    # Run with uvicorn
+    config = uvicorn.Config(
+        app,
+        host=host,
+        port=port,
+        log_level=mcp.settings.log_level.lower(),
+    )
+    server = uvicorn.Server(config)
+    await server.serve()
+
+
+def _log_server_config(
+    transport: TransportType,
+    host: str,
+    port: int,
+    auth_enabled: bool,
+) -> None:
+    """Log server configuration at startup.
+
+    Args:
+        transport: The transport type.
+        host: The host address.
+        port: The port number.
+        auth_enabled: Whether authentication is enabled.
+    """
+    logger.info("=" * 50)
+    logger.info("MCP Server Configuration:")
+    logger.info(f"  Transport: {transport}")
+    if transport != "stdio":
+        logger.info(f"  Host: {host}")
+        logger.info(f"  Port: {port}")
+        logger.info(f"  Password Auth: {'enabled' if auth_enabled else 'disabled'}")
+    logger.info("=" * 50)
+
+
 def run_server(
     name: str = "claude-task-master",
     working_dir: str | None = None,
@@ -381,19 +489,44 @@ def run_server(
         port: Port to bind to (only for network transports). Defaults to 8080.
 
     Security:
-        For network transports, defaults to localhost binding for security.
-        Set CLAUDETM_MCP_HOST to override (use with caution).
+        For network transports (sse, streamable-http):
+        - Defaults to localhost binding for security
+        - Set CLAUDETM_PASSWORD or CLAUDETM_PASSWORD_HASH to enable authentication
+        - When binding to non-localhost addresses, authentication is strongly recommended
     """
-    # Security warning for non-localhost binding
-    effective_host = host or MCP_HOST
-    if transport != "stdio" and effective_host not in ("127.0.0.1", "localhost", "::1"):
-        logger.warning(
-            f"MCP server binding to non-localhost address ({effective_host}). "
-            "Ensure proper authentication is configured."
-        )
+    import anyio
 
+    effective_host = host or MCP_HOST
+    effective_port = port or MCP_PORT
+
+    # Check authentication configuration for network transports
+    if transport != "stdio" and AUTH_AVAILABLE and check_auth_config is not None:
+        auth_enabled, warning = check_auth_config(transport, effective_host)
+        if warning:
+            logger.warning(warning)
+    else:
+        auth_enabled = AUTH_AVAILABLE and is_auth_enabled()
+
+    # Log configuration
+    _log_server_config(transport, effective_host, effective_port, auth_enabled)
+
+    # Create the MCP server
     mcp = create_server(name=name, working_dir=working_dir)
-    mcp.run(transport=transport)
+
+    # Configure host/port in FastMCP settings for network transports
+    if transport != "stdio":
+        mcp.settings.host = effective_host
+        mcp.settings.port = effective_port
+
+    # Run based on transport type
+    if transport == "stdio":
+        # stdio transport - no authentication needed, use FastMCP directly
+        mcp.run(transport="stdio")
+    else:
+        # Network transports - use custom runner with authentication
+        anyio.run(
+            lambda: _run_network_transport_async(mcp, transport, effective_host, effective_port)
+        )
 
 
 # =============================================================================
@@ -432,8 +565,20 @@ def main() -> None:
         default=MCP_PORT,
         help=f"Port to bind to for network transports (default: {MCP_PORT})",
     )
+    parser.add_argument(
+        "--password",
+        help=(
+            "Password for MCP authentication (sets CLAUDETM_PASSWORD env var). "
+            "Required for secure access when using network transports."
+        ),
+    )
 
     args = parser.parse_args()
+
+    # If --password provided, set the environment variable for auth middleware
+    if args.password:
+        os.environ["CLAUDETM_PASSWORD"] = args.password
+
     run_server(
         name=args.name,
         working_dir=args.working_dir,
