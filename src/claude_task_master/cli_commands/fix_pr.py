@@ -146,17 +146,22 @@ def _wait_for_ci_complete(github_client: GitHubClient, pr_number: int) -> PRStat
                 console.print("  [yellow]⚠ PR has merge conflicts[/yellow]")
             return status
 
+        # Build status summary
+        passed = status.checks_passed
+        failed = status.checks_failed
+        status_parts = []
+        if passed:
+            status_parts.append(f"[green]{passed} passed[/green]")
+        if failed:
+            status_parts.append(f"[red]{failed} failed[/red]")
+        status_summary = f" ({', '.join(status_parts)})" if status_parts else ""
+
         # Show what we're waiting for
-        if missing:
-            console.print(
-                f"  ⏳ Waiting for {len(all_waiting)} check(s): "
-                f"{', '.join(all_waiting[:3])}{'...' if len(all_waiting) > 3 else ''}"
-            )
-        else:
-            console.print(
-                f"  ⏳ Waiting for {len(pending)} check(s): "
-                f"{', '.join(pending[:3])}{'...' if len(pending) > 3 else ''}"
-            )
+        console.print(
+            f"  ⏳ Waiting for {len(all_waiting)} check(s): "
+            f"{', '.join(all_waiting[:3])}{'...' if len(all_waiting) > 3 else ''}"
+            f"{status_summary}"
+        )
 
         time.sleep(CI_POLL_INTERVAL)
 
