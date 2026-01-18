@@ -591,3 +591,81 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
     # - create_state_backup() -> Path | None
     # - cleanup_on_success(run_id: str) -> None
     # - _cleanup_old_logs(max_logs: int = 10) -> None
+
+    def update_options(
+        self, **kwargs: bool | int | str | None
+    ) -> dict[str, bool | int | str | None]:
+        """Update task options at runtime.
+
+        This method allows updating TaskOptions fields while preserving other
+        option values. It validates that provided option names are valid and
+        returns a dictionary of the changes that were applied.
+
+        Supported options:
+            - auto_merge: bool - Whether to auto-merge PRs
+            - max_sessions: int | None - Maximum number of sessions
+            - pause_on_pr: bool - Whether to pause on PR creation
+            - enable_checkpointing: bool - Whether to enable checkpointing
+            - log_level: str - Log level (quiet, normal, verbose)
+            - log_format: str - Log format (text, json)
+            - pr_per_task: bool - Whether to create PR per task
+
+        Args:
+            **kwargs: Configuration options to update. Only specified options
+                are updated; others retain their current values.
+
+        Returns:
+            dict[str, Any]: Dictionary of options that were actually changed,
+                with their new values.
+
+        Raises:
+            StateNotFoundError: If no state file exists.
+            ValueError: If invalid configuration options are provided.
+            StatePermissionError: If the file cannot be written.
+            StateLockError: If the file lock cannot be acquired.
+
+        Example:
+            ```python
+            state_manager = StateManager()
+            changed = state_manager.update_options(
+                max_sessions=10,
+                auto_merge=False
+            )
+            print(changed)  # {'max_sessions': 10, 'auto_merge': False}
+            ```
+        """
+        if not self.exists():
+            raise StateNotFoundError(self.state_file)
+
+        # Get valid option names from TaskOptions model
+        valid_options = set(TaskOptions.model_fields.keys())
+        provided_options = set(kwargs.keys())
+
+        # Check for invalid options
+        invalid_options = provided_options - valid_options
+        if invalid_options:
+            raise ValueError(
+                f"Invalid configuration options: {', '.join(sorted(invalid_options))}. "
+                f"Valid options: {', '.join(sorted(valid_options))}"
+            )
+
+        # Load current state
+        state = self.load_state()
+
+        # Get current options as dict
+        current_options = state.options.model_dump()
+        updated_options: dict[str, bool | int | str | None] = {}
+
+        # Apply updates, tracking what actually changed
+        for key, value in kwargs.items():
+            if value is not None and current_options.get(key) != value:
+                current_options[key] = value
+                updated_options[key] = value
+
+        # Only save if there were actual changes
+        if updated_options:
+            state.options = TaskOptions(**current_options)
+            # Skip transition validation since status isn't changing
+            self.save_state(state, validate_transition=False)
+
+        return updated_options

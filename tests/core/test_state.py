@@ -1064,7 +1064,7 @@ class TestStateTransitions:
 
     def test_valid_statuses_defined(self):
         """Test that valid statuses are properly defined."""
-        expected = {"planning", "working", "blocked", "paused", "success", "failed"}
+        expected = {"planning", "working", "blocked", "paused", "stopped", "success", "failed"}
         assert VALID_STATUSES == expected
 
     def test_valid_transitions_from_planning(self):
@@ -1534,7 +1534,7 @@ class TestResumeStatusConstants:
 
     def test_resumable_statuses_defined(self):
         """Test that resumable statuses are properly defined."""
-        expected = {"paused", "working", "blocked"}
+        expected = {"paused", "stopped", "working", "blocked"}
         assert RESUMABLE_STATUSES == expected
 
     def test_terminal_and_resumable_are_disjoint(self):
@@ -1548,6 +1548,7 @@ class TestResumeStatusConstants:
 
     def test_all_statuses_covered(self):
         """Test that all statuses are accounted for."""
+        # Note: "stopped" is now in RESUMABLE_STATUSES (can be resumed)
         all_covered = TERMINAL_STATUSES | RESUMABLE_STATUSES | {"planning"}
         assert all_covered == VALID_STATUSES
 

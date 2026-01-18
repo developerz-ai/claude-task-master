@@ -39,7 +39,6 @@ from claude_task_master.core.shutdown import (
 from claude_task_master.core.state import (
     StateManager,
     StateNotFoundError,
-    TaskOptions,
 )
 from claude_task_master.core.state_exceptions import RESUMABLE_STATUSES
 
@@ -358,33 +357,12 @@ class ControlManager:
         """
         self._ensure_task_exists("update_config")
 
+        # Use StateManager.update_options() for the actual update
+        updated_options = self.state_manager.update_options(**kwargs)
+
+        # Load current state for response details
         state = self.state_manager.load_state()
-
-        # Get valid option names from TaskOptions
-        valid_options = set(TaskOptions.model_fields.keys())
-        provided_options = set(kwargs.keys())
-
-        # Check for invalid options
-        invalid_options = provided_options - valid_options
-        if invalid_options:
-            raise ValueError(
-                f"Invalid configuration options: {', '.join(sorted(invalid_options))}. "
-                f"Valid options: {', '.join(sorted(valid_options))}"
-            )
-
-        # Get current options as dict
         current_options = state.options.model_dump()
-        updated_options: dict[str, Any] = {}
-
-        # Apply updates
-        for key, value in kwargs.items():
-            if value is not None and current_options.get(key) != value:
-                current_options[key] = value
-                updated_options[key] = value
-
-        # Update state with new options
-        state.options = TaskOptions(**current_options)
-        self.state_manager.save_state(state, validate_transition=False)
 
         if updated_options:
             message = f"Configuration updated: {', '.join(f'{k}={v}' for k, v in updated_options.items())}"
