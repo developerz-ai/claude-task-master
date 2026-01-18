@@ -10,13 +10,40 @@ Autonomous task orchestration system that keeps Claude working until a goal is a
 
 ## Quick Start
 
+### Installation
+
+**Option 1: Using uv (recommended)**
+
+```bash
+# Install with uv
+uv tool install claude-task-master
+```
+
+**Option 2: Using pip**
+
 ```bash
 # Install from PyPI
 pip install claude-task-master
-
-# Or with uv (recommended)
-uv tool install claude-task-master
 ```
+
+**Option 3: Using Docker**
+
+```bash
+# Pull the official Docker image from GitHub Container Registry
+docker pull ghcr.io/developerz-ai/claude-task-master:latest
+
+# Run with Docker (requires Claude credentials mounted)
+docker run -d \
+  --name claudetm \
+  -p 8000:8000 \
+  -v ~/.claude:/home/claudetm/.claude:ro \
+  -v $(pwd):/app/project \
+  -v ~/.gitconfig:/home/claudetm/.gitconfig:ro \
+  -v ~/.config/gh:/home/claudetm/.config/gh:ro \
+  ghcr.io/developerz-ai/claude-task-master:latest
+```
+
+See [Docker Deployment Guide](./docs/docker.md) for detailed Docker setup, volume mounts, and configuration options.
 
 ### Authentication
 
@@ -31,24 +58,49 @@ claude
 claudetm doctor
 ```
 
+**For Docker users:** Ensure your `~/.claude/.credentials.json` exists before running the container, as Claude Task Master needs OAuth credentials to function.
+
 ### Upgrading
 
+**With uv:**
 ```bash
-# With pip
-pip install --upgrade claude-task-master
-
-# With uv
 uv tool install claude-task-master --force --reinstall
+```
 
-# Check version
+**With pip:**
+```bash
+pip install --upgrade claude-task-master
+```
+
+**With Docker:**
+```bash
+# Pull the latest image
+docker pull ghcr.io/developerz-ai/claude-task-master:latest
+
+# Restart your container with the new image
+docker-compose up -d
+```
+
+**Check version:**
+```bash
 claudetm --version
 ```
 
 ### Run a Task
 
+**Using the CLI:**
 ```bash
 cd your-project
 claudetm start "Add user authentication with tests"
+```
+
+**Using Docker:**
+```bash
+# Task execution is handled through the unified server
+# Create tasks via the REST API or MCP interface
+curl -H "Authorization: Bearer password" \
+     http://localhost:8000/tasks -X POST \
+     -d '{"goal": "Add user authentication"}'
 ```
 
 ## Overview
