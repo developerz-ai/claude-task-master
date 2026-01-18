@@ -1,5 +1,7 @@
 """CLI entry point for Claude Task Master."""
 
+import asyncio
+
 import typer
 from rich.console import Console
 
@@ -7,6 +9,7 @@ from .cli_commands.github import register_github_commands
 from .cli_commands.info import register_info_commands
 from .cli_commands.workflow import register_workflow_commands
 from .core.state import StateManager
+from .utils.debug_claude_md import debug_claude_md_detection
 from .utils.doctor import SystemDoctor
 
 app = typer.Typer(
@@ -112,6 +115,37 @@ def clean(force: bool = typer.Option(False, "--force", "-f", help="Skip confirma
         console.print("[green]✓ Task state cleaned[/green]")
 
     raise typer.Exit(0)
+
+
+@app.command()
+def debug_md(
+    directory: str | None = typer.Argument(None, help="Directory to test (defaults to current)"),
+) -> None:
+    """Debug CLAUDE.md detection when changing directories for queries.
+
+    Tests whether CLAUDE.md is properly detected by Claude when the SDK
+    changes directories for a query. This is useful for verifying that
+    project context is loaded correctly.
+
+    The test will:
+    1. Check if CLAUDE.md exists in the target directory
+    2. Run a simple query from that directory
+    3. Analyze Claude's response to detect project context indicators
+    4. Report whether CLAUDE.md appears to be loaded
+
+    Examples:
+        claudetm debug-md
+        claudetm debug-md /path/to/project
+    """
+    try:
+        success = asyncio.run(debug_claude_md_detection(directory))
+        raise typer.Exit(0 if success else 1)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Interrupted[/yellow]")
+        raise typer.Exit(2) from None
+    except Exception as e:
+        console.print(f"[red]Error running debug: {e}[/red]")
+        raise typer.Exit(1) from None
 
 
 @app.command()
