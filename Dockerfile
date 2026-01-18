@@ -19,6 +19,11 @@
 #   CLAUDETM_WEBHOOK_SECRET - Webhook HMAC secret (optional)
 # =============================================================================
 
+# Build arguments for version tracking (passed from docker build --build-arg or GitHub Actions)
+ARG VERSION=dev
+ARG GIT_COMMIT=unknown
+ARG BUILD_DATE=unknown
+
 # -----------------------------------------------------------------------------
 # Stage 1: Builder - Install dependencies
 # -----------------------------------------------------------------------------
@@ -56,13 +61,21 @@ RUN pip install --upgrade pip && \
 # -----------------------------------------------------------------------------
 FROM python:3.12-slim AS runtime
 
-# Labels for container metadata
+# Accept build arguments in runtime stage for labels
+ARG VERSION=dev
+ARG GIT_COMMIT=unknown
+ARG BUILD_DATE=unknown
+
+# Labels for container metadata (including version tracking from build arguments)
 LABEL org.opencontainers.image.title="Claude Task Master" \
       org.opencontainers.image.description="Autonomous task orchestration system with REST API and MCP server" \
       org.opencontainers.image.url="https://github.com/developerz-ai/claude-task-master" \
       org.opencontainers.image.source="https://github.com/developerz-ai/claude-task-master" \
       org.opencontainers.image.vendor="DeveloperZ.AI" \
-      org.opencontainers.image.licenses="MIT"
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${GIT_COMMIT}" \
+      org.opencontainers.image.created="${BUILD_DATE}"
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
