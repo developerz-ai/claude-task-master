@@ -89,6 +89,9 @@ def find_bash_wrapper() -> Path | None:
             if found_path.is_file() and os.access(found_path, os.X_OK):
                 return found_path
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        # Silently ignore failures from 'which' command - this is just a fallback
+        # search method. If 'which' isn't available or times out, we simply
+        # return None to indicate the wrapper wasn't found.
         pass
 
     return None
