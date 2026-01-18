@@ -105,6 +105,9 @@ def _is_check_pending(check: dict[str, Any]) -> bool:
 def _wait_for_ci_complete(github_client: GitHubClient, pr_number: int) -> PRStatus:
     """Wait for all CI checks to complete.
 
+    Waits for all checks to complete, then does one extra refresh to catch
+    late-starting checks (like CodeRabbit) that may not appear immediately.
+
     Args:
         github_client: GitHub client for API calls.
         pr_number: PR number to check.
@@ -114,8 +117,12 @@ def _wait_for_ci_complete(github_client: GitHubClient, pr_number: int) -> PRStat
     """
     console.print(f"[bold]Waiting for CI checks on PR #{pr_number}...[/bold]")
 
+    last_check_count = 0
+    stable_cycles = 0  # Track how many cycles the check count has been stable
+
     while True:
         status = github_client.get_pr_status(pr_number)
+        current_check_count = len(status.check_details)
 
         # Count pending checks (both CheckRun and StatusContext)
         pending = [
@@ -125,43 +132,68 @@ def _wait_for_ci_complete(github_client: GitHubClient, pr_number: int) -> PRStat
         ]
 
         if not pending:
-            # All checks complete
-            return status
+            # All current checks complete - but wait for check count to stabilize
+            # to catch late-starting checks like CodeRabbit
+            if current_check_count == last_check_count and current_check_count > 0:
+                stable_cycles += 1
+                if stable_cycles >= 2:
+                    # Check count stable for 2 cycles, safe to return
+                    return status
+                console.print(
+                    f"  ✓ All {current_check_count} checks complete, verifying no new checks..."
+                )
+            else:
+                stable_cycles = 0
+                if current_check_count > 0:
+                    console.print(f"  ✓ {current_check_count} checks complete, waiting for more...")
+        else:
+            stable_cycles = 0
+            # Show progress
+            console.print(
+                f"  ⏳ Waiting for {len(pending)} check(s): "
+                f"{', '.join(pending[:3])}{'...' if len(pending) > 3 else ''}"
+            )
 
-        # Show progress
-        console.print(
-            f"  ⏳ Waiting for {len(pending)} check(s): "
-            f"{', '.join(pending[:3])}{'...' if len(pending) > 3 else ''}"
-        )
+        last_check_count = current_check_count
         time.sleep(CI_POLL_INTERVAL)
 
 
-def _run_ci_fix_session(
+def _run_fix_session(
     agent: AgentWrapper,
     github_client: GitHubClient,
     state_manager: StateManager,
     pr_context: PRContextManager,
     pr_number: int,
-) -> None:
-    """Run agent session to fix CI failures.
+    ci_failed: bool,
+    comment_count: int,
+) -> bool:
+    """Run agent session to fix CI failures and/or address review comments.
+
+    Downloads both CI failures and comments (if present) so the agent can
+    address everything in one session.
 
     Args:
         agent: Agent wrapper for running work sessions.
         github_client: GitHub client for API calls.
         state_manager: State manager for persistence.
-        pr_context: PR context manager for saving CI logs.
+        pr_context: PR context manager for saving CI logs and comments.
         pr_number: PR number being fixed.
+        ci_failed: Whether CI has failed.
+        comment_count: Number of unresolved comments.
+
+    Returns:
+        True if agent ran, False if nothing actionable was found.
     """
-    console.print("\n[bold red]CI Failed[/bold red] - Running agent to fix...")
-
-    # Save CI failure logs
-    pr_context.save_ci_failures(pr_number)
-
-    # Build fix prompt
     pr_dir = state_manager.get_pr_dir(pr_number)
-    ci_path = f"{pr_dir}/ci/"
+    task_sections = []
+    has_actionable_work = False
 
-    task_description = f"""CI has failed for PR #{pr_number}.
+    # Always download CI failures if CI failed
+    if ci_failed:
+        console.print("\n[bold red]CI Failed[/bold red] - Downloading failure logs...")
+        pr_context.save_ci_failures(pr_number)
+        ci_path = f"{pr_dir}/ci/"
+        task_sections.append(f"""## CI Failures
 
 **Read the CI failure logs from:** `{ci_path}`
 
@@ -170,80 +202,34 @@ Use Glob to find all .txt files, then Read each one to understand the errors.
 **IMPORTANT:** Fix ALL CI failures, even if they seem unrelated to your current work.
 Your job is to keep CI green. Pre-existing issues, flaky tests, lint errors - fix them all.
 
-Please:
-1. Read ALL files in the ci/ directory
-2. Understand ALL error messages (lint, tests, types, etc.)
-3. Fix everything that's failing - don't skip anything
-4. Run tests/lint locally to verify ALL passes
-5. Commit and push the fixes
+- Read ALL files in the ci/ directory
+- Understand ALL error messages (lint, tests, types, etc.)
+- Fix everything that's failing - don't skip anything""")
+        has_actionable_work = True
 
-After fixing, end with: TASK COMPLETE"""
-
-    current_branch = _get_current_branch()
-    agent.run_work_session(
-        task_description=task_description,
-        context="",
-        model_override=ModelType.OPUS,
-        required_branch=current_branch,
-    )
-
-
-def _run_comments_fix_session(
-    agent: AgentWrapper,
-    github_client: GitHubClient,
-    state_manager: StateManager,
-    pr_context: PRContextManager,
-    pr_number: int,
-    comment_count: int,
-) -> bool:
-    """Run agent session to address review comments.
-
-    Args:
-        agent: Agent wrapper for running work sessions.
-        github_client: GitHub client for API calls.
-        state_manager: State manager for persistence.
-        pr_context: PR context manager for saving comments.
-        pr_number: PR number being fixed.
-        comment_count: Number of unresolved comments.
-
-    Returns:
-        True if agent ran and made changes, False if no actionable comments found.
-    """
-    console.print(
-        f"\n[bold yellow]{comment_count} unresolved comment(s)[/bold yellow] - Running agent to address..."
-    )
-
-    # Save PR comments
-    saved_count = pr_context.save_pr_comments(pr_number)
-    console.print(f"  Saved {saved_count} actionable comment(s) for review")
-
-    # Guard against loops when no actionable comments are found
-    if saved_count == 0:
+    # Always download comments if there are unresolved threads
+    saved_comment_count = 0
+    if comment_count > 0:
         console.print(
-            "[yellow]  No actionable comments to address (may be bot status updates or already addressed).[/yellow]"
+            f"\n[bold yellow]{comment_count} unresolved comment(s)[/bold yellow] - Downloading..."
         )
-        console.print("[yellow]  Unresolved threads may need manual review on GitHub.[/yellow]")
-        return False
+        saved_comment_count = pr_context.save_pr_comments(pr_number)
+        console.print(f"  Saved {saved_comment_count} actionable comment(s) for review")
 
-    # Build fix prompt
-    pr_dir = state_manager.get_pr_dir(pr_number)
-    comments_path = f"{pr_dir}/comments/"
-    resolve_json_path = f"{pr_dir}/resolve-comments.json"
-
-    task_description = f"""PR #{pr_number} has review comments to address.
+        if saved_comment_count > 0:
+            comments_path = f"{pr_dir}/comments/"
+            resolve_json_path = f"{pr_dir}/resolve-comments.json"
+            task_sections.append(f"""## Review Comments
 
 **Read the review comments from:** `{comments_path}`
 
 Use Glob to find all .txt files, then Read each one to understand the feedback.
 
-Please:
-1. Read ALL comment files in the comments/ directory
-2. For each comment:
-   - Make the requested change, OR
-   - Explain why it's not needed
-3. Run tests to verify
-4. Commit and push the fixes
-5. Create a resolution summary file at: `{resolve_json_path}`
+For each comment:
+- Make the requested change, OR
+- Explain why it's not needed
+
+After addressing comments, create a resolution summary file at: `{resolve_json_path}`
 
 **Resolution file format:**
 ```json
@@ -262,11 +248,33 @@ Please:
 Copy the Thread ID from each comment file into the resolution JSON.
 
 **IMPORTANT: DO NOT resolve threads directly using GitHub GraphQL mutations.**
-The orchestrator will handle thread resolution automatically after you create the resolution file.
-Your job is to: fix the code, run tests, commit, push, and create the resolution JSON file.
+The orchestrator will handle thread resolution automatically after you create the resolution file.""")
+            has_actionable_work = True
 
-After addressing ALL comments and creating the resolution file, end with: TASK COMPLETE"""
+    # Guard against loops when nothing actionable
+    if not has_actionable_work:
+        if comment_count > 0 and saved_comment_count == 0:
+            console.print(
+                "[yellow]  No actionable comments to address (may be bot status updates or already addressed).[/yellow]"
+            )
+            console.print("[yellow]  Unresolved threads may need manual review on GitHub.[/yellow]")
+        return False
 
+    # Build combined task description
+    task_description = f"""PR #{pr_number} needs fixes.
+
+{chr(10).join(task_sections)}
+
+## Instructions
+
+1. Read ALL relevant files (CI logs and/or comments)
+2. Fix ALL issues found
+3. Run tests/lint locally to verify everything passes
+4. Commit and push the fixes
+
+After fixing everything, end with: TASK COMPLETE"""
+
+    console.print("\n[bold]Running agent to fix all issues...[/bold]")
     current_branch = _get_current_branch()
     agent.run_work_session(
         task_description=task_description,
@@ -275,8 +283,10 @@ After addressing ALL comments and creating the resolution file, end with: TASK C
         required_branch=current_branch,
     )
 
-    # Post replies to comments using resolution file
-    pr_context.post_comment_replies(pr_number)
+    # Post replies to comments using resolution file (if comments were addressed)
+    if saved_comment_count > 0:
+        pr_context.post_comment_replies(pr_number)
+
     return True
 
 
@@ -370,38 +380,42 @@ def fix_pr(
             # Wait for all CI checks to complete
             status = _wait_for_ci_complete(github_client, pr_number)
 
-            # Check CI status
-            if status.ci_state in ("FAILURE", "ERROR"):
+            # Determine what needs fixing
+            ci_failed = status.ci_state in ("FAILURE", "ERROR")
+            has_comments = status.unresolved_threads > 0
+
+            # Show status
+            if ci_failed:
                 console.print(f"  CI: [red]{status.ci_state}[/red] ({status.checks_failed} failed)")
-                _run_ci_fix_session(agent, github_client, state_manager, pr_context, pr_number)
+            else:
+                console.print(f"  CI: [green]PASSED[/green] ({status.checks_passed} passed)")
 
-                # Wait for CI to start after push
-                console.print(f"\nWaiting {CI_START_WAIT}s for CI to start...")
-                time.sleep(CI_START_WAIT)
-                continue
+            if has_comments:
+                console.print(
+                    f"  Comments: [yellow]{status.unresolved_threads} unresolved[/yellow]"
+                )
 
-            # CI passed - check for unresolved comments
-            console.print(f"  CI: [green]PASSED[/green] ({status.checks_passed} passed)")
-
-            if status.unresolved_threads > 0:
-                agent_ran = _run_comments_fix_session(
+            # If anything needs fixing, download both and run combined session
+            if ci_failed or has_comments:
+                agent_ran = _run_fix_session(
                     agent,
                     github_client,
                     state_manager,
                     pr_context,
                     pr_number,
-                    status.unresolved_threads,
+                    ci_failed=ci_failed,
+                    comment_count=status.unresolved_threads,
                 )
 
-                if not agent_ran:
-                    # No actionable comments - break to avoid infinite loop
+                if not agent_ran and not ci_failed:
+                    # No actionable work and CI passed - unresolved threads need manual review
                     console.print(
                         "\n[yellow]Exiting: unresolved threads need manual review.[/yellow]"
                     )
                     state_manager.release_session_lock()
                     raise typer.Exit(1)
 
-                # Wait for CI to start after push (comments fix might have changed code)
+                # Wait for CI to start after push
                 console.print(f"\nWaiting {CI_START_WAIT}s for CI to start...")
                 time.sleep(CI_START_WAIT)
                 continue

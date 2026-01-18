@@ -88,8 +88,11 @@ class TestFixPRCommand:
         """Should accept max-iterations option."""
         mock_github = MagicMock()
         mock_github.get_pr_for_current_branch.return_value = None
+        # Make get_pr_status raise to exit early (simulates reaching the loop)
+        mock_github.get_pr_status.side_effect = Exception("test exit")
         mock_github_class.return_value = mock_github
 
         result = runner.invoke(app, ["fix-pr", "123", "-m", "5"])
-        # Will fail but should parse the option
-        assert result.exit_code != 0  # Will fail due to missing PR
+        # Will fail due to exception but should parse the option
+        assert result.exit_code != 0
+        assert "Max iterations: 5" in result.stdout
