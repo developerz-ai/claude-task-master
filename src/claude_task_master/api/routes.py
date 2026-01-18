@@ -13,9 +13,8 @@ Endpoints:
 
 Usage:
     from claude_task_master.api.routes import create_info_router
-    from claude_task_master.core.state import StateManager
 
-    router = create_info_router(StateManager())
+    router = create_info_router()
     app.include_router(router)
 """
 

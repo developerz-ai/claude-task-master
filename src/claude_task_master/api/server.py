@@ -122,10 +122,18 @@ def _configure_cors(app: FastAPI, origins: list[str] | None = None) -> None:
 
     allowed_origins = origins if origins is not None else _parse_cors_origins(CORS_ORIGINS)
 
+    # Disable credentials when wildcard origin is used (CORS spec requirement)
+    allow_credentials = "*" not in allowed_origins
+    if "*" in allowed_origins:
+        logger.warning(
+            "CORS '*' wildcard configured; disabling allow_credentials per spec. "
+            "Use explicit origins for credentialed requests."
+        )
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allowed_origins,
-        allow_credentials=True,
+        allow_credentials=allow_credentials,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["*"],
         expose_headers=["X-Request-ID"],
@@ -182,9 +190,8 @@ def create_app(
             "REST API for Claude Task Master task orchestration.\n\n"
             "Provides endpoints for:\n"
             "- Task status monitoring\n"
-            "- Control operations (pause, stop, resume)\n"
-            "- Configuration management\n"
-            "- Log and progress access"
+            "- Plan, logs, progress, and context access\n"
+            "- Health checks"
         ),
         version=__version__,
         lifespan=lifespan,
@@ -193,8 +200,9 @@ def create_app(
         openapi_url="/openapi.json" if include_docs else None,
     )
 
-    # Store working directory in app state
+    # Store working directory and include_docs flag in app state
     app.state.working_dir = work_dir
+    app.state.include_docs = include_docs
 
     # Configure CORS
     _configure_cors(app, cors_origins)
@@ -215,11 +223,14 @@ def create_app(
         Returns basic information about the API including name, version,
         and links to documentation.
         """
+        # Get docs URL from app state (will be None if docs are disabled)
+        docs_url = app.docs_url if app.state.include_docs else None
+
         return APIInfo(
             name="Claude Task Master API",
             version=__version__,
             description="REST API for Claude Task Master task orchestration",
-            docs_url="/docs",
+            docs_url=docs_url,
         )
 
     # Register routes from routes module
