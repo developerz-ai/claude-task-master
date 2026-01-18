@@ -52,11 +52,17 @@ from claude_task_master.api.models import (
     WorkflowStage,
 )
 
+# Server components
+from claude_task_master.api.server import create_app, get_app, run_server
+
 # Future imports as implemented:
-# - server.py: FastAPI app factory and server runner
 # - routes.py: API endpoint definitions
 
 __all__: list[str] = [
+    # Server
+    "create_app",
+    "run_server",
+    "get_app",
     # Enums
     "TaskStatus",
     "WorkflowStage",
