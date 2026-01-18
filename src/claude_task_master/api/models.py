@@ -525,10 +525,10 @@ class APIInfo(BaseModel):
         name: API name.
         version: API version.
         description: API description.
-        docs_url: URL to API documentation.
+        docs_url: URL to API documentation (None if docs disabled).
     """
 
     name: str = "Claude Task Master API"
     version: str
     description: str = "REST API for Claude Task Master task orchestration"
-    docs_url: str = "/docs"
+    docs_url: str | None = "/docs"
