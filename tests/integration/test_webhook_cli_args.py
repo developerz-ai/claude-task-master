@@ -7,6 +7,7 @@ These tests verify that:
 """
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from typer.testing import CliRunner
@@ -20,6 +21,17 @@ from claude_task_master.core.state import StateManager
 def runner():
     """Provide a CLI test runner."""
     return CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def mock_cleanup_on_success():
+    """Prevent state cleanup so we can verify state was written.
+
+    The orchestrator calls cleanup_on_success() after a successful run,
+    which removes state files. We mock it to preserve state for assertion.
+    """
+    with patch("claude_task_master.core.state_backup.BackupRecoveryMixin.cleanup_on_success"):
+        yield
 
 
 class TestWebhookEnvironmentVariables:
@@ -68,12 +80,12 @@ class TestWebhookEnvironmentVariables:
 
         # Verify the state file contains the webhook URL
         state_file = integration_state_dir / "state.json"
-        if state_file.exists():
-            import json
+        assert state_file.exists(), "State file should be written after start command"
+        import json
 
-            with open(state_file) as f:
-                state_data = json.load(f)
-                assert state_data["options"]["webhook_url"] == "https://example.com/webhooks"
+        with open(state_file) as f:
+            state_data = json.load(f)
+            assert state_data["options"]["webhook_url"] == "https://example.com/webhooks"
 
     def test_webhook_url_from_environment_variable(
         self,
@@ -114,12 +126,12 @@ class TestWebhookEnvironmentVariables:
 
         # Verify the state file contains the webhook URL from environment variable
         state_file = integration_state_dir / "state.json"
-        if state_file.exists():
-            import json
+        assert state_file.exists(), "State file should be written after start command"
+        import json
 
-            with open(state_file) as f:
-                state_data = json.load(f)
-                assert state_data["options"]["webhook_url"] == "https://example.com/webhooks-env"
+        with open(state_file) as f:
+            state_data = json.load(f)
+            assert state_data["options"]["webhook_url"] == "https://example.com/webhooks-env"
 
     def test_webhook_url_cli_takes_precedence_over_env(
         self,
@@ -164,12 +176,12 @@ class TestWebhookEnvironmentVariables:
 
         # Verify the state file contains the CLI argument, not the env variable
         state_file = integration_state_dir / "state.json"
-        if state_file.exists():
-            import json
+        assert state_file.exists(), "State file should be written after start command"
+        import json
 
-            with open(state_file) as f:
-                state_data = json.load(f)
-                assert state_data["options"]["webhook_url"] == "https://example.com/webhooks-cli"
+        with open(state_file) as f:
+            state_data = json.load(f)
+            assert state_data["options"]["webhook_url"] == "https://example.com/webhooks-cli"
 
     def test_webhook_secret_from_cli_argument(
         self,
@@ -216,12 +228,12 @@ class TestWebhookEnvironmentVariables:
 
         # Verify the state file contains the webhook secret
         state_file = integration_state_dir / "state.json"
-        if state_file.exists():
-            import json
+        assert state_file.exists(), "State file should be written after start command"
+        import json
 
-            with open(state_file) as f:
-                state_data = json.load(f)
-                assert state_data["options"]["webhook_secret"] == "my-secret-key"
+        with open(state_file) as f:
+            state_data = json.load(f)
+            assert state_data["options"]["webhook_secret"] == "my-secret-key"
 
     def test_webhook_secret_from_environment_variable(
         self,
@@ -263,12 +275,12 @@ class TestWebhookEnvironmentVariables:
 
         # Verify the state file contains the webhook secret from environment variable
         state_file = integration_state_dir / "state.json"
-        if state_file.exists():
-            import json
+        assert state_file.exists(), "State file should be written after start command"
+        import json
 
-            with open(state_file) as f:
-                state_data = json.load(f)
-                assert state_data["options"]["webhook_secret"] == "env-secret-key"
+        with open(state_file) as f:
+            state_data = json.load(f)
+            assert state_data["options"]["webhook_secret"] == "env-secret-key"
 
     def test_webhook_secret_cli_takes_precedence_over_env(
         self,
@@ -314,12 +326,12 @@ class TestWebhookEnvironmentVariables:
 
         # Verify the state file contains the CLI argument, not the env variable
         state_file = integration_state_dir / "state.json"
-        if state_file.exists():
-            import json
+        assert state_file.exists(), "State file should be written after start command"
+        import json
 
-            with open(state_file) as f:
-                state_data = json.load(f)
-                assert state_data["options"]["webhook_secret"] == "cli-secret"
+        with open(state_file) as f:
+            state_data = json.load(f)
+            assert state_data["options"]["webhook_secret"] == "cli-secret"
 
     def test_no_webhook_when_neither_cli_nor_env_set(
         self,
@@ -362,10 +374,10 @@ class TestWebhookEnvironmentVariables:
 
         # Verify the state file has no webhook URL
         state_file = integration_state_dir / "state.json"
-        if state_file.exists():
-            import json
+        assert state_file.exists(), "State file should be written after start command"
+        import json
 
-            with open(state_file) as f:
-                state_data = json.load(f)
-                assert state_data["options"]["webhook_url"] is None
-                assert state_data["options"]["webhook_secret"] is None
+        with open(state_file) as f:
+            state_data = json.load(f)
+            assert state_data["options"]["webhook_url"] is None
+            assert state_data["options"]["webhook_secret"] is None

@@ -168,10 +168,19 @@ def start(
 
     console.print(f"[bold green]Starting new task:[/bold green] {goal}")
     console.print(f"Model: {model}, Auto-merge: {auto_merge}, Log: {log_level}/{log_format}")
+
+    # Validate and create webhook client early (before state initialization)
+    # to avoid stuck resumes if the URL is invalid
+    wh_client: WebhookClient | None = None
     if webhook_url:
         console.print(
             f"Webhook: {webhook_url} (secret: {'configured' if webhook_secret else 'none'})"
         )
+        try:
+            wh_client = WebhookClient(url=webhook_url, secret=webhook_secret)
+        except ValueError as e:
+            console.print(f"[red]Invalid webhook configuration: {e}[/red]")
+            raise typer.Exit(1) from None
 
     try:
         # Initialize configuration (creates config.json with defaults if missing)
@@ -245,10 +254,8 @@ def start(
             console.print(f"\n[red]Planning failed: {e}[/red]")
             raise typer.Exit(1) from None
 
-        # Create webhook client if URL provided
-        wh_client: WebhookClient | None = None
-        if webhook_url:
-            wh_client = WebhookClient(url=webhook_url, secret=webhook_secret)
+        # Print webhook notification status (client already created above)
+        if wh_client:
             console.print("[dim]Webhook notifications enabled[/dim]")
 
         # Run work loop

@@ -611,6 +611,8 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
             - log_level: str - Log level (quiet, normal, verbose)
             - log_format: str - Log format (text, json)
             - pr_per_task: bool - Whether to create PR per task
+            - webhook_url: str | None - Webhook endpoint URL
+            - webhook_secret: str | None - HMAC secret for signing webhook payloads
 
         Args:
             **kwargs: Configuration options to update. Only specified options
