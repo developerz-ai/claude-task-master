@@ -19,8 +19,24 @@ uv tool install claude-task-master
 
 # Verify setup
 claudetm doctor
+```
 
-# Run a task
+### Upgrading
+
+```bash
+# With pip
+pip install --upgrade claude-task-master
+
+# With uv
+uv tool install claude-task-master --force --reinstall
+
+# Check version
+claudetm --version
+```
+
+### Run a Task
+
+```bash
 cd your-project
 claudetm start "Add user authentication with tests"
 ```
