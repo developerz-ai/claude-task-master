@@ -186,9 +186,16 @@ load_config() {
 # Python Invocation
 # ============================================================================
 
-# Find the best way to invoke Python
+# Find the best way to invoke the Python CLI
+# Priority: claudetm-py (installed) > uv run > python -m
 find_python() {
-    # First, try to use uv if available (recommended)
+    # First, check if claudetm-py is available (installed via pip/uv tool install)
+    if command_exists claudetm-py; then
+        echo "claudetm-py"
+        return 0
+    fi
+
+    # Try to use uv if available (recommended for development)
     if command_exists uv; then
         echo "uv run python -m claude_task_master.cli"
         return 0
