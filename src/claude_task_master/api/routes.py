@@ -10,12 +10,16 @@ Endpoints:
 - GET /progress: Get progress summary
 - GET /context: Get accumulated context/learnings
 - GET /health: Health check endpoint
+- POST /control/stop: Stop a running task with optional cleanup
 
 Usage:
-    from claude_task_master.api.routes import create_info_router
+    from claude_task_master.api.routes import create_info_router, create_control_router
 
     router = create_info_router()
     app.include_router(router)
+
+    control_router = create_control_router()
+    app.include_router(control_router)
 """
 
 from __future__ import annotations
@@ -28,17 +32,20 @@ from typing import TYPE_CHECKING
 from claude_task_master import __version__
 from claude_task_master.api.models import (
     ContextResponse,
+    ControlResponse,
     ErrorResponse,
     HealthResponse,
     LogsResponse,
     PlanResponse,
     ProgressResponse,
+    StopRequest,
     TaskOptionsResponse,
     TaskProgressInfo,
     TaskStatus,
     TaskStatusResponse,
     WorkflowStage,
 )
+from claude_task_master.core.control import ControlManager
 from claude_task_master.core.state import StateManager
 
 if TYPE_CHECKING:
@@ -539,6 +546,112 @@ def create_info_router() -> APIRouter:
 
 
 # =============================================================================
+# Control Router (Stop)
+# =============================================================================
+
+
+def create_control_router() -> APIRouter:
+    """Create router for control endpoints.
+
+    These endpoints allow runtime control of task execution including
+    stopping tasks with optional cleanup.
+
+    Returns:
+        APIRouter configured with control endpoints.
+
+    Raises:
+        ImportError: If FastAPI is not installed.
+    """
+    if not FASTAPI_AVAILABLE:
+        raise ImportError(
+            "FastAPI not installed. Install with: pip install claude-task-master[api]"
+        )
+
+    router = APIRouter(tags=["Control"])
+
+    @router.post(
+        "/control/stop",
+        response_model=ControlResponse,
+        responses={
+            400: {"model": ErrorResponse, "description": "Invalid operation for current state"},
+            404: {"model": ErrorResponse, "description": "No active task found"},
+            500: {"model": ErrorResponse, "description": "Internal server error"},
+        },
+        summary="Stop Task",
+        description="Stop a running task with optional cleanup of state files.",
+    )
+    async def stop_task(
+        request: Request, stop_request: StopRequest
+    ) -> ControlResponse | JSONResponse:
+        """Stop a running task.
+
+        Stops the current task and optionally cleans up state files.
+        The task must be in a stoppable state (planning, working, blocked, or paused).
+
+        Args:
+            stop_request: Stop request with optional reason and cleanup flag.
+
+        Returns:
+            ControlResponse with operation result.
+
+        Raises:
+            404: If no active task exists.
+            400: If the task cannot be stopped in its current state.
+            500: If an error occurs during the operation.
+        """
+        state_manager = _get_state_manager(request)
+
+        if not state_manager.exists():
+            return JSONResponse(
+                status_code=404,
+                content=ErrorResponse(
+                    error="not_found",
+                    message="No active task found",
+                    suggestion="Start a new task with 'claudetm start <goal>'",
+                ).model_dump(),
+            )
+
+        try:
+            # Create control manager and perform stop operation
+            control = ControlManager(state_manager=state_manager)
+            result = control.stop(reason=stop_request.reason, cleanup=stop_request.cleanup)
+
+            return ControlResponse(
+                success=result.success,
+                message=result.message,
+                operation=result.operation,
+                previous_status=result.previous_status,
+                new_status=result.new_status,
+                details=result.details,
+            )
+
+        except Exception as e:
+            logger.exception("Error stopping task")
+
+            # Check if it's a known control error
+            if "Cannot stop task" in str(e):
+                return JSONResponse(
+                    status_code=400,
+                    content=ErrorResponse(
+                        error="invalid_operation",
+                        message=str(e),
+                        suggestion="Task may be in a terminal state or already stopped",
+                    ).model_dump(),
+                )
+
+            return JSONResponse(
+                status_code=500,
+                content=ErrorResponse(
+                    error="internal_error",
+                    message="Failed to stop task",
+                    detail=str(e),
+                ).model_dump(),
+            )
+
+    return router
+
+
+# =============================================================================
 # Router Registration
 # =============================================================================
 
@@ -556,4 +669,9 @@ def register_routes(app: FastAPI) -> None:
     info_router = create_info_router()
     app.include_router(info_router)
 
+    # Create and register control router
+    control_router = create_control_router()
+    app.include_router(control_router)
+
     logger.debug("Registered info routes: /status, /plan, /logs, /progress, /context, /health")
+    logger.debug("Registered control routes: /control/stop")
