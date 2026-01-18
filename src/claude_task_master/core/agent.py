@@ -16,6 +16,7 @@ from .agent_models import (
     ModelType,
     TaskComplexity,
     ToolConfig,
+    get_tools_for_phase,
 )
 from .agent_phases import AgentPhaseExecutor
 from .agent_query import AgentQueryExecutor
@@ -257,13 +258,19 @@ class AgentWrapper:
         )
 
     def get_tools_for_phase(self, phase: str) -> list[str]:
-        """Get appropriate tools for the given phase."""
-        if phase == "planning":
-            return ToolConfig.PLANNING.value
-        elif phase == "verification":
-            return ToolConfig.VERIFICATION.value
-        else:
-            return ToolConfig.WORKING.value
+        """Get appropriate tools for the given phase from global config.
+
+        Tool configurations can be customized via config.json:
+        - Set in `.claude-task-master/config.json`
+        - Under the `tools` section for each phase
+
+        Args:
+            phase: The phase name ("planning", "verification", "working").
+
+        Returns:
+            List of allowed tool names. Empty list means all tools allowed.
+        """
+        return get_tools_for_phase(phase)
 
     def _get_model_name(self, model: ModelType | None = None) -> str:
         """Convert ModelType to API model name using global config.

@@ -3,13 +3,20 @@
 This module contains:
 - ModelType: Available Claude models (Sonnet, Opus, Haiku)
 - TaskComplexity: Task complexity levels for dynamic model selection
-- ToolConfig: Tool configurations for different execution phases
+- ToolConfig: Tool configurations for different execution phases (now config-backed)
 - MODEL_CONTEXT_WINDOWS: Model context window sizes
 - parse_task_complexity: Parse complexity tags from task descriptions
+- get_tools_for_phase: Get tool list for a phase from global config
 """
+
+from __future__ import annotations
 
 import re
 from enum import Enum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from claude_task_master.core.config import ClaudeTaskMasterConfig
 
 # =============================================================================
 # Enums
@@ -37,7 +44,7 @@ class TaskComplexity(Enum):
     GENERAL = "general"
 
     @classmethod
-    def get_model_for_complexity(cls, complexity: "TaskComplexity") -> ModelType:
+    def get_model_for_complexity(cls, complexity: TaskComplexity) -> ModelType:
         """Map task complexity to appropriate model."""
         mapping = {
             cls.CODING: ModelType.OPUS,
@@ -56,6 +63,10 @@ class ToolConfig(Enum):
     - WORKING: Empty list [] allows ALL tools for full implementation access
 
     Note: An empty list in allowed_tools means "all tools are allowed".
+
+    DEPRECATED: Use `get_tools_for_phase()` function instead, which reads from
+    the global config and supports user customization via config.json.
+    These hardcoded values are kept for backwards compatibility only.
     """
 
     # Planning uses READ-ONLY tools + Bash for checks (git status, tests, etc.)
@@ -135,3 +146,49 @@ def parse_task_complexity(task_description: str) -> tuple[TaskComplexity, str]:
 
     # Default to CODING (prefer smarter model when uncertain)
     return TaskComplexity.CODING, task_description
+
+
+def get_tools_for_phase(
+    phase: str,
+    config: ClaudeTaskMasterConfig | None = None,
+) -> list[str]:
+    """Get the allowed tools for a specific execution phase from config.
+
+    This function reads tool configurations from the global config, allowing
+    users to customize which tools are available in each phase via config.json.
+
+    Args:
+        phase: The phase name ("planning", "verification", "working").
+        config: Optional config object. If None, loads from global config.
+
+    Returns:
+        List of allowed tool names. Empty list means all tools allowed.
+
+    Example:
+        >>> tools = get_tools_for_phase("planning")
+        >>> print(tools)
+        ["Read", "Glob", "Grep", "Bash"]
+
+        >>> # With custom config
+        >>> config = get_config()
+        >>> tools = get_tools_for_phase("working", config)
+        >>> print(tools)  # Empty = all tools
+        []
+    """
+    # Import here to avoid circular imports
+    from claude_task_master.core.config_loader import get_config
+
+    if config is None:
+        config = get_config()
+
+    phase_lower = phase.lower()
+
+    if phase_lower == "planning":
+        return list(config.tools.planning)
+    elif phase_lower == "verification":
+        return list(config.tools.verification)
+    elif phase_lower == "working":
+        return list(config.tools.working)
+    else:
+        # Unknown phase - default to empty (all tools allowed)
+        return []

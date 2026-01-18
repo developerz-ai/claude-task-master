@@ -24,6 +24,7 @@ from claude_task_master.core.agent_models import (
     ModelType,
     TaskComplexity,
     ToolConfig,
+    get_tools_for_phase,
     parse_task_complexity,
 )
 from claude_task_master.core.agent_phases import AgentPhaseExecutor
@@ -56,7 +57,6 @@ from claude_task_master.core.config import (
     generate_default_config_dict,
     generate_default_config_json,
     get_model_name,
-    get_tools_for_phase,
 )
 from claude_task_master.core.config_loader import (
     CONFIG,

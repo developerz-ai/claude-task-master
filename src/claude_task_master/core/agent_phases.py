@@ -12,7 +12,7 @@ from collections.abc import Coroutine
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from . import console
-from .agent_models import ModelType, ToolConfig
+from .agent_models import ModelType, get_tools_for_phase
 from .prompts import build_planning_prompt, build_verification_prompt, build_work_prompt
 
 if TYPE_CHECKING:
@@ -278,20 +278,19 @@ class AgentPhaseExecutor:
         return has_positive and not has_negative
 
     def get_tools_for_phase(self, phase: str) -> list[str]:
-        """Get appropriate tools for the given phase.
+        """Get appropriate tools for the given phase from global config.
+
+        Tool configurations can be customized via config.json:
+        - Set in `.claude-task-master/config.json`
+        - Under the `tools` section for each phase
 
         Args:
             phase: The phase name ('planning', 'verification', or 'working').
 
         Returns:
-            List of tool names for the phase.
+            List of tool names for the phase. Empty list means all tools allowed.
         """
-        if phase == "planning":
-            return ToolConfig.PLANNING.value
-        elif phase == "verification":
-            return ToolConfig.VERIFICATION.value
-        else:
-            return ToolConfig.WORKING.value
+        return get_tools_for_phase(phase)
 
     def _extract_plan(self, result: str) -> str:
         """Extract task list from planning result.
