@@ -491,4 +491,4 @@ You've completed all the examples! Now you're ready to:
 For more information:
 - [README](../README.md) - Main documentation
 - [CONTRIBUTING](../CONTRIBUTING.md) - Contribute to the project
-- [GitHub Issues](https://github.com/sebyx07/claude-task-master-py/issues) - Report bugs or request features
+- [GitHub Issues](https://github.com/developerz-ai/claude-task-master/issues) - Report bugs or request features

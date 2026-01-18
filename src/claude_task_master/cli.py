@@ -38,7 +38,7 @@ Quick start:
   claudetm status
   claudetm clean -f
 
-For more info, see: https://github.com/sebyx07/claude-task-master-py
+For more info, see: https://github.com/developerz-ai/claude-task-master
 """,
     add_completion=False,
 )

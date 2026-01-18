@@ -24,8 +24,8 @@ claudetm --version
   Bash wrapper: v0.1.0
   Python package: Claude Task Master v0.1.0
 
-📚 Documentation: https://github.com/sebyx07/claude-task-master-py
-🐛 Issues: https://github.com/sebyx07/claude-task-master-py/issues
+📚 Documentation: https://github.com/developerz-ai/claude-task-master
+🐛 Issues: https://github.com/developerz-ai/claude-task-master/issues
 ```
 - ✅ Bash wrapper loads and executes
 - ✅ Version information displays correctly

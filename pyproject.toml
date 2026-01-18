@@ -34,11 +34,11 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/sebyx07/claude-task-master-py"
-Documentation = "https://github.com/sebyx07/claude-task-master-py#readme"
-Repository = "https://github.com/sebyx07/claude-task-master-py"
-Issues = "https://github.com/sebyx07/claude-task-master-py/issues"
-Changelog = "https://github.com/sebyx07/claude-task-master-py/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/developerz-ai/claude-task-master"
+Documentation = "https://github.com/developerz-ai/claude-task-master#readme"
+Repository = "https://github.com/developerz-ai/claude-task-master"
+Issues = "https://github.com/developerz-ai/claude-task-master/issues"
+Changelog = "https://github.com/developerz-ai/claude-task-master/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 mcp = ["mcp>=1.0.0"]

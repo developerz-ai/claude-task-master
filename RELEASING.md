@@ -99,7 +99,7 @@ Check the GitHub Actions workflow:
 # View workflow status
 gh run watch
 
-# Or visit: https://github.com/sebyx07/claude-task-master-py/actions
+# Or visit: https://github.com/developerz-ai/claude-task-master/actions
 ```
 
 The workflow must complete successfully for the package to be published.

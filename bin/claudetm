@@ -25,7 +25,7 @@
 #   claudetm --init-config             # Create default config.json
 #   claudetm --help                    # Show all commands
 #
-# 📚 Documentation: https://github.com/sebyx07/claude-task-master-py
+# 📚 Documentation: https://github.com/developerz-ai/claude-task-master
 #
 # ============================================================================
 
@@ -333,7 +333,7 @@ init_config() {
         echo "   • Override model names for OpenRouter/other providers"
         echo "   • Configure target branch for PRs"
         echo ""
-        echo "📖 See documentation: https://github.com/sebyx07/claude-task-master-py#configuration"
+        echo "📖 See documentation: https://github.com/developerz-ai/claude-task-master#configuration"
         return 0
     else
         error "Failed to create config file"
@@ -385,8 +385,8 @@ show_version() {
     fi
 
     echo ""
-    echo "📚 Documentation: https://github.com/sebyx07/claude-task-master-py"
-    echo "🐛 Issues: https://github.com/sebyx07/claude-task-master-py/issues"
+    echo "📚 Documentation: https://github.com/developerz-ai/claude-task-master"
+    echo "🐛 Issues: https://github.com/developerz-ai/claude-task-master/issues"
 }
 
 # ============================================================================
@@ -482,7 +482,7 @@ main() {
         echo "    claudetm start \"Fix bug in login form\" --max-sessions 5"
         echo "    claudetm status"
         echo ""
-        echo "📚 Full documentation: https://github.com/sebyx07/claude-task-master-py"
+        echo "📚 Full documentation: https://github.com/developerz-ai/claude-task-master"
         exit 0
     fi
 

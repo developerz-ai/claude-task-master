@@ -1,7 +1,7 @@
 # Claude Task Master
 
-[![CI](https://github.com/sebyx07/claude-task-master-py/actions/workflows/ci.yml/badge.svg)](https://github.com/sebyx07/claude-task-master-py/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/sebyx07/claude-task-master-py/graph/badge.svg)](https://codecov.io/gh/sebyx07/claude-task-master-py)
+[![CI](https://github.com/developerz-ai/claude-task-master/actions/workflows/ci.yml/badge.svg)](https://github.com/developerz-ai/claude-task-master/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/developerz-ai/claude-task-master/graph/badge.svg)](https://codecov.io/gh/developerz-ai/claude-task-master)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![PyPI version](https://badge.fury.io/py/claude-task-master.svg)](https://badge.fury.io/py/claude-task-master)
@@ -105,7 +105,7 @@ claudetm doctor
 
 ```bash
 # Clone the repository
-git clone https://github.com/sebyx07/claude-task-master-py
+git clone https://github.com/developerz-ai/claude-task-master
 cd claude-task-master-py
 
 # Install with development dependencies
