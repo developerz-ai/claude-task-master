@@ -8,6 +8,7 @@ These tests verify state transitions throughout the workflow including:
 
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from typer.testing import CliRunner
@@ -92,8 +93,10 @@ class TestStateTransitions:
 class TestStateValidation:
     """Tests for state validation during transitions."""
 
+    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
     def test_blocked_state_prevents_resume(
         self,
+        mock_sleep,
         runner,
         integration_temp_dir: Path,
         integration_state_dir: Path,
@@ -106,6 +109,7 @@ class TestStateValidation:
         monkeypatch.chdir(integration_temp_dir)
         monkeypatch.setattr(StateManager, "STATE_DIR", integration_state_dir)
         monkeypatch.setattr(CredentialManager, "CREDENTIALS_PATH", mock_credentials_file)
+        mock_sleep.return_value = True  # Sleep not interrupted
 
         # Set up SDK responses so it doesn't block
         patched_sdk.set_work_response("Completed.")
