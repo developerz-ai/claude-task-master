@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import re
-import subprocess
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
 
 import typer
 
@@ -15,27 +13,8 @@ from ..core.agent import AgentWrapper, ModelType
 from ..core.credentials import CredentialManager
 from ..core.pr_context import PRContextManager
 from ..core.state import StateManager
-
-if TYPE_CHECKING:
-    from ..github import GitHubClient, PRStatus
-
-# Polling intervals
-CI_POLL_INTERVAL = 10  # seconds between CI checks (matches orchestrator)
-CI_START_WAIT = 30  # seconds to wait for CI to start after push
-
-
-def _get_current_branch() -> str | None:
-    """Get the current git branch name."""
-    try:
-        result = subprocess.run(
-            ["git", "branch", "--show-current"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        return result.stdout.strip() or None
-    except Exception:
-        return None
+from .ci_helpers import CI_POLL_INTERVAL, CI_START_WAIT, wait_for_ci_complete
+from .fix_session import run_fix_session
 
 
 def _parse_pr_input(pr_input: str | None) -> int | None:
@@ -64,250 +43,6 @@ def _parse_pr_input(pr_input: str | None) -> int | None:
         return int(pr_input[1:])
 
     return None
-
-
-def _is_check_pending(check: dict[str, Any]) -> bool:
-    """Check if a CI check or status is still pending.
-
-    Handles both CheckRun (GitHub Actions) and StatusContext (external services like CodeRabbit).
-
-    CheckRun states:
-        - status: QUEUED, IN_PROGRESS, COMPLETED
-        - conclusion: success, failure, etc. (only set when COMPLETED)
-
-    StatusContext states:
-        - state: PENDING, EXPECTED, SUCCESS, FAILURE, ERROR
-        - Maps to both status and conclusion in our normalized format
-
-    Args:
-        check: Normalized check detail dictionary.
-
-    Returns:
-        True if the check is still pending, False if complete.
-    """
-    status = (check.get("status") or "").upper()
-    conclusion = check.get("conclusion")
-
-    # StatusContext with PENDING or EXPECTED state is still waiting
-    # (These get mapped to both status and conclusion)
-    if status in ("PENDING", "EXPECTED"):
-        return True
-
-    # CheckRun is pending if not completed or has no conclusion yet
-    if status not in ("COMPLETED",) and conclusion is None:
-        return True
-
-    return False
-
-
-def _wait_for_ci_complete(github_client: GitHubClient, pr_number: int) -> PRStatus:
-    """Wait for all CI checks to complete.
-
-    Fetches required checks from branch protection and waits for all of them
-    to report, even if they haven't started yet (like CodeRabbit).
-
-    Args:
-        github_client: GitHub client for API calls.
-        pr_number: PR number to check.
-
-    Returns:
-        Final PRStatus after all checks complete.
-    """
-    console.info(f"Waiting for CI checks on PR #{pr_number}...")
-
-    # Get required checks from branch protection (once at start)
-    status = github_client.get_pr_status(pr_number)
-    required_checks = set(github_client.get_required_status_checks(status.base_branch))
-
-    while True:
-        status = github_client.get_pr_status(pr_number)
-
-        # Get reported check names
-        reported = {check.get("name", "") for check in status.check_details}
-
-        # Find required checks that haven't reported yet
-        missing = required_checks - reported
-
-        # Count pending checks (in progress or not yet complete)
-        pending = [
-            check.get("name", "unknown")
-            for check in status.check_details
-            if _is_check_pending(check)
-        ]
-
-        # All pending = running checks + missing required checks
-        all_waiting = list(missing) + pending
-
-        if not all_waiting:
-            # All checks reported - verify no conflicts
-            if status.mergeable == "CONFLICTING":
-                console.warning("⚠ PR has merge conflicts")
-            return status
-
-        # Build status summary
-        passed = status.checks_passed
-        failed = status.checks_failed
-        status_parts = []
-        if passed:
-            status_parts.append(f"{passed} passed")
-        if failed:
-            status_parts.append(f"{failed} failed")
-        status_summary = f" ({', '.join(status_parts)})" if status_parts else ""
-
-        # Show what we're waiting for
-        console.info(
-            f"⏳ Waiting for {len(all_waiting)} check(s): "
-            f"{', '.join(all_waiting[:3])}{'...' if len(all_waiting) > 3 else ''}"
-            f"{status_summary}"
-        )
-
-        time.sleep(CI_POLL_INTERVAL)
-
-
-def _run_fix_session(
-    agent: AgentWrapper,
-    github_client: GitHubClient,
-    state_manager: StateManager,
-    pr_context: PRContextManager,
-    pr_number: int,
-    ci_failed: bool,
-    comment_count: int,
-    has_conflicts: bool = False,
-) -> bool:
-    """Run agent session to fix CI failures, comments, and/or merge conflicts.
-
-    Downloads both CI failures and comments (if present) so the agent can
-    address everything in one session.
-
-    Args:
-        agent: Agent wrapper for running work sessions.
-        github_client: GitHub client for API calls.
-        state_manager: State manager for persistence.
-        pr_context: PR context manager for saving CI logs and comments.
-        pr_number: PR number being fixed.
-        ci_failed: Whether CI has failed.
-        comment_count: Number of unresolved comments.
-        has_conflicts: Whether there are merge conflicts.
-
-    Returns:
-        True if agent ran, False if nothing actionable was found.
-    """
-    pr_dir = state_manager.get_pr_dir(pr_number)
-    task_sections = []
-    has_actionable_work = False
-
-    # Handle merge conflicts
-    if has_conflicts:
-        console.error("Merge Conflicts - Agent will resolve...")
-        task_sections.append("""## Merge Conflicts
-
-This PR has merge conflicts that need to be resolved.
-
-1. Run `git fetch origin` to get latest changes
-2. Run `git merge origin/main` (or the base branch)
-3. Resolve any conflicts in the affected files
-4. Run tests to verify the merge didn't break anything
-5. Commit the merge resolution""")
-        has_actionable_work = True
-
-    # Always download CI failures if CI failed
-    if ci_failed:
-        console.error("CI Failed - Downloading failure logs...")
-        pr_context.save_ci_failures(pr_number)
-        ci_path = f"{pr_dir}/ci/"
-        task_sections.append(f"""## CI Failures
-
-**Read the CI failure logs from:** `{ci_path}`
-
-Use Glob to find all .txt files, then Read each one to understand the errors.
-
-**IMPORTANT:** Fix ALL CI failures, even if they seem unrelated to your current work.
-Your job is to keep CI green. Pre-existing issues, flaky tests, lint errors - fix them all.
-
-- Read ALL files in the ci/ directory
-- Understand ALL error messages (lint, tests, types, etc.)
-- Fix everything that's failing - don't skip anything""")
-        has_actionable_work = True
-
-    # Always download comments if there are unresolved threads
-    saved_comment_count = 0
-    if comment_count > 0:
-        console.warning(f"{comment_count} unresolved comment(s) - Downloading...")
-        saved_comment_count = pr_context.save_pr_comments(pr_number)
-        console.detail(f"Saved {saved_comment_count} actionable comment(s) for review")
-
-        if saved_comment_count > 0:
-            comments_path = f"{pr_dir}/comments/"
-            resolve_json_path = f"{pr_dir}/resolve-comments.json"
-            task_sections.append(f"""## Review Comments
-
-**Read the review comments from:** `{comments_path}`
-
-Use Glob to find all .txt files, then Read each one to understand the feedback.
-
-For each comment:
-- Make the requested change, OR
-- Explain why it's not needed
-
-After addressing comments, create a resolution summary file at: `{resolve_json_path}`
-
-**Resolution file format:**
-```json
-{{
-  "pr": {pr_number},
-  "resolutions": [
-    {{
-      "thread_id": "THREAD_ID_FROM_COMMENT_FILE",
-      "action": "fixed|explained|skipped",
-      "message": "Brief explanation of what was done"
-    }}
-  ]
-}}
-```
-
-Copy the Thread ID from each comment file into the resolution JSON.
-
-**IMPORTANT: DO NOT resolve threads directly using GitHub GraphQL mutations.**
-The orchestrator will handle thread resolution automatically after you create the resolution file.""")
-            has_actionable_work = True
-
-    # Guard against loops when nothing actionable
-    if not has_actionable_work:
-        if comment_count > 0 and saved_comment_count == 0:
-            console.warning(
-                "No actionable comments to address (may be bot status updates or already addressed)."
-            )
-            console.warning("Unresolved threads may need manual review on GitHub.")
-        return False
-
-    # Build combined task description
-    task_description = f"""PR #{pr_number} needs fixes.
-
-{chr(10).join(task_sections)}
-
-## Instructions
-
-1. Read ALL relevant files (CI logs and/or comments)
-2. Fix ALL issues found
-3. Run tests/lint locally to verify everything passes
-4. Commit and push the fixes
-
-After fixing everything, end with: TASK COMPLETE"""
-
-    console.info("Running agent to fix all issues...")
-    current_branch = _get_current_branch()
-    agent.run_work_session(
-        task_description=task_description,
-        context="",
-        model_override=ModelType.OPUS,
-        required_branch=current_branch,
-    )
-
-    # Post replies to comments using resolution file (if comments were addressed)
-    if saved_comment_count > 0:
-        pr_context.post_comment_replies(pr_number)
-
-    return True
 
 
 def fix_pr(
@@ -398,7 +133,7 @@ def fix_pr(
             console.info(f"Iteration {iteration}/{max_iterations}")
 
             # Wait for all CI checks to complete
-            status = _wait_for_ci_complete(github_client, pr_number)
+            status = wait_for_ci_complete(github_client, pr_number)
 
             # Determine what needs fixing
             ci_failed = status.ci_state in ("FAILURE", "ERROR")
@@ -419,7 +154,7 @@ def fix_pr(
 
             # If anything needs fixing, download both and run combined session
             if ci_failed or has_comments or has_conflicts:
-                agent_ran = _run_fix_session(
+                agent_ran = run_fix_session(
                     agent,
                     github_client,
                     state_manager,

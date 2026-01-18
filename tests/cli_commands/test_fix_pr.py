@@ -70,14 +70,30 @@ class TestFixPRCommand:
         assert result.exit_code == 1
         assert "No PR found" in result.stdout
 
+    @patch("claude_task_master.cli_commands.fix_pr.StateManager")
+    @patch("claude_task_master.cli_commands.fix_pr.CredentialManager")
     @patch("claude_task_master.github.GitHubClient")
-    def test_detects_pr_from_branch(self, mock_github_class: MagicMock) -> None:
+    def test_detects_pr_from_branch(
+        self,
+        mock_github_class: MagicMock,
+        mock_cred_class: MagicMock,
+        mock_state_class: MagicMock,
+    ) -> None:
         """Should detect PR from current branch."""
         mock_github = MagicMock()
         mock_github.get_pr_for_current_branch.return_value = 52
         # Make get_pr_status raise to exit early
         mock_github.get_pr_status.side_effect = Exception("test exit")
         mock_github_class.return_value = mock_github
+
+        # Mock credential manager to return a valid token
+        mock_cred_class.return_value.get_valid_token.return_value = "test-token"
+
+        # Mock state manager
+        mock_state = MagicMock()
+        mock_state.is_session_active.return_value = False
+        mock_state.acquire_session_lock.return_value = True
+        mock_state_class.return_value = mock_state
 
         result = runner.invoke(app, ["fix-pr"])
         # Will fail due to exception, but should have detected PR

@@ -217,7 +217,7 @@ class WorkflowStageHandler:
             # Check for merge conflicts
             if pr_status.mergeable == "CONFLICTING":
                 console.warning("PR has merge conflicts - needs manual resolution")
-                state.workflow_stage = "blocked"
+                state.status = "blocked"
                 self.state_manager.save_state(state)
                 return 1  # Exit with error
 
