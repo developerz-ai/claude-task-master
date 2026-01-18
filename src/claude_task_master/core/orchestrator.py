@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import subprocess
-from typing import TYPE_CHECKING
+import time
+from typing import TYPE_CHECKING, Any
 
 from . import console
 from .agent import AgentWrapper, ModelType
@@ -32,7 +34,11 @@ from .workflow_stages import WorkflowStageHandler
 
 if TYPE_CHECKING:
     from ..github import GitHubClient
+    from ..webhooks import WebhookClient
+    from ..webhooks.events import EventType
     from .logger import TaskLogger
+
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # Custom Exception Classes
@@ -85,7 +91,93 @@ __all__ = [
     "NoPlanFoundError",
     "NoTasksFoundError",
     "WorkSessionError",
+    "WebhookEmitter",
 ]
+
+
+# =============================================================================
+# Webhook Emitter
+# =============================================================================
+
+
+class WebhookEmitter:
+    """Helper class to emit webhook events from the orchestrator.
+
+    Handles webhook emission with error handling and logging. Events are sent
+    asynchronously in a fire-and-forget manner - failures don't block the
+    orchestrator workflow.
+
+    Attributes:
+        client: The webhook client for sending events.
+        run_id: The current orchestrator run ID for correlation.
+    """
+
+    def __init__(self, client: WebhookClient | None, run_id: str | None = None) -> None:
+        """Initialize the webhook emitter.
+
+        Args:
+            client: Optional webhook client. If None, all emit calls are no-ops.
+            run_id: Optional run ID for event correlation.
+        """
+        self._client = client
+        self._run_id = run_id
+
+    @property
+    def enabled(self) -> bool:
+        """Check if webhook emission is enabled."""
+        return self._client is not None
+
+    def emit(
+        self,
+        event_type: EventType | str,
+        **event_data: Any,
+    ) -> None:
+        """Emit a webhook event.
+
+        Creates and sends a webhook event. Failures are logged but don't
+        raise exceptions to avoid blocking the orchestrator.
+
+        Args:
+            event_type: The type of event to emit.
+            **event_data: Event-specific data fields.
+        """
+        if not self._client:
+            return
+
+        try:
+            # Import here to avoid circular imports
+            from ..webhooks.events import create_event
+
+            # Add run_id to all events
+            if self._run_id:
+                event_data["run_id"] = self._run_id
+
+            # Create the event
+            event = create_event(event_type, **event_data)
+
+            # Send synchronously (fire-and-forget)
+            result = self._client.send_sync(
+                data=event.to_dict(),
+                event_type=str(event.event_type),
+                delivery_id=event.event_id,
+            )
+
+            if result.success:
+                logger.debug(
+                    "Webhook delivered: %s (delivery_id=%s)",
+                    event.event_type,
+                    event.event_id,
+                )
+            else:
+                logger.warning(
+                    "Webhook delivery failed: %s - %s",
+                    event.event_type,
+                    result.error,
+                )
+
+        except Exception as e:
+            # Log but don't raise - webhooks shouldn't block the orchestrator
+            logger.warning("Failed to emit webhook event %s: %s", event_type, e)
 
 
 class WorkLoopOrchestrator:
@@ -105,6 +197,7 @@ class WorkLoopOrchestrator:
         github_client: GitHubClient | None = None,
         logger: TaskLogger | None = None,
         tracker_config: TrackerConfig | None = None,
+        webhook_client: WebhookClient | None = None,
     ):
         """Initialize orchestrator.
 
@@ -115,6 +208,7 @@ class WorkLoopOrchestrator:
             github_client: Optional GitHub client for PR operations.
             logger: Optional logger for recording session activity.
             tracker_config: Optional config for execution tracker.
+            webhook_client: Optional webhook client for emitting lifecycle events.
         """
         self.agent = agent
         self.state_manager = state_manager
@@ -122,11 +216,13 @@ class WorkLoopOrchestrator:
         self._github_client = github_client
         self.logger = logger
         self.tracker = ExecutionTracker(config=tracker_config or TrackerConfig.default())
+        self._webhook_client = webhook_client
 
         # Initialize component managers (lazy)
         self._task_runner: TaskRunner | None = None
         self._stage_handler: WorkflowStageHandler | None = None
         self._pr_context: PRContextManager | None = None
+        self._webhook_emitter: WebhookEmitter | None = None
 
     @property
     def github_client(self) -> GitHubClient:
@@ -175,6 +271,146 @@ class WorkLoopOrchestrator:
                 pr_context=self.pr_context,
             )
         return self._stage_handler
+
+    @property
+    def webhook_emitter(self) -> WebhookEmitter:
+        """Get or lazily initialize webhook emitter."""
+        if self._webhook_emitter is None:
+            # Initialize with run_id from state if available
+            run_id = None
+            try:
+                if self.state_manager.exists():
+                    state = self.state_manager.load_state()
+                    run_id = state.run_id
+            except Exception:
+                pass  # Use None if state can't be loaded
+            self._webhook_emitter = WebhookEmitter(self._webhook_client, run_id)
+        return self._webhook_emitter
+
+    def _get_total_tasks(self, state: TaskState) -> int:
+        """Get total number of tasks from the plan.
+
+        Args:
+            state: Current task state.
+
+        Returns:
+            Total number of tasks, or 0 if plan can't be loaded.
+        """
+        try:
+            plan = self.state_manager.load_plan()
+            if plan:
+                tasks = self.state_manager._parse_plan_tasks(plan)
+                return len(tasks)
+        except Exception:
+            pass
+        return 0
+
+    def _get_completed_tasks(self, state: TaskState) -> int:
+        """Get number of completed tasks from the plan.
+
+        Args:
+            state: Current task state.
+
+        Returns:
+            Number of completed tasks.
+        """
+        try:
+            plan = self.state_manager.load_plan()
+            if plan:
+                # Count tasks marked as [x]
+                import re
+
+                completed = len(re.findall(r"^- \[x\]", plan, re.MULTILINE))
+                return completed
+        except Exception:
+            pass
+        return state.current_task_index
+
+    def _get_current_branch(self) -> str | None:
+        """Get the current git branch name.
+
+        Returns:
+            Current branch name or None if not in a git repo.
+        """
+        try:
+            result = subprocess.run(
+                ["git", "branch", "--show-current"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            return result.stdout.strip() or None
+        except Exception:
+            return None
+
+    def _emit_pr_created_event(self, state: TaskState) -> None:
+        """Emit a pr.created webhook event.
+
+        Args:
+            state: Current task state with PR information.
+        """
+        if not state.current_pr:
+            return
+
+        # Get PR details from GitHub
+        pr_url = ""
+        pr_title = ""
+        base_branch = "main"
+        try:
+            pr_status = self.github_client.get_pr_status(state.current_pr)
+            pr_url = pr_status.pr_url if hasattr(pr_status, "pr_url") else ""
+            pr_title = pr_status.pr_title if hasattr(pr_status, "pr_title") else ""
+            base_branch = pr_status.base_branch
+        except Exception:
+            # Use fallback values if PR details can't be fetched
+            pass
+
+        current_branch = self._get_current_branch()
+
+        self.webhook_emitter.emit(
+            "pr.created",
+            pr_number=state.current_pr,
+            pr_url=pr_url,
+            pr_title=pr_title,
+            branch=current_branch or "",
+            base_branch=base_branch,
+            tasks_included=1,  # Currently one task per PR or group
+        )
+
+    def _emit_pr_merged_event(self, state: TaskState) -> None:
+        """Emit a pr.merged webhook event.
+
+        Args:
+            state: Current task state with PR information.
+        """
+        if not state.current_pr:
+            return
+
+        # Get PR details from GitHub
+        pr_url = ""
+        pr_title = ""
+        base_branch = "main"
+        merged_at = None
+        try:
+            pr_status = self.github_client.get_pr_status(state.current_pr)
+            pr_url = pr_status.pr_url if hasattr(pr_status, "pr_url") else ""
+            pr_title = pr_status.pr_title if hasattr(pr_status, "pr_title") else ""
+            base_branch = pr_status.base_branch
+        except Exception:
+            pass
+
+        current_branch = self._get_current_branch()
+
+        self.webhook_emitter.emit(
+            "pr.merged",
+            pr_number=state.current_pr,
+            pr_url=pr_url,
+            pr_title=pr_title,
+            branch=current_branch or "",
+            base_branch=base_branch,
+            merged_at=merged_at,
+            auto_merged=state.options.auto_merge,
+        )
 
     def run(self) -> int:
         """Run the main work loop until completion or blocked.
@@ -375,7 +611,13 @@ class WorkLoopOrchestrator:
             if stage == "working":
                 return self._handle_working_stage(state)
             elif stage == "pr_created":
-                return self.stage_handler.handle_pr_created_stage(state)
+                # Track PR number before stage handler runs
+                pr_before = state.current_pr
+                result = self.stage_handler.handle_pr_created_stage(state)
+                # Emit pr.created webhook if PR was detected
+                if state.current_pr and state.current_pr != pr_before:
+                    self._emit_pr_created_event(state)
+                return result
             elif stage == "waiting_ci":
                 return self.stage_handler.handle_waiting_ci_stage(state)
             elif stage == "ci_failed":
@@ -385,7 +627,13 @@ class WorkLoopOrchestrator:
             elif stage == "addressing_reviews":
                 return self.stage_handler.handle_addressing_reviews_stage(state)
             elif stage == "ready_to_merge":
-                return self.stage_handler.handle_ready_to_merge_stage(state)
+                # Track stage before handler runs
+                stage_before = state.workflow_stage
+                result = self.stage_handler.handle_ready_to_merge_stage(state)
+                # Emit pr.merged webhook if PR was merged (stage changed to "merged")
+                if state.workflow_stage == "merged" and stage_before == "ready_to_merge":
+                    self._emit_pr_merged_event(state)
+                return result
             elif stage == "merged":
                 return self.stage_handler.handle_merged_stage(
                     state, self.task_runner.mark_task_complete
@@ -429,6 +677,9 @@ class WorkLoopOrchestrator:
     def _handle_working_stage(self, state: TaskState) -> int | None:
         """Handle the working stage - implement the current task."""
         task_desc = self.task_runner.get_current_task_description(state)
+        total_tasks = self._get_total_tasks(state)
+        current_branch = self._get_current_branch()
+        session_start_time = time.time()
 
         self.tracker.start_session(
             session_id=state.session_count + 1,
@@ -439,17 +690,66 @@ class WorkLoopOrchestrator:
         if self.logger:
             self.logger.start_session(state.session_count + 1, "working")
 
+        # Emit session.started webhook event
+        self.webhook_emitter.emit(
+            "session.started",
+            session_number=state.session_count + 1,
+            max_sessions=state.options.max_sessions,
+            task_index=state.current_task_index,
+            task_description=task_desc,
+            phase="working",
+        )
+
+        # Emit task.started webhook event
+        self.webhook_emitter.emit(
+            "task.started",
+            task_index=state.current_task_index,
+            task_description=task_desc,
+            total_tasks=total_tasks,
+            branch=current_branch,
+        )
+
         outcome = "completed"
+        error_message = None
+        error_type = None
         try:
             self.task_runner.run_work_session(state)
-        except Exception:
+        except Exception as e:
             outcome = "failed"
+            error_message = str(e)
+            error_type = type(e).__name__
             self.tracker.record_error()
             raise
         finally:
+            session_duration = time.time() - session_start_time
             self.tracker.end_session(outcome=outcome)
             if self.logger:
                 self.logger.end_session(outcome)
+
+            # Emit session.completed webhook event
+            self.webhook_emitter.emit(
+                "session.completed",
+                session_number=state.session_count + 1,
+                max_sessions=state.options.max_sessions,
+                task_index=state.current_task_index,
+                task_description=task_desc,
+                phase="working",
+                duration_seconds=session_duration,
+                result=outcome,
+            )
+
+            # Emit task.failed if task failed
+            if outcome == "failed":
+                self.webhook_emitter.emit(
+                    "task.failed",
+                    task_index=state.current_task_index,
+                    task_description=task_desc,
+                    error_message=error_message or "Unknown error",
+                    error_type=error_type,
+                    duration_seconds=session_duration,
+                    branch=current_branch,
+                    recoverable=True,
+                )
 
         self.tracker.record_task_progress(state.current_task_index)
         reset_escape()
@@ -463,6 +763,18 @@ class WorkLoopOrchestrator:
         if plan:
             self.task_runner.mark_task_complete(plan, completed_task_index)
             console.success(f"Task #{completed_task_index + 1} marked complete in plan.md")
+
+        # Emit task.completed webhook event
+        completed_tasks = self._get_completed_tasks(state) + 1  # +1 for task we just completed
+        self.webhook_emitter.emit(
+            "task.completed",
+            task_index=state.current_task_index,
+            task_description=task_desc,
+            total_tasks=total_tasks,
+            completed_tasks=completed_tasks,
+            duration_seconds=time.time() - session_start_time,
+            branch=current_branch,
+        )
 
         # Determine if we should trigger PR workflow or continue to next task
         # Two modes: pr_per_task=True (one PR per task) or grouped mode (one PR per group)
