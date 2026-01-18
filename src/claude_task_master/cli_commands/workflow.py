@@ -15,6 +15,7 @@ from ..core.logger import LogFormat, LogLevel, TaskLogger
 from ..core.orchestrator import WorkLoopOrchestrator
 from ..core.planner import Planner
 from ..core.state import StateManager, StateResumeValidationError, TaskOptions
+from ..webhooks import WebhookClient
 
 console = Console()
 
@@ -51,9 +52,12 @@ def _run_work_loop(
     state_manager: StateManager,
     planner: Planner,
     logger: TaskLogger,
+    webhook_client: WebhookClient | None = None,
 ) -> int:
     """Run the work loop and return exit code."""
-    orchestrator = WorkLoopOrchestrator(agent, state_manager, planner, logger=logger)
+    orchestrator = WorkLoopOrchestrator(
+        agent, state_manager, planner, logger=logger, webhook_client=webhook_client
+    )
     return orchestrator.run()
 
 
@@ -134,6 +138,16 @@ def start(
         "--pr-per-task",
         help="Create a PR for each task (default: one PR per PR group in plan)",
     ),
+    webhook_url: str | None = typer.Option(
+        None,
+        "--webhook-url",
+        help="URL to receive webhook notifications for task lifecycle events",
+    ),
+    webhook_secret: str | None = typer.Option(
+        None,
+        "--webhook-secret",
+        help="HMAC secret for signing webhook payloads (recommended for security)",
+    ),
 ) -> None:
     """Start a new task with the given goal.
 
@@ -142,11 +156,16 @@ def start(
         claudetm start "Fix bug #123" -m opus --no-auto-merge
         claudetm start "Refactor auth" -n 5 --pause-on-pr
         claudetm start "Debug issue" -l verbose --log-format json
+        claudetm start "Deploy feature" --webhook-url https://example.com/hooks
     """
     log_level_enum, log_format_enum = _validate_log_options(log_level, log_format)
 
     console.print(f"[bold green]Starting new task:[/bold green] {goal}")
     console.print(f"Model: {model}, Auto-merge: {auto_merge}, Log: {log_level}/{log_format}")
+    if webhook_url:
+        console.print(
+            f"Webhook: {webhook_url} (secret: {'configured' if webhook_secret else 'none'})"
+        )
 
     try:
         # Initialize configuration (creates config.json with defaults if missing)
@@ -182,6 +201,8 @@ def start(
             log_level=log_level.lower(),
             log_format=log_format.lower(),
             pr_per_task=pr_per_task,
+            webhook_url=webhook_url,
+            webhook_secret=webhook_secret,
         )
         state = state_manager.initialize(goal=goal, model=model, options=options)
 
@@ -218,9 +239,15 @@ def start(
             console.print(f"\n[red]Planning failed: {e}[/red]")
             raise typer.Exit(1) from None
 
+        # Create webhook client if URL provided
+        wh_client: WebhookClient | None = None
+        if webhook_url:
+            wh_client = WebhookClient(url=webhook_url, secret=webhook_secret)
+            console.print("[dim]Webhook notifications enabled[/dim]")
+
         # Run work loop
         console.print("\n[bold cyan]Phase 2: Execution[/bold cyan]")
-        exit_code = _run_work_loop(agent, state_manager, planner, logger)
+        exit_code = _run_work_loop(agent, state_manager, planner, logger, wh_client)
         _display_exit_message(exit_code)
         raise typer.Exit(exit_code)
 
@@ -343,9 +370,17 @@ def resume(
             state_manager.save_state(state)
             console.print("\n[yellow]Attempting to resume blocked task...[/yellow]")
 
+        # Create webhook client if URL was configured
+        wh_client: WebhookClient | None = None
+        if state.options.webhook_url:
+            wh_client = WebhookClient(
+                url=state.options.webhook_url, secret=state.options.webhook_secret
+            )
+            console.print("[dim]Webhook notifications enabled[/dim]")
+
         # Run work loop
         console.print("\n[bold cyan]Resuming Execution[/bold cyan]")
-        exit_code = _run_work_loop(agent, state_manager, planner, logger)
+        exit_code = _run_work_loop(agent, state_manager, planner, logger, wh_client)
         _display_exit_message(exit_code)
         raise typer.Exit(exit_code)
 
