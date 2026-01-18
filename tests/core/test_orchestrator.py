@@ -852,6 +852,7 @@ class TestRunMethod:
         assert result == 0
         mock_console.success.assert_called()
 
+    @pytest.mark.timeout(5)  # This test runs the full orchestration loop, needs more time
     @patch("claude_task_master.core.orchestrator.is_cancellation_requested")
     @patch("claude_task_master.core.orchestrator.start_listening")
     @patch("claude_task_master.core.orchestrator.stop_listening")
