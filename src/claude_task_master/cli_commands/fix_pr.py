@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import typer
-from rich.console import Console
 
+from ..core import console
 from ..core.agent import AgentWrapper, ModelType
 from ..core.credentials import CredentialManager
 from ..core.pr_context import PRContextManager
@@ -18,8 +18,6 @@ from ..core.state import StateManager
 
 if TYPE_CHECKING:
     from ..github import GitHubClient, PRStatus
-
-console = Console()
 
 # Polling intervals
 CI_POLL_INTERVAL = 10  # seconds between CI checks (matches orchestrator)
@@ -115,7 +113,7 @@ def _wait_for_ci_complete(github_client: GitHubClient, pr_number: int) -> PRStat
     Returns:
         Final PRStatus after all checks complete.
     """
-    console.print(f"[bold]Waiting for CI checks on PR #{pr_number}...[/bold]")
+    console.info(f"Waiting for CI checks on PR #{pr_number}...")
 
     # Get required checks from branch protection (once at start)
     status = github_client.get_pr_status(pr_number)
@@ -143,7 +141,7 @@ def _wait_for_ci_complete(github_client: GitHubClient, pr_number: int) -> PRStat
         if not all_waiting:
             # All checks reported - verify no conflicts
             if status.mergeable == "CONFLICTING":
-                console.print("  [yellow]⚠ PR has merge conflicts[/yellow]")
+                console.warning("⚠ PR has merge conflicts")
             return status
 
         # Build status summary
@@ -151,14 +149,14 @@ def _wait_for_ci_complete(github_client: GitHubClient, pr_number: int) -> PRStat
         failed = status.checks_failed
         status_parts = []
         if passed:
-            status_parts.append(f"[green]{passed} passed[/green]")
+            status_parts.append(f"{passed} passed")
         if failed:
-            status_parts.append(f"[red]{failed} failed[/red]")
+            status_parts.append(f"{failed} failed")
         status_summary = f" ({', '.join(status_parts)})" if status_parts else ""
 
         # Show what we're waiting for
-        console.print(
-            f"  ⏳ Waiting for {len(all_waiting)} check(s): "
+        console.info(
+            f"⏳ Waiting for {len(all_waiting)} check(s): "
             f"{', '.join(all_waiting[:3])}{'...' if len(all_waiting) > 3 else ''}"
             f"{status_summary}"
         )
@@ -200,7 +198,7 @@ def _run_fix_session(
 
     # Handle merge conflicts
     if has_conflicts:
-        console.print("\n[bold red]Merge Conflicts[/bold red] - Agent will resolve...")
+        console.error("Merge Conflicts - Agent will resolve...")
         task_sections.append("""## Merge Conflicts
 
 This PR has merge conflicts that need to be resolved.
@@ -214,7 +212,7 @@ This PR has merge conflicts that need to be resolved.
 
     # Always download CI failures if CI failed
     if ci_failed:
-        console.print("\n[bold red]CI Failed[/bold red] - Downloading failure logs...")
+        console.error("CI Failed - Downloading failure logs...")
         pr_context.save_ci_failures(pr_number)
         ci_path = f"{pr_dir}/ci/"
         task_sections.append(f"""## CI Failures
@@ -234,11 +232,9 @@ Your job is to keep CI green. Pre-existing issues, flaky tests, lint errors - fi
     # Always download comments if there are unresolved threads
     saved_comment_count = 0
     if comment_count > 0:
-        console.print(
-            f"\n[bold yellow]{comment_count} unresolved comment(s)[/bold yellow] - Downloading..."
-        )
+        console.warning(f"{comment_count} unresolved comment(s) - Downloading...")
         saved_comment_count = pr_context.save_pr_comments(pr_number)
-        console.print(f"  Saved {saved_comment_count} actionable comment(s) for review")
+        console.detail(f"Saved {saved_comment_count} actionable comment(s) for review")
 
         if saved_comment_count > 0:
             comments_path = f"{pr_dir}/comments/"
@@ -278,10 +274,10 @@ The orchestrator will handle thread resolution automatically after you create th
     # Guard against loops when nothing actionable
     if not has_actionable_work:
         if comment_count > 0 and saved_comment_count == 0:
-            console.print(
-                "[yellow]  No actionable comments to address (may be bot status updates or already addressed).[/yellow]"
+            console.warning(
+                "No actionable comments to address (may be bot status updates or already addressed)."
             )
-            console.print("[yellow]  Unresolved threads may need manual review on GitHub.[/yellow]")
+            console.warning("Unresolved threads may need manual review on GitHub.")
         return False
 
     # Build combined task description
@@ -298,7 +294,7 @@ The orchestrator will handle thread resolution automatically after you create th
 
 After fixing everything, end with: TASK COMPLETE"""
 
-    console.print("\n[bold]Running agent to fix all issues...[/bold]")
+    console.info("Running agent to fix all issues...")
     current_branch = _get_current_branch()
     agent.run_work_session(
         task_description=task_description,
@@ -348,18 +344,18 @@ def fix_pr(
 
         # Fail fast if user provided invalid PR input
         if pr is not None and pr_number is None:
-            console.print(f"[red]Error: Invalid PR input '{pr}'.[/red]")
-            console.print("Use a PR number or PR URL, e.g. claudetm fix-pr 123")
+            console.error(f"Invalid PR input '{pr}'.")
+            console.info("Use a PR number or PR URL, e.g. claudetm fix-pr 123")
             raise typer.Exit(1)
 
         if pr_number is None:
             # Try to detect from current branch (only when no PR input provided)
             pr_number = github_client.get_pr_for_current_branch()
             if pr_number is None:
-                console.print("[red]Error: No PR found for current branch.[/red]")
-                console.print("Specify a PR number: claudetm fix-pr 123")
+                console.error("No PR found for current branch.")
+                console.info("Specify a PR number: claudetm fix-pr 123")
                 raise typer.Exit(1)
-            console.print(f"[green]Detected PR #{pr_number} for current branch[/green]")
+            console.success(f"Detected PR #{pr_number} for current branch")
 
         # Initialize credentials and agent
         cred_manager = CredentialManager()
@@ -371,13 +367,13 @@ def fix_pr(
 
         # Check for concurrent sessions before proceeding
         if state_manager.is_session_active():
-            console.print("[bold red]Another claudetm session is active.[/bold red]")
-            console.print("Wait for it to complete or use 'claudetm clean -f' to force cleanup.")
+            console.error("Another claudetm session is active.")
+            console.info("Wait for it to complete or use 'claudetm clean -f' to force cleanup.")
             raise typer.Exit(1)
 
         # Acquire session lock
         if not state_manager.acquire_session_lock():
-            console.print("[bold red]Could not acquire session lock.[/bold red]")
+            console.error("Could not acquire session lock.")
             raise typer.Exit(1)
 
         state_manager.state_dir.mkdir(parents=True, exist_ok=True)
@@ -392,14 +388,14 @@ def fix_pr(
         # Initialize PR context manager
         pr_context = PRContextManager(state_manager, github_client)
 
-        console.print(f"\n[bold]Starting fix-pr loop for PR #{pr_number}[/bold]")
-        console.print(f"Max iterations: {max_iterations}")
-        console.print("-" * 40)
+        console.info(f"Starting fix-pr loop for PR #{pr_number}")
+        console.info(f"Max iterations: {max_iterations}")
+        console.info("-" * 40)
 
         iteration = 0
         while iteration < max_iterations:
             iteration += 1
-            console.print(f"\n[bold cyan]Iteration {iteration}/{max_iterations}[/bold cyan]")
+            console.info(f"Iteration {iteration}/{max_iterations}")
 
             # Wait for all CI checks to complete
             status = _wait_for_ci_complete(github_client, pr_number)
@@ -411,17 +407,15 @@ def fix_pr(
 
             # Show status
             if ci_failed:
-                console.print(f"  CI: [red]{status.ci_state}[/red] ({status.checks_failed} failed)")
+                console.error(f"CI: {status.ci_state} ({status.checks_failed} failed)")
             else:
-                console.print(f"  CI: [green]PASSED[/green] ({status.checks_passed} passed)")
+                console.success(f"CI: PASSED ({status.checks_passed} passed)")
 
             if has_comments:
-                console.print(
-                    f"  Comments: [yellow]{status.unresolved_threads} unresolved[/yellow]"
-                )
+                console.warning(f"Comments: {status.unresolved_threads} unresolved")
 
             if has_conflicts:
-                console.print("  Conflicts: [red]merge conflicts detected[/red]")
+                console.error("Conflicts: merge conflicts detected")
 
             # If anything needs fixing, download both and run combined session
             if ci_failed or has_comments or has_conflicts:
@@ -438,24 +432,20 @@ def fix_pr(
 
                 if not agent_ran and not ci_failed:
                     # No actionable work and CI passed - unresolved threads need manual review
-                    console.print(
-                        "\n[yellow]Exiting: unresolved threads need manual review.[/yellow]"
-                    )
+                    console.warning("Exiting: unresolved threads need manual review.")
                     state_manager.release_session_lock()
                     raise typer.Exit(1)
 
                 # Wait for CI to start after push
-                console.print(f"\nWaiting {CI_START_WAIT}s for CI to start...")
+                console.info(f"Waiting {CI_START_WAIT}s for CI to start...")
                 time.sleep(CI_START_WAIT)
                 continue
 
             # All done!
-            console.print("\n[bold green]✓ CI passed and all comments resolved![/bold green]")
+            console.success("✓ CI passed and all comments resolved!")
 
             if no_merge:
-                console.print(
-                    f"\n[green]PR #{pr_number} is ready to merge (--no-merge specified)[/green]"
-                )
+                console.success(f"PR #{pr_number} is ready to merge (--no-merge specified)")
                 state_manager.release_session_lock()
                 raise typer.Exit(0)
 
@@ -466,43 +456,37 @@ def fix_pr(
                 status.mergeable == "UNKNOWN" or status.mergeable is None
             ) and merge_attempts < max_merge_attempts:
                 merge_attempts += 1
-                console.print(
-                    f"  ⏳ Waiting for mergeable status... ({merge_attempts}/{max_merge_attempts})"
+                console.info(
+                    f"⏳ Waiting for mergeable status... ({merge_attempts}/{max_merge_attempts})"
                 )
                 time.sleep(CI_POLL_INTERVAL)
                 status = github_client.get_pr_status(pr_number)
 
             # Check if ready to merge
             if status.mergeable == "MERGEABLE":
-                console.print(f"\n[bold]Merging PR #{pr_number}...[/bold]")
+                console.info(f"Merging PR #{pr_number}...")
                 try:
                     github_client.merge_pr(pr_number)
-                    console.print(
-                        f"[bold green]✓ PR #{pr_number} merged successfully![/bold green]"
-                    )
+                    console.success(f"✓ PR #{pr_number} merged successfully!")
                 except Exception as e:
-                    console.print(f"[red]Merge failed: {e}[/red]")
-                    console.print("You can merge manually.")
+                    console.error(f"Merge failed: {e}")
+                    console.info("You can merge manually.")
                     state_manager.release_session_lock()
                     raise typer.Exit(1) from None
             elif status.mergeable == "CONFLICTING":
-                console.print(
-                    f"\n[yellow]PR #{pr_number} has merge conflicts - manual resolution required[/yellow]"
-                )
+                console.warning(f"PR #{pr_number} has merge conflicts - manual resolution required")
                 state_manager.release_session_lock()
                 raise typer.Exit(1)
             elif status.mergeable is None:
-                console.print(
-                    f"\n[yellow]PR #{pr_number} mergeability unknown - please check GitHub[/yellow]"
-                )
-                console.print("You can merge manually once GitHub computes the status.")
+                console.warning(f"PR #{pr_number} mergeability unknown - please check GitHub")
+                console.info("You can merge manually once GitHub computes the status.")
                 state_manager.release_session_lock()
                 raise typer.Exit(1)
             else:
-                console.print(
-                    f"\n[yellow]PR #{pr_number} mergeable status: {status.mergeable} after {max_merge_attempts} attempts[/yellow]"
+                console.warning(
+                    f"PR #{pr_number} mergeable status: {status.mergeable} after {max_merge_attempts} attempts"
                 )
-                console.print("You can merge manually.")
+                console.info("You can merge manually.")
                 state_manager.release_session_lock()
                 raise typer.Exit(1)
 
@@ -510,13 +494,13 @@ def fix_pr(
             raise typer.Exit(0)
 
         # Max iterations reached
-        console.print(f"\n[red]Max iterations ({max_iterations}) reached without success.[/red]")
-        console.print("Check the PR manually for remaining issues.")
+        console.error(f"Max iterations ({max_iterations}) reached without success.")
+        console.info("Check the PR manually for remaining issues.")
         state_manager.release_session_lock()
         raise typer.Exit(1)
 
     except KeyboardInterrupt:
-        console.print("\n[yellow]Interrupted by user[/yellow]")
+        console.warning("Interrupted by user")
         # Release lock if state_manager was initialized
         try:
             state_manager.release_session_lock()
@@ -527,7 +511,7 @@ def fix_pr(
         # Re-raise Exit exceptions without modification
         raise
     except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
+        console.error(f"Error: {e}")
         # Release lock if state_manager was initialized
         try:
             state_manager.release_session_lock()
