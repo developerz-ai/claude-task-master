@@ -471,9 +471,16 @@ MCP Server authentication depends on the transport type:
 
 ### MCP Client Configuration
 
+MCP clients can connect to Claude Task Master using different transports. The configuration varies based on whether authentication is required.
+
 #### Claude Desktop Configuration
 
-For stdio transport (no authentication):
+**Location**:
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+- Linux: `~/.config/Claude/claude_desktop_config.json`
+
+**stdio transport (local, no authentication):**
 
 ```json
 {
@@ -487,12 +494,18 @@ For stdio transport (no authentication):
 }
 ```
 
-For SSE transport with authentication:
+This is the recommended configuration for Claude Desktop as it:
+- Uses local process communication (most secure)
+- No network exposure
+- No authentication needed
+- Lowest latency
+
+**SSE transport (network, with authentication):**
 
 ```json
 {
   "mcpServers": {
-    "claude-task-master": {
+    "claude-task-master-remote": {
       "command": "claudetm-mcp",
       "args": [
         "--transport", "sse",
@@ -507,25 +520,467 @@ For SSE transport with authentication:
 }
 ```
 
+**Remote SSE server (different machine):**
+
+```json
+{
+  "mcpServers": {
+    "claude-task-master-remote": {
+      "command": "claudetm-mcp",
+      "args": [
+        "--transport", "sse",
+        "--host", "remote.example.com",
+        "--port", "8080"
+      ],
+      "env": {
+        "CLAUDETM_PASSWORD": "your-secure-password",
+        "CLAUDETM_TLS": "true"
+      }
+    }
+  }
+}
+```
+
+**Using password hash (more secure):**
+
+```json
+{
+  "mcpServers": {
+    "claude-task-master": {
+      "command": "claudetm-mcp",
+      "args": [
+        "--transport", "sse",
+        "--host", "localhost",
+        "--port", "8080"
+      ],
+      "env": {
+        "CLAUDETM_PASSWORD_HASH": "$2b$12$..."
+      }
+    }
+  }
+}
+```
+
 #### Python MCP Client
 
+**stdio transport (local, no authentication):**
+
 ```python
+import asyncio
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-# For stdio (no auth needed)
-server_params = StdioServerParameters(
-    command="claudetm-mcp",
-    args=["--transport", "stdio"]
-)
+async def main():
+    # Configure server parameters
+    server_params = StdioServerParameters(
+        command="claudetm-mcp",
+        args=["--transport", "stdio"],
+        env={}
+    )
 
-async with stdio_client(server_params) as (read, write):
-    async with ClientSession(read, write) as session:
-        await session.initialize()
-        # Use session...
+    # Connect and use the server
+    async with stdio_client(server_params) as (read, write):
+        async with ClientSession(read, write) as session:
+            # Initialize the connection
+            await session.initialize()
+
+            # List available tools
+            tools = await session.list_tools()
+            print(f"Available tools: {[t.name for t in tools.tools]}")
+
+            # Call a tool (e.g., get status)
+            result = await session.call_tool("get_status", {})
+            print(f"Task status: {result}")
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
-For network transports, add authentication header to the HTTP client.
+**SSE transport (network, with authentication):**
+
+```python
+import asyncio
+import os
+from mcp import ClientSession
+from mcp.client.sse import sse_client
+
+async def main():
+    password = os.getenv("CLAUDETM_PASSWORD", "your-secure-password")
+
+    # Configure headers with authentication
+    headers = {
+        "Authorization": f"Bearer {password}"
+    }
+
+    # Connect to SSE endpoint
+    url = "http://localhost:8080/sse"
+
+    async with sse_client(url, headers=headers) as (read, write):
+        async with ClientSession(read, write) as session:
+            # Initialize the connection
+            await session.initialize()
+
+            # Call tools with authentication
+            result = await session.call_tool("get_status", {})
+            print(f"Task status: {result}")
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+**Full example with error handling:**
+
+```python
+import asyncio
+import logging
+import os
+from typing import Any
+
+from mcp import ClientSession
+from mcp.client.sse import sse_client
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+async def call_claudetm_tool(
+    tool_name: str,
+    arguments: dict[str, Any] | None = None,
+    password: str | None = None,
+    host: str = "localhost",
+    port: int = 8080,
+) -> Any:
+    """Call a Claude Task Master MCP tool with authentication.
+
+    Args:
+        tool_name: Name of the tool to call (e.g., "get_status", "start_task")
+        arguments: Tool arguments as a dictionary
+        password: Authentication password (or uses CLAUDETM_PASSWORD env var)
+        host: MCP server host
+        port: MCP server port
+
+    Returns:
+        Tool result
+
+    Raises:
+        ConnectionError: If connection fails
+        ValueError: If authentication fails
+    """
+    # Get password from env if not provided
+    pwd = password or os.getenv("CLAUDETM_PASSWORD")
+    if not pwd:
+        raise ValueError("Password required. Set CLAUDETM_PASSWORD or pass password argument")
+
+    # Configure headers
+    headers = {"Authorization": f"Bearer {pwd}"}
+    url = f"http://{host}:{port}/sse"
+
+    try:
+        async with sse_client(url, headers=headers) as (read, write):
+            async with ClientSession(read, write) as session:
+                # Initialize
+                init_result = await session.initialize()
+                logger.info(f"Connected to {init_result.serverInfo.name} v{init_result.serverInfo.version}")
+
+                # Call tool
+                result = await session.call_tool(tool_name, arguments or {})
+                logger.info(f"Tool {tool_name} completed successfully")
+
+                return result
+
+    except Exception as e:
+        if "401" in str(e) or "403" in str(e):
+            raise ValueError(f"Authentication failed: {e}") from e
+        raise ConnectionError(f"Failed to connect to MCP server: {e}") from e
+
+
+async def main():
+    try:
+        # Get current task status
+        status = await call_claudetm_tool("get_status")
+        print(f"Goal: {status['goal']}")
+        print(f"Status: {status['status']}")
+        print(f"Sessions: {status['session_count']}/{status['max_sessions']}")
+
+        # Start a new task
+        result = await call_claudetm_tool(
+            "start_task",
+            {
+                "goal": "Add feature X to the codebase",
+                "model": "sonnet",
+                "max_sessions": 10,
+                "auto_merge": False
+            }
+        )
+        print(f"Task started: {result}")
+
+    except ValueError as e:
+        logger.error(f"Authentication error: {e}")
+    except ConnectionError as e:
+        logger.error(f"Connection error: {e}")
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+#### TypeScript/JavaScript MCP Client
+
+**Using @modelcontextprotocol/sdk:**
+
+```typescript
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+
+async function main() {
+  const password = process.env.CLAUDETM_PASSWORD || "your-secure-password";
+
+  // Create SSE transport with authentication
+  const transport = new SSEClientTransport(
+    new URL("http://localhost:8080/sse"),
+    {
+      headers: {
+        "Authorization": `Bearer ${password}`
+      }
+    }
+  );
+
+  // Create client and connect
+  const client = new Client(
+    {
+      name: "my-client",
+      version: "1.0.0"
+    },
+    {
+      capabilities: {}
+    }
+  );
+
+  await client.connect(transport);
+
+  try {
+    // List available tools
+    const tools = await client.listTools();
+    console.log("Available tools:", tools.tools.map(t => t.name));
+
+    // Call get_status tool
+    const status = await client.callTool({
+      name: "get_status",
+      arguments: {}
+    });
+    console.log("Task status:", status);
+
+    // Start a new task
+    const result = await client.callTool({
+      name: "start_task",
+      arguments: {
+        goal: "Implement feature X",
+        model: "sonnet",
+        max_sessions: 10,
+        auto_merge: false
+      }
+    });
+    console.log("Task started:", result);
+
+  } finally {
+    await client.close();
+  }
+}
+
+main().catch(console.error);
+```
+
+**Using fetch API (manual HTTP):**
+
+```typescript
+interface MCPRequest {
+  jsonrpc: "2.0";
+  id: string | number;
+  method: string;
+  params?: any;
+}
+
+interface MCPResponse {
+  jsonrpc: "2.0";
+  id: string | number;
+  result?: any;
+  error?: {
+    code: number;
+    message: string;
+    data?: any;
+  };
+}
+
+async function callMCPTool(
+  toolName: string,
+  args: Record<string, any> = {},
+  password: string = process.env.CLAUDETM_PASSWORD || ""
+): Promise<any> {
+  const request: MCPRequest = {
+    jsonrpc: "2.0",
+    id: Date.now(),
+    method: "tools/call",
+    params: {
+      name: toolName,
+      arguments: args
+    }
+  };
+
+  const response = await fetch("http://localhost:8080/sse", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${password}`
+    },
+    body: JSON.stringify(request)
+  });
+
+  if (response.status === 401) {
+    throw new Error("Authentication required - missing or invalid password");
+  }
+  if (response.status === 403) {
+    throw new Error("Invalid password");
+  }
+  if (!response.ok) {
+    throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
+  }
+
+  const data: MCPResponse = await response.json();
+
+  if (data.error) {
+    throw new Error(`MCP error: ${data.error.message}`);
+  }
+
+  return data.result;
+}
+
+// Usage
+async function example() {
+  try {
+    const status = await callMCPTool("get_status");
+    console.log("Task status:", status);
+  } catch (error) {
+    console.error("Error:", error.message);
+  }
+}
+```
+
+#### Manual HTTP Requests (curl)
+
+For debugging or testing, you can manually call MCP SSE endpoints:
+
+```bash
+# Set password
+export PASSWORD="your-secure-password"
+
+# Initialize MCP session (SSE endpoint)
+curl -N \
+  -H "Authorization: Bearer $PASSWORD" \
+  -H "Accept: text/event-stream" \
+  http://localhost:8080/sse
+
+# Call tool via JSON-RPC
+curl -X POST \
+  -H "Authorization: Bearer $PASSWORD" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/call",
+    "params": {
+      "name": "get_status",
+      "arguments": {}
+    }
+  }' \
+  http://localhost:8080/sse
+
+# List available tools
+curl -X POST \
+  -H "Authorization: Bearer $PASSWORD" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tools/list",
+    "params": {}
+  }' \
+  http://localhost:8080/sse
+```
+
+#### Configuration Best Practices
+
+**1. Local Development (stdio):**
+```json
+{
+  "mcpServers": {
+    "claudetm": {
+      "command": "claudetm-mcp",
+      "args": ["--transport", "stdio"]
+    }
+  }
+}
+```
+- ✅ Most secure (no network exposure)
+- ✅ No authentication needed
+- ✅ Lowest latency
+- ❌ Only works on same machine
+
+**2. Local Network (SSE with auth):**
+```json
+{
+  "mcpServers": {
+    "claudetm": {
+      "command": "claudetm-mcp",
+      "args": ["--transport", "sse", "--host", "localhost", "--port", "8080"],
+      "env": {"CLAUDETM_PASSWORD": "dev-password"}
+    }
+  }
+}
+```
+- ✅ Works across containers/VMs on same host
+- ✅ Simple password authentication
+- ❌ Password in config file (use for dev only)
+
+**3. Remote Server (SSE with hash):**
+```json
+{
+  "mcpServers": {
+    "claudetm": {
+      "command": "claudetm-mcp",
+      "args": ["--transport", "sse", "--host", "remote.internal", "--port", "8080"],
+      "env": {"CLAUDETM_PASSWORD_HASH": "$2b$12$..."}
+    }
+  }
+}
+```
+- ✅ Secure for production
+- ✅ Password hash (not plaintext)
+- ✅ Works across network
+- ⚠️ Requires TLS/VPN for security
+
+**4. Production (SSE with TLS):**
+```bash
+# Server side: Use reverse proxy (nginx/caddy) for TLS
+# Client side config:
+{
+  "mcpServers": {
+    "claudetm": {
+      "command": "claudetm-mcp",
+      "args": ["--transport", "sse", "--host", "claudetm.example.com", "--port", "443"],
+      "env": {
+        "CLAUDETM_PASSWORD_HASH": "$2b$12$...",
+        "CLAUDETM_TLS": "true"
+      }
+    }
+  }
+}
+```
+- ✅ Production-ready
+- ✅ TLS encryption
+- ✅ Password authentication
+- ✅ Can cross internet securely
 
 ### MCP Authentication Flow
 
