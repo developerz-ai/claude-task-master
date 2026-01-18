@@ -2,8 +2,6 @@
 
 from unittest.mock import AsyncMock, patch
 
-import pytest
-
 from claude_task_master.cli import app
 
 
