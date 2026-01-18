@@ -199,6 +199,22 @@ class WorkflowStageHandler:
         try:
             pr_status = self.github_client.get_pr_status(state.current_pr)
 
+            # Check if PR was already merged (e.g., manually)
+            if pr_status.state == "MERGED":
+                console.success(
+                    f"PR #{state.current_pr} was already merged - skipping to next task"
+                )
+                state.workflow_stage = "merged"
+                self.state_manager.save_state(state)
+                return None
+
+            # Check if PR was closed without merging
+            if pr_status.state == "CLOSED":
+                console.warning(f"PR #{state.current_pr} was closed without merging")
+                state.status = "blocked"
+                self.state_manager.save_state(state)
+                return 1
+
             # Get required checks from branch protection
             required_checks = set(
                 self.github_client.get_required_status_checks(pr_status.base_branch)
@@ -351,6 +367,22 @@ After fixing, end with: TASK COMPLETE"""
         try:
             pr_status = self.github_client.get_pr_status(state.current_pr)
 
+            # Check if PR was already merged (e.g., manually)
+            if pr_status.state == "MERGED":
+                console.success(
+                    f"PR #{state.current_pr} was already merged - skipping to next task"
+                )
+                state.workflow_stage = "merged"
+                self.state_manager.save_state(state)
+                return None
+
+            # Check if PR was closed without merging
+            if pr_status.state == "CLOSED":
+                console.warning(f"PR #{state.current_pr} was closed without merging")
+                state.status = "blocked"
+                self.state_manager.save_state(state)
+                return 1
+
             # Check if ANY checks are still pending (CI, review bots, etc)
             # A check is pending if: status is not terminal AND conclusion is None
             pending_checks = [
@@ -500,9 +532,26 @@ After addressing ALL comments and creating the resolution file, end with: TASK C
             self.state_manager.save_state(state)
             return None
 
-        # Check if PR has conflicts
+        # Check PR status before attempting merge
         try:
             pr_status = self.github_client.get_pr_status(state.current_pr)
+
+            # Check if PR was already merged (e.g., manually)
+            if pr_status.state == "MERGED":
+                console.success(
+                    f"PR #{state.current_pr} was already merged - skipping to next task"
+                )
+                state.workflow_stage = "merged"
+                self.state_manager.save_state(state)
+                return None
+
+            # Check if PR was closed without merging
+            if pr_status.state == "CLOSED":
+                console.warning(f"PR #{state.current_pr} was closed without merging")
+                state.status = "blocked"
+                self.state_manager.save_state(state)
+                return 1
+
             if pr_status.mergeable == "CONFLICTING":
                 console.warning(f"PR #{state.current_pr} has merge conflicts!")
                 console.detail("Conflicts must be resolved before merging")

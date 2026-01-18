@@ -11,6 +11,7 @@ class PRStatus(BaseModel):
     """PR status information."""
 
     number: int
+    state: str = "OPEN"  # OPEN, CLOSED, MERGED
     ci_state: str  # PENDING, SUCCESS, FAILURE, ERROR
     unresolved_threads: int
     resolved_threads: int = 0
@@ -251,6 +252,7 @@ def _build_pr_status_query() -> str:
     query($owner: String!, $repo: String!, $pr: Int!) {
       repository(owner: $owner, name: $repo) {
         pullRequest(number: $pr) {
+          state
           mergeable
           mergeStateStatus
           baseRefName
@@ -339,13 +341,15 @@ def _parse_pr_status_response(pr_number: int, pr_data: dict[str, Any]) -> PRStat
     )
     checks_pending = len(check_details) - checks_passed - checks_failed - checks_skipped
 
-    # Parse mergeable status
+    # Parse PR state and mergeable status
+    state = pr_data.get("state", "OPEN")
     mergeable = pr_data.get("mergeable", "UNKNOWN")
     merge_state_status = pr_data.get("mergeStateStatus", "UNKNOWN")
     base_branch = pr_data.get("baseRefName", "main")
 
     return PRStatus(
         number=pr_number,
+        state=state,
         ci_state=ci_state,
         unresolved_threads=unresolved,
         resolved_threads=resolved,
