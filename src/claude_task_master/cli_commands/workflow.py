@@ -8,6 +8,7 @@ from rich.console import Console
 from rich.markdown import Markdown
 
 from ..core.agent import AgentWrapper, ModelType
+from ..core.config_loader import initialize_config
 from ..core.context_accumulator import ContextAccumulator
 from ..core.credentials import CredentialManager
 from ..core.logger import LogFormat, LogLevel, TaskLogger
@@ -148,6 +149,13 @@ def start(
     console.print(f"Model: {model}, Auto-merge: {auto_merge}, Log: {log_level}/{log_format}")
 
     try:
+        # Initialize configuration (creates config.json with defaults if missing)
+        working_dir = Path.cwd()
+        _config = initialize_config(working_dir)  # noqa: F841 - loaded for side effects
+        console.print(
+            f"[dim]Config loaded from: {working_dir / '.claude-task-master' / 'config.json'}[/dim]"
+        )
+
         # Check if state already exists
         state_manager = StateManager()
         if state_manager.exists():
@@ -180,8 +188,7 @@ def start(
         # Initialize logger with configured level and format
         logger = _initialize_logger(state_manager, state.run_id, log_level_enum, log_format_enum)
 
-        # Initialize components with logger
-        working_dir = Path.cwd()
+        # Initialize components with logger (working_dir already defined above)
         agent, planner = _initialize_components(
             access_token, model_type, working_dir, state_manager, logger
         )
@@ -250,6 +257,10 @@ def resume(
     console.print("[bold blue]Resuming task...[/bold blue]")
 
     try:
+        # Initialize configuration (loads existing config.json or uses defaults)
+        working_dir = Path.cwd()
+        initialize_config(working_dir)
+
         # Check if state exists
         state_manager = StateManager()
         if not state_manager.exists():
@@ -314,8 +325,7 @@ def resume(
         log_level_enum = LogLevel(state.options.log_level)
         log_format_enum = LogFormat(state.options.log_format)
 
-        # Initialize components
-        working_dir = Path.cwd()
+        # Initialize components (working_dir already defined above)
         logger = _initialize_logger(state_manager, state.run_id, log_level_enum, log_format_enum)
         agent, planner = _initialize_components(
             access_token, model_type, working_dir, state_manager, logger
