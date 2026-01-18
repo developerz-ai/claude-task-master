@@ -102,6 +102,39 @@ def _ensure_passlib() -> None:
         )
 
 
+def _truncate_password_for_bcrypt(password: str) -> str:
+    """Truncate password to bcrypt's 72-byte limit.
+
+    bcrypt has a fundamental 72-byte password limit. Passwords longer than
+    72 bytes (when UTF-8 encoded) must be truncated. This is done at a
+    character boundary to avoid breaking multi-byte characters.
+
+    Args:
+        password: The password to potentially truncate.
+
+    Returns:
+        The password truncated to at most 72 bytes when UTF-8 encoded.
+    """
+    # Encode to bytes to check actual byte length
+    encoded = password.encode("utf-8")
+    if len(encoded) <= 72:
+        return password
+
+    # Truncate at byte boundary, then decode
+    # We need to be careful not to break a multi-byte character
+    truncated = encoded[:72]
+    # Find the last complete character by decoding with error handling
+    # If truncation breaks a multi-byte character, we need to go back
+    while True:
+        try:
+            return truncated.decode("utf-8")
+        except UnicodeDecodeError:
+            truncated = truncated[:-1]
+            if not truncated:
+                # This shouldn't happen with valid UTF-8 input
+                return password[:72]
+
+
 def hash_password(password: str) -> str:
     """Hash a password using bcrypt.
 
@@ -115,6 +148,11 @@ def hash_password(password: str) -> str:
         ImportError: If passlib[bcrypt] is not installed.
         ValueError: If password is empty.
 
+    Note:
+        bcrypt has a 72-byte password limit. Passwords longer than 72 bytes
+        (when UTF-8 encoded) will be truncated. This is a bcrypt limitation,
+        not a security concern for most use cases.
+
     Example:
         >>> hashed = hash_password("my_secret_password")
         >>> hashed.startswith("$2b$")  # bcrypt hash format
@@ -124,6 +162,9 @@ def hash_password(password: str) -> str:
 
     if not password:
         raise ValueError("Password cannot be empty")
+
+    # Truncate to bcrypt's 72-byte limit
+    password = _truncate_password_for_bcrypt(password)
 
     assert _pwd_context is not None  # ensured by _ensure_passlib
     result: str = _pwd_context.hash(password)
@@ -145,6 +186,10 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     Raises:
         ImportError: If passlib[bcrypt] is not installed.
 
+    Note:
+        bcrypt has a 72-byte password limit. Passwords are truncated to
+        match the behavior during hashing.
+
     Example:
         >>> hashed = hash_password("my_password")
         >>> verify_password("my_password", hashed)
@@ -158,6 +203,9 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         return False
 
     try:
+        # Truncate to bcrypt's 72-byte limit (must match hash_password behavior)
+        plain_password = _truncate_password_for_bcrypt(plain_password)
+
         assert _pwd_context is not None  # ensured by _ensure_passlib
         result: bool = _pwd_context.verify(plain_password, hashed_password)
         return result
