@@ -47,7 +47,7 @@ class TestValidStatuses:
 
     def test_valid_statuses_contains_expected_values(self):
         """Test that VALID_STATUSES contains all expected values."""
-        expected = {"planning", "working", "blocked", "paused", "success", "failed"}
+        expected = {"planning", "working", "blocked", "paused", "stopped", "success", "failed"}
         assert VALID_STATUSES == expected
 
     def test_valid_statuses_immutable(self):
@@ -107,7 +107,7 @@ class TestResumableStatuses:
 
     def test_resumable_statuses_contains_expected_values(self):
         """Test that RESUMABLE_STATUSES contains expected values."""
-        assert RESUMABLE_STATUSES == {"paused", "working", "blocked"}
+        assert RESUMABLE_STATUSES == {"paused", "stopped", "working", "blocked"}
 
     def test_resumable_statuses_is_subset_of_valid_statuses(self):
         """Test that RESUMABLE_STATUSES is a subset of VALID_STATUSES."""
@@ -137,22 +137,22 @@ class TestValidTransitions:
 
     def test_planning_transitions(self):
         """Test valid transitions from planning."""
-        expected = frozenset(["working", "failed", "paused"])
+        expected = frozenset(["working", "failed", "paused", "stopped"])
         assert VALID_TRANSITIONS["planning"] == expected
 
     def test_working_transitions(self):
         """Test valid transitions from working."""
-        expected = frozenset(["blocked", "success", "failed", "working", "paused"])
+        expected = frozenset(["blocked", "success", "failed", "working", "paused", "stopped"])
         assert VALID_TRANSITIONS["working"] == expected
 
     def test_blocked_transitions(self):
         """Test valid transitions from blocked."""
-        expected = frozenset(["working", "failed", "paused"])
+        expected = frozenset(["working", "failed", "paused", "stopped"])
         assert VALID_TRANSITIONS["blocked"] == expected
 
     def test_paused_transitions(self):
         """Test valid transitions from paused."""
-        expected = frozenset(["working", "failed"])
+        expected = frozenset(["working", "failed", "stopped"])
         assert VALID_TRANSITIONS["paused"] == expected
 
     def test_transition_values_are_frozensets(self):

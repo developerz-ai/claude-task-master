@@ -249,7 +249,7 @@ class TestResumeStatusConstants:
 
     def test_resumable_statuses_defined(self):
         """Test that resumable statuses are properly defined."""
-        expected = {"paused", "working", "blocked"}
+        expected = {"paused", "stopped", "working", "blocked"}
         assert RESUMABLE_STATUSES == expected
 
     def test_terminal_and_resumable_are_disjoint(self):
@@ -274,7 +274,7 @@ class TestResumeStatusConstants:
     def test_resumable_statuses_are_in_progress(self):
         """Test that resumable statuses represent active/interruptible states."""
         for status in RESUMABLE_STATUSES:
-            assert status in {"paused", "working", "blocked"}
+            assert status in {"paused", "stopped", "working", "blocked"}
 
 
 # =============================================================================

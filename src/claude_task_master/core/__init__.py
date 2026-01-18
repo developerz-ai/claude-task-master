@@ -47,13 +47,6 @@ from claude_task_master.core.circuit_breaker import (
     CircuitState,
     get_circuit_breaker,
 )
-from claude_task_master.core.control import (
-    ControlError,
-    ControlManager,
-    ControlOperationNotAllowedError,
-    ControlResult,
-    NoActiveTaskError,
-)
 from claude_task_master.core.config import (
     APIConfig,
     ClaudeTaskMasterConfig,
@@ -83,6 +76,13 @@ from claude_task_master.core.config_loader import (
     reload_config,
     reset_config,
     save_config_to_file,
+)
+from claude_task_master.core.control import (
+    ControlError,
+    ControlManager,
+    ControlOperationNotAllowedError,
+    ControlResult,
+    NoActiveTaskError,
 )
 from claude_task_master.core.credentials import (
     CredentialError,

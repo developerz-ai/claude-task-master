@@ -647,8 +647,11 @@ class TestConfigManager:
 
         assert manager1 is manager2
 
-    def test_config_manager_lazy_loads_config(self, temp_dir) -> None:
+    def test_config_manager_lazy_loads_config(self, temp_dir, monkeypatch) -> None:
         """Test ConfigManager lazy loads configuration."""
+        # Clear env vars that would override file values
+        monkeypatch.delenv("CLAUDETM_MODEL_SONNET", raising=False)
+
         reset_config()
         config_path = get_config_file_path(temp_dir)
         config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -724,6 +727,9 @@ class TestConfigLoaderIntegration:
 
     def test_get_config_loads_from_file(self, temp_dir, monkeypatch) -> None:
         """Test get_config loads from file."""
+        # Clear env vars that would override file values
+        monkeypatch.delenv("CLAUDETM_MODEL_SONNET", raising=False)
+
         monkeypatch.chdir(temp_dir)
         reset_config()
 
@@ -765,8 +771,11 @@ class TestConfigLoaderIntegration:
 
         assert config.models.sonnet == "env-sonnet"
 
-    def test_reload_config_updates_cache(self, temp_dir) -> None:
+    def test_reload_config_updates_cache(self, temp_dir, monkeypatch) -> None:
         """Test reload_config updates the cached config."""
+        # Clear env vars that would override file values
+        monkeypatch.delenv("CLAUDETM_MODEL_SONNET", raising=False)
+
         reset_config()
         config_path = get_config_file_path(temp_dir)
         config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -791,8 +800,13 @@ class TestConfigLoaderIntegration:
 
         assert reloaded.models.sonnet == "sonnet-v2"
 
-    def test_config_file_and_env_vars_together(self, temp_dir) -> None:
+    def test_config_file_and_env_vars_together(self, temp_dir, monkeypatch) -> None:
         """Test config file and env vars work together correctly."""
+        # Clear ALL env vars that could interfere, then set only the ones we want to test
+        monkeypatch.delenv("CLAUDETM_MODEL_SONNET", raising=False)
+        monkeypatch.delenv("CLAUDETM_TARGET_BRANCH", raising=False)
+        monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+
         reset_config()
         config_path = get_config_file_path(temp_dir)
         config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -813,7 +827,7 @@ class TestConfigLoaderIntegration:
 
         with patch("claude_task_master.core.config_loader.get_config_file_path") as mock_get_path:
             mock_get_path.return_value = config_path
-            with patch.dict(os.environ, env_vars):
+            with patch.dict(os.environ, env_vars, clear=False):
                 config = get_config()
 
         # Env vars should override
