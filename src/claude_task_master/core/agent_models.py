@@ -48,7 +48,15 @@ class TaskComplexity(Enum):
 
 
 class ToolConfig(Enum):
-    """Tool configurations for different phases."""
+    """Tool configurations for different phases.
+
+    Each phase specifies the tools available to Claude:
+    - PLANNING: Read-only tools (Read, Glob, Grep, Bash) for exploring codebase
+    - VERIFICATION: Same as planning (Read, Glob, Grep, Bash) for running tests/lint
+    - WORKING: Empty list [] allows ALL tools for full implementation access
+
+    Note: An empty list in allowed_tools means "all tools are allowed".
+    """
 
     # Planning uses READ-ONLY tools + Bash for checks (git status, tests, etc.)
     PLANNING = [
