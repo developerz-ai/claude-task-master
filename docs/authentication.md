@@ -1053,134 +1053,438 @@ HMAC-SHA256(secret, timestamp + "." + json_payload)
 
 ### Verifying Webhook Signatures
 
-#### Python Example
+All webhook payloads include HMAC-SHA256 signatures that you should verify to ensure authenticity. Below are complete, production-ready examples for common languages and frameworks.
+
+#### Overview of Signature Headers
+
+Every webhook request includes:
+
+```
+X-Webhook-Signature: sha256=<hmac-hex>                    # Simple signature (backward compat)
+X-Webhook-Signature-256: sha256=<timestamp-hmac-hex>      # Timestamped signature (recommended)
+X-Webhook-Timestamp: <unix-timestamp>                      # Request timestamp
+X-Webhook-Event: <event-type>                              # Event type
+X-Webhook-Delivery-Id: <unique-id>                         # Unique delivery ID
+```
+
+**Always use `X-Webhook-Signature-256`** (timestamped) to prevent replay attacks.
+
+---
+
+#### Python Examples
+
+##### Standalone Verification Function
 
 ```python
 import hmac
 import hashlib
-import json
 import time
+from typing import Optional
+
 
 def verify_webhook_signature(
     payload: bytes,
     signature: str,
     secret: str,
-    timestamp: str = None,
+    timestamp: Optional[str] = None,
     max_age: int = 300  # 5 minutes
 ) -> bool:
-    """Verify webhook HMAC signature.
+    """Verify webhook HMAC-SHA256 signature.
 
     Args:
-        payload: Raw request body (bytes)
+        payload: Raw request body (bytes) - use request.get_data() in Flask
         signature: X-Webhook-Signature-256 header value
-        secret: Shared webhook secret
+        secret: Shared webhook secret (configured when creating webhook)
         timestamp: X-Webhook-Timestamp header value
-        max_age: Maximum age of webhook in seconds (default 300)
+        max_age: Maximum age of webhook in seconds (default 300 = 5 min)
 
     Returns:
-        True if signature is valid, False otherwise
+        True if signature is valid and fresh, False otherwise
+
+    Example:
+        >>> payload = b'{"type": "task.completed", "data": {...}}'
+        >>> signature = "sha256=abc123..."
+        >>> secret = "my-webhook-secret"
+        >>> timestamp = "1704117600"
+        >>> verify_webhook_signature(payload, signature, secret, timestamp)
+        True
     """
-    # Check timestamp freshness (prevent replay attacks)
+    # 1. Check timestamp freshness (prevent replay attacks)
     if timestamp:
         webhook_time = int(timestamp)
         current_time = int(time.time())
-        if abs(current_time - webhook_time) > max_age:
+        age = abs(current_time - webhook_time)
+        if age > max_age:
+            print(f"Webhook too old: {age}s > {max_age}s")
             return False
 
-    # Remove "sha256=" prefix if present
+    # 2. Remove "sha256=" prefix if present
     if signature.startswith("sha256="):
         signature = signature[7:]
 
-    # Calculate expected signature
+    # 3. Calculate expected signature
     if timestamp:
-        # Timestamped signature (recommended)
+        # Timestamped signature (recommended - includes timestamp in HMAC)
         signed_payload = f"{timestamp}.".encode() + payload
     else:
-        # Simple signature
+        # Simple signature (for backward compatibility)
         signed_payload = payload
 
     expected = hmac.new(
-        secret.encode(),
+        secret.encode("utf-8"),
         signed_payload,
         hashlib.sha256
     ).hexdigest()
 
-    # Constant-time comparison
+    # 4. Constant-time comparison (prevents timing attacks)
     return hmac.compare_digest(signature, expected)
+```
 
-# Example usage in Flask/FastAPI
-from flask import Flask, request
+##### Flask Example
+
+```python
+from flask import Flask, request, jsonify
+import logging
 
 app = Flask(__name__)
-WEBHOOK_SECRET = "your-shared-secret"
+WEBHOOK_SECRET = "your-shared-secret"  # Match secret from webhook config
+
+logger = logging.getLogger(__name__)
+
 
 @app.route("/webhook", methods=["POST"])
 def handle_webhook():
-    # Get signature and timestamp from headers
+    """Handle incoming Claude Task Master webhooks."""
+    # Get headers
     signature = request.headers.get("X-Webhook-Signature-256")
     timestamp = request.headers.get("X-Webhook-Timestamp")
+    event_type = request.headers.get("X-Webhook-Event")
+    delivery_id = request.headers.get("X-Webhook-Delivery-Id")
 
+    # Validate signature presence
     if not signature:
-        return {"error": "Missing signature"}, 401
+        logger.warning("Webhook received without signature")
+        return jsonify({"error": "Missing signature"}), 401
 
-    # Verify signature
+    # Verify signature (use raw bytes, NOT parsed JSON!)
     if not verify_webhook_signature(
-        request.get_data(),
+        request.get_data(),  # Raw bytes - important!
         signature,
         WEBHOOK_SECRET,
         timestamp
     ):
-        return {"error": "Invalid signature"}, 403
+        logger.warning(f"Invalid webhook signature for delivery {delivery_id}")
+        return jsonify({"error": "Invalid signature"}), 403
 
-    # Process webhook
-    event = request.json
-    print(f"Received event: {event['type']}")
+    # Parse and process webhook
+    try:
+        event = request.json
+        logger.info(f"Webhook received: {event_type} (delivery: {delivery_id})")
+
+        # Handle different event types
+        if event_type == "task.completed":
+            handle_task_completed(event)
+        elif event_type == "task.failed":
+            handle_task_failed(event)
+        elif event_type == "pr.created":
+            handle_pr_created(event)
+        else:
+            logger.warning(f"Unknown event type: {event_type}")
+
+        return jsonify({"status": "success"}), 200
+
+    except Exception as e:
+        logger.error(f"Error processing webhook: {e}", exc_info=True)
+        return jsonify({"error": "Internal error"}), 500
+
+
+def handle_task_completed(event: dict):
+    """Process task.completed event."""
+    task_id = event["data"]["task_id"]
+    commit = event["data"].get("commit_hash", "N/A")
+    print(f"Task {task_id} completed! Commit: {commit}")
+
+
+def handle_task_failed(event: dict):
+    """Process task.failed event."""
+    task_id = event["data"]["task_id"]
+    error = event["data"].get("error", "Unknown error")
+    print(f"Task {task_id} failed: {error}")
+
+
+def handle_pr_created(event: dict):
+    """Process pr.created event."""
+    pr_url = event["data"].get("pr_url", "N/A")
+    print(f"PR created: {pr_url}")
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8080)
+```
+
+##### FastAPI Example
+
+```python
+from fastapi import FastAPI, Request, HTTPException, Header
+from typing import Optional
+import logging
+
+app = FastAPI()
+WEBHOOK_SECRET = "your-shared-secret"
+
+logger = logging.getLogger(__name__)
+
+
+@app.post("/webhook")
+async def handle_webhook(
+    request: Request,
+    x_webhook_signature_256: Optional[str] = Header(None),
+    x_webhook_timestamp: Optional[str] = Header(None),
+    x_webhook_event: Optional[str] = Header(None),
+    x_webhook_delivery_id: Optional[str] = Header(None),
+):
+    """Handle Claude Task Master webhook."""
+    # Validate signature
+    if not x_webhook_signature_256:
+        raise HTTPException(status_code=401, detail="Missing signature")
+
+    # Get raw body
+    body = await request.body()
+
+    # Verify signature
+    if not verify_webhook_signature(
+        body,
+        x_webhook_signature_256,
+        WEBHOOK_SECRET,
+        x_webhook_timestamp
+    ):
+        logger.warning(f"Invalid signature for delivery {x_webhook_delivery_id}")
+        raise HTTPException(status_code=403, detail="Invalid signature")
+
+    # Process event
+    event = await request.json()
+    logger.info(f"Received {x_webhook_event}: delivery {x_webhook_delivery_id}")
+
+    # Handle event
+    if x_webhook_event == "task.completed":
+        # Your logic here
+        pass
 
     return {"status": "success"}
 ```
 
-#### Node.js Example
+---
+
+#### Node.js Examples
+
+##### Standalone Verification Function
 
 ```javascript
 const crypto = require('crypto');
-const express = require('express');
 
-const app = express();
-const WEBHOOK_SECRET = 'your-shared-secret';
-
+/**
+ * Verify webhook HMAC-SHA256 signature
+ *
+ * @param {string|Buffer} payload - Raw request body (string or Buffer)
+ * @param {string} signature - X-Webhook-Signature-256 header value
+ * @param {string} secret - Shared webhook secret
+ * @param {string} [timestamp] - X-Webhook-Timestamp header value
+ * @param {number} [maxAge=300] - Maximum age in seconds (default 5 min)
+ * @returns {boolean} True if signature is valid and fresh
+ *
+ * @example
+ * const payload = '{"type": "task.completed"}';
+ * const signature = "sha256=abc123...";
+ * const secret = "my-webhook-secret";
+ * const timestamp = "1704117600";
+ *
+ * if (verifyWebhookSignature(payload, signature, secret, timestamp)) {
+ *   console.log("Webhook verified!");
+ * }
+ */
 function verifyWebhookSignature(payload, signature, secret, timestamp, maxAge = 300) {
-  // Check timestamp freshness
+  // 1. Check timestamp freshness (prevent replay attacks)
   if (timestamp) {
-    const webhookTime = parseInt(timestamp);
+    const webhookTime = parseInt(timestamp, 10);
     const currentTime = Math.floor(Date.now() / 1000);
-    if (Math.abs(currentTime - webhookTime) > maxAge) {
+    const age = Math.abs(currentTime - webhookTime);
+
+    if (age > maxAge) {
+      console.warn(`Webhook too old: ${age}s > ${maxAge}s`);
       return false;
     }
   }
 
-  // Remove "sha256=" prefix
+  // 2. Remove "sha256=" prefix if present
   const providedSig = signature.startsWith('sha256=')
     ? signature.substring(7)
     : signature;
 
-  // Calculate expected signature
+  // 3. Calculate expected signature
   const signedPayload = timestamp
-    ? `${timestamp}.${payload}`
-    : payload;
+    ? `${timestamp}.${payload}`  // Timestamped (recommended)
+    : payload;                    // Simple (backward compat)
 
   const expected = crypto
     .createHmac('sha256', secret)
     .update(signedPayload)
     .digest('hex');
 
-  // Constant-time comparison
+  // 4. Constant-time comparison (prevents timing attacks)
+  // Both buffers must be same length for timingSafeEqual
+  if (providedSig.length !== expected.length) {
+    return false;
+  }
+
   return crypto.timingSafeEqual(
-    Buffer.from(providedSig),
-    Buffer.from(expected)
+    Buffer.from(providedSig, 'hex'),
+    Buffer.from(expected, 'hex')
   );
 }
 
+module.exports = { verifyWebhookSignature };
+```
+
+##### Express.js Example
+
+```javascript
+const express = require('express');
+const crypto = require('crypto');
+
+const app = express();
+const WEBHOOK_SECRET = 'your-shared-secret';  // Match webhook config
+
+// IMPORTANT: Use raw body parser for signature verification
 app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
+  // Get headers
+  const signature = req.headers['x-webhook-signature-256'];
+  const timestamp = req.headers['x-webhook-timestamp'];
+  const eventType = req.headers['x-webhook-event'];
+  const deliveryId = req.headers['x-webhook-delivery-id'];
+
+  // Validate signature
+  if (!signature) {
+    console.warn('Webhook received without signature');
+    return res.status(401).json({ error: 'Missing signature' });
+  }
+
+  // Verify signature (use raw body!)
+  const isValid = verifyWebhookSignature(
+    req.body.toString(),  // Convert Buffer to string
+    signature,
+    WEBHOOK_SECRET,
+    timestamp
+  );
+
+  if (!isValid) {
+    console.warn(`Invalid signature for delivery ${deliveryId}`);
+    return res.status(403).json({ error: 'Invalid signature' });
+  }
+
+  // Parse and process webhook
+  try {
+    const event = JSON.parse(req.body);
+    console.log(`Webhook received: ${eventType} (delivery: ${deliveryId})`);
+
+    // Handle different event types
+    switch (eventType) {
+      case 'task.completed':
+        handleTaskCompleted(event);
+        break;
+      case 'task.failed':
+        handleTaskFailed(event);
+        break;
+      case 'pr.created':
+        handlePrCreated(event);
+        break;
+      default:
+        console.warn(`Unknown event type: ${eventType}`);
+    }
+
+    res.json({ status: 'success' });
+
+  } catch (error) {
+    console.error('Error processing webhook:', error);
+    res.status(500).json({ error: 'Internal error' });
+  }
+});
+
+function handleTaskCompleted(event) {
+  const taskId = event.data.task_id;
+  const commit = event.data.commit_hash || 'N/A';
+  console.log(`Task ${taskId} completed! Commit: ${commit}`);
+}
+
+function handleTaskFailed(event) {
+  const taskId = event.data.task_id;
+  const error = event.data.error || 'Unknown error';
+  console.log(`Task ${taskId} failed: ${error}`);
+}
+
+function handlePrCreated(event) {
+  const prUrl = event.data.pr_url || 'N/A';
+  console.log(`PR created: ${prUrl}`);
+}
+
+app.listen(3000, () => {
+  console.log('Webhook server listening on port 3000');
+});
+```
+
+##### Next.js API Route Example
+
+```javascript
+// pages/api/webhook.js (or app/api/webhook/route.js for App Router)
+import crypto from 'crypto';
+
+export const config = {
+  api: {
+    bodyParser: false,  // Disable body parser to get raw body
+  },
+};
+
+async function getRawBody(req) {
+  const chunks = [];
+  for await (const chunk of req) {
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
+function verifyWebhookSignature(payload, signature, secret, timestamp, maxAge = 300) {
+  // Check timestamp
+  if (timestamp) {
+    const webhookTime = parseInt(timestamp, 10);
+    const currentTime = Math.floor(Date.now() / 1000);
+    if (Math.abs(currentTime - webhookTime) > maxAge) {
+      return false;
+    }
+  }
+
+  // Remove prefix
+  const providedSig = signature.startsWith('sha256=')
+    ? signature.substring(7)
+    : signature;
+
+  // Calculate expected
+  const signedPayload = timestamp ? `${timestamp}.${payload}` : payload;
+  const expected = crypto
+    .createHmac('sha256', secret)
+    .update(signedPayload)
+    .digest('hex');
+
+  // Compare
+  return crypto.timingSafeEqual(
+    Buffer.from(providedSig, 'hex'),
+    Buffer.from(expected, 'hex')
+  );
+}
+
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
   const signature = req.headers['x-webhook-signature-256'];
   const timestamp = req.headers['x-webhook-timestamp'];
 
@@ -1188,25 +1492,199 @@ app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
     return res.status(401).json({ error: 'Missing signature' });
   }
 
+  // Get raw body
+  const rawBody = await getRawBody(req);
+
   // Verify signature
   if (!verifyWebhookSignature(
-    req.body.toString(),
+    rawBody.toString(),
     signature,
-    WEBHOOK_SECRET,
+    process.env.WEBHOOK_SECRET,
     timestamp
   )) {
     return res.status(403).json({ error: 'Invalid signature' });
   }
 
   // Process webhook
-  const event = JSON.parse(req.body);
-  console.log(`Received event: ${event.type}`);
+  const event = JSON.parse(rawBody);
+  console.log('Webhook received:', event.type);
+
+  res.status(200).json({ status: 'success' });
+}
+```
+
+---
+
+#### TypeScript Example
+
+```typescript
+import crypto from 'crypto';
+import express, { Request, Response } from 'express';
+
+interface WebhookEvent {
+  type: string;
+  timestamp: string;
+  data: Record<string, any>;
+}
+
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || 'your-shared-secret';
+
+/**
+ * Verify webhook HMAC signature
+ */
+function verifyWebhookSignature(
+  payload: string,
+  signature: string,
+  secret: string,
+  timestamp?: string,
+  maxAge: number = 300
+): boolean {
+  // Check timestamp freshness
+  if (timestamp) {
+    const webhookTime = parseInt(timestamp, 10);
+    const currentTime = Math.floor(Date.now() / 1000);
+    const age = Math.abs(currentTime - webhookTime);
+
+    if (age > maxAge) {
+      console.warn(`Webhook expired: ${age}s > ${maxAge}s`);
+      return false;
+    }
+  }
+
+  // Remove sha256= prefix
+  const providedSig = signature.startsWith('sha256=')
+    ? signature.substring(7)
+    : signature;
+
+  // Calculate expected signature
+  const signedPayload = timestamp ? `${timestamp}.${payload}` : payload;
+  const expected = crypto
+    .createHmac('sha256', secret)
+    .update(signedPayload)
+    .digest('hex');
+
+  // Constant-time comparison
+  if (providedSig.length !== expected.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(
+    Buffer.from(providedSig, 'hex'),
+    Buffer.from(expected, 'hex')
+  );
+}
+
+const app = express();
+
+app.post('/webhook', express.raw({ type: 'application/json' }), (req: Request, res: Response) => {
+  const signature = req.headers['x-webhook-signature-256'] as string;
+  const timestamp = req.headers['x-webhook-timestamp'] as string;
+  const eventType = req.headers['x-webhook-event'] as string;
+
+  if (!signature) {
+    return res.status(401).json({ error: 'Missing signature' });
+  }
+
+  if (!verifyWebhookSignature(req.body.toString(), signature, WEBHOOK_SECRET, timestamp)) {
+    return res.status(403).json({ error: 'Invalid signature' });
+  }
+
+  const event: WebhookEvent = JSON.parse(req.body.toString());
+  console.log(`Received ${eventType}:`, event);
 
   res.json({ status: 'success' });
 });
 
-app.listen(3000);
+app.listen(3000, () => console.log('Webhook server running on port 3000'));
 ```
+
+---
+
+#### Testing Your Webhook Endpoint
+
+##### Using curl
+
+```bash
+# Set your secret
+SECRET="your-webhook-secret"
+TIMESTAMP=$(date +%s)
+PAYLOAD='{"type":"test","data":{}}'
+
+# Calculate signature (bash with openssl)
+SIGNATURE=$(echo -n "${TIMESTAMP}.${PAYLOAD}" | openssl dgst -sha256 -hmac "$SECRET" | awk '{print $2}')
+
+# Send test webhook
+curl -X POST http://localhost:8080/webhook \
+  -H "Content-Type: application/json" \
+  -H "X-Webhook-Signature-256: sha256=$SIGNATURE" \
+  -H "X-Webhook-Timestamp: $TIMESTAMP" \
+  -H "X-Webhook-Event: test" \
+  -H "X-Webhook-Delivery-Id: test-123" \
+  -d "$PAYLOAD"
+```
+
+##### Using Python
+
+```python
+import requests
+import hmac
+import hashlib
+import time
+import json
+
+def send_test_webhook(url: str, secret: str):
+    """Send a test webhook with valid signature."""
+    payload = {"type": "test", "data": {}}
+    payload_bytes = json.dumps(payload, separators=(",", ":")).encode()
+
+    timestamp = str(int(time.time()))
+    signed_payload = f"{timestamp}.".encode() + payload_bytes
+
+    signature = hmac.new(
+        secret.encode(),
+        signed_payload,
+        hashlib.sha256
+    ).hexdigest()
+
+    response = requests.post(
+        url,
+        json=payload,
+        headers={
+            "X-Webhook-Signature-256": f"sha256={signature}",
+            "X-Webhook-Timestamp": timestamp,
+            "X-Webhook-Event": "test",
+            "X-Webhook-Delivery-Id": "test-123"
+        }
+    )
+
+    print(f"Status: {response.status_code}")
+    print(f"Response: {response.json()}")
+
+# Test
+send_test_webhook("http://localhost:8080/webhook", "your-shared-secret")
+```
+
+---
+
+#### Common Pitfalls
+
+1. **Using parsed JSON instead of raw body**
+   - ❌ `hmac.new(secret, json.dumps(request.json))`
+   - ✅ `hmac.new(secret, request.get_data())`
+
+2. **Not using constant-time comparison**
+   - ❌ `signature == expected`
+   - ✅ `hmac.compare_digest(signature, expected)`
+
+3. **Forgetting the timestamp in signature**
+   - ❌ `hmac.new(secret, payload)`
+   - ✅ `hmac.new(secret, f"{timestamp}.".encode() + payload)`
+
+4. **Not checking timestamp freshness**
+   - Always validate timestamp to prevent replay attacks
+
+5. **Buffer length mismatch in Node.js**
+   - Check lengths before `crypto.timingSafeEqual()`
 
 ### Webhook Event Types
 
