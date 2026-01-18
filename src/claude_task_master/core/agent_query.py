@@ -33,6 +33,7 @@ from .circuit_breaker import (
     CircuitBreakerError,
     CircuitState,
 )
+from .config_loader import get_config
 
 if TYPE_CHECKING:
     from .agent_models import ModelType
@@ -368,22 +369,27 @@ class AgentQueryExecutor:
         return result_text
 
     def _default_get_model_name(self, model: "ModelType") -> str:
-        """Default model name mapping.
+        """Default model name mapping using global config.
+
+        Model names are loaded from configuration, which can be:
+        - Set in `.claude-task-master/config.json`
+        - Overridden via environment variables (CLAUDETM_MODEL_SONNET, etc.)
 
         Args:
             model: The ModelType to convert.
 
         Returns:
-            The API model name string.
+            The API model name string from configuration.
         """
         from .agent_models import ModelType
 
+        config = get_config()
         model_map = {
-            ModelType.SONNET: "claude-sonnet-4-5-20250929",
-            ModelType.OPUS: "claude-opus-4-5-20251101",
-            ModelType.HAIKU: "claude-haiku-4-5-20251001",
+            ModelType.SONNET: config.models.sonnet,
+            ModelType.OPUS: config.models.opus,
+            ModelType.HAIKU: config.models.haiku,
         }
-        return model_map.get(model, "claude-sonnet-4-5-20250929")
+        return model_map.get(model, config.models.sonnet)
 
     def _default_process_message(self, message: Any, result_text: str) -> str:
         """Default message processing - just accumulates text.
