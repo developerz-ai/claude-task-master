@@ -162,7 +162,7 @@ def _run_comments_fix_session(
     pr_context: PRContextManager,
     pr_number: int,
     comment_count: int,
-) -> None:
+) -> bool:
     """Run agent session to address review comments.
 
     Args:
@@ -172,6 +172,9 @@ def _run_comments_fix_session(
         pr_context: PR context manager for saving comments.
         pr_number: PR number being fixed.
         comment_count: Number of unresolved comments.
+
+    Returns:
+        True if agent ran and made changes, False if no actionable comments found.
     """
     console.print(
         f"\n[bold yellow]{comment_count} unresolved comment(s)[/bold yellow] - Running agent to address..."
@@ -180,6 +183,14 @@ def _run_comments_fix_session(
     # Save PR comments
     saved_count = pr_context.save_pr_comments(pr_number)
     console.print(f"  Saved {saved_count} actionable comment(s) for review")
+
+    # Guard against loops when no actionable comments are found
+    if saved_count == 0:
+        console.print(
+            "[yellow]  No actionable comments to address (may be bot status updates or already addressed).[/yellow]"
+        )
+        console.print("[yellow]  Unresolved threads may need manual review on GitHub.[/yellow]")
+        return False
 
     # Build fix prompt
     pr_dir = state_manager.get_pr_dir(pr_number)
@@ -233,6 +244,7 @@ After addressing ALL comments and creating the resolution file, end with: TASK C
 
     # Post replies to comments using resolution file
     pr_context.post_comment_replies(pr_number)
+    return True
 
 
 def fix_pr(
@@ -267,8 +279,14 @@ def fix_pr(
         # Get PR number
         pr_number = _parse_pr_input(pr)
 
+        # Fail fast if user provided invalid PR input
+        if pr is not None and pr_number is None:
+            console.print(f"[red]Error: Invalid PR input '{pr}'.[/red]")
+            console.print("Use a PR number or PR URL, e.g. claudetm fix-pr 123")
+            raise typer.Exit(1)
+
         if pr_number is None:
-            # Try to detect from current branch
+            # Try to detect from current branch (only when no PR input provided)
             pr_number = github_client.get_pr_for_current_branch()
             if pr_number is None:
                 console.print("[red]Error: No PR found for current branch.[/red]")
@@ -280,9 +298,21 @@ def fix_pr(
         cred_manager = CredentialManager()
         access_token = cred_manager.get_valid_token()
 
-        # Initialize state manager (use a temp directory for fix-pr)
+        # Initialize state manager (uses default .claude-task-master directory)
         working_dir = Path.cwd()
-        state_manager = StateManager(working_dir)
+        state_manager = StateManager()
+
+        # Check for concurrent sessions before proceeding
+        if state_manager.is_session_active():
+            console.print("[bold red]Another claudetm session is active.[/bold red]")
+            console.print("Wait for it to complete or use 'claudetm clean -f' to force cleanup.")
+            raise typer.Exit(1)
+
+        # Acquire session lock
+        if not state_manager.acquire_session_lock():
+            console.print("[bold red]Could not acquire session lock.[/bold red]")
+            raise typer.Exit(1)
+
         state_manager.state_dir.mkdir(parents=True, exist_ok=True)
 
         # Initialize agent
@@ -321,7 +351,7 @@ def fix_pr(
             console.print(f"  CI: [green]PASSED[/green] ({status.checks_passed} passed)")
 
             if status.unresolved_threads > 0:
-                _run_comments_fix_session(
+                agent_ran = _run_comments_fix_session(
                     agent,
                     github_client,
                     state_manager,
@@ -329,6 +359,14 @@ def fix_pr(
                     pr_number,
                     status.unresolved_threads,
                 )
+
+                if not agent_ran:
+                    # No actionable comments - break to avoid infinite loop
+                    console.print(
+                        "\n[yellow]Exiting: unresolved threads need manual review.[/yellow]"
+                    )
+                    state_manager.release_session_lock()
+                    raise typer.Exit(1)
 
                 # Wait for CI to start after push (comments fix might have changed code)
                 console.print(f"\nWaiting {CI_START_WAIT}s for CI to start...")
@@ -363,18 +401,33 @@ def fix_pr(
                     f"\n[yellow]PR #{pr_number} mergeable status: {status.mergeable}[/yellow]"
                 )
 
+            state_manager.release_session_lock()
             raise typer.Exit(0)
 
         # Max iterations reached
         console.print(f"\n[red]Max iterations ({max_iterations}) reached without success.[/red]")
         console.print("Check the PR manually for remaining issues.")
+        state_manager.release_session_lock()
         raise typer.Exit(1)
 
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted by user[/yellow]")
+        # Release lock if state_manager was initialized
+        try:
+            state_manager.release_session_lock()
+        except NameError:
+            pass  # state_manager wasn't created yet
         raise typer.Exit(2) from None
+    except typer.Exit:
+        # Re-raise Exit exceptions without modification
+        raise
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
+        # Release lock if state_manager was initialized
+        try:
+            state_manager.release_session_lock()
+        except NameError:
+            pass  # state_manager wasn't created yet
         raise typer.Exit(1) from None
 
 
