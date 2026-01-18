@@ -567,12 +567,18 @@ class TestPhaseToolRestrictions:
             assert tool not in planning_tools
             assert tool not in verification_tools
 
-    def test_case_sensitive_phase_matching(self, agent):
-        """Test phase matching is case-sensitive (lowercase expected)."""
-        # These should NOT match the defined phases
+    def test_case_insensitive_phase_matching(self, agent):
+        """Test phase matching is case-insensitive for user convenience.
+
+        The config-based implementation normalizes phase names to lowercase,
+        allowing users to use any case (e.g., "PLANNING", "Planning", "planning").
+        """
+        # All these should match the planning phase (case-insensitive)
+        tools_lower = agent.get_tools_for_phase("planning")
         tools_upper = agent.get_tools_for_phase("PLANNING")
         tools_mixed = agent.get_tools_for_phase("Planning")
 
-        # Should fall back to WORKING tools (empty list = all tools allowed)
-        assert tools_upper == []
-        assert tools_mixed == []
+        # All should return the same planning tools
+        assert tools_upper == tools_lower
+        assert tools_mixed == tools_lower
+        assert "Read" in tools_lower  # Verify planning tools are returned

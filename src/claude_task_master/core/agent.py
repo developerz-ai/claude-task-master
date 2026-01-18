@@ -16,6 +16,7 @@ from .agent_models import (
     ModelType,
     TaskComplexity,
     ToolConfig,
+    get_tools_for_phase,
 )
 from .agent_phases import AgentPhaseExecutor
 from .agent_query import AgentQueryExecutor
@@ -23,6 +24,7 @@ from .circuit_breaker import (
     CircuitBreaker,
     CircuitBreakerConfig,
 )
+from .config_loader import get_config
 from .rate_limit import RateLimitConfig
 from .subagents import get_agents_for_working_dir
 
@@ -256,27 +258,38 @@ class AgentWrapper:
         )
 
     def get_tools_for_phase(self, phase: str) -> list[str]:
-        """Get appropriate tools for the given phase."""
-        if phase == "planning":
-            return ToolConfig.PLANNING.value
-        elif phase == "verification":
-            return ToolConfig.VERIFICATION.value
-        else:
-            return ToolConfig.WORKING.value
+        """Get appropriate tools for the given phase from global config.
+
+        Tool configurations can be customized via config.json:
+        - Set in `.claude-task-master/config.json`
+        - Under the `tools` section for each phase
+
+        Args:
+            phase: The phase name ("planning", "verification", "working").
+
+        Returns:
+            List of allowed tool names. Empty list means all tools allowed.
+        """
+        return get_tools_for_phase(phase)
 
     def _get_model_name(self, model: ModelType | None = None) -> str:
-        """Convert ModelType to API model name.
+        """Convert ModelType to API model name using global config.
+
+        Model names are loaded from configuration, which can be:
+        - Set in `.claude-task-master/config.json`
+        - Overridden via environment variables (CLAUDETM_MODEL_SONNET, etc.)
 
         Args:
             model: Optional model override. If None, uses self.model.
 
         Returns:
-            The API model name string.
+            The API model name string from configuration.
         """
         target_model = model or self.model
+        config = get_config()
         model_map = {
-            ModelType.SONNET: "claude-sonnet-4-5-20250929",
-            ModelType.OPUS: "claude-opus-4-5-20251101",
-            ModelType.HAIKU: "claude-haiku-4-5-20251001",
+            ModelType.SONNET: config.models.sonnet,
+            ModelType.OPUS: config.models.opus,
+            ModelType.HAIKU: config.models.haiku,
         }
-        return model_map.get(target_model, "claude-sonnet-4-5-20250929")
+        return model_map.get(target_model, config.models.sonnet)

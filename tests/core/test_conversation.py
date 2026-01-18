@@ -5,7 +5,7 @@ which manage multi-turn conversations with the Claude Agent SDK.
 
 Tests cover:
 - ConversationError hierarchy
-- ModelType constants and MODEL_NAMES mapping
+- ModelType constants and config-based model name resolution
 - ConversationManager initialization and configuration
 - SDK lazy loading and import handling
 - ConversationSession message processing
@@ -21,9 +21,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from claude_task_master.core.circuit_breaker import CircuitBreakerConfig
+from claude_task_master.core.config_loader import get_config, reset_config
 from claude_task_master.core.conversation import (
     DEFAULT_TOOLS,
-    MODEL_NAMES,
     ConversationError,
     ConversationManager,
     ConversationSession,
@@ -117,15 +117,19 @@ class TestModelConstants:
         assert ModelType.OPUS == "opus"
         assert ModelType.HAIKU == "haiku"
 
-    def test_model_names_mapping(self):
-        """Should have correct model name mapping."""
-        assert "sonnet" in MODEL_NAMES
-        assert "opus" in MODEL_NAMES
-        assert "haiku" in MODEL_NAMES
+    def test_model_names_from_config(self):
+        """Should resolve model names from config."""
+        # Reset config to ensure fresh state
+        reset_config()
+        config = get_config()
+        # Verify config has model names
+        assert config.models.sonnet is not None
+        assert config.models.opus is not None
+        assert config.models.haiku is not None
         # Verify format matches Claude model naming convention
-        assert "claude-" in MODEL_NAMES["sonnet"]
-        assert "claude-" in MODEL_NAMES["opus"]
-        assert "claude-" in MODEL_NAMES["haiku"]
+        assert "claude-" in config.models.sonnet
+        assert "claude-" in config.models.opus
+        assert "claude-" in config.models.haiku
 
     def test_default_tools(self):
         """Should have expected default tools."""
@@ -270,22 +274,28 @@ class TestGetModelName:
     """Tests for _get_model_name method."""
 
     def test_get_model_name_default(self, temp_dir):
-        """Should return default model name."""
+        """Should return default model name from config."""
+        reset_config()
+        config = get_config()
         manager = ConversationManager(working_dir=str(temp_dir), model="sonnet")
         name = manager._get_model_name()
-        assert name == MODEL_NAMES["sonnet"]
+        assert name == config.models.sonnet
 
     def test_get_model_name_override(self, temp_dir):
         """Should use override when provided."""
+        reset_config()
+        config = get_config()
         manager = ConversationManager(working_dir=str(temp_dir), model="sonnet")
         name = manager._get_model_name("opus")
-        assert name == MODEL_NAMES["opus"]
+        assert name == config.models.opus
 
     def test_get_model_name_unknown(self, temp_dir):
         """Should fallback to sonnet for unknown model."""
+        reset_config()
+        config = get_config()
         manager = ConversationManager(working_dir=str(temp_dir))
         name = manager._get_model_name("unknown-model")
-        assert name == MODEL_NAMES["sonnet"]
+        assert name == config.models.sonnet
 
 
 # =============================================================================
@@ -319,6 +329,8 @@ class TestCreateOptions:
 
     def test_create_options_with_model_override(self, temp_dir):
         """Should use model override in options."""
+        reset_config()
+        config = get_config()
         manager = ConversationManager(working_dir=str(temp_dir), model="sonnet")
 
         mock_sdk = MagicMock()
@@ -333,7 +345,7 @@ class TestCreateOptions:
                 manager._create_options(["Read"], model_override="opus")
 
         call_kwargs = mock_options_class.call_args.kwargs
-        assert call_kwargs["model"] == MODEL_NAMES["opus"]
+        assert call_kwargs["model"] == config.models.opus
 
     def test_create_options_with_subagents(self, temp_dir):
         """Should include subagents when available."""

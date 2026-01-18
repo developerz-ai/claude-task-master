@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from . import console
 from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
+from .config_loader import get_config
 from .rate_limit import RateLimitConfig
 from .subagents import get_agents_for_working_dir
 
@@ -64,13 +65,6 @@ class ModelType:
     OPUS = "opus"
     HAIKU = "haiku"
 
-
-# Model name mapping
-MODEL_NAMES = {
-    "sonnet": "claude-sonnet-4-5-20250929",
-    "opus": "claude-opus-4-5-20251101",
-    "haiku": "claude-haiku-4-5-20251001",
-}
 
 # Default working tools
 DEFAULT_TOOLS = [
@@ -162,9 +156,26 @@ class ConversationManager:
             ) from e
 
     def _get_model_name(self, model: str | None = None) -> str:
-        """Convert model string to API model name."""
+        """Convert model string to API model name using global config.
+
+        Model names are loaded from configuration, which can be:
+        - Set in `.claude-task-master/config.json`
+        - Overridden via environment variables (CLAUDETM_MODEL_SONNET, etc.)
+
+        Args:
+            model: Optional model override. If None, uses self.model.
+
+        Returns:
+            The API model name string from configuration.
+        """
         target_model = model or self.model
-        return MODEL_NAMES.get(target_model, MODEL_NAMES["sonnet"])
+        config = get_config()
+        model_map = {
+            "sonnet": config.models.sonnet,
+            "opus": config.models.opus,
+            "haiku": config.models.haiku,
+        }
+        return model_map.get(target_model, config.models.sonnet)
 
     def _create_options(
         self,
