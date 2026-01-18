@@ -46,6 +46,37 @@ from claude_task_master.core.circuit_breaker import (
     CircuitState,
     get_circuit_breaker,
 )
+from claude_task_master.core.config import (
+    APIConfig,
+    ClaudeTaskMasterConfig,
+    GitConfig,
+    ModelConfig,
+    ToolsConfig,
+    generate_default_config,
+    generate_default_config_dict,
+    generate_default_config_json,
+    get_model_name,
+    get_tools_for_phase,
+)
+from claude_task_master.core.config_loader import (
+    CONFIG,
+    CONFIG_FILE_NAME,
+    ENV_VAR_MAPPINGS,
+    STATE_DIR_NAME,
+    ConfigManager,
+    apply_env_overrides,
+    config_file_exists,
+    generate_default_config_file,
+    get_config,
+    get_config_file_path,
+    get_env_overrides,
+    get_state_dir,
+    initialize_config,
+    load_config_from_file,
+    reload_config,
+    reset_config,
+    save_config_to_file,
+)
 from claude_task_master.core.credentials import (
     CredentialError,
     CredentialManager,
@@ -136,6 +167,35 @@ from claude_task_master.core.task_runner import (
 from claude_task_master.core.workflow_stages import WorkflowStageHandler
 
 __all__ = [
+    # Config classes and functions
+    "ClaudeTaskMasterConfig",
+    "APIConfig",
+    "ModelConfig",
+    "GitConfig",
+    "ToolsConfig",
+    "generate_default_config",
+    "generate_default_config_dict",
+    "generate_default_config_json",
+    "get_model_name",
+    "get_tools_for_phase",
+    # Config loader classes and functions
+    "ConfigManager",
+    "CONFIG",
+    "get_config",
+    "reload_config",
+    "reset_config",
+    "initialize_config",
+    "load_config_from_file",
+    "save_config_to_file",
+    "generate_default_config_file",
+    "get_state_dir",
+    "get_config_file_path",
+    "config_file_exists",
+    "apply_env_overrides",
+    "get_env_overrides",
+    "STATE_DIR_NAME",
+    "CONFIG_FILE_NAME",
+    "ENV_VAR_MAPPINGS",
     # Console module
     "console",
     # Credential exceptions
