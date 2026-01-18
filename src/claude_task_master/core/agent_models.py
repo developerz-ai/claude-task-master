@@ -64,20 +64,8 @@ class ToolConfig(Enum):
         "Grep",
         "Bash",
     ]
-    # Working phase has full tool access for implementation
-    WORKING = [
-        "Read",
-        "Write",
-        "Edit",
-        "Bash",
-        "Glob",
-        "Grep",
-        "Task",
-        "TodoWrite",
-        "WebSearch",
-        "WebFetch",
-        "Skill",  # Enable Skills from .claude/skills/
-    ]
+    # Working phase has full tool access - empty list allows ALL tools
+    WORKING = list[str]()
 
 
 # =============================================================================

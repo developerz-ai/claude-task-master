@@ -130,21 +130,9 @@ class TestToolConfig:
         assert ToolConfig.PLANNING.value == expected
 
     def test_working_tools(self):
-        """Test WORKING tool configuration."""
-        expected = [
-            "Read",
-            "Write",
-            "Edit",
-            "Bash",
-            "Glob",
-            "Grep",
-            "Task",
-            "TodoWrite",
-            "WebSearch",
-            "WebFetch",
-            "Skill",
-        ]
-        assert ToolConfig.WORKING.value == expected
+        """Test WORKING tool configuration - empty list allows ALL tools."""
+        # Empty list means all tools are allowed
+        assert ToolConfig.WORKING.value == []
 
     def test_verification_tools(self):
         """Test VERIFICATION tool configuration - read tools + Bash for running tests."""
@@ -157,17 +145,20 @@ class TestToolConfig:
         assert ToolConfig.VERIFICATION.value == expected
 
     def test_planning_has_subset_of_working_tools(self):
-        """Test planning tools are a subset of working tools (read-only)."""
+        """Test planning tools are restricted while working allows all tools."""
         planning_tools = set(ToolConfig.PLANNING.value)
-        working_tools = set(ToolConfig.WORKING.value)
-        assert planning_tools.issubset(working_tools)
-        assert planning_tools != working_tools  # Planning is restricted
+        # Working phase uses empty list (all tools allowed)
+        # Planning has specific tools, so it's more restricted
+        assert len(planning_tools) > 0  # Planning has specific restrictions
+        assert len(ToolConfig.WORKING.value) == 0  # Working allows all
 
     def test_verification_has_subset_of_working_tools(self):
-        """Test verification tools are a subset of working tools."""
+        """Test verification tools are restricted while working allows all tools."""
         verification_tools = set(ToolConfig.VERIFICATION.value)
-        working_tools = set(ToolConfig.WORKING.value)
-        assert verification_tools.issubset(working_tools)
+        # Working phase uses empty list (all tools allowed)
+        # Verification has specific tools, so it's more restricted
+        assert len(verification_tools) > 0  # Verification has specific restrictions
+        assert len(ToolConfig.WORKING.value) == 0  # Working allows all
         # Verification has Bash but no Write/Edit
         assert "Bash" in verification_tools
         assert "Write" not in verification_tools
@@ -179,11 +170,10 @@ class TestToolConfig:
         assert "Write" not in planning_tools
         assert "Edit" not in planning_tools
 
-    def test_working_has_write_tools(self):
-        """Test working phase has write tools."""
-        working_tools = ToolConfig.WORKING.value
-        assert "Write" in working_tools
-        assert "Edit" in working_tools
+    def test_working_allows_all_tools(self):
+        """Test working phase allows all tools (empty list)."""
+        # Empty list means ALL tools are allowed, including Write and Edit
+        assert ToolConfig.WORKING.value == []
 
 
 # =============================================================================
