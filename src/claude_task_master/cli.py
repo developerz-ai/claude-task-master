@@ -6,6 +6,7 @@ import typer
 from rich.console import Console
 
 from . import __version__
+from .cli_commands.config import register_config_commands
 from .cli_commands.github import register_github_commands
 from .cli_commands.info import register_info_commands
 from .cli_commands.workflow import register_workflow_commands
@@ -63,6 +64,7 @@ def main(
 register_workflow_commands(app)  # start, resume
 register_info_commands(app)  # status, plan, logs, context, progress
 register_github_commands(app)  # ci-status, ci-logs, pr-comments, pr-status
+register_config_commands(app)  # config init, config show, config path
 
 
 @app.command()
