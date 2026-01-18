@@ -131,8 +131,10 @@ class TestToolConfig:
 
     def test_working_tools(self):
         """Test WORKING tool configuration - empty list allows ALL tools."""
-        # Empty list means all tools are allowed
+        # Empty list means all tools are allowed (no restrictions)
         assert ToolConfig.WORKING.value == []
+        assert isinstance(ToolConfig.WORKING.value, list)
+        assert len(ToolConfig.WORKING.value) == 0
 
     def test_verification_tools(self):
         """Test VERIFICATION tool configuration - read tools + Bash for running tests."""
