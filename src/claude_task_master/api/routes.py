@@ -35,11 +35,12 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from claude_task_master import __version__
 from claude_task_master.api.models import (
@@ -60,6 +61,7 @@ from claude_task_master.api.models import (
     TaskProgressInfo,
     TaskStatus,
     TaskStatusResponse,
+    WebhookStatusInfo,
     WorkflowStage,
 )
 from claude_task_master.api.routes_webhooks import create_webhooks_router
@@ -122,6 +124,41 @@ def _get_state_manager(request: Request) -> StateManager:
     return StateManager(state_dir=state_dir)
 
 
+def _get_webhook_status(request: Request) -> WebhookStatusInfo | None:
+    """Get webhook configuration status summary.
+
+    Args:
+        request: The FastAPI request object.
+
+    Returns:
+        WebhookStatusInfo with counts of total/enabled/disabled webhooks,
+        or None if webhooks file doesn't exist or can't be loaded.
+    """
+    working_dir: Path = getattr(request.app.state, "working_dir", Path.cwd())
+    webhooks_file = working_dir / ".claude-task-master" / "webhooks.json"
+
+    if not webhooks_file.exists():
+        return None
+
+    try:
+        with open(webhooks_file) as f:
+            data = json.load(f)
+            webhooks: dict[str, dict[str, Any]] = data.get("webhooks", {})
+
+        total = len(webhooks)
+        enabled = sum(1 for wh in webhooks.values() if wh.get("enabled", True))
+        disabled = total - enabled
+
+        return WebhookStatusInfo(
+            total=total,
+            enabled=enabled,
+            disabled=disabled,
+        )
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning(f"Failed to load webhook status: {e}")
+        return None
+
+
 # =============================================================================
 # Info Router (Status, Plan, Logs, Progress, Context, Health)
 # =============================================================================
@@ -166,6 +203,7 @@ def create_info_router() -> APIRouter:
         - PR information (if applicable)
         - Task options/configuration
         - Task progress (completed/total)
+        - Webhook configuration status (total/enabled/disabled counts)
 
         Returns:
             TaskStatusResponse with full task status information.
@@ -222,6 +260,9 @@ def create_info_router() -> APIRouter:
                         f"Corrupted state: invalid workflow_stage '{state.workflow_stage}'"
                     ) from e
 
+            # Load webhook status
+            webhooks_info = _get_webhook_status(request)
+
             return TaskStatusResponse(
                 success=True,
                 goal=goal,
@@ -244,6 +285,7 @@ def create_info_router() -> APIRouter:
                 created_at=state.created_at,
                 updated_at=state.updated_at,
                 tasks=tasks_info,
+                webhooks=webhooks_info,
             )
 
         except Exception as e:

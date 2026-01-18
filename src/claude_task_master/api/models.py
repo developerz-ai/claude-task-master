@@ -287,6 +287,20 @@ class TaskProgressInfo(BaseModel):
     progress: str = Field(examples=["3/10", "0/5", "No tasks"])
 
 
+class WebhookStatusInfo(BaseModel):
+    """Webhook status summary information.
+
+    Attributes:
+        total: Total number of configured webhooks.
+        enabled: Number of enabled webhooks.
+        disabled: Number of disabled webhooks.
+    """
+
+    total: int = Field(description="Total number of configured webhooks")
+    enabled: int = Field(description="Number of enabled webhooks")
+    disabled: int = Field(description="Number of disabled webhooks")
+
+
 # =============================================================================
 # Response Models - Main Responses
 # =============================================================================
@@ -311,6 +325,7 @@ class TaskStatusResponse(BaseModel):
         created_at: When the task was created.
         updated_at: When the task was last updated.
         tasks: Task progress information.
+        webhooks: Webhook configuration status summary.
     """
 
     success: bool = True
@@ -326,6 +341,7 @@ class TaskStatusResponse(BaseModel):
     created_at: datetime | str
     updated_at: datetime | str
     tasks: TaskProgressInfo | None = None
+    webhooks: WebhookStatusInfo | None = None
 
 
 class ControlResponse(BaseModel):
