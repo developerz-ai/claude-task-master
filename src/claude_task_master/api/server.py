@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 from claude_task_master import __version__
 from claude_task_master.api.models import APIInfo
 from claude_task_master.api.routes import register_routes
+from claude_task_master.auth import is_auth_enabled
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -44,6 +45,15 @@ try:
     FASTAPI_AVAILABLE = True
 except ImportError:
     FASTAPI_AVAILABLE = False
+
+# Import auth middleware - requires [api] extra
+try:
+    from claude_task_master.auth.middleware import PasswordAuthMiddleware
+
+    AUTH_MIDDLEWARE_AVAILABLE = True
+except ImportError:
+    AUTH_MIDDLEWARE_AVAILABLE = False
+    PasswordAuthMiddleware = None  # type: ignore[assignment,misc]
 
 logger = logging.getLogger(__name__)
 
@@ -81,13 +91,16 @@ def _truncate_api_key(key: str) -> str:
     return key[:4] + "..." + key[-4:]
 
 
-def _log_api_config(host: str, port: int, cors_origins: list[str]) -> None:
+def _log_api_config(
+    host: str, port: int, cors_origins: list[str], auth_enabled: bool = False
+) -> None:
     """Log API configuration at startup.
 
     Args:
         host: The host address.
         port: The port number.
         cors_origins: List of CORS origins.
+        auth_enabled: Whether password authentication is enabled.
     """
     logger.info("=" * 50)
     logger.info("API Configuration:")
@@ -95,6 +108,7 @@ def _log_api_config(host: str, port: int, cors_origins: list[str]) -> None:
     logger.info(f"  Port: {port}")
     logger.info(f"  CORS Origins: {', '.join(cors_origins) if cors_origins else '(none)'}")
     logger.info(f"  API Key: {_truncate_api_key(API_KEY)}")
+    logger.info(f"  Password Auth: {'enabled' if auth_enabled else 'disabled'}")
     logger.info("=" * 50)
 
 
@@ -127,6 +141,39 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Shutdown
     logger.info("Claude Task Master API shutting down")
+
+
+# =============================================================================
+# Authentication Configuration
+# =============================================================================
+
+
+def _configure_auth(app: FastAPI) -> bool:
+    """Configure authentication middleware on the FastAPI app.
+
+    Adds PasswordAuthMiddleware if authentication is enabled via environment
+    variables (CLAUDETM_PASSWORD or CLAUDETM_PASSWORD_HASH).
+
+    Args:
+        app: The FastAPI application instance.
+
+    Returns:
+        True if authentication was configured, False otherwise.
+    """
+    if not AUTH_MIDDLEWARE_AVAILABLE:
+        logger.debug("Auth middleware not available (Starlette not installed)")
+        return False
+
+    if not is_auth_enabled():
+        logger.debug("Password authentication not configured (no CLAUDETM_PASSWORD set)")
+        return False
+
+    # Add the password authentication middleware
+    assert PasswordAuthMiddleware is not None  # ensured by AUTH_MIDDLEWARE_AVAILABLE
+    app.add_middleware(PasswordAuthMiddleware)
+
+    logger.info("Password authentication enabled")
+    return True
 
 
 # =============================================================================
@@ -243,8 +290,15 @@ def create_app(
     app.state.working_dir = work_dir
     app.state.include_docs = include_docs
 
-    # Configure CORS
+    # Configure middleware (order matters - middleware added first runs last)
+    # CORS must be added before auth so that CORS headers are added to 401/403 responses
     _configure_cors(app, cors_origins)
+
+    # Configure authentication if password is set
+    # Auth middleware is added after CORS, so it runs before CORS in the request cycle
+    # This allows CORS to handle preflight (OPTIONS) requests without auth
+    auth_enabled = _configure_auth(app)
+    app.state.auth_enabled = auth_enabled
 
     # ==========================================================================
     # Core Endpoints (Root endpoint only - other endpoints via routes)
@@ -323,16 +377,22 @@ def run_server(
     effective_host = host or API_HOST
     effective_port = port or API_PORT
     effective_cors = cors_origins if cors_origins is not None else _parse_cors_origins(CORS_ORIGINS)
+    auth_enabled = is_auth_enabled()
 
     # Log API configuration
-    _log_api_config(effective_host, effective_port, effective_cors)
+    _log_api_config(effective_host, effective_port, effective_cors, auth_enabled)
 
-    # Security warning for non-localhost binding
+    # Security warning for non-localhost binding without authentication
     if effective_host not in ("127.0.0.1", "localhost", "::1"):
-        logger.warning(
-            f"API server binding to non-localhost address ({effective_host}). "
-            "Ensure proper authentication is configured."
-        )
+        if not auth_enabled:
+            logger.warning(
+                f"API server binding to non-localhost address ({effective_host}) without authentication. "
+                "Set CLAUDETM_PASSWORD or CLAUDETM_PASSWORD_HASH for security."
+            )
+        else:
+            logger.info(
+                f"API server binding to {effective_host} with password authentication enabled."
+            )
 
     if reload:
         # Reload mode requires import string with factory so uvicorn can spawn
