@@ -672,7 +672,7 @@ curl -X POST http://localhost:8000/webhooks \
     "events": ["task.completed", "task.failed", "pr.created", "pr.merged"],
     "headers": {
       "X-Slack-Channel": "#dev-notifications",
-      "X-Slack-Webhook-URL": "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+      "X-Slack-Webhook-URL": "https://hooks.slack.com/services/YOUR_TEAM_ID/YOUR_CHANNEL_ID/YOUR_TOKEN"
     }
   }'
 ```
@@ -687,7 +687,7 @@ Discord webhooks natively accept JSON payloads, but like Slack, require a specif
 2. Go to "Integrations" → "Webhooks"
 3. Click "New Webhook"
 4. Set the name and channel
-5. Copy the webhook URL (e.g., `https://discord.com/api/webhooks/123456789/abcdefghijklmnop`)
+5. Copy the webhook URL (example format: `https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN`)
 
 **Step 2: Configure transformation service**
 
@@ -708,7 +708,7 @@ curl -X POST http://localhost:8000/webhooks \
     "max_retries": 3,
     "verify_ssl": true,
     "headers": {
-      "X-Discord-Webhook-URL": "https://discord.com/api/webhooks/123456789/abcdefghijklmnop"
+      "X-Discord-Webhook-URL": "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN"
     }
   }'
 ```
@@ -992,7 +992,7 @@ Using Slack's Incoming Webhooks:
 # Configure webhook in Claude Task Master
 POST /webhooks
 {
-  "url": "https://hooks.slack.com/services/YOUR/WEBHOOK/URL",
+  "url": "https://hooks.slack.com/services/YOUR_TEAM_ID/YOUR_CHANNEL_ID/YOUR_TOKEN",
   "events": ["task.completed", "task.failed", "pr.created"],
   "name": "Slack Notifications"
 }
