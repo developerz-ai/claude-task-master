@@ -66,6 +66,8 @@ claudetm = "claude_task_master.wrapper:main"
 claudetm-py = "claude_task_master.cli:app"
 # MCP server entry point
 claudetm-mcp = "claude_task_master.mcp.server:main"
+# REST API server entry point
+claudetm-api = "claude_task_master.api.server:main"
 
 # Setuptools configuration
 [tool.setuptools.packages.find]
