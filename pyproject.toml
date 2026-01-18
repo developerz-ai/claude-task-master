@@ -45,6 +45,8 @@ mcp = ["mcp>=1.0.0"]
 api = [
     "fastapi>=0.100.0",
     "uvicorn[standard]>=0.24.0",
+    "passlib[bcrypt]>=1.7.4",
+    "bcrypt>=4.0.0,<4.1.0",  # Pin bcrypt for passlib compatibility
 ]
 dev = [
     "claude-task-master[api]",  # Include API dependencies for testing
@@ -126,6 +128,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["fastapi.*", "uvicorn.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "passlib.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
