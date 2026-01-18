@@ -12,6 +12,11 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from claude_task_master.core.control import (
+    ControlManager,
+    ControlOperationNotAllowedError,
+    NoActiveTaskError,
+)
 from claude_task_master.core.state import (
     StateManager,
     TaskOptions,
@@ -70,6 +75,16 @@ class HealthCheckResult(BaseModel):
     server_name: str
     uptime_seconds: float | None = None
     active_tasks: int = 0
+
+
+class PauseTaskResult(BaseModel):
+    """Result from pause_task tool."""
+
+    success: bool
+    message: str
+    previous_status: str | None = None
+    new_status: str | None = None
+    reason: str | None = None
 
 
 # =============================================================================
@@ -506,6 +521,55 @@ def health_check(
         uptime_seconds=uptime,
         active_tasks=active_tasks,
     ).model_dump()
+
+
+def pause_task(
+    work_dir: Path,
+    reason: str | None = None,
+    state_dir: str | None = None,
+) -> dict[str, Any]:
+    """Pause a running task.
+
+    Transitions the task from planning/working status to paused status.
+    The task can be resumed later using resume_task.
+
+    Args:
+        work_dir: Working directory for the server.
+        reason: Optional reason for pausing (stored in progress).
+        state_dir: Optional custom state directory path.
+
+    Returns:
+        Dictionary indicating success or failure with status details.
+    """
+    state_path = Path(state_dir) if state_dir else work_dir / ".claude-task-master"
+    state_manager = StateManager(state_dir=state_path)
+    control_manager = ControlManager(state_manager=state_manager)
+
+    try:
+        result = control_manager.pause(reason=reason)
+        return PauseTaskResult(
+            success=True,
+            message=result.message,
+            previous_status=result.previous_status,
+            new_status=result.new_status,
+            reason=reason,
+        ).model_dump()
+    except NoActiveTaskError:
+        return PauseTaskResult(
+            success=False,
+            message="No active task found. Initialize a task first.",
+        ).model_dump()
+    except ControlOperationNotAllowedError as e:
+        return PauseTaskResult(
+            success=False,
+            message=e.message,
+            previous_status=e.current_status,
+        ).model_dump()
+    except Exception as e:
+        return PauseTaskResult(
+            success=False,
+            message=f"Failed to pause task: {e}",
+        ).model_dump()
 
 
 # =============================================================================
