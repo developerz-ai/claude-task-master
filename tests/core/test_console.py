@@ -29,10 +29,13 @@ from claude_task_master.core.console import (
     _claude_prefix,
     _prefix,
     claude_text,
+    clear_task_context,
     detail,
     error,
+    get_task_context,
     info,
     newline,
+    set_task_context,
     stream,
     success,
     tool,
@@ -165,6 +168,10 @@ class TestPrefixFunction:
 class TestClaudePrefixFunction:
     """Tests for _claude_prefix() function."""
 
+    def teardown_method(self):
+        """Clean up task context after each test."""
+        clear_task_context()
+
     def test_returns_string(self):
         """Test _claude_prefix returns a string."""
         result = _claude_prefix()
@@ -211,6 +218,279 @@ class TestClaudePrefixFunction:
         assert result.startswith(ORANGE + BOLD)
         assert result.endswith(RESET)
         assert "[claude" in result
+
+
+# =============================================================================
+# Task Context Management Tests
+# =============================================================================
+
+
+class TestTaskContextFunctions:
+    """Tests for task context management functions."""
+
+    def teardown_method(self):
+        """Clean up task context after each test."""
+        clear_task_context()
+
+    def test_get_task_context_default_none(self):
+        """Test get_task_context returns (None, None) by default."""
+        current, total = get_task_context()
+        assert current is None
+        assert total is None
+
+    def test_set_task_context_sets_values(self):
+        """Test set_task_context sets current and total values."""
+        set_task_context(3, 10)
+        current, total = get_task_context()
+        assert current == 3
+        assert total == 10
+
+    def test_set_task_context_updates_values(self):
+        """Test set_task_context can update existing values."""
+        set_task_context(1, 5)
+        set_task_context(2, 5)
+        current, total = get_task_context()
+        assert current == 2
+        assert total == 5
+
+    def test_clear_task_context_resets_to_none(self):
+        """Test clear_task_context resets values to None."""
+        set_task_context(5, 20)
+        clear_task_context()
+        current, total = get_task_context()
+        assert current is None
+        assert total is None
+
+    def test_set_task_context_with_one_task(self):
+        """Test set_task_context with single task (1/1)."""
+        set_task_context(1, 1)
+        current, total = get_task_context()
+        assert current == 1
+        assert total == 1
+
+    def test_set_task_context_with_large_numbers(self):
+        """Test set_task_context with large task numbers."""
+        set_task_context(99, 100)
+        current, total = get_task_context()
+        assert current == 99
+        assert total == 100
+
+    def test_set_task_context_first_task(self):
+        """Test set_task_context for first task."""
+        set_task_context(1, 25)
+        current, total = get_task_context()
+        assert current == 1
+        assert total == 25
+
+    def test_set_task_context_last_task(self):
+        """Test set_task_context for last task."""
+        set_task_context(25, 25)
+        current, total = get_task_context()
+        assert current == 25
+        assert total == 25
+
+
+# =============================================================================
+# Task Counter Prefix Tests
+# =============================================================================
+
+
+class TestTaskCounterPrefix:
+    """Tests for task counter formatting in _claude_prefix()."""
+
+    def teardown_method(self):
+        """Clean up task context after each test."""
+        clear_task_context()
+
+    def test_claude_prefix_without_task_context(self):
+        """Test _claude_prefix without task context shows no counter."""
+        clear_task_context()
+        result = _claude_prefix()
+        # Should be [claude HH:MM:SS] without N/M
+        assert re.search(r"\[claude \d{2}:\d{2}:\d{2}\]", result) is not None
+        # Should NOT contain task counter
+        assert "/" not in result
+
+    def test_claude_prefix_with_task_context(self):
+        """Test _claude_prefix with task context shows counter."""
+        set_task_context(5, 10)
+        result = _claude_prefix()
+        # Should be [claude HH:MM:SS 5/10]
+        assert "5/10" in result
+
+    def test_claude_prefix_task_counter_format(self):
+        """Test _claude_prefix task counter has correct format."""
+        set_task_context(3, 25)
+        result = _claude_prefix()
+        # Should match: [claude HH:MM:SS N/M]
+        pattern = r"\[claude \d{2}:\d{2}:\d{2} \d+/\d+\]"
+        assert re.search(pattern, result) is not None
+
+    def test_claude_prefix_first_task(self):
+        """Test _claude_prefix for first task (1/N)."""
+        set_task_context(1, 20)
+        result = _claude_prefix()
+        assert "1/20" in result
+
+    def test_claude_prefix_last_task(self):
+        """Test _claude_prefix for last task (N/N)."""
+        set_task_context(20, 20)
+        result = _claude_prefix()
+        assert "20/20" in result
+
+    def test_claude_prefix_single_digit_tasks(self):
+        """Test _claude_prefix with single digit task numbers."""
+        set_task_context(3, 7)
+        result = _claude_prefix()
+        assert "3/7" in result
+
+    def test_claude_prefix_double_digit_tasks(self):
+        """Test _claude_prefix with double digit task numbers."""
+        set_task_context(15, 99)
+        result = _claude_prefix()
+        assert "15/99" in result
+
+    def test_claude_prefix_triple_digit_tasks(self):
+        """Test _claude_prefix with triple digit task numbers."""
+        set_task_context(123, 456)
+        result = _claude_prefix()
+        assert "123/456" in result
+
+    def test_claude_prefix_task_counter_position(self):
+        """Test task counter appears after timestamp."""
+        set_task_context(5, 10)
+        result = _claude_prefix()
+        # Extract the content between [ and ]
+        match = re.search(r"\[claude (\d{2}:\d{2}:\d{2}) (\d+/\d+)\]", result)
+        assert match is not None
+        timestamp = match.group(1)
+        counter = match.group(2)
+        assert counter == "5/10"
+        # Verify timestamp format
+        assert re.match(r"\d{2}:\d{2}:\d{2}", timestamp)
+
+    def test_claude_prefix_colors_with_task_counter(self):
+        """Test _claude_prefix maintains colors with task counter."""
+        set_task_context(2, 8)
+        result = _claude_prefix()
+        assert ORANGE in result
+        assert BOLD in result
+        assert RESET in result
+
+    def test_claude_prefix_after_clear_context(self):
+        """Test _claude_prefix after clearing context removes counter."""
+        set_task_context(5, 10)
+        clear_task_context()
+        result = _claude_prefix()
+        # Should NOT contain task counter after clearing
+        assert "/" not in result
+
+
+# =============================================================================
+# Functions Using Task Counter Tests
+# =============================================================================
+
+
+class TestFunctionsWithTaskCounter:
+    """Tests for console functions that use task counter via _claude_prefix()."""
+
+    def teardown_method(self):
+        """Clean up task context after each test."""
+        clear_task_context()
+
+    def test_tool_without_task_context(self, capsys):
+        """Test tool() without task context shows no counter."""
+        clear_task_context()
+        tool("Reading file")
+        captured = capsys.readouterr()
+        assert "/" not in captured.out
+
+    def test_tool_with_task_context(self, capsys):
+        """Test tool() with task context shows counter."""
+        set_task_context(3, 10)
+        tool("Reading file")
+        captured = capsys.readouterr()
+        assert "3/10" in captured.out
+        assert "Reading file" in captured.out
+
+    def test_claude_text_without_task_context(self, capsys):
+        """Test claude_text() without task context shows no counter."""
+        clear_task_context()
+        claude_text("Response text")
+        captured = capsys.readouterr()
+        assert "/" not in captured.out
+
+    def test_claude_text_with_task_context(self, capsys):
+        """Test claude_text() with task context shows counter."""
+        set_task_context(7, 15)
+        claude_text("Response text")
+        captured = capsys.readouterr()
+        assert "7/15" in captured.out
+        assert "Response text" in captured.out
+
+    def test_tool_result_without_task_context(self, capsys):
+        """Test tool_result() without task context shows no counter."""
+        clear_task_context()
+        tool_result("Result")
+        captured = capsys.readouterr()
+        assert "/" not in captured.out
+
+    def test_tool_result_with_task_context(self, capsys):
+        """Test tool_result() with task context shows counter."""
+        set_task_context(2, 5)
+        tool_result("Result")
+        captured = capsys.readouterr()
+        assert "2/5" in captured.out
+        assert "Result" in captured.out
+
+    def test_tool_result_error_with_task_context(self, capsys):
+        """Test tool_result() error mode with task context shows counter."""
+        set_task_context(4, 12)
+        tool_result("Error occurred", is_error=True)
+        captured = capsys.readouterr()
+        assert "4/12" in captured.out
+        assert "Error occurred" in captured.out
+        assert RED in captured.out
+
+    def test_multiple_tool_calls_same_context(self, capsys):
+        """Test multiple tool calls with same task context."""
+        set_task_context(5, 20)
+        tool("First tool")
+        claude_text("Text response")
+        tool_result("Success")
+        captured = capsys.readouterr()
+        # All should show same counter
+        assert captured.out.count("5/20") == 3
+
+    def test_tool_calls_with_changing_context(self, capsys):
+        """Test tool calls as task context changes."""
+        set_task_context(1, 3)
+        tool("Task 1 tool")
+        captured1 = capsys.readouterr()
+        assert "1/3" in captured1.out
+
+        set_task_context(2, 3)
+        tool("Task 2 tool")
+        captured2 = capsys.readouterr()
+        assert "2/3" in captured2.out
+
+        set_task_context(3, 3)
+        tool("Task 3 tool")
+        captured3 = capsys.readouterr()
+        assert "3/3" in captured3.out
+
+    def test_orchestrator_functions_not_affected_by_task_context(self, capsys):
+        """Test orchestrator functions (info, success, etc.) don't show task counter."""
+        set_task_context(5, 10)
+        info("Info message")
+        success("Success message")
+        warning("Warning message")
+        error("Error message")
+        detail("Detail message")
+        captured = capsys.readouterr()
+        # These use _prefix() not _claude_prefix(), so no task counter
+        assert "[claudetm" in captured.out
+        assert "5/10" not in captured.out
 
 
 # =============================================================================

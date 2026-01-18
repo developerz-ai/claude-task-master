@@ -2,7 +2,7 @@
 
 Prefixes:
 - [claudetm HH:MM:SS] cyan - orchestrator messages
-- [claude HH:MM:SS] orange - Claude's tool usage
+- [claude HH:MM:SS N/M] orange - Claude's tool usage with task progress
 """
 
 from datetime import datetime
@@ -18,6 +18,38 @@ BOLD = "\033[1m"
 DIM = "\033[2m"
 RESET = "\033[0m"
 
+# Global task context for displaying progress in Claude prefix
+_task_current: int | None = None
+_task_total: int | None = None
+
+
+def set_task_context(current: int, total: int) -> None:
+    """Set the current task context for display in Claude prefix.
+
+    Args:
+        current: Current task number (1-indexed)
+        total: Total number of tasks
+    """
+    global _task_current, _task_total
+    _task_current = current
+    _task_total = total
+
+
+def clear_task_context() -> None:
+    """Clear the task context (used when task execution completes)."""
+    global _task_current, _task_total
+    _task_current = None
+    _task_total = None
+
+
+def get_task_context() -> tuple[int | None, int | None]:
+    """Get the current task context.
+
+    Returns:
+        Tuple of (current, total) or (None, None) if not set
+    """
+    return _task_current, _task_total
+
 
 def _prefix() -> str:
     """Generate orchestrator prefix [claudetm] with timestamp."""
@@ -26,8 +58,13 @@ def _prefix() -> str:
 
 
 def _claude_prefix() -> str:
-    """Generate Claude prefix [claude] with timestamp (orange)."""
+    """Generate Claude prefix [claude] with timestamp and task counter (orange).
+
+    Format: [claude HH:MM:SS N/M] when task context is set, otherwise [claude HH:MM:SS]
+    """
     timestamp = datetime.now().strftime("%H:%M:%S")
+    if _task_current is not None and _task_total is not None:
+        return f"{ORANGE}{BOLD}[claude {timestamp} {_task_current}/{_task_total}]{RESET}"
     return f"{ORANGE}{BOLD}[claude {timestamp}]{RESET}"
 
 

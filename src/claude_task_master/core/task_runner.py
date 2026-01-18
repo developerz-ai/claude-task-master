@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from . import console
 from .agent import ModelType
 from .agent_exceptions import AgentError
+from .console import clear_task_context, set_task_context
 from .task_group import (
     ParsedTask,
     TaskComplexity,
@@ -269,6 +270,9 @@ Please complete this task."""
         # pr_per_task=False (default): only create PR on last task in group
         should_create_pr = state.options.pr_per_task or is_last_in_group
 
+        # Set task context for Claude prefix display [claude HH:MM:SS N/M]
+        set_task_context(state.current_task_index + 1, len(tasks))
+
         # Run work session with model routing based on task complexity
         try:
             # Convert string model name to ModelType enum
@@ -293,6 +297,9 @@ Please complete this task."""
                 current_task,
                 e,
             ) from e
+        finally:
+            # Clear task context after work session completes
+            clear_task_context()
 
         # Log the response
         if self.logger and result.get("output"):
