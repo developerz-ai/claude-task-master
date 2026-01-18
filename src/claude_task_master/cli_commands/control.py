@@ -1,6 +1,6 @@
 """Control commands for Claude Task Master - pause, stop, resume, config."""
 
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 from rich.console import Console
@@ -154,7 +154,7 @@ def config_update(
         control = ControlManager(state_manager)
 
         # Build kwargs with only provided options
-        kwargs = {}
+        kwargs: dict[str, Any] = {}
         if auto_merge is not None:
             kwargs["auto_merge"] = auto_merge
         if max_sessions is not None:
