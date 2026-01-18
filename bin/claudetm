@@ -1,0 +1,276 @@
+#!/usr/bin/env bash
+# ============================================================================
+# claudetm - Claude Task Master Bash Wrapper
+# ============================================================================
+#
+# This script wraps the Python CLI to:
+# 1. Load configuration from .claude-task-master/config.json
+# 2. Set environment variables before invoking Python
+# 3. Provide a consistent entry point across different installation methods
+#
+# Environment Variables (set from config.json if present):
+#   ANTHROPIC_API_KEY     - Anthropic API key
+#   ANTHROPIC_BASE_URL    - Anthropic API base URL
+#   OPENROUTER_API_KEY    - OpenRouter API key (for alternative providers)
+#   OPENROUTER_BASE_URL   - OpenRouter API base URL
+#   CLAUDETM_MODEL_SONNET - Model name for 'sonnet' tier
+#   CLAUDETM_MODEL_OPUS   - Model name for 'opus' tier
+#   CLAUDETM_MODEL_HAIKU  - Model name for 'haiku' tier
+#   CLAUDETM_TARGET_BRANCH - Git target branch for PRs
+#
+# Usage:
+#   claudetm start "Your task here"
+#   claudetm status
+#   claudetm --version
+#   claudetm --help
+#
+# ============================================================================
+
+set -euo pipefail
+
+# Script version (should match Python package version)
+SCRIPT_VERSION="0.1.0"
+
+# Configuration file location
+CONFIG_DIR=".claude-task-master"
+CONFIG_FILE="${CONFIG_DIR}/config.json"
+
+# ============================================================================
+# Helper Functions
+# ============================================================================
+
+# Print error message to stderr
+error() {
+    echo "[claudetm] ERROR: $*" >&2
+}
+
+# Print warning message to stderr
+warn() {
+    echo "[claudetm] WARNING: $*" >&2
+}
+
+# Print info message to stderr (only if verbose)
+debug() {
+    if [[ "${CLAUDETM_DEBUG:-}" == "1" ]]; then
+        echo "[claudetm] DEBUG: $*" >&2
+    fi
+}
+
+# Check if a command exists
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# Extract a value from JSON using Python (portable, no jq dependency)
+# Usage: json_get "path.to.key" < file.json
+# Returns empty string if key not found or value is null
+json_get() {
+    local key_path="$1"
+    python3 -c "
+import json
+import sys
+
+try:
+    data = json.load(sys.stdin)
+    keys = '${key_path}'.split('.')
+    value = data
+    for key in keys:
+        if isinstance(value, dict) and key in value:
+            value = value[key]
+        else:
+            value = None
+            break
+    if value is not None and value != '':
+        print(value)
+except (json.JSONDecodeError, KeyError, TypeError):
+    pass
+" 2>/dev/null || true
+}
+
+# ============================================================================
+# Configuration Loading
+# ============================================================================
+
+# Load configuration from config.json and export as environment variables
+load_config() {
+    local config_path="$1"
+
+    if [[ ! -f "$config_path" ]]; then
+        debug "No config file found at $config_path"
+        return 0
+    fi
+
+    debug "Loading config from $config_path"
+
+    # Read the config file once
+    local config_content
+    config_content=$(cat "$config_path")
+
+    # Export API settings (only if not already set in environment)
+    local value
+
+    # ANTHROPIC_API_KEY
+    if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
+        value=$(echo "$config_content" | json_get "api.anthropic_api_key")
+        if [[ -n "$value" ]]; then
+            export ANTHROPIC_API_KEY="$value"
+            debug "Set ANTHROPIC_API_KEY from config"
+        fi
+    fi
+
+    # ANTHROPIC_BASE_URL
+    if [[ -z "${ANTHROPIC_BASE_URL:-}" ]]; then
+        value=$(echo "$config_content" | json_get "api.anthropic_base_url")
+        if [[ -n "$value" ]]; then
+            export ANTHROPIC_BASE_URL="$value"
+            debug "Set ANTHROPIC_BASE_URL from config"
+        fi
+    fi
+
+    # OPENROUTER_API_KEY
+    if [[ -z "${OPENROUTER_API_KEY:-}" ]]; then
+        value=$(echo "$config_content" | json_get "api.openrouter_api_key")
+        if [[ -n "$value" ]]; then
+            export OPENROUTER_API_KEY="$value"
+            debug "Set OPENROUTER_API_KEY from config"
+        fi
+    fi
+
+    # OPENROUTER_BASE_URL
+    if [[ -z "${OPENROUTER_BASE_URL:-}" ]]; then
+        value=$(echo "$config_content" | json_get "api.openrouter_base_url")
+        if [[ -n "$value" ]]; then
+            export OPENROUTER_BASE_URL="$value"
+            debug "Set OPENROUTER_BASE_URL from config"
+        fi
+    fi
+
+    # Model settings
+    if [[ -z "${CLAUDETM_MODEL_SONNET:-}" ]]; then
+        value=$(echo "$config_content" | json_get "models.sonnet")
+        if [[ -n "$value" ]]; then
+            export CLAUDETM_MODEL_SONNET="$value"
+            debug "Set CLAUDETM_MODEL_SONNET from config"
+        fi
+    fi
+
+    if [[ -z "${CLAUDETM_MODEL_OPUS:-}" ]]; then
+        value=$(echo "$config_content" | json_get "models.opus")
+        if [[ -n "$value" ]]; then
+            export CLAUDETM_MODEL_OPUS="$value"
+            debug "Set CLAUDETM_MODEL_OPUS from config"
+        fi
+    fi
+
+    if [[ -z "${CLAUDETM_MODEL_HAIKU:-}" ]]; then
+        value=$(echo "$config_content" | json_get "models.haiku")
+        if [[ -n "$value" ]]; then
+            export CLAUDETM_MODEL_HAIKU="$value"
+            debug "Set CLAUDETM_MODEL_HAIKU from config"
+        fi
+    fi
+
+    # Git settings
+    if [[ -z "${CLAUDETM_TARGET_BRANCH:-}" ]]; then
+        value=$(echo "$config_content" | json_get "git.target_branch")
+        if [[ -n "$value" ]]; then
+            export CLAUDETM_TARGET_BRANCH="$value"
+            debug "Set CLAUDETM_TARGET_BRANCH from config"
+        fi
+    fi
+
+    debug "Config loading complete"
+}
+
+# ============================================================================
+# Python Invocation
+# ============================================================================
+
+# Find the best way to invoke Python
+find_python() {
+    # First, try to use uv if available (recommended)
+    if command_exists uv; then
+        echo "uv run python -m claude_task_master.cli"
+        return 0
+    fi
+
+    # Fall back to direct Python invocation
+    if command_exists python3; then
+        echo "python3 -m claude_task_master.cli"
+        return 0
+    fi
+
+    if command_exists python; then
+        echo "python -m claude_task_master.cli"
+        return 0
+    fi
+
+    error "No Python interpreter found. Please install Python 3.10+ or uv."
+    return 1
+}
+
+# ============================================================================
+# Main Entry Point
+# ============================================================================
+
+main() {
+    # Handle --version flag specially (before loading config)
+    if [[ "${1:-}" == "--version" ]] || [[ "${1:-}" == "-V" ]]; then
+        echo "claudetm version $SCRIPT_VERSION (bash wrapper)"
+        # Also run Python version for full info
+        local python_cmd
+        python_cmd=$(find_python) || exit 1
+        $python_cmd --version 2>/dev/null || true
+        exit 0
+    fi
+
+    # Handle --wrapper-version (shows only bash wrapper version)
+    if [[ "${1:-}" == "--wrapper-version" ]]; then
+        echo "$SCRIPT_VERSION"
+        exit 0
+    fi
+
+    # Handle --show-config (debug: shows loaded config as env vars)
+    if [[ "${1:-}" == "--show-config" ]]; then
+        # Load config first so we can show the values
+        if [[ -f "$CONFIG_FILE" ]]; then
+            load_config "$CONFIG_FILE"
+        fi
+        echo "Configuration Environment Variables:"
+        echo "  ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-(not set)}"
+        echo "  ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-(not set)}"
+        echo "  OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-(not set)}"
+        echo "  OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-(not set)}"
+        echo "  CLAUDETM_MODEL_SONNET=${CLAUDETM_MODEL_SONNET:-(not set)}"
+        echo "  CLAUDETM_MODEL_OPUS=${CLAUDETM_MODEL_OPUS:-(not set)}"
+        echo "  CLAUDETM_MODEL_HAIKU=${CLAUDETM_MODEL_HAIKU:-(not set)}"
+        echo "  CLAUDETM_TARGET_BRANCH=${CLAUDETM_TARGET_BRANCH:-(not set)}"
+        echo ""
+        echo "Config file: $CONFIG_FILE"
+        if [[ -f "$CONFIG_FILE" ]]; then
+            echo "Config file status: EXISTS"
+        else
+            echo "Config file status: NOT FOUND"
+        fi
+        exit 0
+    fi
+
+    # Load configuration from project config file
+    if [[ -f "$CONFIG_FILE" ]]; then
+        load_config "$CONFIG_FILE"
+    fi
+
+    # Find Python command
+    local python_cmd
+    python_cmd=$(find_python) || exit 1
+
+    debug "Using Python command: $python_cmd"
+    debug "Arguments: $*"
+
+    # Execute Python CLI with all arguments
+    # Use exec to replace shell process (cleaner signal handling)
+    exec $python_cmd "$@"
+}
+
+# Run main function with all arguments
+main "$@"
