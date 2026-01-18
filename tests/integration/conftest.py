@@ -762,13 +762,18 @@ def mock_github_client():
             total_threads=0,
             resolved_threads=0,
             check_details=[],
+            checks_passed=1,
+            checks_failed=0,
+            checks_pending=0,
+            checks_skipped=0,
             mergeable=True,
             merged=False,
+            base_branch="main",
         )
     )
     mock.get_pr_comments = MagicMock(return_value="")
     mock.merge_pr = MagicMock()
-    mock.get_pr_for_current_branch = MagicMock(return_value=None)
+    mock.get_pr_for_current_branch = MagicMock(return_value=123)
     mock.wait_for_ci = MagicMock(return_value=("SUCCESS", None))
     return mock
 
@@ -857,5 +862,43 @@ def mock_key_listener():
             return_value=False,
         ),
         patch("claude_task_master.core.orchestrator.reset_escape"),
+    ):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def mock_interruptible_sleep():
+    """Automatically mock interruptible_sleep to prevent delays in tests.
+
+    The real function waits for seconds, which would cause tests to timeout.
+    This fixture makes it return True immediately (not interrupted).
+    """
+    with (
+        patch(
+            "claude_task_master.core.shutdown.interruptible_sleep",
+            return_value=True,
+        ),
+        patch(
+            "claude_task_master.core.orchestrator.interruptible_sleep",
+            return_value=True,
+        ),
+        patch(
+            "claude_task_master.core.workflow_stages.interruptible_sleep",
+            return_value=True,
+        ),
+    ):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def mock_git_checkout():
+    """Automatically mock git checkout to prevent git operations in tests.
+
+    Integration tests run in temp directories that are not git repos.
+    This fixture mocks the _checkout_branch method to always succeed.
+    """
+    with patch(
+        "claude_task_master.core.workflow_stages.WorkflowStageHandler._checkout_branch",
+        return_value=True,
     ):
         yield

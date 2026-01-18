@@ -22,6 +22,9 @@ class PRStatus(BaseModel):
     check_details: list[dict[str, Any]]
     # Mergeable status
     mergeable: str = "UNKNOWN"  # MERGEABLE, CONFLICTING, UNKNOWN
+    merge_state_status: str = (
+        "UNKNOWN"  # BLOCKED, BEHIND, CLEAN, DIRTY, HAS_HOOKS, UNKNOWN, UNSTABLE
+    )
     base_branch: str = "main"
 
 
@@ -120,6 +123,38 @@ class PROperationsMixin:
 
         return _parse_pr_status_response(pr_number, pr_data)
 
+    def get_required_status_checks(
+        self: GitHubClientProtocol, base_branch: str = "main"
+    ) -> list[str]:
+        """Get required status checks from branch protection rules.
+
+        Args:
+            base_branch: The base branch to check protection for.
+
+        Returns:
+            List of required check context names.
+        """
+        from .exceptions import GitHubError, GitHubTimeoutError
+
+        repo_info = self._get_repo_info()
+        try:
+            result = self._run_gh_command(
+                [
+                    "gh",
+                    "api",
+                    f"repos/{repo_info}/branches/{base_branch}/protection/required_status_checks",
+                    "--jq",
+                    ".contexts",
+                ],
+                timeout=15,
+            )
+            # Parse JSON array of context names
+            contexts = json.loads(result.stdout)
+            return contexts if isinstance(contexts, list) else []
+        except (GitHubError, GitHubTimeoutError):
+            # No branch protection or no required checks
+            return []
+
     def get_pr_for_current_branch(self: GitHubClientProtocol, cwd: str | None = None) -> int | None:
         """Get PR number for the current branch, if one exists.
 
@@ -217,6 +252,7 @@ def _build_pr_status_query() -> str:
       repository(owner: $owner, name: $repo) {
         pullRequest(number: $pr) {
           mergeable
+          mergeStateStatus
           baseRefName
           commits(last: 1) {
             nodes {
@@ -305,6 +341,7 @@ def _parse_pr_status_response(pr_number: int, pr_data: dict[str, Any]) -> PRStat
 
     # Parse mergeable status
     mergeable = pr_data.get("mergeable", "UNKNOWN")
+    merge_state_status = pr_data.get("mergeStateStatus", "UNKNOWN")
     base_branch = pr_data.get("baseRefName", "main")
 
     return PRStatus(
@@ -319,6 +356,7 @@ def _parse_pr_status_response(pr_number: int, pr_data: dict[str, Any]) -> PRStat
         checks_skipped=checks_skipped,
         check_details=check_details,
         mergeable=mergeable,
+        merge_state_status=merge_state_status,
         base_branch=base_branch,
     )
 
