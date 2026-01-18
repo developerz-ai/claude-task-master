@@ -7,6 +7,7 @@ and deleting existing tasks.
 import json
 
 import pytest
+from pydantic import ValidationError
 
 from claude_task_master.api.models import TaskInitRequest
 
@@ -273,19 +274,19 @@ def test_task_init_request_model_validation():
     assert request.auto_merge is True
 
     # Missing required field
-    with pytest.raises(Exception):  # ValidationError
+    with pytest.raises(ValidationError):
         TaskInitRequest(model="opus")
 
     # Invalid model
-    with pytest.raises(Exception):  # ValidationError
+    with pytest.raises(ValidationError):
         TaskInitRequest(goal="Test", model="invalid")
 
     # Invalid max_sessions (too low)
-    with pytest.raises(Exception):  # ValidationError
+    with pytest.raises(ValidationError):
         TaskInitRequest(goal="Test", max_sessions=0)
 
     # Invalid max_sessions (too high)
-    with pytest.raises(Exception):  # ValidationError
+    with pytest.raises(ValidationError):
         TaskInitRequest(goal="Test", max_sessions=1001)
 
     # Valid max_sessions boundaries
