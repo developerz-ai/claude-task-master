@@ -34,6 +34,7 @@ class WorkflowStageHandler:
 
     # CI polling configuration
     CI_POLL_INTERVAL = 10  # seconds between CI status checks
+    REVIEW_DELAY = 5  # seconds to wait after CI passes before checking reviews
 
     @staticmethod
     def _get_check_name(check: dict) -> str:
@@ -150,6 +151,10 @@ class WorkflowStageHandler:
                     f"CI passed! ({pr_status.checks_passed} passed, "
                     f"{pr_status.checks_skipped} skipped)"
                 )
+                # Wait for GitHub to publish reviews before checking
+                console.detail(f"Waiting {self.REVIEW_DELAY}s for reviews to be published...")
+                if not interruptible_sleep(self.REVIEW_DELAY):
+                    return None
                 state.workflow_stage = "waiting_reviews"
                 self.state_manager.save_state(state)
                 return None

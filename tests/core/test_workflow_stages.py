@@ -300,10 +300,12 @@ class TestHandleWaitingCIStage:
         assert result is None
         assert basic_task_state.workflow_stage == "waiting_reviews"
 
+    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
     @patch("claude_task_master.core.workflow_stages.console")
     def test_ci_success_moves_to_reviews(
         self,
         mock_console,
+        mock_sleep,
         workflow_handler,
         state_manager,
         basic_task_state,
@@ -315,12 +317,15 @@ class TestHandleWaitingCIStage:
         basic_task_state.current_pr = 42
         mock_pr_status.ci_state = "SUCCESS"
         mock_github_client.get_pr_status.return_value = mock_pr_status
+        mock_sleep.return_value = True  # Sleep not interrupted
 
         result = workflow_handler.handle_waiting_ci_stage(basic_task_state)
 
         assert result is None
         assert basic_task_state.workflow_stage == "waiting_reviews"
         mock_console.success.assert_called()
+        # Verify the review delay was applied
+        mock_sleep.assert_called_with(workflow_handler.REVIEW_DELAY)
 
     @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
     @patch("claude_task_master.core.workflow_stages.console")
@@ -1024,10 +1029,12 @@ class TestHandleMergedStage:
 class TestWorkflowIntegration:
     """Integration tests for workflow stage transitions."""
 
+    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
     @patch("claude_task_master.core.workflow_stages.console")
     def test_full_successful_pr_flow(
         self,
         mock_console,
+        mock_sleep,
         workflow_handler,
         state_manager,
         basic_task_state,
@@ -1038,6 +1045,7 @@ class TestWorkflowIntegration:
         state_manager.state_dir.mkdir(exist_ok=True)
         state_manager.save_plan("- [ ] Task 1")
         basic_task_state.options.auto_merge = True
+        mock_sleep.return_value = True  # Sleep not interrupted
 
         # Stage 1: PR Created
         mock_github_client.get_pr_for_current_branch.return_value = 42

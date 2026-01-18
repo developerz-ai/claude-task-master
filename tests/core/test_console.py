@@ -479,8 +479,8 @@ class TestFunctionsWithTaskCounter:
         captured3 = capsys.readouterr()
         assert "3/3" in captured3.out
 
-    def test_orchestrator_functions_not_affected_by_task_context(self, capsys):
-        """Test orchestrator functions (info, success, etc.) don't show task counter."""
+    def test_orchestrator_functions_also_show_task_context(self, capsys):
+        """Test orchestrator functions (info, success, etc.) also show task counter."""
         set_task_context(5, 10)
         info("Info message")
         success("Success message")
@@ -488,9 +488,9 @@ class TestFunctionsWithTaskCounter:
         error("Error message")
         detail("Detail message")
         captured = capsys.readouterr()
-        # These use _prefix() not _claude_prefix(), so no task counter
+        # Both claudetm and claude prefixes show task counter
         assert "[claudetm" in captured.out
-        assert "5/10" not in captured.out
+        assert "5/10" in captured.out
 
 
 # =============================================================================

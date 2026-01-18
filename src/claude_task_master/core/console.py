@@ -1,7 +1,7 @@
 """Console output utilities with colored prefixes.
 
 Prefixes:
-- [claudetm HH:MM:SS] cyan - orchestrator messages
+- [claudetm HH:MM:SS N/M] cyan - orchestrator messages with task progress
 - [claude HH:MM:SS N/M] orange - Claude's tool usage with task progress
 """
 
@@ -52,8 +52,13 @@ def get_task_context() -> tuple[int | None, int | None]:
 
 
 def _prefix() -> str:
-    """Generate orchestrator prefix [claudetm] with timestamp."""
+    """Generate orchestrator prefix [claudetm] with timestamp and task counter.
+
+    Format: [claudetm HH:MM:SS N/M] when task context is set, otherwise [claudetm HH:MM:SS]
+    """
     timestamp = datetime.now().strftime("%H:%M:%S")
+    if _task_current is not None and _task_total is not None:
+        return f"{CYAN}{BOLD}[claudetm {timestamp} {_task_current}/{_task_total}]{RESET}"
     return f"{CYAN}{BOLD}[claudetm {timestamp}]{RESET}"
 
 
