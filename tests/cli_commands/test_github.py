@@ -552,7 +552,10 @@ class TestRegisterGitHubCommands:
         github.register_github_commands(app)
 
         # Get registered command names (name or callback function name)
-        command_names = [cmd.name or cmd.callback.__name__ for cmd in app.registered_commands]
+        command_names = [
+            cmd.name or (cmd.callback.__name__ if cmd.callback else None)
+            for cmd in app.registered_commands
+        ]
 
         assert "ci-status" in command_names
         assert "ci-logs" in command_names

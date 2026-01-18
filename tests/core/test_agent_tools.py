@@ -540,25 +540,30 @@ class TestPhaseToolRestrictions:
         assert len(used_modify_tools) == 0
 
     def test_working_phase_has_all_tools(self, agent):
-        """Verify working phase has superset of all other phase tools."""
-        working_tools = set(agent.get_tools_for_phase("working"))
-        planning_tools = set(agent.get_tools_for_phase("planning"))
-        verification_tools = set(agent.get_tools_for_phase("verification"))
+        """Verify working phase allows all tools (empty list)."""
+        working_tools = agent.get_tools_for_phase("working")
+        planning_tools = agent.get_tools_for_phase("planning")
+        verification_tools = agent.get_tools_for_phase("verification")
 
-        assert planning_tools.issubset(working_tools)
-        assert verification_tools.issubset(working_tools)
+        # Working phase uses empty list = all tools allowed
+        assert working_tools == []
+        # Other phases have specific restrictions
+        assert len(planning_tools) > 0
+        assert len(verification_tools) > 0
 
     def test_working_phase_exclusive_tools(self, agent):
-        """Verify working phase has tools not in other phases."""
-        working_tools = set(agent.get_tools_for_phase("working"))
+        """Verify planning/verification don't have write tools while working allows all."""
+        working_tools = agent.get_tools_for_phase("working")
         planning_tools = set(agent.get_tools_for_phase("planning"))
         verification_tools = set(agent.get_tools_for_phase("verification"))
 
-        # These tools should only be in working phase
+        # Working phase uses empty list = all tools allowed
+        assert working_tools == []
+
+        # These tools should NOT be in planning or verification phases
         exclusive_tools = {"Write", "Edit", "Task", "TodoWrite", "WebSearch", "WebFetch", "Skill"}
 
         for tool in exclusive_tools:
-            assert tool in working_tools
             assert tool not in planning_tools
             assert tool not in verification_tools
 
@@ -568,6 +573,6 @@ class TestPhaseToolRestrictions:
         tools_upper = agent.get_tools_for_phase("PLANNING")
         tools_mixed = agent.get_tools_for_phase("Planning")
 
-        # Should fall back to WORKING tools
-        assert tools_upper == ToolConfig.WORKING.value
-        assert tools_mixed == ToolConfig.WORKING.value
+        # Should fall back to WORKING tools (empty list = all tools allowed)
+        assert tools_upper == []
+        assert tools_mixed == []
