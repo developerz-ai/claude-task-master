@@ -552,7 +552,10 @@ class TestRegisterInfoCommands:
         info.register_info_commands(app)
 
         # Get registered command names (name or callback function name)
-        command_names = [cmd.name or cmd.callback.__name__ for cmd in app.registered_commands]
+        command_names = [
+            cmd.name or (cmd.callback.__name__ if cmd.callback else None)
+            for cmd in app.registered_commands
+        ]
 
         assert "status" in command_names
         assert "plan" in command_names
