@@ -17,6 +17,10 @@ Usage:
     # Manager usage for configuration and queuing
     manager = WebhookManager(config=WebhookConfig(...))
     await manager.emit("task.completed", task_data)
+
+    # Create typed events
+    from claude_task_master.webhooks import EventType, create_event
+    event = create_event(EventType.TASK_COMPLETED, task_index=0)
 """
 
 from __future__ import annotations
@@ -27,10 +31,36 @@ from claude_task_master.webhooks.client import (
     WebhookDeliveryResult,
     WebhookTimeoutError,
 )
+from claude_task_master.webhooks.events import (
+    EventType,
+    PRCreatedEvent,
+    PRMergedEvent,
+    SessionCompletedEvent,
+    SessionStartedEvent,
+    TaskCompletedEvent,
+    TaskFailedEvent,
+    TaskStartedEvent,
+    WebhookEvent,
+    create_event,
+    get_event_class,
+)
 
 __all__ = [
+    # Client
     "WebhookClient",
     "WebhookDeliveryError",
     "WebhookDeliveryResult",
     "WebhookTimeoutError",
+    # Events
+    "EventType",
+    "WebhookEvent",
+    "TaskStartedEvent",
+    "TaskCompletedEvent",
+    "TaskFailedEvent",
+    "PRCreatedEvent",
+    "PRMergedEvent",
+    "SessionStartedEvent",
+    "SessionCompletedEvent",
+    "create_event",
+    "get_event_class",
 ]
