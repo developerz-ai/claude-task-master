@@ -203,7 +203,12 @@ class WorkflowStageHandler:
             required_checks = set(
                 self.github_client.get_required_status_checks(pr_status.base_branch)
             )
-            reported_checks = {check.get("name", "") for check in pr_status.check_details}
+            # Use _get_check_name to handle both CheckRun (name) and StatusContext (context)
+            reported_checks = {
+                self._get_check_name(check)
+                for check in pr_status.check_details
+                if self._get_check_name(check) != "unknown"
+            }
             missing_required = required_checks - reported_checks
 
             # If required checks haven't reported yet, keep waiting
