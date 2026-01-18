@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import subprocess
 from typing import TYPE_CHECKING
 
 from . import console
-from .agent import AgentWrapper
+from .agent import AgentWrapper, ModelType
 from .agent_exceptions import AgentError, ConsecutiveFailuresError, ContentFilterError
 from .circuit_breaker import CircuitBreakerError
+from .config_loader import get_config
 from .key_listener import (
     get_cancellation_reason,
     is_cancellation_requested,
@@ -18,7 +20,7 @@ from .key_listener import (
 from .planner import Planner
 from .pr_context import PRContextManager
 from .progress_tracker import ExecutionTracker, TrackerConfig
-from .shutdown import register_handlers, reset_shutdown, unregister_handlers
+from .shutdown import interruptible_sleep, register_handlers, reset_shutdown, unregister_handlers
 from .state import StateError, StateManager, TaskState
 from .task_runner import (
     NoPlanFoundError,
@@ -270,23 +272,71 @@ class WorkLoopOrchestrator:
                     console.info(self.tracker.get_cost_report())
                     return 1
 
-            # All complete - verify
+            # All complete - verify with retry loop for fixes
             stop_listening()
             unregister_handlers()
 
-            if self._verify_success():
-                state.status = "success"
-                self.state_manager.save_state(state)
-                self.state_manager.cleanup_on_success(state.run_id)
-                console.success("All tasks completed successfully!")
-                console.info(self.tracker.get_cost_report())
-                return 0
-            else:
+            # Allow up to 3 fix attempts
+            max_fix_attempts = 3
+            fix_attempt = 0
+
+            while fix_attempt <= max_fix_attempts:
+                verification = self._verify_success()
+
+                if verification["success"]:
+                    # Success! Checkout to main and cleanup
+                    self._checkout_to_main()
+                    state.status = "success"
+                    self.state_manager.save_state(state)
+                    self.state_manager.cleanup_on_success(state.run_id)
+                    console.success("All tasks completed successfully!")
+                    console.info(self.tracker.get_cost_report())
+                    return 0
+
+                # Verification failed
                 console.warning("Success criteria verification failed")
-                state.status = "blocked"
-                self.state_manager.save_state(state)
-                console.info(self.tracker.get_cost_report())
-                return 1
+
+                if fix_attempt >= max_fix_attempts:
+                    # Max attempts reached - checkout to main and fail
+                    console.error(f"Max fix attempts ({max_fix_attempts}) reached")
+                    self._checkout_to_main()
+                    state.status = "blocked"
+                    self.state_manager.save_state(state)
+                    console.info(self.tracker.get_cost_report())
+                    return 1
+
+                # Attempt to fix
+                console.info(f"Attempting fix {fix_attempt + 1}/{max_fix_attempts}...")
+
+                if not self._run_verification_fix(verification["details"], state):
+                    # Fix failed - checkout to main and fail
+                    console.error("Fix attempt failed")
+                    self._checkout_to_main()
+                    state.status = "blocked"
+                    self.state_manager.save_state(state)
+                    console.info(self.tracker.get_cost_report())
+                    return 1
+
+                # Wait for PR to be created and merge it
+                if not self._wait_for_fix_pr_merge(state):
+                    # PR merge failed - checkout to main and fail
+                    console.error("Fix PR merge failed")
+                    self._checkout_to_main()
+                    state.status = "blocked"
+                    self.state_manager.save_state(state)
+                    console.info(self.tracker.get_cost_report())
+                    return 1
+
+                # PR merged - increment and retry verification
+                fix_attempt += 1
+                console.info("Fix PR merged - re-verifying...")
+
+            # Should not reach here, but handle it gracefully
+            self._checkout_to_main()
+            state.status = "blocked"
+            self.state_manager.save_state(state)
+            console.info(self.tracker.get_cost_report())
+            return 1
 
         except KeyboardInterrupt:
             return _handle_pause("Interrupted (Ctrl+C)")
@@ -296,6 +346,7 @@ class WorkLoopOrchestrator:
             console.error(f"Orchestrator error: {e.message}")
             state.status = "failed"
             try:
+                self._checkout_to_main()
                 self.state_manager.save_state(state)
             except Exception:
                 pass  # Best effort - state save failed but we still return error
@@ -306,6 +357,7 @@ class WorkLoopOrchestrator:
             console.error(f"Unexpected error: {type(e).__name__}: {e}")
             state.status = "failed"
             try:
+                self._checkout_to_main()
                 self.state_manager.save_state(state)
             except Exception:
                 pass  # Best effort - state save failed but we still return error
@@ -461,12 +513,176 @@ class WorkLoopOrchestrator:
         except Exception:
             return None
 
-    def _verify_success(self) -> bool:
-        """Verify success criteria are met."""
+    def _verify_success(self) -> dict:
+        """Verify success criteria are met.
+
+        Returns:
+            Dict with 'success' (bool) and 'details' (str) keys.
+        """
         criteria = self.state_manager.load_criteria()
         if not criteria:
-            return True
+            return {"success": True, "details": "No criteria specified"}
 
         context = self.state_manager.load_context()
         result = self.agent.verify_success_criteria(criteria=criteria, context=context)
-        return bool(result.get("success", False))
+        return {
+            "success": bool(result.get("success", False)),
+            "details": result.get("details", ""),
+        }
+
+    def _get_target_branch(self) -> str:
+        """Get the target branch from configuration."""
+        config = get_config()
+        return config.git.target_branch
+
+    def _checkout_to_main(self) -> bool:
+        """Checkout to the configured target branch (main/master/etc).
+
+        Returns:
+            True if checkout succeeded, False otherwise.
+        """
+        target_branch = self._get_target_branch()
+        console.info(f"Checking out to {target_branch}...")
+
+        try:
+            # Checkout to target branch
+            subprocess.run(
+                ["git", "checkout", target_branch],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            # Pull latest changes
+            subprocess.run(
+                ["git", "pull"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            console.success(f"Switched to {target_branch}")
+            return True
+        except subprocess.CalledProcessError as e:
+            console.warning(f"Failed to checkout to {target_branch}: {e}")
+            return False
+
+    def _run_verification_fix(self, verification_details: str, state: TaskState) -> bool:
+        """Run agent to fix verification failures and create a PR.
+
+        Args:
+            verification_details: Details of what failed during verification.
+            state: Current task state.
+
+        Returns:
+            True if fix was attempted (PR created or at least committed).
+        """
+        console.info("Running agent to fix verification failures...")
+
+        # Build fix prompt
+        criteria = self.state_manager.load_criteria() or ""
+        context = self.state_manager.load_context()
+
+        task_description = f"""Verification of success criteria has FAILED.
+
+**Success Criteria:**
+{criteria}
+
+**Verification Result:**
+{verification_details}
+
+**Your Task:**
+1. Read the verification details carefully to understand what failed
+2. Fix all issues identified in the verification
+3. Run tests/lint locally to verify the fixes work
+4. Commit your changes with a descriptive message
+5. Push to a new branch and create a PR
+
+IMPORTANT: You must fix ALL verification failures, not just some of them.
+After fixing everything, run the tests again to confirm they pass.
+
+After completing your fixes, end with: TASK COMPLETE"""
+
+        try:
+            self.agent.run_work_session(
+                task_description=task_description,
+                context=context,
+                model_override=ModelType.OPUS,
+                create_pr=True,
+            )
+            state.session_count += 1
+            self.state_manager.save_state(state)
+            return True
+        except Exception as e:
+            console.error(f"Fix session failed: {e}")
+            return False
+
+    def _wait_for_fix_pr_merge(self, state: TaskState) -> bool:
+        """Wait for fix PR to pass CI and merge it.
+
+        Args:
+            state: Current task state.
+
+        Returns:
+            True if PR was merged successfully.
+        """
+        # Detect PR from current branch
+        try:
+            pr_number = self.github_client.get_pr_for_current_branch()
+            if not pr_number:
+                console.warning("No PR found for fix branch")
+                return False
+
+            console.success(f"Fix PR #{pr_number} detected")
+            state.current_pr = pr_number
+            self.state_manager.save_state(state)
+        except Exception as e:
+            console.warning(f"Could not detect fix PR: {e}")
+            return False
+
+        # Poll CI until success or failure
+        max_wait = 600  # 10 minutes max
+        poll_interval = 10
+        waited = 0
+
+        while waited < max_wait:
+            try:
+                pr_status = self.github_client.get_pr_status(pr_number)
+
+                if pr_status.ci_state == "SUCCESS":
+                    console.success("Fix PR CI passed!")
+                    break
+                elif pr_status.ci_state in ("FAILURE", "ERROR"):
+                    console.error("Fix PR CI failed - cannot auto-merge")
+                    return False
+                else:
+                    console.info(f"Waiting for fix PR CI... ({pr_status.checks_pending} pending)")
+                    if not interruptible_sleep(poll_interval):
+                        return False
+                    waited += poll_interval
+            except Exception as e:
+                console.warning(f"Error checking CI: {e}")
+                if not interruptible_sleep(poll_interval):
+                    return False
+                waited += poll_interval
+
+        if waited >= max_wait:
+            console.warning("Timed out waiting for fix PR CI")
+            return False
+
+        # Merge the PR
+        if state.options.auto_merge:
+            try:
+                console.info(f"Merging fix PR #{pr_number}...")
+                self.github_client.merge_pr(pr_number)
+                console.success(f"Fix PR #{pr_number} merged!")
+
+                # Checkout back to target branch
+                self._checkout_to_main()
+
+                return True
+            except Exception as e:
+                console.error(f"Failed to merge fix PR: {e}")
+                return False
+        else:
+            console.info(f"Fix PR #{pr_number} ready to merge (auto_merge disabled)")
+            console.detail("Merge manually then run 'claudetm resume'")
+            return False

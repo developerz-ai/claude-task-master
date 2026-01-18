@@ -417,31 +417,35 @@ class TestVerifySuccess:
     """Tests for _verify_success method."""
 
     def test_verify_success_no_criteria(self, basic_orchestrator, state_manager):
-        """Should return True when no criteria exist."""
+        """Should return success=True when no criteria exist."""
         state_manager.state_dir.mkdir(exist_ok=True)
         # No criteria file
 
         result = basic_orchestrator._verify_success()
-        assert result is True
+        assert result["success"] is True
+        assert "No criteria" in result["details"]
 
     def test_verify_success_criteria_met(self, basic_orchestrator, state_manager, mock_agent):
-        """Should return True when criteria are met."""
+        """Should return success=True when criteria are met."""
         state_manager.state_dir.mkdir(exist_ok=True)
         state_manager.save_criteria("All tests pass")
-        mock_agent.verify_success_criteria.return_value = {"success": True}
+        mock_agent.verify_success_criteria.return_value = {"success": True, "details": "All good"}
 
         result = basic_orchestrator._verify_success()
-        assert result is True
+        assert result["success"] is True
         mock_agent.verify_success_criteria.assert_called_once()
 
     def test_verify_success_criteria_not_met(self, basic_orchestrator, state_manager, mock_agent):
-        """Should return False when criteria are not met."""
+        """Should return success=False when criteria are not met."""
         state_manager.state_dir.mkdir(exist_ok=True)
         state_manager.save_criteria("All tests pass")
-        mock_agent.verify_success_criteria.return_value = {"success": False}
+        mock_agent.verify_success_criteria.return_value = {
+            "success": False,
+            "details": "Tests failed",
+        }
 
         result = basic_orchestrator._verify_success()
-        assert result is False
+        assert result["success"] is False
 
     def test_verify_success_passes_context(self, basic_orchestrator, state_manager, mock_agent):
         """Should pass context to agent when available."""
@@ -1133,3 +1137,96 @@ class TestTrackerIntegration:
 
         assert result == 1
         mock_console.warning.assert_called()
+
+
+# =============================================================================
+# Test Checkout to Main
+# =============================================================================
+
+
+class TestCheckoutToMain:
+    """Tests for _checkout_to_main and _get_target_branch methods."""
+
+    @patch("claude_task_master.core.orchestrator.get_config")
+    @patch("claude_task_master.core.orchestrator.subprocess.run")
+    @patch("claude_task_master.core.orchestrator.console")
+    def test_checkout_to_main_success(
+        self, mock_console, mock_subprocess, mock_get_config, basic_orchestrator
+    ):
+        """Should checkout to main successfully."""
+        mock_config = MagicMock()
+        mock_config.git.target_branch = "main"
+        mock_get_config.return_value = mock_config
+        mock_subprocess.return_value = MagicMock(returncode=0)
+
+        result = basic_orchestrator._checkout_to_main()
+
+        assert result is True
+        assert mock_subprocess.call_count == 2  # checkout + pull
+        mock_console.success.assert_called()
+
+    @patch("claude_task_master.core.orchestrator.get_config")
+    @patch("claude_task_master.core.orchestrator.subprocess.run")
+    @patch("claude_task_master.core.orchestrator.console")
+    def test_checkout_to_main_failure(
+        self, mock_console, mock_subprocess, mock_get_config, basic_orchestrator
+    ):
+        """Should handle checkout failure gracefully."""
+        import subprocess
+
+        mock_config = MagicMock()
+        mock_config.git.target_branch = "main"
+        mock_get_config.return_value = mock_config
+        mock_subprocess.side_effect = subprocess.CalledProcessError(1, "git")
+
+        result = basic_orchestrator._checkout_to_main()
+
+        assert result is False
+        mock_console.warning.assert_called()
+
+    @patch("claude_task_master.core.orchestrator.get_config")
+    def test_get_target_branch_from_config(self, mock_get_config, basic_orchestrator):
+        """Should get target branch from config."""
+        mock_config = MagicMock()
+        mock_config.git.target_branch = "develop"
+        mock_get_config.return_value = mock_config
+
+        result = basic_orchestrator._get_target_branch()
+
+        assert result == "develop"
+
+
+# =============================================================================
+# Test Verification Fix Flow
+# =============================================================================
+
+
+class TestVerificationFixFlow:
+    """Tests for verification fix loop functionality."""
+
+    @patch("claude_task_master.core.orchestrator.console")
+    def test_run_verification_fix_success(
+        self, mock_console, basic_orchestrator, state_manager, mock_agent, basic_task_state
+    ):
+        """Should run fix session and return True on success."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_criteria("Tests must pass")
+
+        result = basic_orchestrator._run_verification_fix("Tests failed", basic_task_state)
+
+        assert result is True
+        mock_agent.run_work_session.assert_called()
+
+    @patch("claude_task_master.core.orchestrator.console")
+    def test_run_verification_fix_failure(
+        self, mock_console, basic_orchestrator, state_manager, mock_agent, basic_task_state
+    ):
+        """Should return False when fix session fails."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_criteria("Tests must pass")
+        mock_agent.run_work_session.side_effect = RuntimeError("Fix failed")
+
+        result = basic_orchestrator._run_verification_fix("Tests failed", basic_task_state)
+
+        assert result is False
+        mock_console.error.assert_called()
