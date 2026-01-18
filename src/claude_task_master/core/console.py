@@ -58,8 +58,13 @@ def _prefix() -> str:
 
 
 def _claude_prefix() -> str:
-    """Generate Claude prefix [claude] with timestamp (orange)."""
+    """Generate Claude prefix [claude] with timestamp and task counter (orange).
+
+    Format: [claude HH:MM:SS N/M] when task context is set, otherwise [claude HH:MM:SS]
+    """
     timestamp = datetime.now().strftime("%H:%M:%S")
+    if _task_current is not None and _task_total is not None:
+        return f"{ORANGE}{BOLD}[claude {timestamp} {_task_current}/{_task_total}]{RESET}"
     return f"{ORANGE}{BOLD}[claude {timestamp}]{RESET}"
 
 
