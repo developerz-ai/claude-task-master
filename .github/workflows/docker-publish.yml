@@ -12,6 +12,8 @@ env:
 permissions:
   contents: read
   packages: write  # Required to push to GitHub Container Registry
+  id-token: write  # Required for artifact attestation
+  attestations: write  # Required for attestation
 
 jobs:
   build-and-push:

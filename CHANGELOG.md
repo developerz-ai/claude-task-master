@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 - N/A
 
+## [0.1.3] - 2026-01-19
+
+Release tag alignment - all features documented under v0.1.2 are now properly included in this tagged release.
+
 ## [0.1.2] - 2025-01-18
 
 ### Added
@@ -180,7 +184,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/developerz-ai/claude-task-master/releases/tag/v0.1.0
