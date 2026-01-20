@@ -585,6 +585,41 @@ class TestPostCommentReplies:
         addressed = state_manager.get_addressed_threads(123)
         assert "thread_abc" in addressed
 
+    def test_resolves_thread_on_explained_action(
+        self,
+        pr_context_manager: PRContextManager,
+        state_manager: StateManager,
+    ) -> None:
+        """Test that threads are resolved when action is 'explained'."""
+        pr_dir = state_manager.get_pr_dir(123)
+        resolve_file = pr_dir / "resolve-comments.json"
+        resolve_file.write_text(
+            json.dumps(
+                {
+                    "resolutions": [
+                        {
+                            "thread_id": "thread_to_resolve",
+                            "action": "explained",
+                            "message": "Explained why this is correct",
+                        }
+                    ]
+                }
+            )
+        )
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(stdout=json.dumps(make_graphql_response([])))
+
+            with patch("claude_task_master.core.pr_context.console"):
+                pr_context_manager.post_comment_replies(123)
+
+        # Should have made calls to resolve the thread
+        # (repo info, get resolved, post reply, resolve thread)
+        assert mock_run.call_count >= 3
+        # Verify resolveReviewThread was called
+        args = [str(call) for call in mock_run.call_args_list]
+        assert any("resolveReviewThread" in str(a) for a in args)
+
     def test_deletes_resolve_file_after_processing(
         self,
         pr_context_manager: PRContextManager,

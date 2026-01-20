@@ -264,8 +264,9 @@ class PRContextManager:
                     # Mark this thread as addressed so we don't re-download it
                     addressed_thread_ids.append(thread_id)
 
-                    # Resolve thread if action is "fixed"
-                    if action == "fixed":
+                    # Resolve thread if action is "fixed" or "explained"
+                    # Both indicate the comment has been addressed (either by code change or explanation)
+                    if action in ("fixed", "explained"):
                         try:
                             self.resolve_thread(thread_id)
                             console.detail(f"  Resolved thread {thread_id[:20]}...")
