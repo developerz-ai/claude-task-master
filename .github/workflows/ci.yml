@@ -81,6 +81,8 @@ jobs:
     name: Build Package
     runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [lint, test]
+    # Only run on PRs to verify build works, not on main pushes
+    if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v6
 
@@ -108,6 +110,8 @@ jobs:
     name: CLI Integration Test
     runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [lint, test]
+    # Only run on PRs to verify CLI works, not on main pushes
+    if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v6
 
@@ -135,6 +139,8 @@ jobs:
     name: Docker Build Verification
     runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [lint, test]
+    # Only run on PRs to verify Docker build works, not on main pushes
+    if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v6
 
