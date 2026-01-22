@@ -1258,6 +1258,7 @@ def setup_repo(
         Dictionary containing setup result with success status and details.
     """
     import subprocess
+    import sys
 
     work_path = Path(work_dir).expanduser().resolve()
     steps_completed: list[str] = []
@@ -1417,7 +1418,12 @@ def setup_repo(
                     steps_completed.append("Virtual environment already exists")
 
                 venv_path = str(venv_dir)
-                pip_path = venv_dir / "bin" / "pip"
+                # Use platform-appropriate path for pip
+                pip_path = (
+                    venv_dir
+                    / ("Scripts" if sys.platform == "win32" else "bin")
+                    / ("pip.exe" if sys.platform == "win32" else "pip")
+                )
 
                 # Install dependencies with pip
                 if (work_path / "pyproject.toml").exists():
@@ -1510,8 +1516,9 @@ def setup_repo(
         # === Run Setup Scripts ===
         for script in setup_scripts:
             try:
-                # Make script executable
-                script.chmod(script.stat().st_mode | 0o755)
+                # Make script executable (skip on Windows where chmod is not needed)
+                if sys.platform != "win32":
+                    script.chmod(script.stat().st_mode | 0o755)
 
                 result = subprocess.run(
                     [str(script)],
