@@ -40,13 +40,25 @@ class TestEventTypeEnum:
 
     def test_event_type_values(self) -> None:
         """Test that event types have correct string values."""
+        # Task lifecycle events
         assert EventType.TASK_STARTED.value == "task.started"
         assert EventType.TASK_COMPLETED.value == "task.completed"
         assert EventType.TASK_FAILED.value == "task.failed"
+        # PR events
         assert EventType.PR_CREATED.value == "pr.created"
         assert EventType.PR_MERGED.value == "pr.merged"
+        # CI events
+        assert EventType.CI_PASSED.value == "ci.passed"
+        assert EventType.CI_FAILED.value == "ci.failed"
+        # Session events
         assert EventType.SESSION_STARTED.value == "session.started"
         assert EventType.SESSION_COMPLETED.value == "session.completed"
+        # Plan events
+        assert EventType.PLAN_UPDATED.value == "plan.updated"
+        # Orchestrator lifecycle events
+        assert EventType.STATUS_CHANGED.value == "status.changed"
+        assert EventType.RUN_STARTED.value == "run.started"
+        assert EventType.RUN_COMPLETED.value == "run.completed"
 
     def test_event_type_from_string_valid(self) -> None:
         """Test converting valid strings to EventType."""
@@ -67,14 +79,26 @@ class TestEventTypeEnum:
     def test_all_event_types_exist(self) -> None:
         """Test that all expected event types are defined."""
         event_types = list(EventType)
-        assert len(event_types) == 7
+        assert len(event_types) == 13
+        # Task lifecycle events
         assert EventType.TASK_STARTED in event_types
         assert EventType.TASK_COMPLETED in event_types
         assert EventType.TASK_FAILED in event_types
+        # PR events
         assert EventType.PR_CREATED in event_types
         assert EventType.PR_MERGED in event_types
+        # CI events
+        assert EventType.CI_PASSED in event_types
+        assert EventType.CI_FAILED in event_types
+        # Session events
         assert EventType.SESSION_STARTED in event_types
         assert EventType.SESSION_COMPLETED in event_types
+        # Plan events
+        assert EventType.PLAN_UPDATED in event_types
+        # Orchestrator lifecycle events
+        assert EventType.STATUS_CHANGED in event_types
+        assert EventType.RUN_STARTED in event_types
+        assert EventType.RUN_COMPLETED in event_types
 
 
 # =============================================================================

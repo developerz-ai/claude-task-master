@@ -15,6 +15,12 @@ Supported Event Types:
     - pr.merged: Pull request was merged
     - session.started: Work session has begun
     - session.completed: Work session completed
+    - ci.passed: CI checks passed
+    - ci.failed: CI checks failed
+    - plan.updated: Plan was updated (via mailbox or resume)
+    - status.changed: Orchestrator status changed
+    - run.started: Orchestrator run started
+    - run.completed: Orchestrator run completed
 
 Example:
     >>> from claude_task_master.webhooks.events import (
@@ -60,6 +66,12 @@ class EventType(str, Enum):
         PR_MERGED: Emitted when a pull request is merged.
         SESSION_STARTED: Emitted when a work session begins.
         SESSION_COMPLETED: Emitted when a work session completes.
+        CI_PASSED: Emitted when CI checks pass.
+        CI_FAILED: Emitted when CI checks fail.
+        PLAN_UPDATED: Emitted when the plan is updated via mailbox or resume.
+        STATUS_CHANGED: Emitted when orchestrator status changes.
+        RUN_STARTED: Emitted when orchestrator run starts.
+        RUN_COMPLETED: Emitted when orchestrator run completes.
     """
 
     # Task lifecycle events
@@ -71,9 +83,21 @@ class EventType(str, Enum):
     PR_CREATED = "pr.created"
     PR_MERGED = "pr.merged"
 
+    # CI events
+    CI_PASSED = "ci.passed"
+    CI_FAILED = "ci.failed"
+
     # Session events
     SESSION_STARTED = "session.started"
     SESSION_COMPLETED = "session.completed"
+
+    # Plan events
+    PLAN_UPDATED = "plan.updated"
+
+    # Orchestrator lifecycle events
+    STATUS_CHANGED = "status.changed"
+    RUN_STARTED = "run.started"
+    RUN_COMPLETED = "run.completed"
 
     @classmethod
     def from_string(cls, value: str) -> EventType:
