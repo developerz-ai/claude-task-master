@@ -63,6 +63,9 @@ PauseTaskResult = tools.PauseTaskResult
 StopTaskResult = tools.StopTaskResult
 ResumeTaskResult = tools.ResumeTaskResult
 UpdateConfigResult = tools.UpdateConfigResult
+SendMessageResult = tools.SendMessageResult
+MailboxStatusResult = tools.MailboxStatusResult
+ClearMailboxResult = tools.ClearMailboxResult
 
 
 # =============================================================================
@@ -347,6 +350,70 @@ def create_server(
             pr_per_task=pr_per_task,
             state_dir=state_dir,
         )
+
+    # =============================================================================
+    # Mailbox Tool Wrappers
+    # =============================================================================
+
+    @mcp.tool()
+    def send_message(
+        content: str,
+        sender: str = "anonymous",
+        priority: int = 1,
+        state_dir: str | None = None,
+    ) -> dict[str, Any]:
+        """Send a message to the claudetm mailbox.
+
+        Messages are processed after the current task completes. Multiple messages
+        are merged into a single change request that updates the plan before
+        continuing work.
+
+        Use this to send instructions, feedback, or change requests to a running
+        claudetm instance from external systems or other AI agents.
+
+        Args:
+            content: The message content describing the change request.
+            sender: Identifier of the sender (default: "anonymous").
+            priority: Message priority - 0=low, 1=normal, 2=high, 3=urgent.
+            state_dir: Optional custom state directory path.
+
+        Returns:
+            Dictionary containing the message_id on success, or error info.
+
+        Example:
+            send_message("Please also add unit tests for the new feature")
+            send_message("URGENT: Fix the security bug first", priority=3)
+        """
+        return tools.send_message(work_dir, content, sender, priority, state_dir)
+
+    @mcp.tool()
+    def check_mailbox(state_dir: str | None = None) -> dict[str, Any]:
+        """Check the status of the claudetm mailbox.
+
+        Returns the number of pending messages and previews of each.
+        Use this to see what messages are waiting to be processed.
+
+        Args:
+            state_dir: Optional custom state directory path.
+
+        Returns:
+            Dictionary containing mailbox status with message previews.
+        """
+        return tools.check_mailbox(work_dir, state_dir)
+
+    @mcp.tool()
+    def clear_mailbox(state_dir: str | None = None) -> dict[str, Any]:
+        """Clear all messages from the claudetm mailbox.
+
+        Use this to discard all pending messages without processing them.
+
+        Args:
+            state_dir: Optional custom state directory path.
+
+        Returns:
+            Dictionary indicating success and number of messages cleared.
+        """
+        return tools.clear_mailbox(work_dir, state_dir)
 
     # =============================================================================
     # Resource Wrappers
