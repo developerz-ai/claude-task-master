@@ -760,7 +760,7 @@ class TestGitHubClientGetPRComments:
     def test_get_pr_comments_no_comments(self, github_client):
         """Test when there are no review comments."""
         rest_comments: list = []
-        graphql_response = {
+        graphql_response: dict = {
             "data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": []}}}}
         }
 
