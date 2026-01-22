@@ -578,6 +578,9 @@ class WorkLoopOrchestrator:
                     else None,  # Truncate long messages
                     total_tasks=updated_total_tasks,
                     completed_tasks=updated_completed_tasks,
+                    tasks_added=None,  # TODO: Calculate from plan diff
+                    tasks_modified=None,  # TODO: Calculate from plan diff
+                    tasks_removed=None,  # TODO: Calculate from plan diff
                 )
 
                 return True
