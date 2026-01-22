@@ -157,7 +157,7 @@ jobs:
       - name: Run property-based tests
         run: |
           # Run with CI profile (100 examples, no deadline)
-          HYPOTHESIS_PROFILE=ci pytest tests/property/ \
+          pytest tests/property/ \
             --cov=claude_task_master \
             --cov-report=xml:coverage-property.xml \
             --cov-report=term-missing \
