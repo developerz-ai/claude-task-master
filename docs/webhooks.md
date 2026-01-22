@@ -14,6 +14,9 @@ This guide covers webhook event notifications in Claude Task Master, including e
   - [Task Events](#task-events)
   - [Pull Request Events](#pull-request-events)
   - [Session Events](#session-events)
+  - [CI Events](#ci-events)
+  - [Plan Events](#plan-events)
+  - [Orchestrator Events](#orchestrator-events)
 - [Delivery and Retry Behavior](#delivery-and-retry-behavior)
 - [Configuration Examples](#configuration-examples)
 - [Integration Examples](#integration-examples)
@@ -56,6 +59,12 @@ Claude Task Master emits the following webhook event types:
 | `pr.merged` | Pull request merged | When a PR is successfully merged |
 | `session.started` | Work session begins | When a Claude Agent SDK query starts |
 | `session.completed` | Work session completes | When a Claude Agent SDK query finishes |
+| `ci.passed` | CI checks pass | When CI checks pass on a pull request |
+| `ci.failed` | CI checks fail | When CI checks fail on a pull request |
+| `plan.updated` | Plan is updated | When the plan is updated via mailbox or resume |
+| `status.changed` | Status changes | When the orchestrator status transitions |
+| `run.started` | Run begins | When the orchestrator starts execution |
+| `run.completed` | Run completes | When the orchestrator finishes execution |
 
 ### Event Filtering
 
@@ -571,6 +580,218 @@ Emitted when a work session completes.
 | `result` | string | Outcome: "success", "blocked", "failed", etc. |
 | `tools_used` | integer | Number of tool invocations in this session |
 | `tokens_used` | integer | Total tokens consumed (optional) |
+
+### CI Events
+
+#### ci.passed
+
+Emitted when CI checks pass on a pull request.
+
+```json
+{
+  "event_type": "ci.passed",
+  "event_id": "550e8400-e29b-41d4-a716-446655440000",
+  "timestamp": "2024-01-18T16:05:00.123456Z",
+  "run_id": "run_20240118_143022",
+
+  "pr_number": 42,
+  "pr_url": "https://github.com/owner/repo/pull/42",
+  "branch": "feat/dark-mode",
+  "check_name": "Python Tests",
+  "check_url": "https://github.com/owner/repo/runs/1234567890",
+  "duration_seconds": 125.5,
+  "repository": "owner/repo"
+}
+```
+
+**Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `pr_number` | integer | The pull request number |
+| `pr_url` | string | URL to the pull request |
+| `branch` | string | Branch name being checked |
+| `check_name` | string | Name of the CI check that passed (optional) |
+| `check_url` | string | URL to the CI check details (optional) |
+| `duration_seconds` | float | How long the CI check took in seconds (optional) |
+| `repository` | string | Repository name in owner/repo format (optional) |
+
+#### ci.failed
+
+Emitted when CI checks fail on a pull request.
+
+```json
+{
+  "event_type": "ci.failed",
+  "event_id": "550e8400-e29b-41d4-a716-446655440000",
+  "timestamp": "2024-01-18T16:10:00.123456Z",
+  "run_id": "run_20240118_143022",
+
+  "pr_number": 42,
+  "pr_url": "https://github.com/owner/repo/pull/42",
+  "branch": "feat/dark-mode",
+  "check_name": "Python Tests",
+  "check_url": "https://github.com/owner/repo/runs/1234567890",
+  "failure_reason": "3 test failures in test_settings.py",
+  "failure_log": "FAILED tests/test_settings.py::test_dark_mode_toggle",
+  "duration_seconds": 45.2,
+  "repository": "owner/repo",
+  "recoverable": true
+}
+```
+
+**Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `pr_number` | integer | The pull request number |
+| `pr_url` | string | URL to the pull request |
+| `branch` | string | Branch name being checked |
+| `check_name` | string | Name of the CI check that failed (optional) |
+| `check_url` | string | URL to the CI check details (optional) |
+| `failure_reason` | string | Description of why CI failed (optional) |
+| `failure_log` | string | Snippet of the failure log (optional) |
+| `duration_seconds` | float | How long the CI check took before failing in seconds (optional) |
+| `repository` | string | Repository name in owner/repo format (optional) |
+| `recoverable` | boolean | Whether the failure is potentially recoverable (default: true) |
+
+### Plan Events
+
+#### plan.updated
+
+Emitted when the plan is updated via mailbox, resume message, or manual intervention.
+
+```json
+{
+  "event_type": "plan.updated",
+  "event_id": "550e8400-e29b-41d4-a716-446655440000",
+  "timestamp": "2024-01-18T16:15:00.123456Z",
+  "run_id": "run_20240118_143022",
+
+  "update_source": "mailbox",
+  "message": "Also add rate limiting to API endpoints",
+  "tasks_added": 2,
+  "tasks_modified": 1,
+  "tasks_removed": 0,
+  "total_tasks": 12,
+  "completed_tasks": 4
+}
+```
+
+**Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `update_source` | string | Source of the update: "mailbox", "resume", or "manual" |
+| `message` | string | The update message that triggered the change (optional) |
+| `tasks_added` | integer | Number of new tasks added to the plan |
+| `tasks_modified` | integer | Number of existing tasks modified |
+| `tasks_removed` | integer | Number of tasks removed from the plan |
+| `total_tasks` | integer | Total number of tasks after update |
+| `completed_tasks` | integer | Number of tasks already completed |
+
+### Orchestrator Events
+
+#### status.changed
+
+Emitted when the orchestrator status transitions (e.g., from "running" to "waiting_ci").
+
+```json
+{
+  "event_type": "status.changed",
+  "event_id": "550e8400-e29b-41d4-a716-446655440000",
+  "timestamp": "2024-01-18T16:20:00.123456Z",
+  "run_id": "run_20240118_143022",
+
+  "previous_status": "working",
+  "new_status": "waiting_ci",
+  "reason": "Waiting for CI checks to complete before merging",
+  "task_index": 3,
+  "session_number": 5
+}
+```
+
+**Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `previous_status` | string | The status before the change |
+| `new_status` | string | The status after the change |
+| `reason` | string | Reason for the status change (optional) |
+| `task_index` | integer | Current task index at time of change (optional) |
+| `session_number` | integer | Current session number at time of change (optional) |
+
+#### run.started
+
+Emitted when an orchestrator run starts.
+
+```json
+{
+  "event_type": "run.started",
+  "event_id": "550e8400-e29b-41d4-a716-446655440000",
+  "timestamp": "2024-01-18T15:45:00.123456Z",
+  "run_id": "run_20240118_143022",
+
+  "goal": "Add dark mode support to the application",
+  "working_directory": "/home/user/projects/myapp",
+  "max_sessions": 10,
+  "auto_merge": false,
+  "pr_mode": "per-group",
+  "resumed": false
+}
+```
+
+**Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `goal` | string | The user's goal for this run |
+| `working_directory` | string | The working directory for the run |
+| `max_sessions` | integer | Maximum number of sessions allowed (optional, null if unlimited) |
+| `auto_merge` | boolean | Whether auto-merge is enabled |
+| `pr_mode` | string | PR creation mode: "per-task", "per-group", "single", etc. |
+| `resumed` | boolean | Whether this is a resumed run |
+
+#### run.completed
+
+Emitted when an orchestrator run completes (success, blocked, failed, or interrupted).
+
+```json
+{
+  "event_type": "run.completed",
+  "event_id": "550e8400-e29b-41d4-a716-446655440000",
+  "timestamp": "2024-01-18T17:30:00.123456Z",
+  "run_id": "run_20240118_143022",
+
+  "goal": "Add dark mode support to the application",
+  "result": "success",
+  "exit_code": 0,
+  "total_tasks": 10,
+  "completed_tasks": 10,
+  "total_sessions": 8,
+  "duration_seconds": 6300.5,
+  "prs_created": 3,
+  "prs_merged": 3,
+  "final_status": "completed",
+  "error_message": null
+}
+```
+
+**Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `goal` | string | The user's goal for this run |
+| `result` | string | Outcome of the run: "success", "blocked", "failed", or "interrupted" |
+| `exit_code` | integer | Exit code of the run (0=success, 1=blocked, 2=interrupted) |
+| `total_tasks` | integer | Total number of tasks in the plan |
+| `completed_tasks` | integer | Number of tasks completed |
+| `total_sessions` | integer | Total number of sessions used |
+| `duration_seconds` | float | Total duration of the run in seconds (optional) |
+| `prs_created` | integer | Number of PRs created during the run |
+| `prs_merged` | integer | Number of PRs merged during the run |
+| `final_status` | string | Final orchestrator status |
+| `error_message` | string | Error message if run failed (optional) |
 
 ---
 
