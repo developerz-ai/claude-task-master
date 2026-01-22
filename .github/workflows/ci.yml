@@ -181,6 +181,23 @@ jobs:
           path: coverage-property.xml
           retention-days: 7
 
+  # Summary job for branch protection - must be named "Test" to match required check
+  test:
+    name: Test
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs: [test-unit, test-integration, test-property]
+    if: always()
+    steps:
+      - name: Check test results
+        run: |
+          if [ "${{ needs.test-unit.result }}" = "failure" ] || \
+             [ "${{ needs.test-integration.result }}" = "failure" ] || \
+             [ "${{ needs.test-property.result }}" = "failure" ]; then
+            echo "One or more test jobs failed"
+            exit 1
+          fi
+          echo "All tests passed"
+
   # Combine coverage reports and upload to Codecov
   coverage:
     name: Coverage Report
