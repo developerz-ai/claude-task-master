@@ -66,6 +66,9 @@ UpdateConfigResult = tools.UpdateConfigResult
 SendMessageResult = tools.SendMessageResult
 MailboxStatusResult = tools.MailboxStatusResult
 ClearMailboxResult = tools.ClearMailboxResult
+CloneRepoResult = tools.CloneRepoResult
+SetupRepoResult = tools.SetupRepoResult
+PlanRepoResult = tools.PlanRepoResult
 
 
 # =============================================================================
@@ -414,6 +417,119 @@ def create_server(
             Dictionary indicating success and number of messages cleared.
         """
         return tools.clear_mailbox(work_dir, state_dir)
+
+    # =============================================================================
+    # Repo Setup Tool Wrappers
+    # =============================================================================
+
+    @mcp.tool()
+    def clone_repo(
+        url: str,
+        target_dir: str | None = None,
+        branch: str | None = None,
+    ) -> dict[str, Any]:
+        """Clone a git repository to the workspace.
+
+        Clones the repository to ~/workspace/claude-task-master/{project-name}
+        by default, or to a custom target directory if specified. This is the
+        first step in setting up a new development environment for AI developers.
+
+        Args:
+            url: Git repository URL (HTTPS or SSH format).
+                Examples: https://github.com/user/repo.git or git@github.com:user/repo.git
+            target_dir: Optional custom target directory path. If not provided,
+                defaults to ~/workspace/claude-task-master/{repo-name}.
+            branch: Optional branch to checkout after cloning.
+
+        Returns:
+            Dictionary containing:
+            - success: Whether clone was successful
+            - message: Human-readable result message
+            - repo_url: The cloned repository URL
+            - target_dir: The directory where repo was cloned
+            - branch: The branch checked out (if specified)
+            - error: Error details on failure
+
+        Example:
+            clone_repo("https://github.com/anthropics/claude-code")
+            clone_repo("git@github.com:user/project.git", branch="develop")
+            clone_repo("https://github.com/user/project", target_dir="/custom/path")
+        """
+        return tools.clone_repo(url, target_dir, branch)
+
+    @mcp.tool()
+    def setup_repo(
+        repo_dir: str,
+    ) -> dict[str, Any]:
+        """Set up a cloned repository for development.
+
+        Detects the project type and performs appropriate setup:
+        - Creates virtual environment (for Python projects)
+        - Installs dependencies (pip, npm, pnpm, yarn, bun)
+        - Runs setup scripts (setup-hooks.sh, setup.sh, etc.)
+
+        Supports Python projects (pyproject.toml, setup.py, requirements.txt)
+        and Node.js projects (package.json). Uses uv for Python dependency
+        management when available, falling back to standard venv + pip.
+
+        Args:
+            repo_dir: Path to the cloned repository directory to set up.
+
+        Returns:
+            Dictionary containing:
+            - success: Whether setup completed successfully
+            - message: Human-readable result message
+            - work_dir: The directory that was set up
+            - steps_completed: List of completed setup steps
+            - venv_path: Path to virtual environment (Python projects)
+            - dependencies_installed: Whether dependencies were installed
+            - setup_scripts_run: List of setup scripts that were executed
+            - error: Error details on failure
+
+        Example:
+            setup_repo("/home/user/workspace/claude-task-master/my-project")
+            setup_repo("~/workspace/claude-task-master/python-app")
+        """
+        return tools.setup_repo(repo_dir)
+
+    @mcp.tool()
+    def plan_repo(
+        repo_dir: str,
+        goal: str,
+        model: str = "opus",
+    ) -> dict[str, Any]:
+        """Create a plan for a repository without executing any work.
+
+        This is a plan-only mode that reads the codebase using read-only tools
+        (Read, Glob, Grep) and outputs a structured plan with tasks and success
+        criteria. No changes are made to the repository.
+
+        Use this after `clone_repo` and `setup_repo` to plan work before execution,
+        or to get a plan for a new goal in an existing repository.
+
+        Args:
+            repo_dir: Path to the repository directory to plan for.
+            goal: The goal/task description to plan for. Be specific about
+                what you want to accomplish.
+            model: Model to use for planning (default: "opus" for best quality).
+                Options: "opus", "sonnet", "haiku".
+
+        Returns:
+            Dictionary containing:
+            - success: Whether planning completed successfully
+            - message: Human-readable result message
+            - work_dir: The directory that was planned for
+            - goal: The goal that was planned for
+            - plan: The generated task plan (markdown with checkboxes)
+            - criteria: Success criteria for verifying completion
+            - run_id: Unique identifier for this planning session
+            - error: Error details on failure
+
+        Example:
+            plan_repo("/home/user/workspace/project", "Add user authentication")
+            plan_repo("~/workspace/my-app", "Fix the login bug", model="sonnet")
+        """
+        return tools.plan_repo(repo_dir, goal, model)
 
     # =============================================================================
     # Resource Wrappers
