@@ -802,3 +802,487 @@ class TestWebhookErrorHandling:
         # Should complete without issues
         result = orchestrator._handle_working_stage(basic_task_state)
         assert result is None
+
+
+# =============================================================================
+# Test New Webhook Events (run.started, run.completed, status.changed, CI, plan.updated)
+# =============================================================================
+
+
+class TestRunLifecycleWebhooks:
+    """Tests for run.started and run.completed webhook events."""
+
+    @patch("claude_task_master.core.orchestrator.register_handlers")
+    @patch("claude_task_master.core.orchestrator.start_listening")
+    def test_run_started_event_emitted_on_orchestrator_start(
+        self,
+        mock_start_listening,
+        mock_register,
+        orchestrator_with_webhooks,
+        state_manager,
+        mock_webhook_client,
+        sample_task_options,
+        basic_plan,
+    ):
+        """Should emit run.started event when orchestrator starts."""
+        from claude_task_master.core.state import TaskOptions
+
+        state_manager.state_dir.mkdir(exist_ok=True)
+        options = TaskOptions(**sample_task_options)
+        options.max_sessions = 5
+        options.auto_merge = True
+        state_manager.initialize(goal="Test goal", model="sonnet", options=options)
+        state_manager.save_plan(basic_plan)
+        state_manager.save_goal("Test goal")
+
+        # Mock the work loop to exit immediately
+        with patch.object(orchestrator_with_webhooks, "_run_workflow_cycle", return_value=0):
+            orchestrator_with_webhooks.run()
+
+        # Find the run.started event call
+        calls = mock_webhook_client.send_sync.call_args_list
+        run_started_calls = [c for c in calls if c.kwargs.get("event_type") == "run.started"]
+
+        assert len(run_started_calls) == 1
+        event_data = run_started_calls[0].kwargs["data"]
+        assert event_data["event_type"] == "run.started"
+        assert event_data["goal"] == "Test goal"
+        assert event_data["max_sessions"] == 5
+        assert event_data["auto_merge"] is True
+        assert event_data["pr_mode"] in ("per-task", "per-group")
+        assert event_data["resumed"] is False
+        assert "working_directory" in event_data
+
+    @patch("claude_task_master.core.orchestrator.register_handlers")
+    @patch("claude_task_master.core.orchestrator.start_listening")
+    def test_run_started_event_indicates_resumed_run(
+        self,
+        mock_start_listening,
+        mock_register,
+        orchestrator_with_webhooks,
+        state_manager,
+        mock_webhook_client,
+        sample_task_options,
+        basic_plan,
+    ):
+        """Should indicate resumed=True when run is resumed (session_count > 0)."""
+        from claude_task_master.core.state import TaskOptions
+
+        state_manager.state_dir.mkdir(exist_ok=True)
+        options = TaskOptions(**sample_task_options)
+        state_manager.initialize(goal="Test goal", model="sonnet", options=options)
+        state_manager.save_plan(basic_plan)
+        state_manager.save_goal("Test goal")
+
+        # Increment session count to simulate resumed run
+        state = state_manager.load_state()
+        state.session_count = 3
+        state_manager.save_state(state)
+
+        # Mock the work loop to exit immediately
+        with patch.object(orchestrator_with_webhooks, "_run_workflow_cycle", return_value=0):
+            orchestrator_with_webhooks.run()
+
+        # Find the run.started event call
+        calls = mock_webhook_client.send_sync.call_args_list
+        run_started_calls = [c for c in calls if c.kwargs.get("event_type") == "run.started"]
+
+        assert len(run_started_calls) == 1
+        event_data = run_started_calls[0].kwargs["data"]
+        assert event_data["resumed"] is True
+
+    @patch("claude_task_master.core.orchestrator.register_handlers")
+    @patch("claude_task_master.core.orchestrator.start_listening")
+    def test_run_completed_event_emitted_on_success(
+        self,
+        mock_start_listening,
+        mock_register,
+        orchestrator_with_webhooks,
+        state_manager,
+        mock_webhook_client,
+        sample_task_options,
+        basic_plan,
+    ):
+        """Should emit run.completed event with success result when run completes."""
+        from claude_task_master.core.state import TaskOptions
+
+        state_manager.state_dir.mkdir(exist_ok=True)
+        options = TaskOptions(**sample_task_options)
+        state_manager.initialize(goal="Complete the project", model="sonnet", options=options)
+        state_manager.save_plan(basic_plan)
+        state_manager.save_goal("Complete the project")
+
+        # Mock the work loop to exit with success
+        with patch.object(orchestrator_with_webhooks, "_run_workflow_cycle", return_value=0):
+            exit_code = orchestrator_with_webhooks.run()
+
+        assert exit_code == 0
+
+        # Find the run.completed event call
+        calls = mock_webhook_client.send_sync.call_args_list
+        run_completed_calls = [c for c in calls if c.kwargs.get("event_type") == "run.completed"]
+
+        assert len(run_completed_calls) == 1
+        event_data = run_completed_calls[0].kwargs["data"]
+        assert event_data["event_type"] == "run.completed"
+        assert event_data["result"] == "success"
+        assert event_data["exit_code"] == 0
+        assert event_data["goal"] == "Complete the project"
+        assert "total_tasks" in event_data
+        assert "completed_tasks" in event_data
+        assert "total_sessions" in event_data
+        assert "duration_seconds" in event_data
+        # Status could be "planning" or "working" depending on mock setup
+        assert event_data["final_status"] in ("planning", "working", "success")
+        assert event_data["error_message"] is None
+
+    @patch("claude_task_master.core.orchestrator.register_handlers")
+    @patch("claude_task_master.core.orchestrator.start_listening")
+    def test_run_completed_event_emitted_on_blocked(
+        self,
+        mock_start_listening,
+        mock_register,
+        orchestrator_with_webhooks,
+        state_manager,
+        mock_webhook_client,
+        sample_task_options,
+        basic_plan,
+    ):
+        """Should emit run.completed event with blocked result when max sessions reached."""
+        from claude_task_master.core.state import TaskOptions
+
+        state_manager.state_dir.mkdir(exist_ok=True)
+        options = TaskOptions(**sample_task_options)
+        options.max_sessions = 5
+        state_manager.initialize(goal="Test goal", model="sonnet", options=options)
+        state_manager.save_plan(basic_plan)
+
+        # Set session count to max sessions
+        state = state_manager.load_state()
+        state.session_count = 5
+        state_manager.save_state(state)
+
+        exit_code = orchestrator_with_webhooks.run()
+        assert exit_code == 1
+
+        # Find the run.completed event call
+        calls = mock_webhook_client.send_sync.call_args_list
+        run_completed_calls = [c for c in calls if c.kwargs.get("event_type") == "run.completed"]
+
+        assert len(run_completed_calls) == 1
+        event_data = run_completed_calls[0].kwargs["data"]
+        assert event_data["result"] == "blocked"
+        assert event_data["exit_code"] == 1
+        assert "Max sessions reached" in event_data["error_message"]
+
+    @patch("claude_task_master.core.orchestrator.register_handlers")
+    @patch("claude_task_master.core.orchestrator.start_listening")
+    @patch("claude_task_master.core.orchestrator.unregister_handlers")
+    @patch("claude_task_master.core.orchestrator.stop_listening")
+    @patch("claude_task_master.core.orchestrator.reset_shutdown")
+    @patch("claude_task_master.core.orchestrator.is_cancellation_requested")
+    def test_run_completed_event_emitted_on_interruption(
+        self,
+        mock_cancel_requested,
+        mock_reset_shutdown,
+        mock_stop_listening,
+        mock_unregister,
+        mock_start_listening,
+        mock_register,
+        orchestrator_with_webhooks,
+        state_manager,
+        mock_webhook_client,
+        sample_task_options,
+        basic_plan,
+    ):
+        """Should emit run.completed event with interrupted result when cancelled."""
+        from claude_task_master.core.state import TaskOptions
+
+        state_manager.state_dir.mkdir(exist_ok=True)
+        options = TaskOptions(**sample_task_options)
+        state_manager.initialize(goal="Test goal", model="sonnet", options=options)
+        state_manager.save_plan(basic_plan)
+
+        # Mock cancellation request
+        mock_cancel_requested.return_value = True
+
+        # Mock the work loop to check cancellation
+        def mock_workflow_cycle(state):
+            # Simulate cancellation during run
+            if mock_cancel_requested():
+                return 2
+
+        with patch.object(
+            orchestrator_with_webhooks, "_run_workflow_cycle", side_effect=mock_workflow_cycle
+        ):
+            exit_code = orchestrator_with_webhooks.run()
+
+        assert exit_code == 2
+
+        # Find the run.completed event call
+        calls = mock_webhook_client.send_sync.call_args_list
+        run_completed_calls = [c for c in calls if c.kwargs.get("event_type") == "run.completed"]
+
+        assert len(run_completed_calls) == 1
+        event_data = run_completed_calls[0].kwargs["data"]
+        assert event_data["result"] == "interrupted"
+        assert event_data["exit_code"] == 2
+
+
+class TestStatusChangedWebhooks:
+    """Tests for status.changed webhook events."""
+
+    def test_status_changed_event_emitted_on_transition(
+        self,
+        orchestrator_with_webhooks,
+        state_manager,
+        mock_webhook_client,
+        basic_task_state,
+    ):
+        """Should emit status.changed event when status transitions."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+
+        orchestrator_with_webhooks._emit_status_changed(
+            previous_status="working",
+            new_status="completed",
+            state=basic_task_state,
+            reason="All tasks completed successfully",
+        )
+
+        # Find the status.changed event call
+        calls = mock_webhook_client.send_sync.call_args_list
+        status_changed_calls = [c for c in calls if c.kwargs.get("event_type") == "status.changed"]
+
+        assert len(status_changed_calls) == 1
+        event_data = status_changed_calls[0].kwargs["data"]
+        assert event_data["event_type"] == "status.changed"
+        assert event_data["previous_status"] == "working"
+        assert event_data["new_status"] == "completed"
+        assert event_data["reason"] == "All tasks completed successfully"
+        assert event_data["task_index"] == 0
+        assert event_data["session_number"] == 1
+
+    def test_status_changed_event_not_emitted_if_status_unchanged(
+        self,
+        orchestrator_with_webhooks,
+        state_manager,
+        mock_webhook_client,
+        basic_task_state,
+    ):
+        """Should not emit status.changed event if status didn't change."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+
+        orchestrator_with_webhooks._emit_status_changed(
+            previous_status="working",
+            new_status="working",  # Same status
+            state=basic_task_state,
+            reason="No change",
+        )
+
+        # Should not have emitted any event
+        calls = mock_webhook_client.send_sync.call_args_list
+        status_changed_calls = [c for c in calls if c.kwargs.get("event_type") == "status.changed"]
+
+        assert len(status_changed_calls) == 0
+
+
+class TestCIWebhooks:
+    """Tests for ci.passed and ci.failed webhook events."""
+
+    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
+    def test_ci_passed_event_emitted_when_checks_succeed(
+        self,
+        mock_sleep,
+        mock_console,
+        orchestrator_with_webhooks,
+        state_manager,
+        mock_github_client,
+        mock_webhook_client,
+        basic_task_state,
+    ):
+        """Should emit ci.passed event when CI checks pass."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        basic_task_state.workflow_stage = "waiting_ci"
+        basic_task_state.current_pr = 42
+
+        # Mock successful CI
+        mock_pr_status = Mock()
+        mock_pr_status.state = "OPEN"
+        mock_pr_status.ci_state = "SUCCESS"
+        mock_pr_status.checks_passed = 3
+        mock_pr_status.checks_failed = 0
+        mock_pr_status.checks_pending = 0
+        mock_pr_status.checks_skipped = 1
+        mock_pr_status.base_branch = "main"
+        mock_pr_status.check_details = []
+        mock_github_client.get_pr_status.return_value = mock_pr_status
+        mock_github_client.get_required_status_checks.return_value = []
+
+        # Handle waiting_ci stage
+        orchestrator_with_webhooks._run_workflow_cycle(basic_task_state)
+
+        # Find the ci.passed event call
+        calls = mock_webhook_client.send_sync.call_args_list
+        ci_passed_calls = [c for c in calls if c.kwargs.get("event_type") == "ci.passed"]
+
+        assert len(ci_passed_calls) == 1
+        event_data = ci_passed_calls[0].kwargs["data"]
+        assert event_data["event_type"] == "ci.passed"
+        assert event_data["pr_number"] == 42
+        assert "branch" in event_data
+
+    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
+    def test_ci_failed_event_emitted_when_checks_fail(
+        self,
+        mock_sleep,
+        mock_console,
+        orchestrator_with_webhooks,
+        state_manager,
+        mock_github_client,
+        mock_webhook_client,
+        basic_task_state,
+    ):
+        """Should emit ci.failed event when CI checks fail."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        basic_task_state.workflow_stage = "waiting_ci"
+        basic_task_state.current_pr = 42
+
+        # Mock failed CI
+        mock_pr_status = Mock()
+        mock_pr_status.state = "OPEN"
+        mock_pr_status.ci_state = "FAILURE"
+        mock_pr_status.checks_passed = 2
+        mock_pr_status.checks_failed = 1
+        mock_pr_status.checks_pending = 0
+        mock_pr_status.checks_skipped = 0
+        mock_pr_status.base_branch = "main"
+        mock_pr_status.check_details = [
+            {"name": "test-suite", "conclusion": "FAILURE"},
+            {"name": "lint", "conclusion": "SUCCESS"},
+        ]
+        mock_github_client.get_pr_status.return_value = mock_pr_status
+        mock_github_client.get_required_status_checks.return_value = []
+
+        # Handle waiting_ci stage
+        orchestrator_with_webhooks._run_workflow_cycle(basic_task_state)
+
+        # Find the ci.failed event call
+        calls = mock_webhook_client.send_sync.call_args_list
+        ci_failed_calls = [c for c in calls if c.kwargs.get("event_type") == "ci.failed"]
+
+        assert len(ci_failed_calls) == 1
+        event_data = ci_failed_calls[0].kwargs["data"]
+        assert event_data["event_type"] == "ci.failed"
+        assert event_data["pr_number"] == 42
+        assert "branch" in event_data
+        assert "failure_reason" in event_data
+        assert "test-suite" in event_data["failure_reason"]
+
+
+class TestPlanUpdatedWebhooks:
+    """Tests for plan.updated webhook events."""
+
+    @patch("claude_task_master.core.orchestrator.console")
+    def test_plan_updated_event_emitted_on_mailbox_update(
+        self,
+        mock_console,
+        orchestrator_with_webhooks,
+        state_manager,
+        mock_webhook_client,
+        basic_task_state,
+        basic_plan,
+    ):
+        """Should emit plan.updated event when plan is updated via mailbox."""
+        from claude_task_master.mailbox.models import Priority
+
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan(basic_plan)
+        state_manager.save_goal("Test goal")
+
+        # Add message to mailbox
+        orchestrator_with_webhooks.mailbox_storage.add_message(
+            content="Add feature X to the plan",
+            sender="user",
+            priority=Priority.NORMAL,
+        )
+
+        # Mock plan updater to succeed with changes
+        mock_updater_result = {
+            "success": True,
+            "changes_made": True,
+            "updated_plan": basic_plan + "\n- [ ] Task 4: Feature X",
+        }
+        with patch.object(
+            orchestrator_with_webhooks.plan_updater,
+            "update_plan",
+            return_value=mock_updater_result,
+        ):
+            plan_updated = orchestrator_with_webhooks._check_and_process_mailbox(basic_task_state)
+
+        assert plan_updated is True
+
+        # Find the plan.updated event call
+        calls = mock_webhook_client.send_sync.call_args_list
+        plan_updated_calls = [c for c in calls if c.kwargs.get("event_type") == "plan.updated"]
+
+        assert len(plan_updated_calls) == 1
+        event_data = plan_updated_calls[0].kwargs["data"]
+        assert event_data["event_type"] == "plan.updated"
+        assert event_data["update_source"] == "mailbox"
+        assert "message" in event_data
+        assert "total_tasks" in event_data
+        assert "completed_tasks" in event_data
+        assert event_data["tasks_added"] >= 0
+
+    @patch("claude_task_master.core.orchestrator.console")
+    def test_plan_updated_event_with_no_changes(
+        self,
+        mock_console,
+        orchestrator_with_webhooks,
+        state_manager,
+        mock_webhook_client,
+        basic_task_state,
+        basic_plan,
+    ):
+        """Should emit plan.updated event even when plan doesn't change."""
+        from claude_task_master.mailbox.models import Priority
+
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan(basic_plan)
+        state_manager.save_goal("Test goal")
+
+        # Add message to mailbox
+        orchestrator_with_webhooks.mailbox_storage.add_message(
+            content="No actual changes needed",
+            sender="user",
+            priority=Priority.LOW,
+        )
+
+        # Mock plan updater to return same plan (no changes)
+        mock_updater_result = {
+            "success": True,
+            "changes_made": False,
+            "updated_plan": basic_plan,  # Same plan
+        }
+        with patch.object(
+            orchestrator_with_webhooks.plan_updater,
+            "update_plan",
+            return_value=mock_updater_result,
+        ):
+            plan_updated = orchestrator_with_webhooks._check_and_process_mailbox(basic_task_state)
+
+        assert plan_updated is False
+
+        # Find the plan.updated event call
+        calls = mock_webhook_client.send_sync.call_args_list
+        plan_updated_calls = [c for c in calls if c.kwargs.get("event_type") == "plan.updated"]
+
+        # Should still emit event even though plan didn't change
+        assert len(plan_updated_calls) == 1
+        event_data = plan_updated_calls[0].kwargs["data"]
+        assert event_data["event_type"] == "plan.updated"
+        assert event_data["update_source"] == "mailbox"
+        assert event_data["tasks_added"] == 0
+        assert event_data["tasks_removed"] == 0

@@ -6,7 +6,7 @@ Used by the orchestrator-workers notebook examples.
 
 import re
 
-import anthropic  # type: ignore[import-not-found]
+import anthropic
 
 
 def llm_call(
