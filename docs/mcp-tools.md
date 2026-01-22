@@ -12,6 +12,7 @@ This document provides a comprehensive reference for the Claude Task Master MCP 
   - [Task Management Tools](#task-management-tools)
   - [Control Tools](#control-tools)
   - [Mailbox Tools](#mailbox-tools)
+  - [Repo Setup Tools](#repo-setup-tools)
 - [Resources](#resources)
 - [Response Format](#response-format)
 - [Examples](#examples)
@@ -546,6 +547,164 @@ Clear all messages from the claudetm mailbox.
 
 ---
 
+### Repo Setup Tools
+
+These tools enable the AI developer workflow: clone a repository, set it up for development, and plan work without executing it.
+
+#### `clone_repo`
+
+Clone a git repository to the workspace.
+
+**Parameters:**
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `url` | string | Yes | - | Git repository URL (HTTPS, SSH, or git protocol) |
+| `target_dir` | string | No | `~/workspace/claude-task-master/{repo-name}` | Custom target directory path |
+| `branch` | string | No | - | Branch to checkout after cloning |
+
+**Returns:**
+```json
+{
+  "success": true,
+  "message": "Repository cloned successfully to /home/user/workspace/claude-task-master/my-project",
+  "repo_url": "https://github.com/user/my-project.git",
+  "target_dir": "/home/user/workspace/claude-task-master/my-project",
+  "branch": "main"
+}
+```
+
+**Error Handling:**
+- Returns error if URL is empty or invalid format
+- Returns error if target directory already exists
+- Returns error if parent directory cannot be created (permission denied)
+
+**Use Case:**
+```
+Clone a repository to the workspace before setting it up:
+- url: "https://github.com/myorg/my-service.git"
+- target_dir: "/home/user/workspace/claude-task-master/my-service"
+```
+
+---
+
+#### `setup_repo`
+
+Set up a cloned repository for development.
+
+Detects project type and performs appropriate setup:
+- **Python projects**: Creates virtual environment, installs dependencies via pip or uv
+- **Node projects**: Creates node_modules and installs dependencies via npm/yarn
+- **All projects**: Runs setup scripts (setup-hooks.sh, setup.sh, install.sh, bootstrap.sh)
+
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `work_dir` | string | Yes | Path to the cloned repository directory |
+
+**Returns:**
+```json
+{
+  "success": true,
+  "message": "Repository setup completed successfully",
+  "work_dir": "/home/user/workspace/claude-task-master/my-project",
+  "steps_completed": [
+    "Detected Python project",
+    "Created virtual environment at .venv",
+    "Installed dependencies with uv",
+    "Running setup script: scripts/setup-hooks.sh"
+  ],
+  "venv_path": "/home/user/workspace/claude-task-master/my-project/.venv",
+  "dependencies_installed": true,
+  "setup_scripts_run": ["scripts/setup-hooks.sh"]
+}
+```
+
+**Error Handling:**
+- Returns error if work directory doesn't exist
+- Returns error if path is not a directory
+- Returns error if setup commands fail (with details)
+
+**Supported Project Types:**
+- **Python**: Detects `pyproject.toml`, `setup.py`, `requirements.txt`, or `uv.lock`
+- **Node.js**: Detects `package.json`
+- **Setup Scripts**: Looks for `setup.sh`, `install.sh`, `bootstrap.sh` in `scripts/` or root
+
+**Use Case:**
+```
+Set up a Python project after cloning:
+- work_dir: "/home/user/workspace/claude-task-master/my-project"
+
+This will:
+1. Create .venv
+2. Install dependencies with uv (or pip)
+3. Run any setup scripts found in scripts/ directory
+```
+
+---
+
+#### `plan_repo`
+
+Create a plan for a repository without executing any work.
+
+This plan-only mode reads the codebase using read-only tools (Read, Glob, Grep, Bash) and outputs a structured plan with tasks and success criteria. No changes are made to the repository.
+
+**Parameters:**
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `work_dir` | string | Yes | - | Path to the repository directory to plan for |
+| `goal` | string | Yes | - | The goal/task description to plan for |
+| `model` | string | No | `opus` | Model to use for planning (opus, sonnet, haiku) |
+
+**Returns:**
+```json
+{
+  "success": true,
+  "message": "Plan created successfully",
+  "work_dir": "/home/user/workspace/claude-task-master/my-project",
+  "goal": "Add authentication to the API",
+  "plan": "# Task Plan\n\n## Overview\nAdd JWT-based authentication to the existing API.\n\n## Tasks\n\n- [ ] Create auth module with JWT utilities\n- [ ] Add authentication middleware\n- [ ] Update API endpoints with auth checks\n- [ ] Add tests for authentication\n- [ ] Update API documentation\n\n## Success Criteria\n\n1. All API endpoints require valid JWT token\n2. Tests pass with 95%+ coverage\n3. Documentation updated\n4. No breaking changes to existing clients",
+  "criteria": "1. All API endpoints require valid JWT token\n2. Tests pass with 95%+ coverage\n3. Documentation updated\n4. No breaking changes to existing clients",
+  "run_id": "plan_20240118_143022"
+}
+```
+
+**Error Handling:**
+- Returns error if work directory doesn't exist
+- Returns error if goal is empty
+- Returns error if task is already in progress (status: planning or working)
+- Returns error if credentials are not available
+
+**Use Case:**
+```
+Plan work for a repository without executing it:
+- work_dir: "/home/user/workspace/claude-task-master/my-project"
+- goal: "Add rate limiting to the API"
+- model: "opus"
+
+This will create a task plan that you can review before executing with `start_task`.
+```
+
+**Complete Workflow:**
+```
+1. clone_repo
+   - url: "https://github.com/myorg/my-service.git"
+   - target_dir: "/home/user/workspace/claude-task-master/my-service"
+
+2. setup_repo
+   - work_dir: "/home/user/workspace/claude-task-master/my-service"
+
+3. plan_repo
+   - work_dir: "/home/user/workspace/claude-task-master/my-service"
+   - goal: "Add feature X to the service"
+   - model: "opus"
+
+4. (Optional) Review plan, adjust via send_message tool
+
+5. (In future session) start_task to execute the plan
+```
+
+---
+
 ## Resources
 
 The MCP server also exposes task data as resources that can be accessed directly.
@@ -648,6 +807,32 @@ Use update_config with:
 - log_level: "verbose"
 
 This increases session limit and enables verbose logging.
+```
+
+### Set Up a New Project for Development
+
+```
+1. Clone the repository
+   Use clone_repo with:
+   - url: "https://github.com/myorg/my-service.git"
+   - target_dir: "/home/user/workspace/claude-task-master/my-service"
+
+2. Set up the development environment
+   Use setup_repo with:
+   - work_dir: "/home/user/workspace/claude-task-master/my-service"
+
+   This will create venv, install dependencies, and run setup scripts.
+
+3. Plan work for the project
+   Use plan_repo with:
+   - work_dir: "/home/user/workspace/claude-task-master/my-service"
+   - goal: "Add user authentication to the API"
+   - model: "opus"
+
+   This creates a task plan without making any changes.
+
+4. Review the plan and execute (in a new session)
+   Use initialize_task with the goal and parameters, then execute
 ```
 
 ---

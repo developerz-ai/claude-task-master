@@ -13,6 +13,7 @@ This document provides a comprehensive reference for the Claude Task Master REST
   - [Info Endpoints](#info-endpoints)
   - [Control Endpoints](#control-endpoints)
   - [Task Management Endpoints](#task-management-endpoints)
+  - [Repository Setup Endpoints](#repository-setup-endpoints)
   - [Webhook Endpoints](#webhook-endpoints)
   - [Mailbox Endpoints](#mailbox-endpoints)
 
@@ -509,6 +510,210 @@ Delete the current task and cleanup all state files.
 
 ---
 
+### Repository Setup Endpoints
+
+Endpoints for cloning, setting up, and planning work on repositories. These endpoints support the AI developer workflow where repositories are cloned to the workspace, set up for development, and then work is planned/executed.
+
+#### `POST /repo/clone`
+
+Clone a git repository to the workspace directory.
+
+**Request Body:** `CloneRepoRequest`
+
+```json
+{
+  "url": "https://github.com/user/my-project.git",
+  "target_dir": "/home/user/workspace/claude-task-master/my-project",
+  "branch": "main"
+}
+```
+
+**Parameters:**
+
+- `url` (required, string) - Git repository URL (HTTPS or SSH format)
+- `target_dir` (optional, string) - Custom target directory path
+  - If not provided, defaults to `~/workspace/claude-task-master/{repo-name}`
+  - Will be created if it doesn't exist
+- `branch` (optional, string) - Branch to checkout after cloning (default: repository default)
+
+**Response:** `CloneRepoResponse` (201 Created)
+
+```json
+{
+  "success": true,
+  "message": "Repository cloned successfully",
+  "repo_url": "https://github.com/user/my-project.git",
+  "target_dir": "/home/user/workspace/claude-task-master/my-project",
+  "branch": "main"
+}
+```
+
+**Example:**
+
+```bash
+curl -X POST http://localhost:8000/repo/clone \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mypassword" \
+  -d '{
+    "url": "https://github.com/user/my-project.git",
+    "branch": "main"
+  }'
+```
+
+**Error Responses:**
+
+- `400 Bad Request` - Invalid repository URL or clone failed
+- `500 Internal Server Error` - Network or git error
+
+---
+
+#### `POST /repo/setup`
+
+Set up a cloned repository for development. Detects the project type and performs appropriate setup.
+
+**Request Body:** `SetupRepoRequest`
+
+```json
+{
+  "work_dir": "/home/user/workspace/claude-task-master/my-project"
+}
+```
+
+**Parameters:**
+
+- `work_dir` (required, string) - Path to the cloned repository directory
+
+**What the endpoint does:**
+
+- Detects the project type by examining `package.json`, `pyproject.toml`, `Gemfile`, etc.
+- Creates a Python virtual environment for Python projects
+- Installs dependencies:
+  - Python: `pip install -r requirements.txt` or similar
+  - JavaScript: `npm install`, `yarn install`, `pnpm install`, `bun install`
+  - Ruby: `bundle install`
+- Runs setup scripts found in the project (e.g., `setup-hooks.sh`, `setup.sh`, `install.sh`)
+
+**Response:** `SetupRepoResponse`
+
+```json
+{
+  "success": true,
+  "message": "Repository setup completed",
+  "work_dir": "/home/user/workspace/claude-task-master/my-project",
+  "steps_completed": ["detected_python", "created_venv", "installed_dependencies"],
+  "venv_path": "/home/user/workspace/claude-task-master/my-project/.venv",
+  "dependencies_installed": true,
+  "setup_scripts_run": ["scripts/setup-hooks.sh"]
+}
+```
+
+**Response Fields:**
+
+- `success` - Whether setup completed successfully
+- `message` - Human-readable status message
+- `work_dir` - The repository directory that was set up
+- `steps_completed` - List of setup steps executed (e.g., `detected_python`, `created_venv`, `installed_dependencies`)
+- `venv_path` - Path to the Python virtual environment (if created)
+- `dependencies_installed` - Whether dependencies were successfully installed
+- `setup_scripts_run` - List of setup scripts that were executed
+
+**Example:**
+
+```bash
+curl -X POST http://localhost:8000/repo/setup \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mypassword" \
+  -d '{
+    "work_dir": "/home/user/workspace/claude-task-master/my-project"
+  }'
+```
+
+**Error Responses:**
+
+- `404 Not Found` - Repository directory does not exist
+- `400 Bad Request` - Setup failed (check logs for details)
+- `500 Internal Server Error` - Unexpected error during setup
+
+---
+
+#### `POST /repo/plan`
+
+Create a plan for a repository without executing any work. Uses read-only tools to analyze the codebase and generate a structured task list.
+
+**Request Body:** `PlanRepoRequest`
+
+```json
+{
+  "work_dir": "/home/user/workspace/claude-task-master/my-project",
+  "goal": "Add dark mode support to the application",
+  "model": "opus"
+}
+```
+
+**Parameters:**
+
+- `work_dir` (required, string) - Path to the repository directory to plan for
+- `goal` (required, string) - The goal or task description to plan for (1-10000 chars)
+- `model` (optional, string) - Model to use for planning
+  - `opus` - Recommended (default) - Best quality planning
+  - `sonnet` - Faster, good for simple tasks
+  - `haiku` - Fastest, for basic analysis
+
+**What the endpoint does:**
+
+- Creates a planning session using read-only tools only
+- Explores the codebase using Read, Glob, and Grep tools
+- Analyzes project structure, dependencies, and existing code patterns
+- Generates a structured task plan with checkboxes
+- Defines success criteria for the goal
+- Does NOT make any changes to the repository
+- Saves planning output for later reference
+
+**Response:** `PlanRepoResponse`
+
+```json
+{
+  "success": true,
+  "message": "Plan created successfully",
+  "work_dir": "/home/user/workspace/claude-task-master/my-project",
+  "goal": "Add dark mode support to the application",
+  "plan": "# Task Plan\n\n- [ ] Task 1: Create dark mode theme configuration\n- [ ] Task 2: Add theme toggle component\n- [ ] Task 3: Update existing components for theme support\n...",
+  "criteria": "## Success Criteria\n\n- [ ] Dark mode option available in settings\n- [ ] All UI components properly styled in dark mode\n- [ ] Theme preference persists across sessions\n...",
+  "run_id": "run_20240118_143022"
+}
+```
+
+**Response Fields:**
+
+- `success` - Whether planning succeeded
+- `message` - Human-readable status message
+- `work_dir` - The repository directory that was analyzed
+- `goal` - The goal that was planned for
+- `plan` - The generated task plan in markdown format (with checkboxes)
+- `criteria` - The success criteria in markdown format
+- `run_id` - Run ID for reference and state management
+
+**Example:**
+
+```bash
+curl -X POST http://localhost:8000/repo/plan \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mypassword" \
+  -d '{
+    "work_dir": "/home/user/workspace/claude-task-master/my-project",
+    "goal": "Add dark mode support",
+    "model": "opus"
+  }'
+```
+
+**Error Responses:**
+
+- `404 Not Found` - Repository directory does not exist
+- `400 Bad Request` - Planning failed (invalid goal or unable to analyze repo)
+- `500 Internal Server Error` - Unexpected error during planning
+
+---
+
 ### Webhook Endpoints
 
 Endpoints for managing webhook configurations.
@@ -976,7 +1181,9 @@ curl -X DELETE http://localhost:8000/mailbox \
 
 ## Complete Example Workflow
 
-Here's a complete example of using the API to manage a task:
+### Option 1: Traditional Task-Based Workflow
+
+For AI-driven task execution where you define a goal and Claude handles the implementation:
 
 ```bash
 # 1. Check server health
@@ -1060,6 +1267,75 @@ curl -H "Authorization: Bearer mypassword" \
   http://localhost:8000/mailbox
 
 # 13. Delete task when done
+curl -X DELETE http://localhost:8000/task \
+  -H "Authorization: Bearer mypassword"
+```
+
+### Option 2: Repository Setup and Planning Workflow
+
+For AI developer environments where you clone a repository, set it up, and plan work before execution:
+
+```bash
+# 1. Check server health
+curl http://localhost:8000/health
+
+# 2. Clone a repository to the workspace
+curl -X POST http://localhost:8000/repo/clone \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mypassword" \
+  -d '{
+    "url": "https://github.com/user/my-project.git",
+    "branch": "main"
+  }'
+
+# 3. Set up the cloned repository for development
+# (Creates venv, installs dependencies, runs setup scripts)
+curl -X POST http://localhost:8000/repo/setup \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mypassword" \
+  -d '{
+    "work_dir": "/home/user/workspace/claude-task-master/my-project"
+  }'
+
+# 4. Create a plan for the repository (read-only, no work)
+curl -X POST http://localhost:8000/repo/plan \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mypassword" \
+  -d '{
+    "work_dir": "/home/user/workspace/claude-task-master/my-project",
+    "goal": "Add dark mode support to the application",
+    "model": "opus"
+  }'
+
+# 5. Review the plan output and then initialize a task
+curl -X POST http://localhost:8000/task/init \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mypassword" \
+  -d '{
+    "goal": "Add dark mode support to the application",
+    "model": "opus",
+    "auto_merge": true,
+    "max_sessions": 10
+  }'
+
+# 6. Monitor progress and check logs
+curl -H "Authorization: Bearer mypassword" \
+  http://localhost:8000/status
+
+curl -H "Authorization: Bearer mypassword" \
+  http://localhost:8000/logs?tail=100
+
+# 7. Send mailbox messages for plan updates while working
+curl -X POST http://localhost:8000/mailbox/send \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mypassword" \
+  -d '{
+    "content": "Also add export functionality for dark mode preferences",
+    "sender": "product-team",
+    "priority": 2
+  }'
+
+# 8. Delete task when done
 curl -X DELETE http://localhost:8000/task \
   -H "Authorization: Bearer mypassword"
 ```
