@@ -891,9 +891,8 @@ class WorkLoopOrchestrator:
                 console.warning("Success criteria verification failed")
 
                 if fix_attempt >= max_fix_attempts:
-                    # Max attempts reached - checkout to main and fail
+                    # Max attempts reached - stay on branch for easier resume
                     console.error(f"Max fix attempts ({max_fix_attempts}) reached")
-                    self._checkout_to_main()
                     previous_status = state.status
                     state.status = "blocked"
                     self._emit_status_changed(
@@ -910,9 +909,8 @@ class WorkLoopOrchestrator:
                 console.info(f"Attempting fix {fix_attempt + 1}/{max_fix_attempts}...")
 
                 if not self._run_verification_fix(verification["details"], state):
-                    # Fix failed - checkout to main and fail
+                    # Fix failed - stay on branch for easier resume
                     console.error("Fix attempt failed")
-                    self._checkout_to_main()
                     previous_status = state.status
                     state.status = "blocked"
                     self._emit_status_changed(
@@ -927,9 +925,8 @@ class WorkLoopOrchestrator:
 
                 # Wait for PR to be created and merge it
                 if not self._wait_for_fix_pr_merge(state):
-                    # PR merge failed - checkout to main and fail
+                    # PR merge failed - stay on branch for easier resume
                     console.error("Fix PR merge failed")
-                    self._checkout_to_main()
                     previous_status = state.status
                     state.status = "blocked"
                     self._emit_status_changed(
@@ -947,7 +944,7 @@ class WorkLoopOrchestrator:
                 console.info("Fix PR merged - re-verifying...")
 
             # Should not reach here, but handle it gracefully
-            self._checkout_to_main()
+            # Stay on branch for easier resume
             previous_status = state.status
             state.status = "blocked"
             self._emit_status_changed(
@@ -970,7 +967,7 @@ class WorkLoopOrchestrator:
             state.status = "failed"
             self._emit_status_changed(previous_status, "failed", state, e.message)
             try:
-                self._checkout_to_main()
+                # Don't checkout to main on error - stay on branch for easier resume
                 self.state_manager.save_state(state)
             except Exception:
                 pass  # Best effort - state save failed but we still return error
@@ -985,7 +982,7 @@ class WorkLoopOrchestrator:
             error_message = f"{type(e).__name__}: {e}"
             self._emit_status_changed(previous_status, "failed", state, error_message)
             try:
-                self._checkout_to_main()
+                # Don't checkout to main on error - stay on branch for easier resume
                 self.state_manager.save_state(state)
             except Exception:
                 pass  # Best effort - state save failed but we still return error
