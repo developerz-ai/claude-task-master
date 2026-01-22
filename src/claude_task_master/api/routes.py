@@ -44,15 +44,20 @@ from typing import TYPE_CHECKING, Any
 
 from claude_task_master import __version__
 from claude_task_master.api.models import (
+    ClearMailboxResponse,
     ConfigUpdateRequest,
     ContextResponse,
     ControlResponse,
     ErrorResponse,
     HealthResponse,
     LogsResponse,
+    MailboxMessagePreview,
+    MailboxStatusResponse,
     PlanResponse,
     ProgressResponse,
     ResumeRequest,
+    SendMailboxMessageRequest,
+    SendMailboxMessageResponse,
     StopRequest,
     TaskDeleteResponse,
     TaskInitRequest,
@@ -1100,6 +1105,216 @@ def create_task_router() -> APIRouter:
 
 
 # =============================================================================
+# Mailbox Router (Send, Status, Clear)
+# =============================================================================
+
+
+def create_mailbox_router() -> APIRouter:
+    """Create router for mailbox endpoints.
+
+    These endpoints allow external systems to send messages to the mailbox
+    which will be processed after the current task completes.
+
+    Returns:
+        APIRouter configured with mailbox endpoints.
+
+    Raises:
+        ImportError: If FastAPI is not installed.
+    """
+    if not FASTAPI_AVAILABLE:
+        raise ImportError(
+            "FastAPI not installed. Install with: pip install claude-task-master[api]"
+        )
+
+    router = APIRouter(tags=["Mailbox"])
+
+    @router.post(
+        "/send",
+        response_model=SendMailboxMessageResponse,
+        responses={
+            400: {"model": ErrorResponse, "description": "Invalid request"},
+            500: {"model": ErrorResponse, "description": "Internal server error"},
+        },
+        summary="Send Message to Mailbox",
+        description="Send a message to the claudetm mailbox for processing after the current task.",
+    )
+    async def send_message(
+        request: Request, message_request: SendMailboxMessageRequest
+    ) -> SendMailboxMessageResponse | JSONResponse:
+        """Send a message to the mailbox.
+
+        Messages in the mailbox will be processed after the current task completes.
+        Multiple messages are merged into a single change request that updates
+        the plan before continuing work.
+
+        Args:
+            message_request: The message to send with content, sender, and priority.
+
+        Returns:
+            SendMailboxMessageResponse with message_id on success.
+
+        Raises:
+            400: If the request is invalid.
+            500: If an error occurs sending the message.
+        """
+        from claude_task_master.mailbox import MailboxStorage
+
+        working_dir: Path = getattr(request.app.state, "working_dir", Path.cwd())
+        state_dir = working_dir / ".claude-task-master"
+
+        # Validate content is not empty/whitespace only
+        if not message_request.content.strip():
+            return JSONResponse(
+                status_code=400,
+                content=ErrorResponse(
+                    error="invalid_request",
+                    message="Message content cannot be empty or whitespace only",
+                    suggestion="Provide a non-empty message content",
+                ).model_dump(),
+            )
+
+        try:
+            mailbox = MailboxStorage(state_dir=state_dir)
+            message_id = mailbox.add_message(
+                content=message_request.content.strip(),
+                sender=message_request.sender,
+                priority=message_request.priority,
+                metadata=message_request.metadata or {},
+            )
+
+            return SendMailboxMessageResponse(
+                success=True,
+                message_id=message_id,
+                message=f"Message sent successfully (id: {message_id})",
+            )
+
+        except Exception as e:
+            logger.exception("Error sending message to mailbox")
+            return JSONResponse(
+                status_code=500,
+                content=ErrorResponse(
+                    error="internal_error",
+                    message="Failed to send message to mailbox",
+                    detail=str(e),
+                ).model_dump(),
+            )
+
+    @router.get(
+        "",
+        response_model=MailboxStatusResponse,
+        responses={
+            500: {"model": ErrorResponse, "description": "Internal server error"},
+        },
+        summary="Get Mailbox Status",
+        description="Check the status of the mailbox including message count and previews.",
+    )
+    async def get_mailbox_status(request: Request) -> MailboxStatusResponse | JSONResponse:
+        """Get mailbox status.
+
+        Returns the number of pending messages and previews of each.
+
+        Returns:
+            MailboxStatusResponse with message count and previews.
+
+        Raises:
+            500: If an error occurs checking the mailbox.
+        """
+        from datetime import datetime as dt
+
+        from claude_task_master.mailbox import MailboxStorage
+
+        working_dir: Path = getattr(request.app.state, "working_dir", Path.cwd())
+        state_dir = working_dir / ".claude-task-master"
+
+        try:
+            mailbox = MailboxStorage(state_dir=state_dir)
+            status = mailbox.get_status()
+
+            # Convert preview dicts to MailboxMessagePreview models
+            previews = []
+            for preview_data in status["previews"]:
+                previews.append(
+                    MailboxMessagePreview(
+                        id=preview_data["id"],
+                        sender=preview_data["sender"],
+                        content_preview=preview_data["content_preview"],
+                        priority=preview_data["priority"],
+                        timestamp=dt.fromisoformat(preview_data["timestamp"]),
+                    )
+                )
+
+            # Parse last_checked if present
+            last_checked = None
+            if status["last_checked"]:
+                last_checked = dt.fromisoformat(status["last_checked"])
+
+            return MailboxStatusResponse(
+                success=True,
+                count=status["count"],
+                messages=previews,
+                last_checked=last_checked,
+                total_messages_received=status["total_messages_received"],
+            )
+
+        except Exception as e:
+            logger.exception("Error checking mailbox status")
+            return JSONResponse(
+                status_code=500,
+                content=ErrorResponse(
+                    error="internal_error",
+                    message="Failed to check mailbox status",
+                    detail=str(e),
+                ).model_dump(),
+            )
+
+    @router.delete(
+        "",
+        response_model=ClearMailboxResponse,
+        responses={
+            500: {"model": ErrorResponse, "description": "Internal server error"},
+        },
+        summary="Clear Mailbox",
+        description="Clear all messages from the mailbox.",
+    )
+    async def clear_mailbox(request: Request) -> ClearMailboxResponse | JSONResponse:
+        """Clear all messages from the mailbox.
+
+        Returns:
+            ClearMailboxResponse with number of messages cleared.
+
+        Raises:
+            500: If an error occurs clearing the mailbox.
+        """
+        from claude_task_master.mailbox import MailboxStorage
+
+        working_dir: Path = getattr(request.app.state, "working_dir", Path.cwd())
+        state_dir = working_dir / ".claude-task-master"
+
+        try:
+            mailbox = MailboxStorage(state_dir=state_dir)
+            count = mailbox.clear()
+
+            return ClearMailboxResponse(
+                success=True,
+                messages_cleared=count,
+                message=f"Cleared {count} message(s) from mailbox",
+            )
+
+        except Exception as e:
+            logger.exception("Error clearing mailbox")
+            return JSONResponse(
+                status_code=500,
+                content=ErrorResponse(
+                    error="internal_error",
+                    message="Failed to clear mailbox",
+                    detail=str(e),
+                ).model_dump(),
+            )
+
+    return router
+
+
+# =============================================================================
 # Router Registration
 # =============================================================================
 
@@ -1129,7 +1344,12 @@ def register_routes(app: FastAPI) -> None:
     webhooks_router = create_webhooks_router()
     app.include_router(webhooks_router, prefix="/webhooks")
 
+    # Create and register mailbox router
+    mailbox_router = create_mailbox_router()
+    app.include_router(mailbox_router, prefix="/mailbox")
+
     logger.debug("Registered info routes: /status, /plan, /logs, /progress, /context, /health")
     logger.debug("Registered control routes: /control/stop, /control/resume, /config")
     logger.debug("Registered task routes: /task/init, /task")
     logger.debug("Registered webhook routes: /webhooks, /webhooks/{id}, /webhooks/test")
+    logger.debug("Registered mailbox routes: /mailbox/send, /mailbox")
