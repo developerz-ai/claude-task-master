@@ -560,6 +560,321 @@ class SessionCompletedEvent(WebhookEvent):
 
 
 # =============================================================================
+# CI Events
+# =============================================================================
+
+
+@dataclass
+class CIPassedEvent(WebhookEvent):
+    """Event emitted when CI checks pass.
+
+    Attributes:
+        pr_number: The pull request number.
+        pr_url: URL to the pull request.
+        branch: Branch name being checked.
+        check_name: Name of the CI check that passed (optional).
+        check_url: URL to the CI check details (optional).
+        duration_seconds: How long the CI check took (optional).
+        repository: Repository name (owner/repo format, optional).
+    """
+
+    pr_number: int = 0
+    pr_url: str = ""
+    branch: str = ""
+    check_name: str | None = None
+    check_url: str | None = None
+    duration_seconds: float | None = None
+    repository: str | None = None
+
+    def __post_init__(self) -> None:
+        """Set event type and validate data."""
+        self.event_type = EventType.CI_PASSED
+        super().__post_init__()
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert event to dictionary.
+
+        Returns:
+            Dictionary with base event fields plus CI pass data.
+        """
+        data = super().to_dict()
+        data.update(
+            {
+                "pr_number": self.pr_number,
+                "pr_url": self.pr_url,
+                "branch": self.branch,
+                "check_name": self.check_name,
+                "check_url": self.check_url,
+                "duration_seconds": self.duration_seconds,
+                "repository": self.repository,
+            }
+        )
+        return data
+
+
+@dataclass
+class CIFailedEvent(WebhookEvent):
+    """Event emitted when CI checks fail.
+
+    Attributes:
+        pr_number: The pull request number.
+        pr_url: URL to the pull request.
+        branch: Branch name being checked.
+        check_name: Name of the CI check that failed (optional).
+        check_url: URL to the CI check details (optional).
+        failure_reason: Description of why CI failed (optional).
+        failure_log: Snippet of the failure log (optional).
+        duration_seconds: How long the CI check took before failing (optional).
+        repository: Repository name (owner/repo format, optional).
+        recoverable: Whether the failure is potentially recoverable.
+    """
+
+    pr_number: int = 0
+    pr_url: str = ""
+    branch: str = ""
+    check_name: str | None = None
+    check_url: str | None = None
+    failure_reason: str | None = None
+    failure_log: str | None = None
+    duration_seconds: float | None = None
+    repository: str | None = None
+    recoverable: bool = True
+
+    def __post_init__(self) -> None:
+        """Set event type and validate data."""
+        self.event_type = EventType.CI_FAILED
+        super().__post_init__()
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert event to dictionary.
+
+        Returns:
+            Dictionary with base event fields plus CI failure data.
+        """
+        data = super().to_dict()
+        data.update(
+            {
+                "pr_number": self.pr_number,
+                "pr_url": self.pr_url,
+                "branch": self.branch,
+                "check_name": self.check_name,
+                "check_url": self.check_url,
+                "failure_reason": self.failure_reason,
+                "failure_log": self.failure_log,
+                "duration_seconds": self.duration_seconds,
+                "repository": self.repository,
+                "recoverable": self.recoverable,
+            }
+        )
+        return data
+
+
+# =============================================================================
+# Plan Events
+# =============================================================================
+
+
+@dataclass
+class PlanUpdatedEvent(WebhookEvent):
+    """Event emitted when the plan is updated via mailbox or resume.
+
+    Attributes:
+        update_source: Source of the update ("mailbox", "resume", "manual").
+        message: The update message that triggered the change (optional).
+        tasks_added: Number of new tasks added to the plan.
+        tasks_modified: Number of existing tasks modified.
+        tasks_removed: Number of tasks removed from the plan.
+        total_tasks: Total number of tasks after update.
+        completed_tasks: Number of tasks already completed.
+    """
+
+    update_source: str = "manual"
+    message: str | None = None
+    tasks_added: int = 0
+    tasks_modified: int = 0
+    tasks_removed: int = 0
+    total_tasks: int = 0
+    completed_tasks: int = 0
+
+    def __post_init__(self) -> None:
+        """Set event type and validate data."""
+        self.event_type = EventType.PLAN_UPDATED
+        super().__post_init__()
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert event to dictionary.
+
+        Returns:
+            Dictionary with base event fields plus plan update data.
+        """
+        data = super().to_dict()
+        data.update(
+            {
+                "update_source": self.update_source,
+                "message": self.message,
+                "tasks_added": self.tasks_added,
+                "tasks_modified": self.tasks_modified,
+                "tasks_removed": self.tasks_removed,
+                "total_tasks": self.total_tasks,
+                "completed_tasks": self.completed_tasks,
+            }
+        )
+        return data
+
+
+# =============================================================================
+# Orchestrator Lifecycle Events
+# =============================================================================
+
+
+@dataclass
+class StatusChangedEvent(WebhookEvent):
+    """Event emitted when the orchestrator status changes.
+
+    Attributes:
+        previous_status: The status before the change.
+        new_status: The status after the change.
+        reason: Reason for the status change (optional).
+        task_index: Current task index at time of change (optional).
+        session_number: Current session number at time of change (optional).
+    """
+
+    previous_status: str = ""
+    new_status: str = ""
+    reason: str | None = None
+    task_index: int | None = None
+    session_number: int | None = None
+
+    def __post_init__(self) -> None:
+        """Set event type and validate data."""
+        self.event_type = EventType.STATUS_CHANGED
+        super().__post_init__()
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert event to dictionary.
+
+        Returns:
+            Dictionary with base event fields plus status change data.
+        """
+        data = super().to_dict()
+        data.update(
+            {
+                "previous_status": self.previous_status,
+                "new_status": self.new_status,
+                "reason": self.reason,
+                "task_index": self.task_index,
+                "session_number": self.session_number,
+            }
+        )
+        return data
+
+
+@dataclass
+class RunStartedEvent(WebhookEvent):
+    """Event emitted when an orchestrator run starts.
+
+    Attributes:
+        goal: The user's goal for this run.
+        working_directory: The working directory for the run.
+        max_sessions: Maximum number of sessions allowed.
+        auto_merge: Whether auto-merge is enabled.
+        pr_mode: PR creation mode ("per-task", "per-group", etc.).
+        resumed: Whether this is a resumed run.
+    """
+
+    goal: str = ""
+    working_directory: str = ""
+    max_sessions: int | None = None
+    auto_merge: bool = False
+    pr_mode: str = "per-group"
+    resumed: bool = False
+
+    def __post_init__(self) -> None:
+        """Set event type and validate data."""
+        self.event_type = EventType.RUN_STARTED
+        super().__post_init__()
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert event to dictionary.
+
+        Returns:
+            Dictionary with base event fields plus run start data.
+        """
+        data = super().to_dict()
+        data.update(
+            {
+                "goal": self.goal,
+                "working_directory": self.working_directory,
+                "max_sessions": self.max_sessions,
+                "auto_merge": self.auto_merge,
+                "pr_mode": self.pr_mode,
+                "resumed": self.resumed,
+            }
+        )
+        return data
+
+
+@dataclass
+class RunCompletedEvent(WebhookEvent):
+    """Event emitted when an orchestrator run completes.
+
+    Attributes:
+        goal: The user's goal for this run.
+        result: Outcome of the run ("success", "blocked", "failed", "interrupted").
+        exit_code: Exit code of the run (0=success, 1=blocked, 2=interrupted).
+        total_tasks: Total number of tasks in the plan.
+        completed_tasks: Number of tasks completed.
+        total_sessions: Total number of sessions used.
+        duration_seconds: Total duration of the run.
+        prs_created: Number of PRs created during the run.
+        prs_merged: Number of PRs merged during the run.
+        final_status: Final orchestrator status.
+        error_message: Error message if run failed (optional).
+    """
+
+    goal: str = ""
+    result: str = "success"
+    exit_code: int = 0
+    total_tasks: int = 0
+    completed_tasks: int = 0
+    total_sessions: int = 0
+    duration_seconds: float | None = None
+    prs_created: int = 0
+    prs_merged: int = 0
+    final_status: str = ""
+    error_message: str | None = None
+
+    def __post_init__(self) -> None:
+        """Set event type and validate data."""
+        self.event_type = EventType.RUN_COMPLETED
+        super().__post_init__()
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert event to dictionary.
+
+        Returns:
+            Dictionary with base event fields plus run completion data.
+        """
+        data = super().to_dict()
+        data.update(
+            {
+                "goal": self.goal,
+                "result": self.result,
+                "exit_code": self.exit_code,
+                "total_tasks": self.total_tasks,
+                "completed_tasks": self.completed_tasks,
+                "total_sessions": self.total_sessions,
+                "duration_seconds": self.duration_seconds,
+                "prs_created": self.prs_created,
+                "prs_merged": self.prs_merged,
+                "final_status": self.final_status,
+                "error_message": self.error_message,
+            }
+        )
+        return data
+
+
+# =============================================================================
 # Event Factory
 # =============================================================================
 
@@ -573,6 +888,12 @@ _EVENT_CLASSES: dict[EventType, type[WebhookEvent]] = {
     EventType.PR_MERGED: PRMergedEvent,
     EventType.SESSION_STARTED: SessionStartedEvent,
     EventType.SESSION_COMPLETED: SessionCompletedEvent,
+    EventType.CI_PASSED: CIPassedEvent,
+    EventType.CI_FAILED: CIFailedEvent,
+    EventType.PLAN_UPDATED: PlanUpdatedEvent,
+    EventType.STATUS_CHANGED: StatusChangedEvent,
+    EventType.RUN_STARTED: RunStartedEvent,
+    EventType.RUN_COMPLETED: RunCompletedEvent,
 }
 
 
@@ -654,9 +975,18 @@ __all__ = [
     # PR events
     "PRCreatedEvent",
     "PRMergedEvent",
+    # CI events
+    "CIPassedEvent",
+    "CIFailedEvent",
     # Session events
     "SessionStartedEvent",
     "SessionCompletedEvent",
+    # Plan events
+    "PlanUpdatedEvent",
+    # Orchestrator lifecycle events
+    "StatusChangedEvent",
+    "RunStartedEvent",
+    "RunCompletedEvent",
     # Factory functions
     "create_event",
     "get_event_class",
