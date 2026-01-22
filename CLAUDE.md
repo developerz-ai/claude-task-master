@@ -184,28 +184,73 @@ uv run claudetm start "Implement TODO" --max-sessions 3 --no-auto-merge
 - Single work session addresses all feedback at once
 - `PRContextManager.save_ci_failures()` automatically calls `save_pr_comments()`
 
+### Webhook Events
+The system emits the following webhook events that can be registered at `/webhooks`:
+
+**Run Lifecycle**:
+- `run.started` - Emitted when orchestrator starts execution
+- `run.completed` - Emitted when orchestrator finishes (success, failure, or blocked state)
+
+**Task Status**:
+- `status.changed` - Emitted when task status transitions between states (pending → in_progress → completed)
+
+**CI/CD**:
+- `ci.passed` - Emitted when CI checks pass for a PR
+- `ci.failed` - Emitted when CI checks fail for a PR
+
+**Plan Updates**:
+- `plan.updated` - Emitted when plan is updated via mailbox/API or plan updater
+
+Each webhook event includes:
+- `event_id`: Unique identifier for the event
+- `event_type`: The event type (one of above)
+- `timestamp`: When the event occurred
+- `data`: Event-specific payload (varies by event type)
+
 ### API Endpoints (REST)
 Server runs on port 8000 by default (`claudetm-server`):
+
+**Task Management**:
 - `POST /task/init` - Create a new task
 - `GET /status` - Get orchestrator status
+
+**Mailbox** (Dynamic Plan Updates):
 - `POST /mailbox/send` - Send message to mailbox
 - `GET /mailbox` - Check mailbox status
 - `DELETE /mailbox` - Clear mailbox
+
+**Control**:
 - `POST /control/stop` - Stop orchestrator
 - `POST /control/resume` - Resume paused or blocked task
+
+**Webhooks**:
 - `GET /webhooks` - List webhooks
 - `POST /webhooks` - Register webhook
 - `DELETE /webhooks/{id}` - Delete webhook
 
+**Repo Setup** (AI Developer Workflow):
+- `POST /repo/clone` - Clone a git repository to `~/workspace/claude-task-master/{project-name}`
+- `POST /repo/setup` - Setup cloned repository (install dependencies, create venv, run setup scripts)
+- `POST /repo/plan` - Plan-only mode: analyze codebase and generate task plan without executing
+
 ### MCP Tools
 Available via IDE integration:
-- `send_message` - Send message to mailbox
-- `check_mailbox` - Check mailbox status
-- `clear_mailbox` - Clear mailbox
+
+**Task Management**:
 - `get_status` - Get task status
 - `pause_task` - Pause current task
 - `stop_task` - Stop current task
 - `resume_task` - Resume paused or blocked task
+
+**Mailbox** (Dynamic Plan Updates):
+- `send_message` - Send message to mailbox
+- `check_mailbox` - Check mailbox status
+- `clear_mailbox` - Clear mailbox
+
+**Repo Setup** (AI Developer Workflow):
+- `clone_repo` - Clone a git repository to `~/workspace/claude-task-master/{project-name}`
+- `setup_repo` - Setup cloned repository (install dependencies, create venv, run setup scripts)
+- `plan_repo` - Plan-only mode: analyze codebase and generate task plan without executing
 
 ## Workflow Integration
 
