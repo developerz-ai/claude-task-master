@@ -456,6 +456,10 @@ class WorkLoopOrchestrator:
         messages from other instances or external systems. If messages
         are found, they are merged and used to update the plan.
 
+        The last_mailbox_check timestamp is always updated regardless of
+        whether messages were found, to track when the mailbox was last
+        monitored.
+
         Args:
             state: Current task state.
 
@@ -466,6 +470,9 @@ class WorkLoopOrchestrator:
         message_count = self.mailbox_storage.count()
         if message_count == 0:
             logger.debug("Mailbox check: no messages")
+            # Always update the timestamp to track when mailbox was checked
+            state.last_mailbox_check = datetime.now()
+            self.state_manager.save_state(state)
             return False
 
         # Log that we're processing messages
