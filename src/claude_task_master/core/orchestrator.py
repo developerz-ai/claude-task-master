@@ -543,6 +543,9 @@ class WorkLoopOrchestrator:
         # Update the plan with the merged content
         logger.debug("Starting plan update from mailbox messages")
         try:
+            # Capture task count before update for diff calculation
+            total_tasks_before = self._get_total_tasks(state)
+
             console.info("Updating plan based on mailbox messages...")
             result = self.plan_updater.update_plan(merged_content)
 
@@ -570,6 +573,11 @@ class WorkLoopOrchestrator:
                 updated_total_tasks = self._get_total_tasks(state)
                 updated_completed_tasks = self._get_completed_tasks(state)
 
+                # Calculate task diff
+                task_diff = updated_total_tasks - total_tasks_before
+                tasks_added = max(0, task_diff)
+                tasks_removed = max(0, -task_diff)
+
                 self.webhook_emitter.emit(
                     "plan.updated",
                     update_source="mailbox",
@@ -578,9 +586,9 @@ class WorkLoopOrchestrator:
                     else None,  # Truncate long messages
                     total_tasks=updated_total_tasks,
                     completed_tasks=updated_completed_tasks,
-                    tasks_added=None,  # TODO: Calculate from plan diff
-                    tasks_modified=None,  # TODO: Calculate from plan diff
-                    tasks_removed=None,  # TODO: Calculate from plan diff
+                    tasks_added=tasks_added,
+                    tasks_modified=None,  # TODO: Calculate from plan diff (requires content comparison)
+                    tasks_removed=tasks_removed,
                 )
 
                 return True
