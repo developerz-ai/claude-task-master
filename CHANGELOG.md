@@ -45,7 +45,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - New webhook events in the Webhook Events section
   - New MCP tools in the MCP Tools section
   - New REST API endpoints in the API Endpoints section
-- Updated `README.md` with AI developer workflow section describing the repo setup use case
 
 #### Testing & Quality Assurance
 - Unit tests for all new webhook event types in `tests/webhooks/test_events.py`

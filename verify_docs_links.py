@@ -91,16 +91,17 @@ def verify_link(
 
     # Skip anchor-only links (verified separately)
     if link_url.startswith("#"):
-        anchor = link_url[1:]
-        if anchor in file_anchors.get(source_file, set()):
+        anchor_only = link_url[1:]
+        if anchor_only in file_anchors.get(source_file, set()):
             return True, ""
-        return False, f"Anchor #{anchor} not found in {source_file.name}"
+        return False, f"Anchor #{anchor_only} not found in {source_file.name}"
 
     # Parse URL and anchor
+    anchor: str | None = None
     if "#" in link_url:
         path_part, anchor = link_url.split("#", 1)
     else:
-        path_part, anchor = link_url, None
+        path_part = link_url
 
     # Skip empty paths
     if not path_part:
@@ -129,7 +130,7 @@ def verify_link(
     return True, ""
 
 
-def main():
+def main() -> int:
     """Main verification function."""
     root_dir = Path(__file__).parent
     print(f"Scanning documentation in: {root_dir}")
