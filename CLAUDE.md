@@ -186,13 +186,13 @@ uv run claudetm start "Implement TODO" --max-sessions 3 --no-auto-merge
 
 ### API Endpoints (REST)
 Server runs on port 8000 by default (`claudetm-server`):
-- `POST /tasks` - Create a new task
+- `POST /task/init` - Create a new task
 - `GET /status` - Get orchestrator status
 - `POST /mailbox/send` - Send message to mailbox
 - `GET /mailbox` - Check mailbox status
 - `DELETE /mailbox` - Clear mailbox
-- `POST /control/pause` - Pause orchestrator
 - `POST /control/stop` - Stop orchestrator
+- `POST /control/resume` - Resume paused or blocked task
 - `GET /webhooks` - List webhooks
 - `POST /webhooks` - Register webhook
 - `DELETE /webhooks/{id}` - Delete webhook
@@ -202,9 +202,10 @@ Available via IDE integration:
 - `send_message` - Send message to mailbox
 - `check_mailbox` - Check mailbox status
 - `clear_mailbox` - Clear mailbox
-- `task_status` - Get task status
+- `get_status` - Get task status
 - `pause_task` - Pause current task
 - `stop_task` - Stop current task
+- `resume_task` - Resume paused or blocked task
 
 ## Workflow Integration
 
