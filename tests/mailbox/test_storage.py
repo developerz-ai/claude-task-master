@@ -826,3 +826,68 @@ class TestMailboxStorageError:
             raise MailboxStorageError("Custom error message")
         except MailboxStorageError as e:
             assert str(e) == "Custom error message"
+
+
+class TestAtomicWriteFailure:
+    """Test atomic write failure handling."""
+
+    def test_save_state_cleans_temp_file_on_error(self, state_dir, monkeypatch):
+        """Test that temp file is cleaned up when shutil.move fails."""
+        from pathlib import Path as RealPath
+
+        storage = MailboxStorage(state_dir=state_dir)
+        state_dir.mkdir(parents=True, exist_ok=True)
+
+        # Track temp files created
+        temp_files_created = []
+        original_mkstemp = __import__("tempfile").mkstemp
+
+        def tracking_mkstemp(*args, **kwargs):
+            fd, path = original_mkstemp(*args, **kwargs)
+            temp_files_created.append(path)
+            return fd, path
+
+        # Mock shutil.move to fail
+        def failing_move(src, dst):
+            raise OSError("Simulated disk full error")
+
+        monkeypatch.setattr("tempfile.mkstemp", tracking_mkstemp)
+        monkeypatch.setattr("shutil.move", failing_move)
+
+        # Should raise the error
+        with pytest.raises(OSError, match="Simulated disk full error"):
+            storage.add_message("Test message")
+
+        # Verify temp file was cleaned up
+        for temp_path in temp_files_created:
+            assert not RealPath(temp_path).exists(), f"Temp file {temp_path} was not cleaned up"
+
+    def test_save_state_temp_cleanup_handles_missing_file(self, state_dir, monkeypatch):
+        """Test that temp file cleanup handles already-deleted files gracefully."""
+        from pathlib import Path as RealPath
+
+        storage = MailboxStorage(state_dir=state_dir)
+        state_dir.mkdir(parents=True, exist_ok=True)
+
+        original_mkstemp = __import__("tempfile").mkstemp
+        temp_files_created = []
+
+        def tracking_mkstemp(*args, **kwargs):
+            fd, path = original_mkstemp(*args, **kwargs)
+            temp_files_created.append(path)
+            return fd, path
+
+        def failing_move_and_delete_temp(src, dst):
+            # Delete the temp file before the cleanup code can
+            try:
+                RealPath(src).unlink()
+            except Exception:
+                pass
+            raise OSError("Simulated error after temp deletion")
+
+        monkeypatch.setattr("tempfile.mkstemp", tracking_mkstemp)
+        monkeypatch.setattr("shutil.move", failing_move_and_delete_temp)
+
+        # Should still raise the original error, even if temp cleanup fails
+        with pytest.raises(OSError, match="Simulated error after temp deletion"):
+            storage.add_message("Test message")

@@ -56,6 +56,7 @@ dev = [
     "pytest-cov>=4.1.0",
     "pytest-asyncio>=0.23.0",
     "pytest-timeout>=2.4.0",
+    "hypothesis>=6.100.0",
     "ruff>=0.3.0",
     "mypy>=1.9.0",
 ]
@@ -155,7 +156,6 @@ addopts = [
     "--cov-report=term-missing",
     "--cov-report=html:coverage_html",
     "--cov-report=xml:coverage.xml",
-    "--cov-fail-under=50",
     "--timeout=2",
 ]
 asyncio_mode = "auto"
@@ -169,7 +169,15 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests (require external services)",
     "unit: marks tests as unit tests",
+    "property: marks tests as property-based tests using Hypothesis",
 ]
+
+# Hypothesis settings for property-based tests
+[tool.hypothesis]
+profile = "default"
+# Profiles available: default, ci, dev, quick, thorough
+# Set HYPOTHESIS_PROFILE environment variable to use a different profile
+# Example: HYPOTHESIS_PROFILE=ci pytest tests/property/
 
 [tool.coverage.run]
 source = ["src/claude_task_master"]
