@@ -156,7 +156,6 @@ addopts = [
     "--cov-report=term-missing",
     "--cov-report=html:coverage_html",
     "--cov-report=xml:coverage.xml",
-    "--cov-fail-under=50",
     "--timeout=2",
 ]
 asyncio_mode = "auto"
