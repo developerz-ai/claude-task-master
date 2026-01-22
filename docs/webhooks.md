@@ -25,10 +25,10 @@ This guide covers webhook event notifications in Claude Task Master, including e
 - [Troubleshooting](#troubleshooting)
 - [Mailbox Integration](#mailbox-integration)
   - [Mailbox Event Types](#mailbox-event-types)
-  - [Workflow: External System → Mailbox → Plan Update → Webhook](#workflow-external-system--mailbox--plan-update--webhook)
+  - [Workflow: External System → Mailbox → Plan Update → Webhook](#workflow-external-system-mailbox-plan-update-webhook)
   - [Use Cases](#use-cases)
   - [Configuring Webhooks for Mailbox Events](#configuring-webhooks-for-mailbox-events)
-  - [Best Practices for Mailbox + Webhooks](#best-practices-for-mailbox--webhooks)
+  - [Best Practices for Mailbox + Webhooks](#best-practices-for-mailbox-webhooks)
 
 ---
 
@@ -1920,7 +1920,7 @@ curl -X POST http://localhost:8000/webhooks \
 ## See Also
 
 - [REST API Reference](./api-reference.md) - Complete API documentation including webhook and mailbox endpoints
-- [MCP Reference](./mcp-reference.md) - MCP tools including mailbox tools
+- [MCP Tools Reference](./mcp-tools.md) - MCP tools including mailbox tools
 - [Authentication Guide](./authentication.md) - Securing your Claude Task Master instance
 - [Docker Guide](./docker.md) - Running Claude Task Master in containers
 
