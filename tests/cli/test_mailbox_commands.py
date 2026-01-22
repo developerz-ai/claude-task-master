@@ -24,6 +24,7 @@ from claude_task_master.cli_commands import mailbox as mailbox_module
 from claude_task_master.core.state import StateManager, TaskOptions
 from claude_task_master.mailbox.models import Priority
 from claude_task_master.mailbox.storage import MailboxStorage
+from tests.cli.conftest import strip_ansi
 
 # =============================================================================
 # Additional Fixtures for Extended Tests
@@ -354,18 +355,20 @@ class TestMailboxHelp:
     def test_mailbox_send_help(self, cli_runner):
         """Test mailbox send --help shows options."""
         result = cli_runner.invoke(app, ["mailbox", "send", "--help"])
+        output = strip_ansi(result.output)
 
         assert result.exit_code == 0
-        assert "--sender" in result.output
-        assert "--priority" in result.output
-        assert "MESSAGE" in result.output.upper() or "message" in result.output
+        assert "--sender" in output
+        assert "--priority" in output
+        assert "MESSAGE" in output.upper() or "message" in output
 
     def test_mailbox_clear_help(self, cli_runner):
         """Test mailbox clear --help shows options."""
         result = cli_runner.invoke(app, ["mailbox", "clear", "--help"])
+        output = strip_ansi(result.output)
 
         assert result.exit_code == 0
-        assert "--force" in result.output
+        assert "--force" in output
 
 
 # =============================================================================
