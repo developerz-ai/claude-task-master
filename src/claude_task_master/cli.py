@@ -63,7 +63,7 @@ def main(
 
 
 # Register commands from submodules
-register_workflow_commands(app)  # start, resume
+register_workflow_commands(app)  # start, resume (resume accepts optional message for plan updates)
 register_info_commands(app)  # status, plan, logs, context, progress
 register_github_commands(app)  # ci-status, ci-logs, pr-comments, pr-status
 register_config_commands(app)  # config init, config show, config path

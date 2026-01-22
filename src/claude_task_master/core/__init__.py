@@ -120,6 +120,7 @@ from claude_task_master.core.parallel import (
     TaskResult,
     TaskStatus,
 )
+from claude_task_master.core.plan_updater import PlanUpdater
 from claude_task_master.core.pr_context import PRContextManager
 from claude_task_master.core.progress_tracker import (
     ExecutionTracker,
@@ -132,6 +133,7 @@ from claude_task_master.core.prompts import (
     PromptSection,
     build_context_extraction_prompt,
     build_error_recovery_prompt,
+    build_plan_update_prompt,
     build_planning_prompt,
     build_task_completion_check_prompt,
     build_verification_prompt,
@@ -274,6 +276,8 @@ __all__ = [
     "MaxSessionsReachedError",
     # Orchestrator classes
     "WorkLoopOrchestrator",
+    # Plan updater classes
+    "PlanUpdater",
     # Task runner exceptions
     "TaskRunnerError",
     "NoPlanFoundError",
@@ -309,6 +313,7 @@ __all__ = [
     "PromptBuilder",
     "PromptSection",
     "build_planning_prompt",
+    "build_plan_update_prompt",
     "build_work_prompt",
     "build_verification_prompt",
     "build_task_completion_check_prompt",
