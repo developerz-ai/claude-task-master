@@ -405,6 +405,202 @@ claudetm start "Add API documentation and examples"
 7. **[CI/CD Integration](./examples/07-cicd.md)** - GitHub Actions workflows
 8. **[Advanced Workflows](./examples/08-advanced-workflows.md)** - Complex scenarios
 
+## AI Developer Workflow
+
+Claude Task Master includes built-in support for repository cloning and setup, enabling an AI-driven development environment. This is particularly useful for:
+
+- **AI Server Deployments** - Deploy Claude Task Master to servers and have it autonomously clone and setup projects
+- **Development Environment Setup** - Automatically configure repositories for local development
+- **Multi-Project Coordination** - Manage multiple projects simultaneously, each in isolated directories
+- **Continuous AI Development** - Receive work requests, setup projects, implement tasks, all autonomously
+
+### Repo Setup Workflow
+
+The repo setup workflow consists of three phases:
+
+1. **Clone** - Clone a git repository to `~/workspace/claude-task-master/{project-name}`
+2. **Setup** - Automatically install dependencies, create virtual environments, run setup scripts
+3. **Plan or Work** - Either analyze the project and create a plan, or immediately start working on tasks
+
+### Clone a Repository
+
+**Via REST API:**
+```bash
+curl -X POST http://localhost:8000/repo/clone \
+  -H "Content-Type: application/json" \
+  -d '{
+    "repo_url": "https://github.com/example/my-project.git",
+    "project_name": "my-project"
+  }'
+```
+
+**Via MCP Tools (IDE Integration):**
+```
+Claude: Clone the repository https://github.com/example/my-project.git
+→ Uses clone_repo tool to clone to ~/workspace/claude-task-master/my-project
+```
+
+### Setup a Cloned Repository
+
+After cloning, setup installs dependencies and prepares the project for development:
+
+**Via REST API:**
+```bash
+curl -X POST http://localhost:8000/repo/setup \
+  -H "Content-Type: application/json" \
+  -d '{
+    "project_name": "my-project"
+  }'
+```
+
+**Via MCP Tools:**
+```
+Claude: Set up the project my-project for development
+→ Uses setup_repo tool to configure and prepare the repository
+```
+
+The setup phase:
+- Detects project type (Python, Node.js, Ruby, etc.)
+- Installs package manager if needed (uv, npm, pip, bundler, etc.)
+- Creates virtual environments (venv, node_modules, etc.)
+- Runs setup scripts if present (setup.sh, Makefile, scripts/setup-hooks.sh, etc.)
+- Installs dependencies from lock files (requirements.txt, package.json, Gemfile, etc.)
+
+### Plan a Repository (Analysis Only)
+
+Analyze a project and generate a task plan without executing work:
+
+**Via REST API:**
+```bash
+curl -X POST http://localhost:8000/repo/plan \
+  -H "Content-Type: application/json" \
+  -d '{
+    "project_name": "my-project",
+    "goal": "Add authentication to the application"
+  }'
+```
+
+**Via MCP Tools:**
+```
+Claude: Plan the task "Add authentication" for project my-project
+→ Uses plan_repo tool to analyze and generate a task plan
+```
+
+This phase creates a plan in `.claude-task-master/plan.md` without executing any tasks, allowing review before work begins.
+
+### Complete AI Developer Workflow Example
+
+A full end-to-end workflow:
+
+```bash
+# 1. Clone a repository
+curl -X POST http://localhost:8000/repo/clone \
+  -H "Content-Type: application/json" \
+  -d '{"repo_url": "https://github.com/example/myapp.git", "project_name": "myapp"}'
+
+# 2. Setup the project for development
+curl -X POST http://localhost:8000/repo/setup \
+  -H "Content-Type: application/json" \
+  -d '{"project_name": "myapp"}'
+
+# 3. Plan the work (optional - just analyze)
+curl -X POST http://localhost:8000/repo/plan \
+  -H "Content-Type: application/json" \
+  -d '{"project_name": "myapp", "goal": "Add user authentication with OAuth"}'
+
+# 4. Or start work directly with a goal
+curl -X POST http://localhost:8000/task/init \
+  -H "Content-Type: application/json" \
+  -d '{"project_dir": "~/workspace/claude-task-master/myapp", "goal": "Add user authentication with OAuth"}'
+```
+
+### Directory Structure
+
+When using the repo setup workflow, projects are organized as follows:
+
+```
+~/workspace/claude-task-master/
+├── my-project/
+│   ├── .git/
+│   ├── src/
+│   ├── .claude-task-master/      # State directory (auto-created by claudetm)
+│   │   ├── goal.txt
+│   │   ├── plan.md
+│   │   ├── state.json
+│   │   └── logs/
+│   └── ...
+├── another-project/
+│   └── ...
+```
+
+### Use Cases
+
+**1. Server-Based AI Development Platform**
+
+Deploy Claude Task Master to a server with git credentials and have it:
+- Clone repositories on demand
+- Setup development environments automatically
+- Execute work assignments from a job queue
+- Report results via webhooks
+
+```bash
+# Server startup
+docker run -d \
+  -p 8000:8000 \
+  -v ~/.claude:/root/.claude:ro \
+  -v ~/.gitconfig:/root/.gitconfig:ro \
+  -v ~/.config/gh:/root/.config/gh:ro \
+  -v ~/workspace:/root/workspace \
+  ghcr.io/developerz-ai/claude-task-master:latest
+
+# External system sends work
+curl http://ai-dev-server:8000/repo/clone -d '{"repo_url": "...", "project_name": "..."}'
+curl http://ai-dev-server:8000/repo/setup -d '{"project_name": "..."}'
+curl http://ai-dev-server:8000/task/init -d '{"project_dir": "...", "goal": "..."}'
+```
+
+**2. Local Development Workspace Management**
+
+Setup a local workspace where Claude helps manage multiple projects:
+
+```bash
+# Initialize workspace
+mkdir -p ~/workspace/claude-task-master
+cd ~/workspace/claude-task-master
+
+# Clone and setup multiple projects
+claudetm repo clone https://github.com/org/api-server api-server
+claudetm repo setup api-server
+
+claudetm repo clone https://github.com/org/web-client web-client
+claudetm repo setup web-client
+
+# Work on individual projects
+cd api-server
+claudetm start "Add rate limiting to API endpoints"
+
+cd ../web-client
+claudetm start "Implement dark mode toggle"
+```
+
+**3. Continuous Integration as AI Development**
+
+Integrate with CI/CD to have Claude automatically work on issues:
+
+```bash
+# GitHub Action or external trigger
+curl http://localhost:8000/repo/clone \
+  -d '{"repo_url": "'$GITHUB_REPOSITORY'", "project_name": "repo"}'
+
+curl http://localhost:8000/repo/setup \
+  -d '{"project_name": "repo"}'
+
+curl http://localhost:8000/task/init \
+  -d '{"project_dir": "~/workspace/claude-task-master/repo", "goal": "'$ISSUE_TITLE'"}'
+
+# Results reported via webhook callback
+```
+
 ## Troubleshooting
 
 ### Credentials & Setup
