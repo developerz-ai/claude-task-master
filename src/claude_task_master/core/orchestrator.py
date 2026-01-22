@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import subprocess
 import time
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from . import console
@@ -34,9 +35,11 @@ from .workflow_stages import WorkflowStageHandler
 
 if TYPE_CHECKING:
     from ..github import GitHubClient
+    from ..mailbox import MailboxStorage, MessageMerger
     from ..webhooks import WebhookClient
     from ..webhooks.events import EventType
     from .logger import TaskLogger
+    from .plan_updater import PlanUpdater
 
 logger = logging.getLogger(__name__)
 
@@ -223,6 +226,9 @@ class WorkLoopOrchestrator:
         self._stage_handler: WorkflowStageHandler | None = None
         self._pr_context: PRContextManager | None = None
         self._webhook_emitter: WebhookEmitter | None = None
+        self._mailbox_storage: MailboxStorage | None = None
+        self._message_merger: MessageMerger | None = None
+        self._plan_updater: PlanUpdater | None = None
 
     @property
     def github_client(self) -> GitHubClient:
@@ -286,6 +292,37 @@ class WorkLoopOrchestrator:
                 pass  # Use None if state can't be loaded
             self._webhook_emitter = WebhookEmitter(self._webhook_client, run_id)
         return self._webhook_emitter
+
+    @property
+    def mailbox_storage(self) -> MailboxStorage:
+        """Get or lazily initialize mailbox storage."""
+        if self._mailbox_storage is None:
+            from ..mailbox import MailboxStorage
+
+            self._mailbox_storage = MailboxStorage(self.state_manager.state_dir)
+        return self._mailbox_storage
+
+    @property
+    def message_merger(self) -> MessageMerger:
+        """Get or lazily initialize message merger."""
+        if self._message_merger is None:
+            from ..mailbox import MessageMerger
+
+            self._message_merger = MessageMerger()
+        return self._message_merger
+
+    @property
+    def plan_updater(self) -> PlanUpdater:
+        """Get or lazily initialize plan updater."""
+        if self._plan_updater is None:
+            from .plan_updater import PlanUpdater
+
+            self._plan_updater = PlanUpdater(
+                agent=self.agent,
+                state_manager=self.state_manager,
+                logger=self.logger,
+            )
+        return self._plan_updater
 
     def _get_total_tasks(self, state: TaskState) -> int:
         """Get total number of tasks from the plan.
@@ -411,6 +448,95 @@ class WorkLoopOrchestrator:
             merged_at=merged_at,
             auto_merged=state.options.auto_merge,
         )
+
+    def _check_and_process_mailbox(self, state: TaskState) -> bool:
+        """Check mailbox and update plan if messages exist.
+
+        This method is called after each task completion to check for
+        messages from other instances or external systems. If messages
+        are found, they are merged and used to update the plan.
+
+        Args:
+            state: Current task state.
+
+        Returns:
+            True if plan was updated, False otherwise.
+        """
+        # Check if there are any messages in the mailbox
+        message_count = self.mailbox_storage.count()
+        if message_count == 0:
+            logger.debug("Mailbox check: no messages")
+            return False
+
+        # Log that we're processing messages
+        logger.info("Mailbox check: found %d message(s)", message_count)
+        console.info(f"Found {message_count} message(s) in mailbox - processing...")
+
+        # Get and clear messages atomically
+        messages = self.mailbox_storage.get_and_clear()
+        if not messages:
+            # Race condition - messages were cleared by another process
+            logger.warning("Mailbox messages disappeared between count and get")
+            return False
+
+        # Merge messages into a single change request
+        try:
+            merged_content = self.message_merger.merge(messages)
+            logger.debug("Merged mailbox messages: %s...", merged_content[:100])
+        except ValueError as e:
+            logger.error("Failed to merge mailbox messages: %s", e)
+            console.warning(f"Failed to merge mailbox messages: {e}")
+            return False
+
+        # Update the plan with the merged content
+        try:
+            console.info("Updating plan based on mailbox messages...")
+            result = self.plan_updater.update_plan(merged_content)
+
+            if result.get("changes_made"):
+                console.success("Plan updated based on mailbox messages")
+                logger.info("Plan updated from mailbox: changes_made=True")
+
+                # Update state to record the mailbox check
+                state.last_mailbox_check = datetime.now()
+                self.state_manager.save_state(state)
+
+                # Emit webhook event for plan update
+                self.webhook_emitter.emit(
+                    "mailbox.processed",
+                    message_count=len(messages),
+                    plan_updated=True,
+                    senders=[msg.sender for msg in messages],
+                )
+
+                return True
+            else:
+                console.info("Mailbox messages processed - no plan changes needed")
+                logger.info("Plan not modified from mailbox messages")
+
+                # Still record that we checked
+                state.last_mailbox_check = datetime.now()
+                self.state_manager.save_state(state)
+
+                self.webhook_emitter.emit(
+                    "mailbox.processed",
+                    message_count=len(messages),
+                    plan_updated=False,
+                    senders=[msg.sender for msg in messages],
+                )
+
+                return False
+
+        except ValueError as e:
+            # No plan exists - can't update
+            logger.error("Cannot update plan from mailbox: %s", e)
+            console.warning(f"Cannot update plan: {e}")
+            return False
+        except Exception as e:
+            # Other errors during plan update
+            logger.error("Error updating plan from mailbox: %s", e)
+            console.warning(f"Error updating plan from mailbox: {e}")
+            return False
 
     def run(self) -> int:
         """Run the main work loop until completion or blocked.
@@ -775,6 +901,15 @@ class WorkLoopOrchestrator:
             duration_seconds=time.time() - session_start_time,
             branch=current_branch,
         )
+
+        # Check mailbox for any messages after task completion
+        # If messages exist, merge them and update the plan
+        plan_updated = self._check_and_process_mailbox(state)
+        if plan_updated:
+            # Plan was updated - need to refresh total_tasks count
+            # The task list may have changed
+            total_tasks = self._get_total_tasks(state)
+            console.detail(f"Plan updated - new total tasks: {total_tasks}")
 
         # Determine if we should trigger PR workflow or continue to next task
         # Two modes: pr_per_task=True (one PR per task) or grouped mode (one PR per group)

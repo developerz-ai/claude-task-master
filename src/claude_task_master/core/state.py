@@ -117,6 +117,9 @@ class TaskState(BaseModel):
     run_id: str
     model: str
     options: TaskOptions
+    # Mailbox integration fields
+    mailbox_enabled: bool = True  # Whether mailbox checking is enabled
+    last_mailbox_check: datetime | None = None  # Last time mailbox was checked
 
 
 # =============================================================================
@@ -333,7 +336,8 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
         with file_lock(self._lock_file, timeout=self.LOCK_TIMEOUT):
             try:
                 # Use atomic write with temp file
-                self._atomic_write_json(self.state_file, state.model_dump())
+                # Use mode='json' to ensure datetime fields are serialized as ISO strings
+                self._atomic_write_json(self.state_file, state.model_dump(mode="json"))
             except PermissionError as e:
                 raise StatePermissionError(self.state_file, "writing", e) from e
 
