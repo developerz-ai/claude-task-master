@@ -303,33 +303,24 @@ class WorkflowStageHandler:
             return None
 
     def handle_ci_failed_stage(self, state: TaskState) -> int | None:
-        """Handle CI failure - run agent to fix issues."""
+        """Handle CI failure - run agent to fix issues.
+
+        This method now also fetches PR comments (from CodeRabbit, reviewers, etc.)
+        when saving CI failures, so the agent can fix BOTH CI issues AND address
+        review comments in a single step.
+        """
         console.info("CI failed - running agent to fix...")
 
-        # Save CI failure logs
+        # Save CI failure logs (this also saves PR comments via _also_save_comments=True)
         self.pr_context.save_ci_failures(state.current_pr)
 
-        # Build fix prompt
-        pr_dir = self.state_manager.get_pr_dir(state.current_pr) if state.current_pr else None
-        ci_path = f"{pr_dir}/ci/" if pr_dir else ".claude-task-master/debugging/"
+        # Check what feedback we have (CI failures and/or comments)
+        has_ci, has_comments, pr_dir_path = self.pr_context.get_combined_feedback(state.current_pr)
 
-        task_description = f"""CI has failed for PR #{state.current_pr}.
-
-**Read the CI failure logs from:** `{ci_path}`
-
-Use Glob to find all .txt files, then Read each one to understand the errors.
-
-**IMPORTANT:** Fix ALL CI failures, even if they seem unrelated to your current work.
-Your job is to keep CI green. Pre-existing issues, flaky tests, lint errors - fix them all.
-
-Please:
-1. Read ALL files in the ci/ directory
-2. Understand ALL error messages (lint, tests, types, etc.)
-3. Fix everything that's failing - don't skip anything
-4. Run tests/lint locally to verify ALL passes
-5. Commit and push the fixes
-
-After fixing, end with: TASK COMPLETE"""
+        # Build combined task description
+        task_description = self._build_combined_ci_comments_task(
+            state.current_pr, has_ci, has_comments, pr_dir_path
+        )
 
         # Run agent with Opus for complex debugging
         try:
@@ -354,6 +345,161 @@ After fixing, end with: TASK COMPLETE"""
         state.session_count += 1
         self.state_manager.save_state(state)
         return None
+
+    def _build_combined_ci_comments_task(
+        self,
+        pr_number: int | None,
+        has_ci: bool,
+        has_comments: bool,
+        pr_dir_path: str,
+    ) -> str:
+        """Build a combined task description for CI failures and review comments.
+
+        This ensures that both CI failures AND review comments are addressed in
+        a single agent session, avoiding the need for multiple fix cycles.
+
+        Args:
+            pr_number: The PR number.
+            has_ci: Whether there are CI failure logs.
+            has_comments: Whether there are review comments.
+            pr_dir_path: Path to the PR directory.
+
+        Returns:
+            Task description string for the agent.
+        """
+        ci_path = f"{pr_dir_path}/ci/" if pr_dir_path else ".claude-task-master/debugging/"
+        comments_path = (
+            f"{pr_dir_path}/comments/" if pr_dir_path else ".claude-task-master/debugging/"
+        )
+        resolve_json_path = (
+            f"{pr_dir_path}/resolve-comments.json"
+            if pr_dir_path
+            else ".claude-task-master/debugging/resolve-comments.json"
+        )
+
+        # Build the appropriate task description based on what feedback exists
+        if has_ci and has_comments:
+            # Both CI failures and comments - handle together!
+            return f"""CI has failed for PR #{pr_number} AND there are review comments to address.
+
+**IMPORTANT: Fix BOTH CI failures AND address review comments in this session.**
+This is more efficient than fixing them separately.
+
+## Step 1: Read ALL Feedback
+
+**CI Failure logs:** `{ci_path}`
+**Review comments:** `{comments_path}`
+
+Use Glob to find all .txt files in both directories, then Read each one.
+
+## Step 2: Fix CI Failures (Priority 1)
+
+- Read ALL files in the ci/ directory
+- Understand ALL error messages (lint, tests, types, etc.)
+- Fix everything that's failing - don't skip anything
+- Pre-existing issues, flaky tests, lint errors - fix them all
+
+## Step 3: Address Review Comments (Priority 2)
+
+- Read ALL comment files in the comments/ directory
+- For each comment:
+  - Make the requested change, OR
+  - Explain why it's not needed
+
+## Step 4: Verify and Commit
+
+1. Run tests/lint locally to verify ALL passes
+2. Commit all fixes together with a descriptive message
+3. Push the fixes
+4. Create a resolution summary file at: `{resolve_json_path}`
+
+**Resolution file format:**
+```json
+{{
+  "pr": {pr_number},
+  "resolutions": [
+    {{
+      "thread_id": "THREAD_ID_FROM_COMMENT_FILE",
+      "action": "fixed|explained|skipped",
+      "message": "Brief explanation of what was done"
+    }}
+  ]
+}}
+```
+
+Copy the Thread ID from each comment file into the resolution JSON.
+
+**IMPORTANT: DO NOT resolve threads directly using GitHub GraphQL mutations.**
+The orchestrator will handle thread resolution automatically after you create the resolution file.
+
+After fixing ALL CI issues AND addressing ALL comments, end with: TASK COMPLETE"""
+
+        elif has_ci:
+            # Only CI failures (no comments)
+            return f"""CI has failed for PR #{pr_number}.
+
+**Read the CI failure logs from:** `{ci_path}`
+
+Use Glob to find all .txt files, then Read each one to understand the errors.
+
+**IMPORTANT:** Fix ALL CI failures, even if they seem unrelated to your current work.
+Your job is to keep CI green. Pre-existing issues, flaky tests, lint errors - fix them all.
+
+Please:
+1. Read ALL files in the ci/ directory
+2. Understand ALL error messages (lint, tests, types, etc.)
+3. Fix everything that's failing - don't skip anything
+4. Run tests/lint locally to verify ALL passes
+5. Commit and push the fixes
+
+After fixing, end with: TASK COMPLETE"""
+
+        elif has_comments:
+            # Only comments (rare case - CI passed but called with comments only)
+            return f"""PR #{pr_number} has review comments to address.
+
+**Read the review comments from:** `{comments_path}`
+
+Use Glob to find all .txt files, then Read each one to understand the feedback.
+
+Please:
+1. Read ALL comment files in the comments/ directory
+2. For each comment:
+   - Make the requested change, OR
+   - Explain why it's not needed
+3. Run tests to verify
+4. Commit and push the fixes
+5. Create a resolution summary file at: `{resolve_json_path}`
+
+**Resolution file format:**
+```json
+{{
+  "pr": {pr_number},
+  "resolutions": [
+    {{
+      "thread_id": "THREAD_ID_FROM_COMMENT_FILE",
+      "action": "fixed|explained|skipped",
+      "message": "Brief explanation of what was done"
+    }}
+  ]
+}}
+```
+
+Copy the Thread ID from each comment file into the resolution JSON.
+
+**IMPORTANT: DO NOT resolve threads directly using GitHub GraphQL mutations.**
+The orchestrator will handle thread resolution automatically after you create the resolution file.
+
+After addressing ALL comments and creating the resolution file, end with: TASK COMPLETE"""
+
+        else:
+            # Neither CI failures nor comments (shouldn't happen in ci_failed stage)
+            return f"""PR #{pr_number} needs attention.
+
+Please check the PR status and ensure everything is working correctly.
+Run tests/lint locally to verify.
+
+After verifying, end with: TASK COMPLETE"""
 
     def handle_waiting_reviews_stage(self, state: TaskState) -> int | None:
         """Handle waiting for reviews - check for review comments."""

@@ -50,6 +50,13 @@ def mock_pr_context():
     context.save_ci_failures = MagicMock()
     context.save_pr_comments = MagicMock()
     context.post_comment_replies = MagicMock()
+    # New methods for combined CI + comments handling
+    context.has_ci_failures = MagicMock(return_value=True)
+    context.has_pr_comments = MagicMock(return_value=False)
+    # Returns (has_ci, has_comments, pr_dir_path)
+    context.get_combined_feedback = MagicMock(
+        return_value=(True, False, "/tmp/.claude-task-master/debugging/pr/42")
+    )
     return context
 
 

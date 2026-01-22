@@ -454,3 +454,70 @@ class PRContextManager:
                 return True
 
         return False
+
+    def has_pr_comments(self, pr_number: int | None) -> bool:
+        """Check if there are unresolved PR comments saved.
+
+        Args:
+            pr_number: The PR number.
+
+        Returns:
+            True if there are saved comment files.
+        """
+        if pr_number is None:
+            return False
+
+        try:
+            pr_dir = self.state_manager.get_pr_dir(pr_number)
+            comments_dir = pr_dir / "comments"
+            if not comments_dir.exists():
+                return False
+            comment_files = list(comments_dir.glob("*.txt"))
+            return len(comment_files) > 0
+        except Exception:
+            return False
+
+    def has_ci_failures(self, pr_number: int | None) -> bool:
+        """Check if there are CI failure logs saved.
+
+        Args:
+            pr_number: The PR number.
+
+        Returns:
+            True if there are saved CI failure files.
+        """
+        if pr_number is None:
+            return False
+
+        try:
+            pr_dir = self.state_manager.get_pr_dir(pr_number)
+            ci_dir = pr_dir / "ci"
+            if not ci_dir.exists():
+                return False
+            ci_files = list(ci_dir.glob("*.txt"))
+            return len(ci_files) > 0
+        except Exception:
+            return False
+
+    def get_combined_feedback(self, pr_number: int | None) -> tuple[bool, bool, str]:
+        """Get combined feedback context for CI failures and PR comments.
+
+        This method checks both CI failures and PR comments, returning information
+        about what types of feedback are present and paths to find them.
+
+        Args:
+            pr_number: The PR number.
+
+        Returns:
+            Tuple of (has_ci_failures, has_comments, pr_dir_path).
+        """
+        if pr_number is None:
+            return (False, False, "")
+
+        pr_dir = self.state_manager.get_pr_dir(pr_number)
+        pr_dir_path = str(pr_dir)
+
+        has_ci = self.has_ci_failures(pr_number)
+        has_comments = self.has_pr_comments(pr_number)
+
+        return (has_ci, has_comments, pr_dir_path)
