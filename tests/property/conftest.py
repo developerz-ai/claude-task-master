@@ -3,6 +3,8 @@
 This module provides shared fixtures and configuration for Hypothesis tests.
 """
 
+import os
+
 import pytest
 from hypothesis import Phase, Verbosity, settings
 
@@ -36,9 +38,21 @@ settings.register_profile(
     verbosity=Verbosity.normal,
 )
 
+# Load profile from environment variable if set
+_profile = os.environ.get("HYPOTHESIS_PROFILE", "default")
+if _profile in ("ci", "dev", "quick", "thorough"):
+    settings.load_profile(_profile)
+
 
 @pytest.fixture(autouse=True)
 def _reset_hypothesis_settings():
     """Reset Hypothesis settings between tests."""
     # This ensures each test starts with clean settings
     yield
+
+
+def pytest_collection_modifyitems(config, items):
+    """Automatically mark property tests with the 'property' marker."""
+    for item in items:
+        if "property" in str(item.fspath):
+            item.add_marker(pytest.mark.property)
