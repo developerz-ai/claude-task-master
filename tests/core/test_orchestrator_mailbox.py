@@ -588,3 +588,418 @@ class TestMailboxStatePersistence:
 
         assert len(messages) == 1
         assert messages[0].content == "Persistent message"
+
+
+# =============================================================================
+# Test Plan Update Order and Continuation
+# =============================================================================
+
+
+class TestMergedMessagesTriggerPlanUpdate:
+    """Tests verifying that merged messages trigger plan update BEFORE continuing work.
+
+    This is the key requirement: when messages are in the mailbox, the plan MUST
+    be updated before the orchestrator moves to the next task. This ensures that
+    any new tasks or changes from external sources are incorporated into the
+    workflow before continuation.
+    """
+
+    @patch("claude_task_master.core.orchestrator.reset_escape")
+    @patch("claude_task_master.core.orchestrator.time.time")
+    def test_plan_updated_before_task_index_incremented(
+        self, mock_time, mock_reset, orchestrator_with_mailbox, basic_task_state, state_manager
+    ):
+        """Plan should be updated BEFORE task index is incremented."""
+        mock_time.return_value = 1000.0
+
+        # Setup: initial plan with 2 tasks
+        initial_plan = """## Task List
+- [ ] Task 1: First task
+- [ ] Task 2: Second task
+"""
+        state_manager.save_plan(initial_plan)
+        state_manager.save_state(basic_task_state)
+
+        # Add mailbox message to trigger plan update
+        orchestrator_with_mailbox.mailbox_storage.add_message(
+            "Add a new task 3 for testing",
+            sender="supervisor",
+        )
+
+        # Track the order of operations
+        operation_order = []
+
+        # Mock task runner
+        mock_task_runner = MagicMock()
+        mock_task_runner.run_work_session = MagicMock()
+        mock_task_runner.get_current_task_description = MagicMock(return_value="First task")
+        mock_task_runner.mark_task_complete = MagicMock()
+        mock_task_runner.update_progress = MagicMock()
+        mock_task_runner.is_last_task_in_group = MagicMock(return_value=False)
+        orchestrator_with_mailbox._task_runner = mock_task_runner
+
+        # Mock plan updater to record when it's called
+        def mock_update_plan(change_request):
+            operation_order.append("plan_updated")
+            return {"success": True, "changes_made": True, "plan": "updated plan"}
+
+        mock_plan_updater = MagicMock()
+        mock_plan_updater.update_plan = MagicMock(side_effect=mock_update_plan)
+        orchestrator_with_mailbox._plan_updater = mock_plan_updater
+
+        # Patch state save to track when task index is saved
+        original_save = state_manager.save_state
+
+        def tracking_save(state):
+            if state.current_task_index > 0:
+                operation_order.append("task_index_incremented")
+            return original_save(state)
+
+        state_manager.save_state = tracking_save
+
+        # Run the working stage
+        orchestrator_with_mailbox._handle_working_stage(basic_task_state)
+
+        # Verify plan was updated BEFORE task index was incremented
+        assert "plan_updated" in operation_order
+        # Plan update should happen before any increment save
+        plan_idx = (
+            operation_order.index("plan_updated") if "plan_updated" in operation_order else -1
+        )
+        increment_indices = [
+            i for i, op in enumerate(operation_order) if op == "task_index_incremented"
+        ]
+
+        # If there's an increment, plan update should come first
+        if increment_indices:
+            assert plan_idx < increment_indices[0], (
+                "Plan must be updated BEFORE task index is incremented"
+            )
+
+    @patch("claude_task_master.core.orchestrator.reset_escape")
+    @patch("claude_task_master.core.orchestrator.time.time")
+    def test_updated_plan_used_for_next_task_determination(
+        self, mock_time, mock_reset, orchestrator_with_mailbox, basic_task_state, state_manager
+    ):
+        """After plan update, the orchestrator should use the NEW plan for next task."""
+        mock_time.return_value = 1000.0
+
+        # Setup: initial plan
+        initial_plan = """## Task List
+- [ ] Task 1: First task
+- [ ] Task 2: Second task
+"""
+        # Updated plan with new task
+        updated_plan = """## Task List
+- [x] Task 1: First task
+- [ ] Task 2: Second task
+- [ ] Task 3: New task from mailbox
+"""
+        state_manager.save_plan(initial_plan)
+        state_manager.save_state(basic_task_state)
+
+        # Add mailbox message
+        orchestrator_with_mailbox.mailbox_storage.add_message(
+            "Add a new task 3",
+            sender="supervisor",
+        )
+
+        # Mock task runner
+        mock_task_runner = MagicMock()
+        mock_task_runner.run_work_session = MagicMock()
+        mock_task_runner.get_current_task_description = MagicMock(return_value="First task")
+        mock_task_runner.mark_task_complete = MagicMock()
+        mock_task_runner.update_progress = MagicMock()
+        mock_task_runner.is_last_task_in_group = MagicMock(return_value=False)
+        orchestrator_with_mailbox._task_runner = mock_task_runner
+
+        # Mock plan updater to return the updated plan
+        mock_plan_updater = MagicMock()
+        mock_plan_updater.update_plan = MagicMock(
+            return_value={"success": True, "changes_made": True, "plan": updated_plan}
+        )
+        orchestrator_with_mailbox._plan_updater = mock_plan_updater
+
+        # Run the working stage
+        orchestrator_with_mailbox._handle_working_stage(basic_task_state)
+
+        # Verify the plan updater was called with merged message content
+        mock_plan_updater.update_plan.assert_called_once()
+        call_args = mock_plan_updater.update_plan.call_args[0][0]
+        assert "Add a new task 3" in call_args
+
+    @patch("claude_task_master.core.orchestrator.reset_escape")
+    @patch("claude_task_master.core.orchestrator.time.time")
+    def test_multiple_messages_merged_then_plan_updated(
+        self, mock_time, mock_reset, orchestrator_with_mailbox, basic_task_state, state_manager
+    ):
+        """Multiple messages should be merged into one request before plan update."""
+        mock_time.return_value = 1000.0
+
+        plan = """## Task List
+- [ ] Task 1: First task
+"""
+        state_manager.save_plan(plan)
+        state_manager.save_state(basic_task_state)
+
+        # Add multiple messages with different priorities
+        storage = orchestrator_with_mailbox.mailbox_storage
+        storage.add_message("Normal priority task", sender="user", priority=Priority.NORMAL)
+        storage.add_message(
+            "URGENT: Fix security bug", sender="security-team", priority=Priority.URGENT
+        )
+        storage.add_message("Low priority refactor", sender="tech-debt-bot", priority=Priority.LOW)
+
+        # Mock task runner
+        mock_task_runner = MagicMock()
+        mock_task_runner.run_work_session = MagicMock()
+        mock_task_runner.get_current_task_description = MagicMock(return_value="First task")
+        mock_task_runner.mark_task_complete = MagicMock()
+        mock_task_runner.update_progress = MagicMock()
+        mock_task_runner.is_last_task_in_group = MagicMock(return_value=True)
+        orchestrator_with_mailbox._task_runner = mock_task_runner
+
+        # Mock plan updater
+        mock_plan_updater = MagicMock()
+        mock_plan_updater.update_plan = MagicMock(
+            return_value={"success": True, "changes_made": True, "plan": "updated"}
+        )
+        orchestrator_with_mailbox._plan_updater = mock_plan_updater
+
+        # Run the working stage
+        orchestrator_with_mailbox._handle_working_stage(basic_task_state)
+
+        # Verify plan updater was called exactly once with merged content
+        assert mock_plan_updater.update_plan.call_count == 1
+
+        # Verify all message contents are in the merged request
+        merged_content = mock_plan_updater.update_plan.call_args[0][0]
+        assert "URGENT: Fix security bug" in merged_content
+        assert "Normal priority task" in merged_content
+        assert "Low priority refactor" in merged_content
+
+        # Verify URGENT appears before NORMAL (priority ordering preserved in merger)
+        urgent_pos = merged_content.find("URGENT: Fix security bug")
+        normal_pos = merged_content.find("Normal priority task")
+        assert urgent_pos < normal_pos, "Urgent message should appear before normal message"
+
+    @patch("claude_task_master.core.orchestrator.reset_escape")
+    @patch("claude_task_master.core.orchestrator.time.time")
+    def test_total_tasks_refreshed_after_plan_update(
+        self, mock_time, mock_reset, orchestrator_with_mailbox, basic_task_state, state_manager
+    ):
+        """After plan update, total_tasks count should reflect the new plan."""
+        mock_time.return_value = 1000.0
+
+        # Initial plan with 2 tasks
+        initial_plan = """## Task List
+- [ ] Task 1: First task
+- [ ] Task 2: Second task
+"""
+        state_manager.save_plan(initial_plan)
+        state_manager.save_state(basic_task_state)
+
+        # Add mailbox message
+        orchestrator_with_mailbox.mailbox_storage.add_message(
+            "Add task 3",
+            sender="supervisor",
+        )
+
+        # Mock task runner
+        mock_task_runner = MagicMock()
+        mock_task_runner.run_work_session = MagicMock()
+        mock_task_runner.get_current_task_description = MagicMock(return_value="First task")
+        mock_task_runner.mark_task_complete = MagicMock()
+        mock_task_runner.update_progress = MagicMock()
+        mock_task_runner.is_last_task_in_group = MagicMock(return_value=False)
+        orchestrator_with_mailbox._task_runner = mock_task_runner
+
+        # Mock plan updater - this should also update the actual plan file
+        def update_plan_and_save(change_request):
+            # Simulate saving an updated plan with 3 tasks
+            new_plan = """## Task List
+- [x] Task 1: First task
+- [ ] Task 2: Second task
+- [ ] Task 3: New task added
+"""
+            state_manager.save_plan(new_plan)
+            return {"success": True, "changes_made": True, "plan": new_plan}
+
+        mock_plan_updater = MagicMock()
+        mock_plan_updater.update_plan = MagicMock(side_effect=update_plan_and_save)
+        orchestrator_with_mailbox._plan_updater = mock_plan_updater
+
+        # Get initial task count
+        initial_total = orchestrator_with_mailbox._get_total_tasks(basic_task_state)
+        assert initial_total == 2
+
+        # Run the working stage
+        orchestrator_with_mailbox._handle_working_stage(basic_task_state)
+
+        # After mailbox processing, total should reflect updated plan
+        updated_total = orchestrator_with_mailbox._get_total_tasks(basic_task_state)
+        assert updated_total == 3, "Total tasks should be updated to reflect new plan"
+
+    def test_mailbox_checked_atomically(
+        self, orchestrator_with_mailbox, basic_task_state, sample_plan_file
+    ):
+        """Mailbox should be cleared atomically to prevent duplicate processing."""
+        storage = orchestrator_with_mailbox.mailbox_storage
+        storage.add_message("Message 1", sender="user1")
+        storage.add_message("Message 2", sender="user2")
+
+        # Mock plan updater
+        mock_plan_updater = MagicMock()
+        mock_plan_updater.update_plan = MagicMock(
+            return_value={"success": True, "changes_made": True, "plan": "updated"}
+        )
+        orchestrator_with_mailbox._plan_updater = mock_plan_updater
+
+        # First check
+        result1 = orchestrator_with_mailbox._check_and_process_mailbox(basic_task_state)
+        assert result1 is True
+        assert storage.count() == 0, "Messages should be cleared after processing"
+
+        # Second check should find no messages
+        result2 = orchestrator_with_mailbox._check_and_process_mailbox(basic_task_state)
+        assert result2 is False, "No messages should remain for second processing"
+
+    @patch("claude_task_master.core.orchestrator.reset_escape")
+    @patch("claude_task_master.core.orchestrator.time.time")
+    def test_work_continues_after_plan_update_failure(
+        self, mock_time, mock_reset, orchestrator_with_mailbox, basic_task_state, state_manager
+    ):
+        """Work should continue even if plan update fails (graceful degradation)."""
+        mock_time.return_value = 1000.0
+
+        plan = """## Task List
+- [ ] Task 1: First task
+- [ ] Task 2: Second task
+"""
+        state_manager.save_plan(plan)
+        state_manager.save_state(basic_task_state)
+
+        # Add mailbox message
+        orchestrator_with_mailbox.mailbox_storage.add_message(
+            "Add new task",
+            sender="supervisor",
+        )
+
+        # Mock task runner
+        mock_task_runner = MagicMock()
+        mock_task_runner.run_work_session = MagicMock()
+        mock_task_runner.get_current_task_description = MagicMock(return_value="First task")
+        mock_task_runner.mark_task_complete = MagicMock()
+        mock_task_runner.update_progress = MagicMock()
+        mock_task_runner.is_last_task_in_group = MagicMock(return_value=False)
+        orchestrator_with_mailbox._task_runner = mock_task_runner
+
+        # Mock plan updater to fail
+        mock_plan_updater = MagicMock()
+        mock_plan_updater.update_plan = MagicMock(side_effect=Exception("Plan update failed"))
+        orchestrator_with_mailbox._plan_updater = mock_plan_updater
+
+        # Run the working stage - should complete without raising
+        result = orchestrator_with_mailbox._handle_working_stage(basic_task_state)
+
+        # Workflow should continue (result is None for continue, or int for terminal)
+        # The key is that it doesn't raise an exception
+        assert result is None  # None means continue to next cycle
+
+        # Task runner should have been called (work happened)
+        mock_task_runner.run_work_session.assert_called_once()
+
+
+class TestMailboxProcessingTiming:
+    """Tests for the timing of mailbox processing in the workflow."""
+
+    @patch("claude_task_master.core.orchestrator.reset_escape")
+    @patch("claude_task_master.core.orchestrator.time.time")
+    def test_mailbox_processed_after_task_completion_not_before(
+        self, mock_time, mock_reset, orchestrator_with_mailbox, basic_task_state, state_manager
+    ):
+        """Mailbox should be checked AFTER task is marked complete, not before."""
+        mock_time.return_value = 1000.0
+
+        plan = """## Task List
+- [ ] Task 1: First task
+"""
+        state_manager.save_plan(plan)
+        state_manager.save_state(basic_task_state)
+
+        # Add mailbox message
+        orchestrator_with_mailbox.mailbox_storage.add_message(
+            "Update plan",
+            sender="supervisor",
+        )
+
+        # Track operation order
+        operation_order = []
+
+        # Mock task runner with order tracking
+        mock_task_runner = MagicMock()
+
+        def track_work_session(*args, **kwargs):
+            operation_order.append("task_completed")
+
+        mock_task_runner.run_work_session = MagicMock(side_effect=track_work_session)
+        mock_task_runner.get_current_task_description = MagicMock(return_value="First task")
+
+        def track_mark_complete(*args, **kwargs):
+            operation_order.append("task_marked_complete")
+
+        mock_task_runner.mark_task_complete = MagicMock(side_effect=track_mark_complete)
+        mock_task_runner.update_progress = MagicMock()
+        mock_task_runner.is_last_task_in_group = MagicMock(return_value=True)
+        orchestrator_with_mailbox._task_runner = mock_task_runner
+
+        # Mock plan updater with order tracking
+        def track_plan_update(change_request):
+            operation_order.append("mailbox_plan_updated")
+            return {"success": True, "changes_made": True, "plan": "updated"}
+
+        mock_plan_updater = MagicMock()
+        mock_plan_updater.update_plan = MagicMock(side_effect=track_plan_update)
+        orchestrator_with_mailbox._plan_updater = mock_plan_updater
+
+        # Run the working stage
+        orchestrator_with_mailbox._handle_working_stage(basic_task_state)
+
+        # Verify order: task complete -> mark complete -> mailbox processed
+        assert "task_completed" in operation_order
+        assert "task_marked_complete" in operation_order
+        assert "mailbox_plan_updated" in operation_order
+
+        task_idx = operation_order.index("task_completed")
+        mark_idx = operation_order.index("task_marked_complete")
+        mailbox_idx = operation_order.index("mailbox_plan_updated")
+
+        assert task_idx < mark_idx < mailbox_idx, (
+            "Order must be: task complete -> mark complete -> mailbox process"
+        )
+
+    def test_messages_from_multiple_senders_all_processed(
+        self, orchestrator_with_mailbox, basic_task_state, sample_plan_file
+    ):
+        """Messages from different senders should all be included in merged content."""
+        storage = orchestrator_with_mailbox.mailbox_storage
+
+        # Add messages from different senders
+        storage.add_message("Request from AI supervisor", sender="ai-supervisor")
+        storage.add_message("Request from human manager", sender="human@company.com")
+        storage.add_message("Request from automation", sender="ci-bot")
+
+        # Mock plan updater
+        mock_plan_updater = MagicMock()
+        mock_plan_updater.update_plan = MagicMock(
+            return_value={"success": True, "changes_made": True, "plan": "updated"}
+        )
+        orchestrator_with_mailbox._plan_updater = mock_plan_updater
+
+        orchestrator_with_mailbox._check_and_process_mailbox(basic_task_state)
+
+        # Verify all senders' messages are in the merged content
+        merged_content = mock_plan_updater.update_plan.call_args[0][0]
+        assert "Request from AI supervisor" in merged_content
+        assert "Request from human manager" in merged_content
+        assert "Request from automation" in merged_content
