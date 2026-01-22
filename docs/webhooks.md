@@ -20,6 +20,12 @@ This guide covers webhook event notifications in Claude Task Master, including e
 - [Testing Webhooks](#testing-webhooks)
 - [Security Best Practices](#security-best-practices)
 - [Troubleshooting](#troubleshooting)
+- [Mailbox Integration](#mailbox-integration)
+  - [Mailbox Event Types](#mailbox-event-types)
+  - [Workflow: External System → Mailbox → Plan Update → Webhook](#workflow-external-system--mailbox--plan-update--webhook)
+  - [Use Cases](#use-cases)
+  - [Configuring Webhooks for Mailbox Events](#configuring-webhooks-for-mailbox-events)
+  - [Best Practices for Mailbox + Webhooks](#best-practices-for-mailbox--webhooks)
 
 ---
 
@@ -1459,9 +1465,241 @@ def debug_webhook():
 
 ---
 
+## Mailbox Integration
+
+The mailbox system enables dynamic plan updates from external systems. When messages are processed, Claude Task Master emits webhook events to notify external services about plan changes.
+
+### Mailbox Event Types
+
+In addition to the standard event types, the following mailbox-related events are available:
+
+| Event Type | Description | When Emitted |
+|------------|-------------|--------------|
+| `mailbox.processed` | Mailbox messages processed | After the orchestrator processes pending mailbox messages |
+
+### mailbox.processed
+
+Emitted when the orchestrator processes one or more pending mailbox messages after a task completes.
+
+```json
+{
+  "event_type": "mailbox.processed",
+  "event_id": "550e8400-e29b-41d4-a716-446655440000",
+  "timestamp": "2024-01-18T15:50:00.123456Z",
+  "run_id": "run_20240118_143022",
+
+  "message_count": 3,
+  "plan_updated": true,
+  "senders": ["supervisor-ai", "security-review", "product-team"]
+}
+```
+
+**Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `message_count` | integer | Number of messages that were processed |
+| `plan_updated` | boolean | Whether the plan was modified as a result |
+| `senders` | array | List of sender identifiers from the processed messages |
+
+### Workflow: External System → Mailbox → Plan Update → Webhook
+
+The mailbox system allows external systems to send messages that dynamically update the task plan. Here's how it integrates with webhooks:
+
+1. **External system sends a message** via REST API, MCP, or CLI:
+
+   ```bash
+   # Via REST API
+   curl -X POST http://localhost:8000/mailbox/send \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer mypassword" \
+     -d '{
+       "content": "Also add rate limiting to API endpoints",
+       "sender": "security-review",
+       "priority": 2
+     }'
+   ```
+
+2. **Orchestrator checks mailbox** after each task completion
+
+3. **If messages are present**, the orchestrator:
+   - Merges messages by priority (urgent → high → normal → low)
+   - Uses AI to update the plan with the new requirements
+   - Clears processed messages from the mailbox
+
+4. **Webhook event emitted** with `mailbox.processed` event type
+
+5. **External service receives notification** about the plan update
+
+### Use Cases
+
+#### Multi-Agent Coordination
+
+When multiple Claude Task Master instances work together, they can coordinate via the mailbox:
+
+```python
+# Supervisor instance sends a message to worker instance
+import requests
+
+def send_directive_to_worker(worker_url: str, message: str, priority: int = 1):
+    """Send a directive to a worker claudetm instance."""
+    response = requests.post(
+        f"{worker_url}/mailbox/send",
+        headers={"Authorization": "Bearer worker-password"},
+        json={
+            "content": message,
+            "sender": "supervisor",
+            "priority": priority
+        }
+    )
+    return response.json()
+
+# High-priority directive
+send_directive_to_worker(
+    "http://worker-1:8000",
+    "Pause current work and fix the security vulnerability first",
+    priority=3  # URGENT
+)
+```
+
+#### Automated Review Integration
+
+Configure webhooks to respond to plan updates from automated reviews:
+
+```python
+# Receive webhook, then send follow-up via mailbox
+@app.route('/webhook', methods=['POST'])
+def handle_claudetm_webhook():
+    event = request.json
+
+    if event['event_type'] == 'task.completed':
+        # After task completion, check if there are review comments
+        comments = get_pending_review_comments(event['pr_number'])
+        if comments:
+            # Send to mailbox for processing
+            send_to_mailbox(
+                CLAUDETM_API_URL,
+                f"Address review comments: {comments}",
+                sender="code-review-bot",
+                priority=2
+            )
+
+    elif event['event_type'] == 'mailbox.processed':
+        # Log that the plan was updated
+        log_event(f"Plan updated with {event['message_count']} messages")
+        if event['plan_updated']:
+            notify_team(f"Plan modified by: {', '.join(event['senders'])}")
+
+    return {"received": True}, 200
+```
+
+#### CI/CD Pipeline Integration
+
+Use mailbox to dynamically adjust work based on CI results:
+
+```yaml
+# GitHub Actions example
+- name: Notify claudetm of CI failure
+  if: failure()
+  run: |
+    curl -X POST ${{ secrets.CLAUDETM_API_URL }}/mailbox/send \
+      -H "Authorization: Bearer ${{ secrets.CLAUDETM_PASSWORD }}" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "content": "CI failed. Please fix: ${{ github.job }} - ${{ steps.test.outputs.error }}",
+        "sender": "github-actions",
+        "priority": 3,
+        "metadata": {
+          "workflow": "${{ github.workflow }}",
+          "run_id": "${{ github.run_id }}"
+        }
+      }'
+```
+
+### Configuring Webhooks for Mailbox Events
+
+To receive notifications when the mailbox is processed, include `mailbox.processed` in your webhook event filter:
+
+```bash
+curl -X POST http://localhost:8000/webhooks \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mypassword" \
+  -d '{
+    "url": "https://your-service.com/webhook",
+    "secret": "your-webhook-secret",
+    "name": "Plan Update Notifications",
+    "description": "Receive notifications when plan is updated via mailbox",
+    "events": ["mailbox.processed", "task.completed", "task.failed"],
+    "timeout": 30.0
+  }'
+```
+
+Or subscribe to all events (including mailbox events):
+
+```bash
+curl -X POST http://localhost:8000/webhooks \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mypassword" \
+  -d '{
+    "url": "https://your-service.com/webhook",
+    "name": "All Events",
+    "events": null
+  }'
+```
+
+### Mailbox + Webhook Architecture Diagram
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  External       │     │  Claude Task    │     │  Your Webhook   │
+│  System         │     │  Master         │     │  Endpoint       │
+└────────┬────────┘     └────────┬────────┘     └────────┬────────┘
+         │                       │                       │
+         │  POST /mailbox/send   │                       │
+         │ ─────────────────────>│                       │
+         │                       │                       │
+         │                       │ (task completes)      │
+         │                       │                       │
+         │                       │ Process mailbox       │
+         │                       │ Update plan (AI)      │
+         │                       │                       │
+         │                       │  POST webhook         │
+         │                       │  mailbox.processed    │
+         │                       │ ─────────────────────>│
+         │                       │                       │
+         │                       │                       │ Process event
+         │                       │                       │ (notify team,
+         │                       │                       │  update dashboard,
+         │                       │                       │  trigger actions)
+         │                       │                       │
+         │                       │  Continue work        │
+         │                       │  with updated plan    │
+         │                       │                       │
+```
+
+### Best Practices for Mailbox + Webhooks
+
+1. **Use priority appropriately**: Reserve `URGENT` (3) for critical issues that should interrupt normal flow. Use `NORMAL` (1) for routine updates.
+
+2. **Include sender context**: Always set a meaningful `sender` value so webhook consumers can identify the source of plan changes.
+
+3. **Monitor plan updates**: Subscribe to `mailbox.processed` events to track how often external systems modify the plan.
+
+4. **Handle message merging**: When multiple messages are sent rapidly, they're merged into a single plan update. Your webhook handler will receive one `mailbox.processed` event with `message_count > 1`.
+
+5. **Idempotency for mailbox sends**: Unlike webhooks (which have retry logic), mailbox messages are processed exactly once. Ensure your external systems don't send duplicate messages.
+
+6. **Coordinate with task events**: Combine `task.completed` and `mailbox.processed` events to build a complete picture of task flow:
+   - `task.completed` → Task finished
+   - `mailbox.processed` with `plan_updated: true` → Plan was modified
+   - Next `task.started` → Working on (potentially new) tasks
+
+---
+
 ## See Also
 
-- [REST API Reference](./api-reference.md) - Complete API documentation including webhook endpoints
+- [REST API Reference](./api-reference.md) - Complete API documentation including webhook and mailbox endpoints
+- [MCP Reference](./mcp-reference.md) - MCP tools including mailbox tools
 - [Authentication Guide](./authentication.md) - Securing your Claude Task Master instance
 - [Docker Guide](./docker.md) - Running Claude Task Master in containers
 
