@@ -185,6 +185,9 @@ class PROperationsMixin:
     ) -> str:
         """Get PR review comments formatted for Claude.
 
+        Uses REST API to get all comments (like tstc), then enriches with
+        resolved status from GraphQL.
+
         Args:
             pr_number: The PR number.
             only_unresolved: If True, only return unresolved comments.
@@ -193,37 +196,56 @@ class PROperationsMixin:
             Formatted string of PR comments.
 
         Raises:
-            GitHubError: If GraphQL query fails.
+            GitHubError: If API calls fail.
             GitHubTimeoutError: If command times out.
         """
         # Get repository info
         repo_info = self._get_repo_info()
-        owner, repo = repo_info.split("/")
 
-        # Run GraphQL query
-        query = """
-        query($owner: String!, $repo: String!, $pr: Int!) {
-          repository(owner: $owner, name: $repo) {
-            pullRequest(number: $pr) {
-              reviewThreads(first: 100) {
+        # Use REST API to get ALL PR review comments (like tstc)
+        result = self._run_gh_command(
+            ["gh", "api", "--paginate", f"repos/{repo_info}/pulls/{pr_number}/comments"],
+            timeout=60,
+        )
+        all_comments = json.loads(result.stdout)
+
+        # Get resolved status from GraphQL
+        resolved_map = _get_comment_resolved_map(self, repo_info, pr_number)
+
+        # Format comments
+        return _format_pr_comments_from_rest(all_comments, resolved_map, only_unresolved)
+
+
+def _get_comment_resolved_map(
+    client: GitHubClientProtocol, repo_info: str, pr_number: int
+) -> dict[int, bool]:
+    """Get resolved status for all comments from GraphQL.
+
+    Returns a map of comment_id (databaseId) -> is_resolved.
+    """
+    owner, repo = repo_info.split("/")
+
+    query = """
+    query($owner: String!, $repo: String!, $pr: Int!) {
+      repository(owner: $owner, name: $repo) {
+        pullRequest(number: $pr) {
+          reviewThreads(first: 100) {
+            nodes {
+              isResolved
+              comments(first: 100) {
                 nodes {
-                  isResolved
-                  comments(first: 10) {
-                    nodes {
-                      author { login }
-                      body
-                      path
-                      line
-                    }
-                  }
+                  databaseId
                 }
               }
             }
           }
         }
-        """
+      }
+    }
+    """
 
-        result = self._run_gh_command(
+    try:
+        result = client._run_gh_command(
             [
                 "gh",
                 "api",
@@ -243,7 +265,17 @@ class PROperationsMixin:
         data = json.loads(result.stdout)
         threads = data["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
 
-        return _format_pr_comments(threads, only_unresolved)
+        resolved_map: dict[int, bool] = {}
+        for thread in threads:
+            is_resolved = thread.get("isResolved", False)
+            for comment in thread.get("comments", {}).get("nodes", []):
+                db_id = comment.get("databaseId")
+                if db_id:
+                    resolved_map[db_id] = is_resolved
+
+        return resolved_map
+    except Exception:
+        return {}
 
 
 def _build_pr_status_query() -> str:
@@ -424,5 +456,39 @@ def _format_pr_comments(threads: list[dict[str, Any]], only_unresolved: bool) ->
                 f"**{author}{bot_marker}** on {comment.get('path', 'PR')}:"
                 f"{comment.get('line', 'N/A')}\n{comment['body']}\n"
             )
+
+    return "\n---\n\n".join(formatted)
+
+
+def _format_pr_comments_from_rest(
+    comments: list[dict[str, Any]], resolved_map: dict[int, bool], only_unresolved: bool
+) -> str:
+    """Format PR review comments from REST API into a readable string.
+
+    Args:
+        comments: List of comment dicts from REST API.
+        resolved_map: Map of comment_id -> is_resolved from GraphQL.
+        only_unresolved: If True, only include unresolved comments.
+
+    Returns:
+        Formatted string of comments.
+    """
+    formatted = []
+    for comment in comments:
+        comment_id = comment.get("id")
+        is_resolved = resolved_map.get(comment_id, False) if comment_id else False
+
+        if only_unresolved and is_resolved:
+            continue
+
+        author = comment.get("user", {}).get("login", "unknown")
+        is_bot = author.endswith("[bot]")
+        bot_marker = " (bot)" if is_bot else ""
+
+        path = comment.get("path", "PR")
+        line = comment.get("line") or comment.get("original_line") or "N/A"
+        body = comment.get("body", "")
+
+        formatted.append(f"**{author}{bot_marker}** on {path}:{line}\n{body}\n")
 
     return "\n---\n\n".join(formatted)

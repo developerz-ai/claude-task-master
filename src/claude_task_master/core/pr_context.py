@@ -75,6 +75,9 @@ class PRContextManager:
     def save_pr_comments(self, pr_number: int | None, *, _also_save_ci: bool = True) -> int:
         """Fetch and save PR comments to files for Claude to read.
 
+        Uses REST API to get all comments (like tstc), then enriches with
+        resolved status from GraphQL.
+
         Args:
             pr_number: The PR number.
             _also_save_ci: Internal flag to also save CI failures (prevents recursion).
@@ -111,33 +114,97 @@ class PRContextManager:
                 text=True,
             )
             repo_info = result.stdout.strip()
-            owner, repo = repo_info.split("/")
 
-            # GraphQL query to get structured comments with thread IDs
-            query = """
-            query($owner: String!, $repo: String!, $pr: Int!) {
-              repository(owner: $owner, name: $repo) {
-                pullRequest(number: $pr) {
-                  reviewThreads(first: 100) {
+            # Use REST API to get ALL PR review comments (like tstc)
+            result = subprocess.run(
+                ["gh", "api", "--paginate", f"repos/{repo_info}/pulls/{pr_number}/comments"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            all_comments = json.loads(result.stdout)
+
+            # Get resolved status from GraphQL
+            resolved_map = self._get_resolved_status_map(repo_info, pr_number)
+
+            # Get already-addressed comment IDs to skip them
+            addressed_threads = self.state_manager.get_addressed_threads(pr_number)
+
+            # Convert to list of comment dicts - filter unresolved, actionable
+            comments = []
+            for comment in all_comments:
+                comment_id = comment.get("id")
+                # Check if this comment's thread is resolved
+                is_resolved = resolved_map.get(comment_id, False)
+                if is_resolved:
+                    continue  # Skip resolved comments
+
+                # Get thread ID for this comment (for tracking addressed threads)
+                thread_id = self._get_thread_id_for_comment(comment_id, resolved_map)
+
+                # Skip threads we've already addressed (replied to)
+                if thread_id and thread_id in addressed_threads:
+                    continue
+
+                body = comment.get("body", "")
+                author = comment.get("user", {}).get("login", "unknown")
+
+                # Skip non-actionable bot comments
+                if self._is_non_actionable_comment(author, body):
+                    continue
+
+                comments.append(
+                    {
+                        "thread_id": thread_id or f"comment_{comment_id}",
+                        "comment_id": str(comment_id),
+                        "author": author,
+                        "body": body,
+                        "path": comment.get("path"),
+                        "line": comment.get("line") or comment.get("original_line"),
+                        "is_resolved": False,
+                    }
+                )
+
+            # Save to files
+            self.state_manager.save_pr_comments(pr_number, comments)
+            return len(comments)
+
+        except Exception as e:
+            console.warning(f"Could not save PR comments: {e}")
+            return 0
+
+    def _get_resolved_status_map(self, repo_info: str, pr_number: int) -> dict[int, bool]:
+        """Get resolved status for all comments from GraphQL.
+
+        Returns a map of comment_id -> is_resolved.
+        Also stores thread_id for each comment for later lookup.
+        """
+        owner, repo = repo_info.split("/")
+
+        # Store thread info: comment_id -> (is_resolved, thread_id)
+        self._thread_info: dict[int, tuple[bool, str]] = {}
+
+        query = """
+        query($owner: String!, $repo: String!, $pr: Int!) {
+          repository(owner: $owner, name: $repo) {
+            pullRequest(number: $pr) {
+              reviewThreads(first: 100) {
+                nodes {
+                  id
+                  isResolved
+                  comments(first: 100) {
                     nodes {
-                      id
-                      isResolved
-                      comments(first: 10) {
-                        nodes {
-                          id
-                          author { login }
-                          body
-                          path
-                          line
-                        }
-                      }
+                      databaseId
                     }
                   }
                 }
               }
             }
-            """
+          }
+        }
+        """
 
+        try:
             result = subprocess.run(
                 [
                     "gh",
@@ -160,47 +227,26 @@ class PRContextManager:
             data = json.loads(result.stdout)
             threads = data["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
 
-            # Get already-addressed thread IDs to skip them
-            addressed_threads = self.state_manager.get_addressed_threads(pr_number)
-
-            # Convert to list of comment dicts - ONLY unresolved, actionable threads
-            comments = []
+            resolved_map: dict[int, bool] = {}
             for thread in threads:
-                if thread["isResolved"]:
-                    continue  # Skip resolved threads
-                thread_id = thread.get("id")
+                thread_id = thread.get("id", "")
+                is_resolved = thread.get("isResolved", False)
+                for comment in thread.get("comments", {}).get("nodes", []):
+                    db_id = comment.get("databaseId")
+                    if db_id:
+                        resolved_map[db_id] = is_resolved
+                        self._thread_info[db_id] = (is_resolved, thread_id)
 
-                # Skip threads we've already addressed (replied to)
-                if thread_id in addressed_threads:
-                    continue
+            return resolved_map
+        except Exception:
+            return {}
 
-                for comment in thread["comments"]["nodes"]:
-                    body = comment["body"]
-                    author = comment["author"]["login"] if comment.get("author") else "unknown"
-
-                    # Skip non-actionable bot comments
-                    if self._is_non_actionable_comment(author, body):
-                        continue
-
-                    comments.append(
-                        {
-                            "thread_id": thread_id,
-                            "comment_id": comment.get("id"),
-                            "author": author,
-                            "body": body,
-                            "path": comment.get("path"),
-                            "line": comment.get("line"),
-                            "is_resolved": False,
-                        }
-                    )
-
-            # Save to files
-            self.state_manager.save_pr_comments(pr_number, comments)
-            return len(comments)
-
-        except Exception as e:
-            console.warning(f"Could not save PR comments: {e}")
-            return 0
+    def _get_thread_id_for_comment(
+        self, comment_id: int, resolved_map: dict[int, bool]
+    ) -> str | None:
+        """Get the thread ID for a comment."""
+        info = getattr(self, "_thread_info", {}).get(comment_id)
+        return info[1] if info else None
 
     def post_comment_replies(self, pr_number: int | None) -> None:
         """Post replies to comments based on resolve-comments.json.

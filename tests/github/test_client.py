@@ -617,8 +617,34 @@ class TestGitHubClientGetPRStatus:
 # =============================================================================
 
 
+def _make_rest_comment_client(
+    comment_id: int, user: str, body: str, path: str | None, line: int | None
+) -> dict:
+    """Helper to create REST API comment format."""
+    return {
+        "id": comment_id,
+        "user": {"login": user},
+        "body": body,
+        "path": path,
+        "line": line,
+    }
+
+
+def _make_graphql_resolved_response_client(resolved_map: dict[int, bool]) -> dict:
+    """Helper to create GraphQL resolved status response."""
+    nodes = []
+    for comment_id, is_resolved in resolved_map.items():
+        nodes.append(
+            {
+                "isResolved": is_resolved,
+                "comments": {"nodes": [{"databaseId": comment_id}]},
+            }
+        )
+    return {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": nodes}}}}}
+
+
 class TestGitHubClientGetPRComments:
-    """Tests for PR comments retrieval."""
+    """Tests for PR comments retrieval using REST API + GraphQL."""
 
     @pytest.fixture
     def github_client(self):
@@ -630,51 +656,18 @@ class TestGitHubClientGetPRComments:
 
     def test_get_pr_comments_unresolved_only(self, github_client):
         """Test getting only unresolved PR comments."""
-        response = {
-            "data": {
-                "repository": {
-                    "pullRequest": {
-                        "reviewThreads": {
-                            "nodes": [
-                                {
-                                    "isResolved": False,
-                                    "comments": {
-                                        "nodes": [
-                                            {
-                                                "author": {"login": "reviewer1"},
-                                                "body": "Please fix this",
-                                                "path": "src/main.py",
-                                                "line": 42,
-                                            }
-                                        ]
-                                    },
-                                },
-                                {
-                                    "isResolved": True,
-                                    "comments": {
-                                        "nodes": [
-                                            {
-                                                "author": {"login": "reviewer2"},
-                                                "body": "Looks good now",
-                                                "path": "src/utils.py",
-                                                "line": 10,
-                                            }
-                                        ]
-                                    },
-                                },
-                            ]
-                        }
-                    }
-                }
-            }
-        }
+        rest_comments = [
+            _make_rest_comment_client(1, "reviewer1", "Please fix this", "src/main.py", 42),
+            _make_rest_comment_client(2, "reviewer2", "Looks good now", "src/utils.py", 10),
+        ]
+        graphql_response = _make_graphql_resolved_response_client({1: False, 2: True})
+
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
-                mock_run.return_value = MagicMock(
-                    returncode=0,
-                    stdout=json.dumps(response),
-                    stderr="",
-                )
+                mock_run.side_effect = [
+                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
+                ]
                 comments = github_client.get_pr_comments(123, only_unresolved=True)
 
                 assert "reviewer1" in comments
@@ -684,51 +677,18 @@ class TestGitHubClientGetPRComments:
 
     def test_get_pr_comments_all_comments(self, github_client):
         """Test getting all PR comments including resolved."""
-        response = {
-            "data": {
-                "repository": {
-                    "pullRequest": {
-                        "reviewThreads": {
-                            "nodes": [
-                                {
-                                    "isResolved": False,
-                                    "comments": {
-                                        "nodes": [
-                                            {
-                                                "author": {"login": "reviewer1"},
-                                                "body": "Unresolved comment",
-                                                "path": "src/main.py",
-                                                "line": 42,
-                                            }
-                                        ]
-                                    },
-                                },
-                                {
-                                    "isResolved": True,
-                                    "comments": {
-                                        "nodes": [
-                                            {
-                                                "author": {"login": "reviewer2"},
-                                                "body": "Resolved comment",
-                                                "path": "src/utils.py",
-                                                "line": 10,
-                                            }
-                                        ]
-                                    },
-                                },
-                            ]
-                        }
-                    }
-                }
-            }
-        }
+        rest_comments = [
+            _make_rest_comment_client(1, "reviewer1", "Unresolved comment", "src/main.py", 42),
+            _make_rest_comment_client(2, "reviewer2", "Resolved comment", "src/utils.py", 10),
+        ]
+        graphql_response = _make_graphql_resolved_response_client({1: False, 2: True})
+
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
-                mock_run.return_value = MagicMock(
-                    returncode=0,
-                    stdout=json.dumps(response),
-                    stderr="",
-                )
+                mock_run.side_effect = [
+                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
+                ]
                 comments = github_client.get_pr_comments(123, only_unresolved=False)
 
                 assert "reviewer1" in comments
@@ -738,41 +698,21 @@ class TestGitHubClientGetPRComments:
 
     def test_get_pr_comments_formatting(self, github_client):
         """Test that comments are properly formatted."""
-        response = {
-            "data": {
-                "repository": {
-                    "pullRequest": {
-                        "reviewThreads": {
-                            "nodes": [
-                                {
-                                    "isResolved": False,
-                                    "comments": {
-                                        "nodes": [
-                                            {
-                                                "author": {"login": "developer"},
-                                                "body": "This needs refactoring",
-                                                "path": "src/handler.py",
-                                                "line": 100,
-                                            }
-                                        ]
-                                    },
-                                }
-                            ]
-                        }
-                    }
-                }
-            }
-        }
+        rest_comments = [
+            _make_rest_comment_client(
+                1, "developer", "This needs refactoring", "src/handler.py", 100
+            ),
+        ]
+        graphql_response = _make_graphql_resolved_response_client({1: False})
+
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
-                mock_run.return_value = MagicMock(
-                    returncode=0,
-                    stdout=json.dumps(response),
-                    stderr="",
-                )
+                mock_run.side_effect = [
+                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
+                ]
                 comments = github_client.get_pr_comments(1)
 
-                # Check formatting elements
                 assert "**developer**" in comments
                 assert "src/handler.py" in comments
                 assert "100" in comments
@@ -780,38 +720,17 @@ class TestGitHubClientGetPRComments:
 
     def test_get_pr_comments_bot_user_marker(self, github_client):
         """Test that bot users are properly marked."""
-        response = {
-            "data": {
-                "repository": {
-                    "pullRequest": {
-                        "reviewThreads": {
-                            "nodes": [
-                                {
-                                    "isResolved": False,
-                                    "comments": {
-                                        "nodes": [
-                                            {
-                                                "author": {"login": "codecov[bot]"},
-                                                "body": "Coverage report",
-                                                "path": None,
-                                                "line": None,
-                                            }
-                                        ]
-                                    },
-                                }
-                            ]
-                        }
-                    }
-                }
-            }
-        }
+        rest_comments = [
+            _make_rest_comment_client(1, "codecov[bot]", "Coverage report", None, None),
+        ]
+        graphql_response = _make_graphql_resolved_response_client({1: False})
+
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
-                mock_run.return_value = MagicMock(
-                    returncode=0,
-                    stdout=json.dumps(response),
-                    stderr="",
-                )
+                mock_run.side_effect = [
+                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
+                ]
                 comments = github_client.get_pr_comments(1)
 
                 assert "(bot)" in comments
@@ -819,44 +738,18 @@ class TestGitHubClientGetPRComments:
 
     def test_get_pr_comments_multiple_comments_in_thread(self, github_client):
         """Test handling multiple comments in a single thread."""
-        response = {
-            "data": {
-                "repository": {
-                    "pullRequest": {
-                        "reviewThreads": {
-                            "nodes": [
-                                {
-                                    "isResolved": False,
-                                    "comments": {
-                                        "nodes": [
-                                            {
-                                                "author": {"login": "user1"},
-                                                "body": "First comment",
-                                                "path": "file.py",
-                                                "line": 1,
-                                            },
-                                            {
-                                                "author": {"login": "user2"},
-                                                "body": "Reply to first",
-                                                "path": "file.py",
-                                                "line": 1,
-                                            },
-                                        ]
-                                    },
-                                }
-                            ]
-                        }
-                    }
-                }
-            }
-        }
+        rest_comments = [
+            _make_rest_comment_client(1, "user1", "First comment", "file.py", 1),
+            _make_rest_comment_client(2, "user2", "Reply to first", "file.py", 1),
+        ]
+        graphql_response = _make_graphql_resolved_response_client({1: False, 2: False})
+
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
-                mock_run.return_value = MagicMock(
-                    returncode=0,
-                    stdout=json.dumps(response),
-                    stderr="",
-                )
+                mock_run.side_effect = [
+                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
+                ]
                 comments = github_client.get_pr_comments(1)
 
                 assert "user1" in comments
@@ -865,53 +758,35 @@ class TestGitHubClientGetPRComments:
                 assert "Reply to first" in comments
 
     def test_get_pr_comments_no_comments(self, github_client):
-        """Test when there are no review threads."""
-        response: dict = {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": []}}}}}
+        """Test when there are no review comments."""
+        rest_comments: list = []
+        graphql_response = {
+            "data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": []}}}}
+        }
+
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
-                mock_run.return_value = MagicMock(
-                    returncode=0,
-                    stdout=json.dumps(response),
-                    stderr="",
-                )
+                mock_run.side_effect = [
+                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
+                ]
                 comments = github_client.get_pr_comments(1)
 
                 assert comments == ""
 
     def test_get_pr_comments_missing_path_and_line(self, github_client):
         """Test handling comments without path or line information."""
-        response = {
-            "data": {
-                "repository": {
-                    "pullRequest": {
-                        "reviewThreads": {
-                            "nodes": [
-                                {
-                                    "isResolved": False,
-                                    "comments": {
-                                        "nodes": [
-                                            {
-                                                "author": {"login": "reviewer"},
-                                                "body": "General PR comment",
-                                                "path": None,
-                                                "line": None,
-                                            }
-                                        ]
-                                    },
-                                }
-                            ]
-                        }
-                    }
-                }
-            }
-        }
+        rest_comments = [
+            _make_rest_comment_client(1, "reviewer", "General PR comment", None, None),
+        ]
+        graphql_response = _make_graphql_resolved_response_client({1: False})
+
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
-                mock_run.return_value = MagicMock(
-                    returncode=0,
-                    stdout=json.dumps(response),
-                    stderr="",
-                )
+                mock_run.side_effect = [
+                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
+                ]
                 comments = github_client.get_pr_comments(1)
 
                 assert "PR" in comments or "N/A" in comments
@@ -919,48 +794,39 @@ class TestGitHubClientGetPRComments:
 
     def test_get_pr_comments_separator(self, github_client):
         """Test that comments are separated correctly."""
-        response = {
-            "data": {
-                "repository": {
-                    "pullRequest": {
-                        "reviewThreads": {
-                            "nodes": [
-                                {
-                                    "isResolved": False,
-                                    "comments": {
-                                        "nodes": [
-                                            {
-                                                "author": {"login": "user1"},
-                                                "body": "Comment 1",
-                                                "path": "file1.py",
-                                                "line": 1,
-                                            },
-                                            {
-                                                "author": {"login": "user2"},
-                                                "body": "Comment 2",
-                                                "path": "file2.py",
-                                                "line": 2,
-                                            },
-                                        ]
-                                    },
-                                }
-                            ]
-                        }
-                    }
-                }
-            }
-        }
+        rest_comments = [
+            _make_rest_comment_client(1, "user1", "Comment 1", "file1.py", 1),
+            _make_rest_comment_client(2, "user2", "Comment 2", "file2.py", 2),
+        ]
+        graphql_response = _make_graphql_resolved_response_client({1: False, 2: False})
+
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
-                mock_run.return_value = MagicMock(
-                    returncode=0,
-                    stdout=json.dumps(response),
-                    stderr="",
-                )
+                mock_run.side_effect = [
+                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
+                ]
                 comments = github_client.get_pr_comments(1)
 
                 # Check that separator is used
                 assert "---" in comments
+
+    def test_get_pr_comments_with_empty_comment_body(self, github_client):
+        """Test handling comments with empty body."""
+        rest_comments = [
+            _make_rest_comment_client(1, "user", "", "file.py", 1),
+        ]
+        graphql_response = _make_graphql_resolved_response_client({1: False})
+
+        with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
+            with patch("subprocess.run") as mock_run:
+                mock_run.side_effect = [
+                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
+                ]
+                # Should not raise, just return formatted output
+                comments = github_client.get_pr_comments(1)
+                assert "user" in comments
 
 
 # =============================================================================
@@ -1304,38 +1170,17 @@ class TestGitHubClientEdgeCases:
 
     def test_get_pr_comments_with_empty_comment_body(self, github_client):
         """Test handling comments with empty body."""
-        response = {
-            "data": {
-                "repository": {
-                    "pullRequest": {
-                        "reviewThreads": {
-                            "nodes": [
-                                {
-                                    "isResolved": False,
-                                    "comments": {
-                                        "nodes": [
-                                            {
-                                                "author": {"login": "user"},
-                                                "body": "",
-                                                "path": "file.py",
-                                                "line": 1,
-                                            }
-                                        ]
-                                    },
-                                }
-                            ]
-                        }
-                    }
-                }
-            }
-        }
+        rest_comments = [
+            _make_rest_comment_client(1, "user", "", "file.py", 1),
+        ]
+        graphql_response = _make_graphql_resolved_response_client({1: False})
+
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
-                mock_run.return_value = MagicMock(
-                    returncode=0,
-                    stdout=json.dumps(response),
-                    stderr="",
-                )
+                mock_run.side_effect = [
+                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
+                ]
                 # Should not raise, just return formatted output
                 comments = github_client.get_pr_comments(1)
                 assert "user" in comments
