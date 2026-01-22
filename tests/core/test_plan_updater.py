@@ -170,7 +170,7 @@ class TestPlanUpdaterFromMessages:
         with patch.object(updater, "update_plan") as mock_update:
             mock_update.return_value = {"success": True, "changes_made": True}
 
-            result = updater.update_plan_from_messages(["Add new feature"])
+            updater.update_plan_from_messages(["Add new feature"])
 
         mock_update.assert_called_once_with("Add new feature")
 
