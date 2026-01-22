@@ -565,12 +565,19 @@ class WorkLoopOrchestrator:
                     check_time.isoformat(),
                 )
 
-                # Emit webhook event for plan update
+                # Emit plan.updated webhook event
+                # Get task counts for the updated plan
+                updated_total_tasks = self._get_total_tasks(state)
+                updated_completed_tasks = self._get_completed_tasks(state)
+
                 self.webhook_emitter.emit(
-                    "mailbox.processed",
-                    message_count=len(messages),
-                    plan_updated=True,
-                    senders=[msg.sender for msg in messages],
+                    "plan.updated",
+                    update_source="mailbox",
+                    message=merged_content[:500]
+                    if merged_content
+                    else None,  # Truncate long messages
+                    total_tasks=updated_total_tasks,
+                    completed_tasks=updated_completed_tasks,
                 )
 
                 return True
@@ -591,11 +598,19 @@ class WorkLoopOrchestrator:
                     check_time.isoformat(),
                 )
 
+                # Emit plan.updated with no changes (still useful for tracking)
+                current_total_tasks = self._get_total_tasks(state)
+                current_completed_tasks = self._get_completed_tasks(state)
+
                 self.webhook_emitter.emit(
-                    "mailbox.processed",
-                    message_count=len(messages),
-                    plan_updated=False,
-                    senders=[msg.sender for msg in messages],
+                    "plan.updated",
+                    update_source="mailbox",
+                    message=merged_content[:500] if merged_content else None,  # Truncate
+                    total_tasks=current_total_tasks,
+                    completed_tasks=current_completed_tasks,
+                    tasks_added=0,
+                    tasks_modified=0,
+                    tasks_removed=0,
                 )
 
                 return False

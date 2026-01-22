@@ -345,13 +345,14 @@ class TestCheckAndProcessMailbox:
 
         # Check that webhook was emitted
         mock_emitter.emit.assert_called()
-        # Find the mailbox.processed call
-        calls = [c for c in mock_emitter.emit.call_args_list if c[0][0] == "mailbox.processed"]
+        # Find the plan.updated call
+        calls = [c for c in mock_emitter.emit.call_args_list if c[0][0] == "plan.updated"]
         assert len(calls) == 1
         call_kwargs = calls[0][1]
-        assert call_kwargs["message_count"] == 1
-        assert call_kwargs["plan_updated"] is True
-        assert "webhook-tester" in call_kwargs["senders"]
+        assert call_kwargs["update_source"] == "mailbox"
+        assert call_kwargs["message"] is not None
+        assert "total_tasks" in call_kwargs
+        assert "completed_tasks" in call_kwargs
 
 
 # =============================================================================
