@@ -59,8 +59,11 @@ mypy .                    # Type check
 2. **State Manager** - Persistence to `.claude-task-master/`
 3. **Agent Wrapper** - Claude Agent SDK `query()` with real-time streaming
 4. **Planner** - Planning phase (read-only tools)
-5. **Work Loop Orchestrator** - Execution loop with task tracking
-6. **Logger** - Consolidated `logs/run-{timestamp}.txt`
+5. **Plan Updater** - Updates existing plans with change requests (for `resume "message"`)
+6. **Work Loop Orchestrator** - Execution loop with task tracking, mailbox checks
+7. **Mailbox** - Inter-instance communication for dynamic plan updates
+8. **PR Context Manager** - CI failures + review comments fetched together
+9. **Logger** - Consolidated `logs/run-{timestamp}.txt`
 
 **Tool Configurations by Phase**:
 | Phase | Tools | Purpose |
@@ -78,8 +81,12 @@ mypy .                    # Type check
 ├── state.json            # Machine state
 ├── progress.md           # Progress summary
 ├── context.md            # Accumulated learnings
-└── logs/
-    └── run-*.txt         # Last 10 logs kept
+├── mailbox.json          # Pending messages for plan updates
+├── logs/
+│   └── run-*.txt         # Last 10 logs kept
+└── pr-{number}/          # PR-specific context
+    ├── ci/*.txt          # CI failure logs
+    └── comments/*.txt    # Review comments
 ```
 
 ## Exit Codes
@@ -118,12 +125,26 @@ The work prompt enforces this - agents must report both commit hash AND PR URL.
 ### CLI Commands
 All commands check `state_manager.exists()` first:
 - `start`: Initialize and run planning → work loop
+- `resume`: Resume paused task, optionally with message to update plan first
 - `status`: Show goal, status, session count, options
 - `plan`: Display plan.md with markdown rendering
 - `logs`: Show last N lines from log file
 - `progress`: Display progress.md
 - `context`: Display context.md
 - `clean`: Remove .claude-task-master/ with confirmation
+
+### Mailbox System
+- Messages stored in `.claude-task-master/mailbox.json`
+- Checked after each task completion by orchestrator
+- Multiple messages merged with priority ordering (urgent → low)
+- Merged message triggers plan update via `PlanUpdater`
+- REST: `POST /mailbox/send`, `GET /mailbox`, `DELETE /mailbox`
+- MCP: `send_message`, `check_mailbox`, `clear_mailbox` tools
+
+### Resume with Message
+- `claudetm resume "change"` updates plan before resuming
+- Uses `PlanUpdater` to integrate change request into existing plan
+- Preserves completed tasks, modifies pending tasks as needed
 
 ### Planning Prompt
 - Instructs Claude to add `.claude-task-master/` to .gitignore
@@ -144,6 +165,12 @@ uv run claudetm start "Implement TODO" --max-sessions 3 --no-auto-merge
 - **Max 500 LOC per file** - split larger files following SRP/SOLID
 - **Single Responsibility** - one reason to change per module
 
+### CI + Comments Combined
+- When CI fails, both CI logs AND PR comments are fetched together
+- Prevents two-step fixes (CI first, then comments)
+- Single work session addresses all feedback at once
+- `PRContextManager.save_ci_failures()` automatically calls `save_pr_comments()`
+
 ## Important Notes
 
 1. **Always check if tasks already complete** - planning phase might finish some tasks
@@ -152,3 +179,5 @@ uv run claudetm start "Implement TODO" --max-sessions 3 --no-auto-merge
 4. **Clean exit** - delete state files on success, keep logs
 5. **OAuth credentials** - handle nested JSON structure properly
 6. **Working directory** - change dir for queries, always restore
+7. **Mailbox check** - orchestrator checks mailbox after each task completion
+8. **CI + Comments** - fetched together to handle in one step

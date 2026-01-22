@@ -14,6 +14,7 @@ This document provides a comprehensive reference for the Claude Task Master REST
   - [Control Endpoints](#control-endpoints)
   - [Task Management Endpoints](#task-management-endpoints)
   - [Webhook Endpoints](#webhook-endpoints)
+  - [Mailbox Endpoints](#mailbox-endpoints)
 
 ---
 
@@ -831,6 +832,148 @@ Or test a URL directly:
 
 ---
 
+### Mailbox Endpoints
+
+Endpoints for inter-instance communication and dynamic plan updates.
+
+#### `POST /mailbox/send`
+
+Send a message to the mailbox for processing after the current task completes.
+
+**Request Body:** `SendMailboxMessageRequest`
+
+```json
+{
+  "content": "Add input validation to all form fields",
+  "sender": "security-review",
+  "priority": 2,
+  "metadata": {
+    "ticket": "SEC-123",
+    "source": "automated-scan"
+  }
+}
+```
+
+**Parameters:**
+
+- `content` (required, string) - The message content describing the change request
+- `sender` (optional, string) - Identifier for the message sender (default: "anonymous")
+- `priority` (optional, integer) - Priority level 0-3 (default: 1)
+  - 0 = Low
+  - 1 = Normal
+  - 2 = High
+  - 3 = Urgent
+- `metadata` (optional, object) - Additional metadata for tracking
+
+**Response:** `SendMailboxMessageResponse` (201 Created)
+
+```json
+{
+  "success": true,
+  "message_id": "msg_a1b2c3d4",
+  "message": "Message sent successfully (id: msg_a1b2c3d4)"
+}
+```
+
+**Example:**
+
+```bash
+curl -X POST http://localhost:8000/mailbox/send \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mypassword" \
+  -d '{
+    "content": "Also add rate limiting to the API endpoints",
+    "sender": "api-team",
+    "priority": 2
+  }'
+```
+
+**Error Responses:**
+
+- `400 Bad Request` - Empty content or invalid request
+- `500 Internal Server Error` - Failed to store message
+
+---
+
+#### `GET /mailbox`
+
+Check the current mailbox status including message count and previews.
+
+**Response:** `MailboxStatusResponse`
+
+```json
+{
+  "success": true,
+  "count": 2,
+  "messages": [
+    {
+      "id": "msg_a1b2c3d4",
+      "sender": "security-review",
+      "content_preview": "Add input validation to all form...",
+      "priority": 2,
+      "timestamp": "2024-01-18T15:30:00Z"
+    },
+    {
+      "id": "msg_e5f6g7h8",
+      "sender": "product-team",
+      "content_preview": "Also add export functionality for...",
+      "priority": 1,
+      "timestamp": "2024-01-18T15:35:00Z"
+    }
+  ],
+  "last_checked": "2024-01-18T15:00:00Z",
+  "total_messages_received": 5
+}
+```
+
+**Fields:**
+
+- `count` - Number of pending messages
+- `messages` - Array of message previews
+  - `id` - Unique message identifier
+  - `sender` - Who sent the message
+  - `content_preview` - First 50 characters of content
+  - `priority` - Priority level (0-3)
+  - `timestamp` - When the message was received
+- `last_checked` - When the mailbox was last processed
+- `total_messages_received` - Lifetime count of messages received
+
+**Example:**
+
+```bash
+curl http://localhost:8000/mailbox \
+  -H "Authorization: Bearer mypassword"
+```
+
+---
+
+#### `DELETE /mailbox`
+
+Clear all pending messages from the mailbox.
+
+**Response:** `ClearMailboxResponse`
+
+```json
+{
+  "success": true,
+  "messages_cleared": 2,
+  "message": "Cleared 2 message(s) from mailbox"
+}
+```
+
+**Example:**
+
+```bash
+curl -X DELETE http://localhost:8000/mailbox \
+  -H "Authorization: Bearer mypassword"
+```
+
+**Error Responses:**
+
+- `500 Internal Server Error` - Failed to clear mailbox
+
+---
+
 ## Complete Example Workflow
 
 Here's a complete example of using the API to manage a task:
@@ -902,7 +1045,21 @@ curl -X POST http://localhost:8000/control/resume \
     "reason": "Continuing after review"
   }'
 
-# 11. Delete task when done
+# 11. Send a message to the mailbox (processed after current task)
+curl -X POST http://localhost:8000/mailbox/send \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mypassword" \
+  -d '{
+    "content": "Also add rate limiting to the API",
+    "sender": "api-team",
+    "priority": 2
+  }'
+
+# 12. Check mailbox status
+curl -H "Authorization: Bearer mypassword" \
+  http://localhost:8000/mailbox
+
+# 13. Delete task when done
 curl -X DELETE http://localhost:8000/task \
   -H "Authorization: Bearer mypassword"
 ```

@@ -300,6 +300,7 @@ Complete documentation for all features and deployment options:
 | **[Authentication](./docs/authentication.md)** | Password-based authentication for REST API, MCP server, and webhooks |
 | **[REST API Reference](./docs/api-reference.md)** | Complete REST API endpoint documentation with examples |
 | **[Webhooks](./docs/webhooks.md)** | Webhook events, payload formats, HMAC signature verification, and integration examples |
+| **[Mailbox System](./docs/mailbox.md)** | Inter-instance communication, dynamic plan updates, and multi-instance coordination |
 
 ## Usage
 
@@ -309,6 +310,7 @@ Complete documentation for all features and deployment options:
 |---------|-------------|
 | `claudetm start "goal"` | Start a new task |
 | `claudetm resume` | Resume a paused task |
+| `claudetm resume "message"` | Update plan with message, then resume |
 | `claudetm status` | Show current status |
 | `claudetm plan` | View task list |
 | `claudetm progress` | View progress summary |
@@ -346,6 +348,14 @@ claudetm start "Fix bug in parser" --max-sessions 5
 
 # Monitor progress
 watch -n 5 'claudetm status'
+
+# Resume with a change request (updates plan first)
+claudetm resume "Also add input validation to the forms"
+
+# Send message to mailbox via REST API
+curl -X POST http://localhost:8000/mailbox/send \
+  -H "Content-Type: application/json" \
+  -d '{"content": "Prioritize security fixes", "priority": 2}'
 ```
 
 ## Examples & Use Cases
