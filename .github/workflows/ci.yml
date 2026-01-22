@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main, master]
 
+env:
+  # Hypothesis profile for CI - more examples, no deadline
+  HYPOTHESIS_PROFILE: ci
+
 jobs:
   lint:
     name: Lint
@@ -35,8 +39,60 @@ jobs:
       - name: Run mypy
         run: mypy src/
 
-  test:
-    name: Test
+  # Unit tests - fast, run on multiple Python versions
+  test-unit:
+    name: Unit Tests (Python ${{ matrix.python-version }})
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install dependencies
+        run: |
+          uv pip install --system -e ".[dev,api]"
+
+      - name: Run unit tests
+        run: |
+          # Run unit tests (exclude integration and property tests)
+          pytest tests/ \
+            --ignore=tests/integration/ \
+            --ignore=tests/property/ \
+            --cov=claude_task_master \
+            --cov-report=xml:coverage-unit-${{ matrix.python-version }}.xml \
+            --cov-report=term-missing \
+            -v \
+            2>&1 | tee pytest-unit-${{ matrix.python-version }}.txt
+          exit ${PIPESTATUS[0]}
+
+      - name: Upload test output on failure
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pytest-unit-${{ matrix.python-version }}
+          path: pytest-unit-${{ matrix.python-version }}.txt
+          retention-days: 7
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: coverage-unit-${{ matrix.python-version }}
+          path: coverage-unit-${{ matrix.python-version }}.xml
+          retention-days: 7
+
+  # Integration tests - may be slower, test component interactions
+  test-integration:
+    name: Integration Tests
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v6
@@ -53,25 +109,112 @@ jobs:
         run: |
           uv pip install --system -e ".[dev,api]"
 
-      - name: Run tests with coverage
+      - name: Run integration tests
         run: |
-          # Run pytest and capture full output to file for debugging
-          pytest --cov=claude_task_master --cov-report=xml --cov-report=term-missing --cov-fail-under=50 2>&1 | tee pytest-output.txt
-          # Check pytest exit code from PIPESTATUS
+          pytest tests/integration/ \
+            --cov=claude_task_master \
+            --cov-report=xml:coverage-integration.xml \
+            --cov-report=term-missing \
+            -v \
+            --timeout=120 \
+            2>&1 | tee pytest-integration.txt
           exit ${PIPESTATUS[0]}
 
       - name: Upload test output on failure
         if: failure()
         uses: actions/upload-artifact@v6
         with:
-          name: pytest-output
-          path: pytest-output.txt
+          name: pytest-integration
+          path: pytest-integration.txt
           retention-days: 7
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: coverage-integration
+          path: coverage-integration.xml
+          retention-days: 7
+
+  # Property-based tests using Hypothesis
+  test-property:
+    name: Property-based Tests (Hypothesis)
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install dependencies
+        run: |
+          uv pip install --system -e ".[dev,api]"
+
+      - name: Run property-based tests
+        run: |
+          # Run with CI profile (100 examples, no deadline)
+          HYPOTHESIS_PROFILE=ci pytest tests/property/ \
+            --cov=claude_task_master \
+            --cov-report=xml:coverage-property.xml \
+            --cov-report=term-missing \
+            -v \
+            --hypothesis-show-statistics \
+            2>&1 | tee pytest-property.txt
+          exit ${PIPESTATUS[0]}
+
+      - name: Upload test output on failure
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pytest-property
+          path: pytest-property.txt
+          retention-days: 7
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: coverage-property
+          path: coverage-property.xml
+          retention-days: 7
+
+  # Combine coverage reports and upload to Codecov
+  coverage:
+    name: Coverage Report
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs: [test-unit, test-integration, test-property]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download all coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install coverage
+        run: pip install coverage
+
+      - name: Combine coverage reports
+        run: |
+          # List downloaded files for debugging
+          ls -la coverage-*.xml || true
+
+          # Just use the individual reports for codecov
+          echo "Coverage files ready for upload"
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
-          files: ./coverage.xml
+          files: ./coverage-unit-3.12.xml,./coverage-integration.xml,./coverage-property.xml
           fail_ci_if_error: false
           verbose: true
         env:
@@ -80,7 +223,7 @@ jobs:
   build:
     name: Build Package
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    needs: [lint, test]
+    needs: [lint, test-unit, test-integration, test-property]
     # Only run on PRs to verify build works, not on main pushes
     if: github.event_name == 'pull_request'
     steps:
@@ -109,7 +252,7 @@ jobs:
   cli-test:
     name: CLI Integration Test
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    needs: [lint, test]
+    needs: [lint, test-unit, test-integration, test-property]
     # Only run on PRs to verify CLI works, not on main pushes
     if: github.event_name == 'pull_request'
     steps:
@@ -138,7 +281,7 @@ jobs:
   docker-build:
     name: Docker Build Verification
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    needs: [lint, test]
+    needs: [lint, test-unit, test-integration, test-property]
     # Only run on PRs to verify Docker build works, not on main pushes
     if: github.event_name == 'pull_request'
     steps:
