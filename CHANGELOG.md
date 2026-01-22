@@ -7,11 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-01-22
+
 ### Added
-- N/A
+
+#### Webhook Events - Enhanced Event System
+- Extended webhook event system with new event types:
+  - `run.started` - Emitted when orchestrator starts execution
+  - `run.completed` - Emitted when orchestrator finishes (success, failure, or blocked state)
+  - `status.changed` - Emitted when task status transitions between states (pending → in_progress → completed)
+  - `ci.passed` - Emitted when CI checks pass for a PR
+  - `ci.failed` - Emitted when CI checks fail for a PR
+  - `plan.updated` - Emitted when plan is updated via mailbox/API or plan updater
+- New event dataclasses: `CIPassedEvent`, `CIFailedEvent`, `PlanUpdatedEvent`, `StatusChangedEvent`, `RunStartedEvent`, `RunCompletedEvent`
+- Updated `EventType` enum with complete event type coverage
+- Comprehensive webhook event documentation in `docs/webhooks.md` with payload examples
+
+#### AI Developer Workflow - Repository Setup
+- **New MCP Tools** for AI developer environments:
+  - `clone_repo(url, target_dir, branch)` - Clone git repository to `~/workspace/claude-task-master/{project-name}`
+  - `setup_repo(work_dir)` - Run dependency installation, create venv, execute setup scripts
+  - `plan_repo(work_dir, goal)` - Plan-only mode that analyzes codebase and generates task plan without execution
+- **New REST API Endpoints** for repository management:
+  - `POST /repo/clone` - Clone a git repository with configuration
+  - `POST /repo/setup` - Setup cloned repository for development
+  - `POST /repo/plan` - Plan-only mode: analyze codebase and generate task plan
+- New Pydantic models: `CloneRepoRequest`, `SetupRepoRequest`, `PlanRepoRequest`, `SetupRepoResult`, `PlanRepoResult`
+- New routes module `src/claude_task_master/api/routes_repo.py` for repository endpoints
+- Comprehensive repository setup guide (`docs/repo-setup.md`) describing the AI developer workflow: clone → setup → plan → work
+
+#### Documentation Enhancements
+- Complete webhook events documentation in `docs/webhooks.md` with all 7+ event types and payload formats
+- Comprehensive repository setup workflow guide in `docs/repo-setup.md`
+- Updated `docs/api-reference.md` with new `/repo/clone`, `/repo/setup`, `/repo/plan` endpoint documentation
+- Updated `docs/mcp-tools.md` with new `clone_repo`, `setup_repo`, `plan_repo` tool documentation
+- Enhanced `CLAUDE.md` project instructions with:
+  - New webhook events in the Webhook Events section
+  - New MCP tools in the MCP Tools section
+  - New REST API endpoints in the API Endpoints section
+- Updated `README.md` with AI developer workflow section describing the repo setup use case
+
+#### Testing & Quality Assurance
+- Unit tests for all new webhook event types in `tests/webhooks/test_events.py`
+- Integration tests for webhook emissions in `tests/core/test_orchestrator_webhooks.py`
+- Tests for new MCP tools in `tests/mcp/test_tools_repo.py`
+- Tests for new REST API endpoints in `tests/api/test_routes_repo.py`
+- Full test suite passing with 100% coverage of new features
+- Comprehensive type checking with mypy
+- Code formatting and linting with ruff
 
 ### Changed
-- N/A
+- Webhook event system now includes lifecycle events (run.started, run.completed)
+- Task lifecycle tracking now includes status.changed events for granular monitoring
+- CI/CD workflow integration now emits separate ci.passed and ci.failed events instead of combined events
 
 ### Deprecated
 - N/A
@@ -184,7 +232,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.0...v0.1.1
