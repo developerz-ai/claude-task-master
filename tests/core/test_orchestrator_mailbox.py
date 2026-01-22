@@ -291,6 +291,38 @@ class TestCheckAndProcessMailbox:
         if initial_check is not None:
             assert basic_task_state.last_mailbox_check > initial_check
 
+    def test_last_mailbox_check_timestamp_updated_when_empty(
+        self, orchestrator_with_mailbox, basic_task_state, state_manager
+    ):
+        """Should update last_mailbox_check timestamp even when mailbox is empty.
+
+        The timestamp tracks when the mailbox was last checked, regardless of
+        whether messages were found. This is important for monitoring to know
+        the orchestrator is alive and checking the mailbox.
+        """
+        # Initialize state_manager with state
+        state_manager.save_state(basic_task_state)
+
+        # Ensure mailbox is empty
+        assert orchestrator_with_mailbox.mailbox_storage.count() == 0
+
+        # Store initial timestamp
+        initial_check = basic_task_state.last_mailbox_check
+        assert initial_check is None  # Should be None initially
+
+        # Check empty mailbox
+        result = orchestrator_with_mailbox._check_and_process_mailbox(basic_task_state)
+
+        # Should return False (no plan update)
+        assert result is False
+
+        # But timestamp should still be updated
+        assert basic_task_state.last_mailbox_check is not None
+
+        # Verify state was persisted
+        loaded_state = state_manager.load_state()
+        assert loaded_state.last_mailbox_check is not None
+
     def test_webhook_emitted_on_process(
         self, orchestrator_with_mailbox, basic_task_state, sample_plan_file
     ):
