@@ -160,4 +160,5 @@ def get_sample_ci_failures():
 def get_ci_failure_for_type(failure_type: str) -> str:
     """Get a specific CI failure log by type."""
     failures = get_sample_ci_failures()
-    return failures.get(failure_type, GITHUB_ACTIONS_FAILURE)
+    result = failures.get(failure_type, GITHUB_ACTIONS_FAILURE)
+    return str(result)

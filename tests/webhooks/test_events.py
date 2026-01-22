@@ -157,7 +157,7 @@ class TestWebhookEventBase:
         """Test that string event_type is normalized to EventType enum."""
         # This tests __post_init__ normalization
         event = TaskStartedEvent(task_index=0, task_description="Test")
-        event.event_type = "task.started"  # pyright: ignore[reportAttributeAccessIssue]
+        event.event_type = "task.started"  # type: ignore[assignment]
         event.__post_init__()
 
         assert isinstance(event.event_type, EventType)

@@ -419,7 +419,7 @@ class TestTestWebhook:
 
     def test_test_webhook_missing_params(self, api_client, api_state_dir):
         """Test sending a test webhook without ID or URL."""
-        request_data = {}
+        request_data: dict[str, str] = {}
         response = api_client.post("/webhooks/test", json=request_data)
 
         assert response.status_code == 400

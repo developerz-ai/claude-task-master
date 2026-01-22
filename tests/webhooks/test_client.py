@@ -439,7 +439,7 @@ class TestAsyncSend:
         assert result.success is False
         assert result.attempt_count == 2
         # Error message starts with capital "Webhook" so use lower() for comparison
-        assert "timed out" in result.error.lower()
+        assert result.error is not None and "timed out" in result.error.lower()
 
     @pytest.mark.asyncio
     async def test_send_connection_error_retried(self) -> None:

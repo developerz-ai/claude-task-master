@@ -209,8 +209,8 @@ class TestCircuitBreakerStateProperties:
 
         time.sleep(0.15)
 
-        # State should now be half-open
-        assert breaker.state == CircuitState.HALF_OPEN
+        # State should now be half-open (after timeout)
+        assert breaker.state == CircuitState.HALF_OPEN  # type: ignore[comparison-overlap]
 
     @given(
         failures_before=st.integers(min_value=1, max_value=5),
@@ -266,7 +266,7 @@ class TestCircuitBreakerInvariants:
         assert breaker.state == CircuitState.OPEN
 
         breaker.reset()
-        assert breaker.state == CircuitState.CLOSED
+        assert breaker.state == CircuitState.CLOSED  # type: ignore[comparison-overlap]
         assert breaker.metrics.total_calls == 0
 
     @given(
@@ -282,7 +282,7 @@ class TestCircuitBreakerInvariants:
         assert breaker.state == CircuitState.CLOSED
 
         breaker.force_open()
-        assert breaker.state == CircuitState.OPEN
+        assert breaker.state == CircuitState.OPEN  # type: ignore[comparison-overlap]
 
     @given(
         failure_threshold=failure_threshold_strategy,
@@ -298,7 +298,7 @@ class TestCircuitBreakerInvariants:
         assert breaker.state == CircuitState.OPEN
 
         breaker.force_close()
-        assert breaker.state == CircuitState.CLOSED
+        assert breaker.state == CircuitState.CLOSED  # type: ignore[comparison-overlap]
 
     @given(
         call_count=st.integers(min_value=0, max_value=50),

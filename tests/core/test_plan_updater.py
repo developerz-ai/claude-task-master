@@ -36,13 +36,13 @@ class TestPlanUpdaterInit:
     def test_init_with_none_agent_raises_no_error(self):
         """Test initialization with None agent (no validation in __init__)."""
         state_manager = MagicMock()
-        updater = PlanUpdater(None, state_manager)
+        updater = PlanUpdater(None, state_manager)  # type: ignore[arg-type]
         assert updater.agent is None
 
     def test_init_with_none_state_manager_raises_no_error(self):
         """Test initialization with None state_manager (no validation in __init__)."""
         agent = MagicMock()
-        updater = PlanUpdater(agent, None)
+        updater = PlanUpdater(agent, None)  # type: ignore[arg-type]
         assert updater.state_manager is None
 
 

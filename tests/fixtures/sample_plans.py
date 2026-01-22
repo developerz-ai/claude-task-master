@@ -205,7 +205,8 @@ def get_sample_plans():
 def get_plan_for_type(plan_type: str) -> str:
     """Get a specific plan by type."""
     plans = get_sample_plans()
-    return plans.get(plan_type, SIMPLE_PLAN)
+    result = plans.get(plan_type, SIMPLE_PLAN)
+    return str(result)
 
 
 def get_plan_with_n_tasks(n: int, completed: int = 0) -> str:

@@ -160,7 +160,8 @@ def get_sample_pr_comments():
 def get_pr_comment_for_type(comment_type: str) -> str:
     """Get a specific PR comment by type."""
     comments = get_sample_pr_comments()
-    return comments.get(comment_type, HUMAN_REVIEWER_COMMENT)
+    result = comments.get(comment_type, HUMAN_REVIEWER_COMMENT)
+    return str(result)
 
 
 def get_edge_case_comment(case_type: str) -> str:

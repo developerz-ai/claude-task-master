@@ -37,7 +37,7 @@ jobs:
         run: ruff format --check src/ tests/
 
       - name: Run mypy
-        run: mypy src/
+        run: mypy .
 
   # Unit tests - fast, run on multiple Python versions
   test-unit:

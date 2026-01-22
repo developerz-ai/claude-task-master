@@ -21,10 +21,10 @@ from claude_task_master.mailbox.storage import MailboxStorage
 # Define strategies for mailbox testing
 priority_strategy = st.sampled_from(list(Priority))
 sender_strategy = st.text(
-    min_size=1, max_size=50, alphabet=st.characters(blacklist_categories=("Cs",))
+    min_size=1, max_size=50, alphabet=st.characters(blacklist_categories=["Cs"])
 )
 content_strategy = st.text(
-    min_size=0, max_size=5000, alphabet=st.characters(blacklist_categories=("Cs",))
+    min_size=0, max_size=5000, alphabet=st.characters(blacklist_categories=["Cs"])
 )
 metadata_strategy = st.fixed_dictionaries(
     {},
@@ -63,7 +63,7 @@ class TestMailboxMessageProperties:
 
     @given(
         content=st.text(
-            min_size=1, max_size=5000, alphabet=st.characters(blacklist_categories=("Cs",))
+            min_size=1, max_size=5000, alphabet=st.characters(blacklist_categories=["Cs"])
         ),
         max_length=st.integers(min_value=10, max_value=500),
     )
@@ -217,7 +217,7 @@ class TestMailboxStorageProperties:
 
     @given(
         contents=st.lists(
-            st.text(min_size=1, max_size=100, alphabet=st.characters(blacklist_categories=("Cs",))),
+            st.text(min_size=1, max_size=100, alphabet=st.characters(blacklist_categories=["Cs"])),
             min_size=1,
             max_size=20,
         ),

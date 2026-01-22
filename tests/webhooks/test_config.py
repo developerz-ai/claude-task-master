@@ -143,7 +143,7 @@ class TestEventNormalization:
         """Test that event type strings are normalized to enums."""
         config = WebhookConfig(
             url="https://example.com/webhook",
-            events=["task.started", "task.completed"],
+            events=["task.started", "task.completed"],  # type: ignore[list-item]
         )
 
         assert config.events == [EventType.TASK_STARTED, EventType.TASK_COMPLETED]
@@ -152,7 +152,7 @@ class TestEventNormalization:
         """Test that mixed strings and enums are accepted."""
         config = WebhookConfig(
             url="https://example.com/webhook",
-            events=["task.started", EventType.PR_CREATED],
+            events=["task.started", EventType.PR_CREATED],  # type: ignore[list-item]
         )
 
         assert config.events == [EventType.TASK_STARTED, EventType.PR_CREATED]
@@ -172,7 +172,7 @@ class TestEventNormalization:
         with pytest.raises(ValidationError) as exc_info:
             WebhookConfig(
                 url="https://example.com/webhook",
-                events=["task.invalid"],
+                events=["task.invalid"],  # type: ignore[list-item]
             )
         assert "invalid event type" in str(exc_info.value).lower()
 
