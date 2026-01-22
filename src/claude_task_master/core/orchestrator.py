@@ -646,6 +646,31 @@ class WorkLoopOrchestrator:
             )
             return 1
 
+        # Emit run.started webhook event
+        # Determine if this is a resumed run (session_count > 0 means we've run before)
+        is_resumed = state.session_count > 0
+        pr_mode = "per-task" if state.options.pr_per_task else "per-group"
+
+        # Load goal from state manager (stored in goal.txt)
+        goal = ""
+        try:
+            goal = self.state_manager.load_goal()
+        except Exception:
+            pass  # Goal is optional for webhook
+
+        # Get working directory (parent of state_dir which is .claude-task-master/)
+        working_directory = str(self.state_manager.state_dir.parent)
+
+        self.webhook_emitter.emit(
+            "run.started",
+            goal=goal,
+            working_directory=working_directory,
+            max_sessions=state.options.max_sessions,
+            auto_merge=state.options.auto_merge,
+            pr_mode=pr_mode,
+            resumed=is_resumed,
+        )
+
         # Setup signal handlers and key listener
         register_handlers()
         reset_shutdown()
