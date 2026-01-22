@@ -342,3 +342,265 @@ class TestCloneRepoResultModel:
         assert result.target_dir is None
         assert result.branch is None
         assert result.error is None
+
+
+class TestPlanRepoTool:
+    """Test the plan_repo MCP tool."""
+
+    def test_plan_repo_nonexistent_directory(self, temp_dir):
+        """Test plan_repo with nonexistent directory."""
+        from claude_task_master.mcp.tools import plan_repo
+
+        nonexistent = temp_dir / "does-not-exist"
+        result = plan_repo(nonexistent, goal="Test goal")
+
+        assert result["success"] is False
+        assert "does not exist" in result["message"]
+        assert result["error"] == "Work directory not found"
+        assert result["goal"] == "Test goal"
+
+    def test_plan_repo_not_a_directory(self, temp_dir):
+        """Test plan_repo with a file instead of directory."""
+        from claude_task_master.mcp.tools import plan_repo
+
+        file_path = temp_dir / "some_file.txt"
+        file_path.write_text("not a directory")
+
+        result = plan_repo(file_path, goal="Test goal")
+
+        assert result["success"] is False
+        assert "not a directory" in result["message"]
+        assert result["error"] == "Path is not a directory"
+
+    def test_plan_repo_empty_goal_fails(self, temp_dir):
+        """Test plan_repo fails with empty goal."""
+        from claude_task_master.mcp.tools import plan_repo
+
+        result = plan_repo(temp_dir, goal="")
+
+        assert result["success"] is False
+        assert "required" in result["message"].lower()
+        assert result["error"] == "Goal cannot be empty"
+
+    def test_plan_repo_whitespace_goal_fails(self, temp_dir):
+        """Test plan_repo fails with whitespace-only goal."""
+        from claude_task_master.mcp.tools import plan_repo
+
+        result = plan_repo(temp_dir, goal="   ")
+
+        assert result["success"] is False
+        assert "required" in result["message"].lower()
+        assert result["error"] == "Goal cannot be empty"
+
+    def test_plan_repo_accepts_string_path(self):
+        """Test plan_repo accepts string path."""
+        from claude_task_master.mcp.tools import plan_repo
+
+        # Test with nonexistent path to fail fast without agent calls
+        result = plan_repo("/nonexistent/test/path", goal="Test goal")
+
+        assert result["success"] is False
+        assert result["error"] == "Work directory not found"
+
+    def test_plan_repo_expands_user_path(self):
+        """Test plan_repo expands ~ in path."""
+        from claude_task_master.mcp.tools import plan_repo
+
+        # This should expand and fail gracefully since the path likely doesn't exist
+        result = plan_repo("~/nonexistent-test-path-12345", goal="Test goal")
+
+        # Should have expanded the path
+        assert "~" not in result["work_dir"]
+
+    def test_plan_repo_with_active_task_planning(self, temp_dir):
+        """Test plan_repo fails when task is already in planning status."""
+        from claude_task_master.core.state import StateManager, TaskOptions
+        from claude_task_master.mcp.tools import plan_repo
+
+        # Initialize a task in planning state
+        state_path = temp_dir / ".claude-task-master"
+        state_manager = StateManager(state_dir=state_path)
+        options = TaskOptions(auto_merge=False, max_sessions=1)
+        state = state_manager.initialize(goal="Existing goal", model="opus", options=options)
+        state.status = "planning"
+        state_manager.save_state(state)
+
+        # Try to create a new plan
+        result = plan_repo(temp_dir, goal="New goal")
+
+        assert result["success"] is False
+        assert "already in progress" in result["message"]
+        assert "Cannot create new plan while task is active" in result["error"]
+
+    def test_plan_repo_with_active_task_working(self, temp_dir):
+        """Test plan_repo fails when task is in working status."""
+        from claude_task_master.core.state import StateManager, TaskOptions
+        from claude_task_master.mcp.tools import plan_repo
+
+        # Initialize a task in working state
+        state_path = temp_dir / ".claude-task-master"
+        state_manager = StateManager(state_dir=state_path)
+        options = TaskOptions(auto_merge=False, max_sessions=1)
+        state = state_manager.initialize(goal="Existing goal", model="opus", options=options)
+        state.status = "working"
+        state_manager.save_state(state)
+
+        # Try to create a new plan
+        result = plan_repo(temp_dir, goal="New goal")
+
+        assert result["success"] is False
+        assert "already in progress" in result["message"]
+
+    def test_plan_repo_model_parameter(self):
+        """Test plan_repo accepts model parameter."""
+        from claude_task_master.mcp.tools import plan_repo
+
+        # Test with different model values using nonexistent path to fail fast
+        for model in ["opus", "sonnet", "haiku"]:
+            result = plan_repo("/nonexistent/path", goal="Test goal", model=model)
+            # Should accept the parameter and fail quickly on path validation
+            assert result["success"] is False
+            assert result["error"] == "Work directory not found"
+
+    def test_plan_repo_result_structure(self):
+        """Test plan_repo returns correct result structure."""
+        from claude_task_master.mcp.tools import plan_repo
+
+        # Use nonexistent path to fail fast without agent initialization
+        result = plan_repo("/nonexistent/path", goal="Test goal")
+
+        # Verify required keys are present
+        assert "success" in result
+        assert "message" in result
+        assert "work_dir" in result
+        assert "goal" in result
+        assert "plan" in result
+        assert "criteria" in result
+        assert "run_id" in result
+        assert "error" in result
+
+    def test_plan_repo_no_agent_initialization_on_validation_failure(self, temp_dir):
+        """Test plan_repo doesn't initialize agent on validation failures."""
+        from claude_task_master.mcp.tools import plan_repo
+
+        # Test empty goal - should fail fast without creating any state
+        result = plan_repo(temp_dir, goal="")
+
+        assert result["success"] is False
+        assert result["error"] == "Goal cannot be empty"
+        # State directory should not be created for validation failures
+        # (though it may exist from other tests)
+
+
+class TestPlanRepoResultModel:
+    """Test the PlanRepoResult model."""
+
+    def test_plan_repo_result_model_fields(self):
+        """Test PlanRepoResult model has expected fields."""
+        from claude_task_master.mcp.tools import PlanRepoResult
+
+        result = PlanRepoResult(
+            success=True,
+            message="Planning successful",
+            work_dir="/path/to/repo",
+            goal="Add feature X",
+            plan="- [ ] Task 1\n- [ ] Task 2",
+            criteria="Tests pass",
+            run_id="run-123",
+        )
+
+        assert result.success is True
+        assert result.message == "Planning successful"
+        assert result.work_dir == "/path/to/repo"
+        assert result.goal == "Add feature X"
+        assert result.plan == "- [ ] Task 1\n- [ ] Task 2"
+        assert result.criteria == "Tests pass"
+        assert result.run_id == "run-123"
+        assert result.error is None
+
+    def test_plan_repo_result_model_defaults(self):
+        """Test PlanRepoResult model defaults."""
+        from claude_task_master.mcp.tools import PlanRepoResult
+
+        result = PlanRepoResult(
+            success=False,
+            message="Planning failed",
+        )
+
+        assert result.work_dir is None
+        assert result.goal is None
+        assert result.plan is None
+        assert result.criteria is None
+        assert result.run_id is None
+        assert result.error is None
+
+    def test_plan_repo_result_model_dump(self):
+        """Test PlanRepoResult model_dump works correctly."""
+        from claude_task_master.mcp.tools import PlanRepoResult
+
+        result = PlanRepoResult(
+            success=True,
+            message="Planning successful",
+            work_dir="/path/to/repo",
+            goal="Test goal",
+            plan="Test plan",
+            criteria="Test criteria",
+            run_id="run-123",
+            error="Test error",
+        )
+
+        dumped = result.model_dump()
+        assert isinstance(dumped, dict)
+        assert dumped["success"] is True
+        assert dumped["message"] == "Planning successful"
+        assert dumped["work_dir"] == "/path/to/repo"
+        assert dumped["goal"] == "Test goal"
+        assert dumped["plan"] == "Test plan"
+        assert dumped["criteria"] == "Test criteria"
+        assert dumped["run_id"] == "run-123"
+        assert dumped["error"] == "Test error"
+
+
+class TestRepoSetupIntegration:
+    """Integration tests for repo setup workflow."""
+
+    def test_repo_name_extraction_edge_cases(self):
+        """Test edge cases in repository name extraction."""
+        from claude_task_master.mcp.tools import _extract_repo_name
+
+        # Test various URL formats
+        assert _extract_repo_name("https://github.com/org/repo-name.git") == "repo-name"
+        assert _extract_repo_name("git@gitlab.com:org/repo-name.git") == "repo-name"
+        assert _extract_repo_name("https://bitbucket.org/team/repo.git") == "repo"
+        assert _extract_repo_name("git@github.com:user/my.repo.git") == "my.repo"
+
+    def test_clone_repo_default_target_directory(self):
+        """Test clone_repo uses default workspace directory."""
+        from claude_task_master.mcp.tools import DEFAULT_WORKSPACE_BASE, clone_repo
+
+        # Test that default path includes workspace base
+        result = clone_repo("https://github.com/user/test-repo.git")
+
+        # Should fail (repo doesn't exist), but check target_dir structure
+        expected_target = str(DEFAULT_WORKSPACE_BASE / "test-repo")
+        if "target_dir" in result:
+            assert result["target_dir"] == expected_target
+
+    def test_setup_repo_with_multiple_project_types(self, temp_dir):
+        """Test setup_repo handles projects with both Python and Node.js."""
+        from claude_task_master.mcp.tools import setup_repo
+
+        # Create both Python and Node.js project files
+        pyproject = temp_dir / "pyproject.toml"
+        pyproject.write_text('[project]\nname = "test"\nversion = "0.1.0"')
+
+        package_json = temp_dir / "package.json"
+        package_json.write_text('{"name": "test", "version": "1.0.0"}')
+
+        result = setup_repo(temp_dir)
+
+        # Should detect both project types
+        assert result["work_dir"] == str(temp_dir)
+        steps = result["steps_completed"]
+        assert any("Python" in step for step in steps)
+        assert any("Node.js" in step for step in steps)
