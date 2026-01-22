@@ -1040,3 +1040,202 @@ def clear_mailbox(
             success=False,
             error=f"Failed to clear mailbox: {e}",
         ).model_dump()
+
+
+# =============================================================================
+# Repo Setup Tool Implementations
+# =============================================================================
+
+# Default workspace base for repo setup
+DEFAULT_WORKSPACE_BASE = Path.home() / "workspace" / "claude-task-master"
+
+
+def _extract_repo_name(url: str) -> str:
+    """Extract repository name from a git URL.
+
+    Supports both HTTPS and SSH URLs:
+    - https://github.com/user/repo.git -> repo
+    - git@github.com:user/repo.git -> repo
+    - https://github.com/user/repo -> repo
+
+    Args:
+        url: Git repository URL.
+
+    Returns:
+        Repository name without .git suffix.
+    """
+    # Remove trailing .git if present
+    clean_url = url.rstrip("/")
+    if clean_url.endswith(".git"):
+        clean_url = clean_url[:-4]
+
+    # Extract repo name from path
+    # For SSH: git@github.com:user/repo
+    if ":" in clean_url and "@" in clean_url:
+        repo_name = clean_url.split("/")[-1]
+    else:
+        # For HTTPS: https://github.com/user/repo
+        repo_name = clean_url.split("/")[-1]
+
+    return repo_name
+
+
+def clone_repo(
+    url: str,
+    target_dir: str | None = None,
+    branch: str | None = None,
+) -> dict[str, Any]:
+    """Clone a git repository to the workspace.
+
+    Clones the repository to ~/workspace/claude-task-master/{project-name}
+    by default, or to a custom target directory if specified.
+
+    Args:
+        url: Git repository URL (HTTPS or SSH).
+        target_dir: Optional custom target directory path. If not provided,
+            defaults to ~/workspace/claude-task-master/{repo-name}.
+        branch: Optional branch to checkout after cloning.
+
+    Returns:
+        Dictionary containing clone result with success status and details.
+    """
+    import subprocess
+
+    # Validate URL
+    if not url or not url.strip():
+        return CloneRepoResult(
+            success=False,
+            message="Repository URL is required",
+            error="Repository URL cannot be empty",
+        ).model_dump()
+
+    url = url.strip()
+
+    # Basic URL validation
+    if not (
+        url.startswith("https://")
+        or url.startswith("git@")
+        or url.startswith("git://")
+        or url.startswith("ssh://")
+    ):
+        return CloneRepoResult(
+            success=False,
+            message="Invalid repository URL format",
+            repo_url=url,
+            error="URL must start with https://, git@, git://, or ssh://",
+        ).model_dump()
+
+    # Determine target directory
+    repo_name = _extract_repo_name(url)
+    if target_dir:
+        target_path = Path(target_dir).expanduser().resolve()
+    else:
+        # Default to ~/workspace/claude-task-master/{repo-name}
+        target_path = DEFAULT_WORKSPACE_BASE / repo_name
+
+    # Check if target already exists
+    if target_path.exists():
+        return CloneRepoResult(
+            success=False,
+            message=f"Target directory already exists: {target_path}",
+            repo_url=url,
+            target_dir=str(target_path),
+            error="Target directory already exists. Remove it first or specify a different target.",
+        ).model_dump()
+
+    # Ensure parent directory exists
+    try:
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+    except PermissionError as e:
+        return CloneRepoResult(
+            success=False,
+            message=f"Permission denied creating parent directory: {target_path.parent}",
+            repo_url=url,
+            target_dir=str(target_path),
+            error=str(e),
+        ).model_dump()
+    except OSError as e:
+        return CloneRepoResult(
+            success=False,
+            message=f"Failed to create parent directory: {target_path.parent}",
+            repo_url=url,
+            target_dir=str(target_path),
+            error=str(e),
+        ).model_dump()
+
+    # Build git clone command
+    cmd = ["git", "clone"]
+    if branch:
+        cmd.extend(["--branch", branch])
+    cmd.extend([url, str(target_path)])
+
+    # Execute git clone
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=300,  # 5 minute timeout for large repos
+        )
+
+        if result.returncode != 0:
+            # Clean up partial clone if it exists
+            if target_path.exists():
+                shutil.rmtree(target_path, ignore_errors=True)
+
+            error_msg = result.stderr.strip() if result.stderr else "Unknown error"
+            return CloneRepoResult(
+                success=False,
+                message=f"Git clone failed: {error_msg}",
+                repo_url=url,
+                target_dir=str(target_path),
+                branch=branch,
+                error=error_msg,
+            ).model_dump()
+
+        return CloneRepoResult(
+            success=True,
+            message=f"Successfully cloned {repo_name} to {target_path}",
+            repo_url=url,
+            target_dir=str(target_path),
+            branch=branch,
+        ).model_dump()
+
+    except subprocess.TimeoutExpired:
+        # Clean up partial clone
+        if target_path.exists():
+            shutil.rmtree(target_path, ignore_errors=True)
+
+        return CloneRepoResult(
+            success=False,
+            message="Git clone timed out (5 minute limit exceeded)",
+            repo_url=url,
+            target_dir=str(target_path),
+            branch=branch,
+            error="Clone operation timed out - repository may be too large or network is slow",
+        ).model_dump()
+
+    except FileNotFoundError:
+        return CloneRepoResult(
+            success=False,
+            message="Git is not installed or not in PATH",
+            repo_url=url,
+            target_dir=str(target_path),
+            branch=branch,
+            error="git command not found - please install git",
+        ).model_dump()
+
+    except Exception as e:
+        # Clean up partial clone
+        if target_path.exists():
+            shutil.rmtree(target_path, ignore_errors=True)
+
+        return CloneRepoResult(
+            success=False,
+            message=f"Clone failed: {e}",
+            repo_url=url,
+            target_dir=str(target_path),
+            branch=branch,
+            error=str(e),
+        ).model_dump()
