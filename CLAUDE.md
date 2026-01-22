@@ -8,6 +8,16 @@ Autonomous task orchestration system that uses Claude Agent SDK to keep Claude w
 
 **Core Philosophy**: Claude is smart enough to do work AND verify it. Task master keeps the loop going and persists state.
 
+### Key Capabilities
+
+- **Autonomous Execution** - Runs until goal achieved or needs human input
+- **PR-Based Workflow** - All work flows through pull requests for review
+- **CI/CD Integration** - Handles CI failures and review comments together in one step
+- **Mailbox System** - Accept dynamic plan updates while working (REST API, MCP, or CLI)
+- **Multi-Instance Coordination** - Multiple claudetm instances can communicate via mailbox
+- **State Persistence** - Survives interruptions, resumes where it left off
+- **Resume with Message** - Update the plan mid-execution with `claudetm resume "message"`
+
 ## Installation
 
 ### Global Install (Recommended for usage)
@@ -132,6 +142,9 @@ All commands check `state_manager.exists()` first:
 - `progress`: Display progress.md
 - `context`: Display context.md
 - `clean`: Remove .claude-task-master/ with confirmation
+- `mailbox`: Show mailbox status
+- `mailbox send "msg"`: Send message to mailbox
+- `mailbox clear`: Clear pending messages
 
 ### Mailbox System
 - Messages stored in `.claude-task-master/mailbox.json`
@@ -171,6 +184,69 @@ uv run claudetm start "Implement TODO" --max-sessions 3 --no-auto-merge
 - Single work session addresses all feedback at once
 - `PRContextManager.save_ci_failures()` automatically calls `save_pr_comments()`
 
+### API Endpoints (REST)
+Server runs on port 8000 by default (`claudetm-server`):
+- `POST /task/init` - Create a new task
+- `GET /status` - Get orchestrator status
+- `POST /mailbox/send` - Send message to mailbox
+- `GET /mailbox` - Check mailbox status
+- `DELETE /mailbox` - Clear mailbox
+- `POST /control/stop` - Stop orchestrator
+- `POST /control/resume` - Resume paused or blocked task
+- `GET /webhooks` - List webhooks
+- `POST /webhooks` - Register webhook
+- `DELETE /webhooks/{id}` - Delete webhook
+
+### MCP Tools
+Available via IDE integration:
+- `send_message` - Send message to mailbox
+- `check_mailbox` - Check mailbox status
+- `clear_mailbox` - Clear mailbox
+- `get_status` - Get task status
+- `pause_task` - Pause current task
+- `stop_task` - Stop current task
+- `resume_task` - Resume paused or blocked task
+
+## Workflow Integration
+
+### Complete Work Loop
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         PLANNING                                 │
+│  Read codebase → Create task list → Define success criteria     │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                      WORKING (per task)                          │
+│  Make changes → Run tests → Commit → Push → Create PR           │
+│                              ↓                                   │
+│                      Check Mailbox ←── Messages from REST/MCP   │
+│                              ↓                                   │
+│              (If messages: Update plan, continue work)          │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                       PR LIFECYCLE                               │
+│  Wait for CI → Fix failures + comments → Merge                  │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                       VERIFICATION                               │
+│  Run tests → Check lint → Verify criteria → Done                │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Dynamic Plan Updates
+
+The orchestrator supports mid-execution plan updates via:
+
+1. **CLI Resume with Message**: `claudetm resume "Add rate limiting to API"`
+2. **REST API**: `POST /mailbox/send` with message content
+3. **MCP Tools**: `send_message` tool from IDE integration
+
+Messages are processed after each task completes. Multiple messages are merged with priority ordering (urgent → low) before updating the plan.
+
 ## Important Notes
 
 1. **Always check if tasks already complete** - planning phase might finish some tasks
@@ -181,3 +257,5 @@ uv run claudetm start "Implement TODO" --max-sessions 3 --no-auto-merge
 6. **Working directory** - change dir for queries, always restore
 7. **Mailbox check** - orchestrator checks mailbox after each task completion
 8. **CI + Comments** - fetched together to handle in one step
+9. **Message priority** - 0=low, 1=normal, 2=high, 3=urgent
+10. **Plan preservation** - completed tasks preserved when plan updates occur
