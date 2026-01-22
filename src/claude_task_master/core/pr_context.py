@@ -41,10 +41,6 @@ class PRContextManager:
         if pr_number is None:
             return
 
-        # Also save comments when saving CI failures (for complete context)
-        if _also_save_comments:
-            self.save_pr_comments(pr_number, _also_save_ci=False)
-
         # Clear old CI logs to avoid stale data
         try:
             pr_dir = self.state_manager.get_pr_dir(pr_number)
@@ -71,6 +67,11 @@ class PRContextManager:
                     )
         except Exception as e:
             console.warning(f"Could not save CI failures: {e}")
+
+        # Also save comments when saving CI failures (for complete context)
+        # Do this AFTER saving CI failures to ensure CI files exist first
+        if _also_save_comments:
+            self.save_pr_comments(pr_number, _also_save_ci=False)
 
     def save_pr_comments(self, pr_number: int | None, *, _also_save_ci: bool = True) -> int:
         """Fetch and save PR comments to files for Claude to read.
