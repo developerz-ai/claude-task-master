@@ -619,6 +619,52 @@ class WorkLoopOrchestrator:
             console.warning(f"Error updating plan from mailbox: {e}")
             return False
 
+    def _emit_run_completed(
+        self,
+        state: TaskState,
+        exit_code: int,
+        result: str,
+        run_start_time: float,
+        error_message: str | None = None,
+    ) -> None:
+        """Emit a run.completed webhook event.
+
+        Args:
+            state: Current task state.
+            exit_code: Exit code (0=success, 1=blocked, 2=interrupted).
+            result: Outcome string ("success", "blocked", "failed", "interrupted").
+            run_start_time: Time when the run started (time.time() value).
+            error_message: Error message if run failed (optional).
+        """
+        # Get goal from state manager
+        goal = ""
+        try:
+            goal = self.state_manager.load_goal()
+        except Exception:
+            pass
+
+        # Get task counts
+        total_tasks = self._get_total_tasks(state)
+        completed_tasks = self._get_completed_tasks(state)
+
+        # Calculate duration
+        duration_seconds = time.time() - run_start_time if run_start_time > 0 else None
+
+        self.webhook_emitter.emit(
+            "run.completed",
+            goal=goal,
+            result=result,
+            exit_code=exit_code,
+            total_tasks=total_tasks,
+            completed_tasks=completed_tasks,
+            total_sessions=state.session_count,
+            duration_seconds=duration_seconds,
+            prs_created=0,  # TODO: Track PR counts in state
+            prs_merged=0,  # TODO: Track PR counts in state
+            final_status=state.status,
+            error_message=error_message,
+        )
+
     def run(self) -> int:
         """Run the main work loop until completion or blocked.
 
@@ -627,6 +673,9 @@ class WorkLoopOrchestrator:
             1: Blocked/Failed - max sessions reached or error.
             2: Paused - user interrupted.
         """
+        # Track run start time for duration calculation
+        run_start_time = time.time()
+
         # Load state with recovery
         try:
             state = self.state_manager.load_state()
@@ -644,6 +693,7 @@ class WorkLoopOrchestrator:
             console.warning(
                 MaxSessionsReachedError(state.options.max_sessions, state.session_count).message
             )
+            self._emit_run_completed(state, 1, "blocked", run_start_time, "Max sessions reached")
             return 1
 
         # Emit run.started webhook event
@@ -689,6 +739,7 @@ class WorkLoopOrchestrator:
             console.newline()
             console.info(self.tracker.get_cost_report())
             console.info("Use 'claudetm resume' to continue")
+            self._emit_run_completed(state, 2, "interrupted", run_start_time, reason)
             return 2
 
         try:
@@ -713,6 +764,7 @@ class WorkLoopOrchestrator:
                     stop_listening()
                     unregister_handlers()
                     console.info(self.tracker.get_cost_report())
+                    self._emit_run_completed(state, 1, "blocked", run_start_time, abort_reason)
                     return 1
 
                 # Run workflow cycle
@@ -721,6 +773,9 @@ class WorkLoopOrchestrator:
                     stop_listening()
                     unregister_handlers()
                     console.info(self.tracker.get_cost_report())
+                    # Determine result string based on exit code
+                    result_str = "success" if result == 0 else "blocked"
+                    self._emit_run_completed(state, result, result_str, run_start_time)
                     return result
 
                 # Debug: check completion after each cycle
@@ -738,6 +793,9 @@ class WorkLoopOrchestrator:
                     stop_listening()
                     unregister_handlers()
                     console.info(self.tracker.get_cost_report())
+                    self._emit_run_completed(
+                        state, 1, "blocked", run_start_time, "Max sessions reached"
+                    )
                     return 1
 
             # All complete - verify with retry loop for fixes
@@ -759,6 +817,7 @@ class WorkLoopOrchestrator:
                     self.state_manager.cleanup_on_success(state.run_id)
                     console.success("All tasks completed successfully!")
                     console.info(self.tracker.get_cost_report())
+                    self._emit_run_completed(state, 0, "success", run_start_time)
                     return 0
 
                 # Verification failed
@@ -771,6 +830,9 @@ class WorkLoopOrchestrator:
                     state.status = "blocked"
                     self.state_manager.save_state(state)
                     console.info(self.tracker.get_cost_report())
+                    self._emit_run_completed(
+                        state, 1, "blocked", run_start_time, "Max fix attempts reached"
+                    )
                     return 1
 
                 # Attempt to fix
@@ -783,6 +845,9 @@ class WorkLoopOrchestrator:
                     state.status = "blocked"
                     self.state_manager.save_state(state)
                     console.info(self.tracker.get_cost_report())
+                    self._emit_run_completed(
+                        state, 1, "failed", run_start_time, "Verification fix failed"
+                    )
                     return 1
 
                 # Wait for PR to be created and merge it
@@ -793,6 +858,9 @@ class WorkLoopOrchestrator:
                     state.status = "blocked"
                     self.state_manager.save_state(state)
                     console.info(self.tracker.get_cost_report())
+                    self._emit_run_completed(
+                        state, 1, "blocked", run_start_time, "Fix PR merge failed"
+                    )
                     return 1
 
                 # PR merged - increment and retry verification
@@ -804,6 +872,9 @@ class WorkLoopOrchestrator:
             state.status = "blocked"
             self.state_manager.save_state(state)
             console.info(self.tracker.get_cost_report())
+            self._emit_run_completed(
+                state, 1, "blocked", run_start_time, "Unexpected exit from verification loop"
+            )
             return 1
 
         except KeyboardInterrupt:
@@ -818,6 +889,7 @@ class WorkLoopOrchestrator:
                 self.state_manager.save_state(state)
             except Exception:
                 pass  # Best effort - state save failed but we still return error
+            self._emit_run_completed(state, 1, "failed", run_start_time, e.message)
             return 1
         except Exception as e:
             stop_listening()
@@ -829,6 +901,7 @@ class WorkLoopOrchestrator:
                 self.state_manager.save_state(state)
             except Exception:
                 pass  # Best effort - state save failed but we still return error
+            self._emit_run_completed(state, 1, "failed", run_start_time, f"{type(e).__name__}: {e}")
             return 1
 
     def _run_workflow_cycle(self, state: TaskState) -> int | None:
