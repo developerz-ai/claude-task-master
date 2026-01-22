@@ -15,6 +15,9 @@ Endpoints:
 - POST /control/stop: Stop a running task with optional cleanup
 - POST /control/resume: Resume a paused or blocked task
 - PATCH /config: Update runtime configuration options
+- POST /repo/clone: Clone a git repository to workspace
+- POST /repo/setup: Set up a cloned repository for development
+- POST /repo/plan: Create a plan for a repository (read-only)
 
 Usage:
     from claude_task_master.api.routes import (
@@ -69,6 +72,7 @@ from claude_task_master.api.models import (
     WebhookStatusInfo,
     WorkflowStage,
 )
+from claude_task_master.api.routes_repo import create_repo_router
 from claude_task_master.api.routes_webhooks import create_webhooks_router
 from claude_task_master.core.agent import ModelType
 from claude_task_master.core.control import ControlManager
@@ -1348,8 +1352,13 @@ def register_routes(app: FastAPI) -> None:
     mailbox_router = create_mailbox_router()
     app.include_router(mailbox_router, prefix="/mailbox")
 
+    # Create and register repo setup router
+    repo_router = create_repo_router()
+    app.include_router(repo_router, prefix="/repo")
+
     logger.debug("Registered info routes: /status, /plan, /logs, /progress, /context, /health")
     logger.debug("Registered control routes: /control/stop, /control/resume, /config")
     logger.debug("Registered task routes: /task/init, /task")
     logger.debug("Registered webhook routes: /webhooks, /webhooks/{id}, /webhooks/test")
     logger.debug("Registered mailbox routes: /mailbox/send, /mailbox")
+    logger.debug("Registered repo routes: /repo/clone, /repo/setup, /repo/plan")
