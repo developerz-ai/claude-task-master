@@ -275,6 +275,7 @@ class WorkLoopOrchestrator:
                 state_manager=self.state_manager,
                 github_client=self.github_client,
                 pr_context=self.pr_context,
+                webhook_emitter=self.webhook_emitter,
             )
         return self._stage_handler
 

@@ -14,6 +14,7 @@ from .shutdown import interruptible_sleep
 if TYPE_CHECKING:
     from ..github import GitHubClient
     from .agent import AgentWrapper
+    from .orchestrator import WebhookEmitter
     from .pr_context import PRContextManager
     from .state import StateManager, TaskState
 
@@ -132,6 +133,7 @@ class WorkflowStageHandler:
         state_manager: StateManager,
         github_client: GitHubClient,
         pr_context: PRContextManager,
+        webhook_emitter: WebhookEmitter | None = None,
     ):
         """Initialize stage handler.
 
@@ -140,11 +142,52 @@ class WorkflowStageHandler:
             state_manager: The state manager for persistence.
             github_client: GitHub client for PR operations.
             pr_context: PR context manager for comments/CI logs.
+            webhook_emitter: Optional webhook emitter for CI events.
         """
         self.agent = agent
         self.state_manager = state_manager
         self.github_client = github_client
         self.pr_context = pr_context
+        self.webhook_emitter = webhook_emitter
+
+    def _emit_ci_event(
+        self,
+        event_type: str,
+        pr_number: int | None,
+        branch: str,
+        failure_reason: str | None = None,
+    ) -> None:
+        """Emit a CI webhook event (ci.passed or ci.failed).
+
+        Args:
+            event_type: The event type ("ci.passed" or "ci.failed").
+            pr_number: The PR number.
+            branch: The branch name.
+            failure_reason: Optional failure reason (for ci.failed events).
+        """
+        if self.webhook_emitter is None:
+            return
+
+        # Import EventType only when needed
+        from ..webhooks.events import EventType
+
+        try:
+            if event_type == "ci.passed":
+                self.webhook_emitter.emit(
+                    EventType.CI_PASSED,
+                    pr_number=pr_number or 0,
+                    branch=branch,
+                )
+            elif event_type == "ci.failed":
+                self.webhook_emitter.emit(
+                    EventType.CI_FAILED,
+                    pr_number=pr_number or 0,
+                    branch=branch,
+                    failure_reason=failure_reason,
+                )
+        except Exception:
+            # Webhooks should never block the workflow
+            pass
 
     def handle_pr_created_stage(self, state: TaskState) -> int | None:
         """Handle PR creation - detect PR from current branch.
@@ -247,6 +290,12 @@ class WorkflowStageHandler:
                     f"CI passed! ({pr_status.checks_passed} passed, "
                     f"{pr_status.checks_skipped} skipped)"
                 )
+                # Emit ci.passed webhook
+                self._emit_ci_event(
+                    event_type="ci.passed",
+                    pr_number=state.current_pr,
+                    branch=self._get_current_branch() or "",
+                )
                 # Wait for GitHub to publish reviews before checking
                 console.detail(f"Waiting {self.REVIEW_DELAY}s for reviews to be published...")
                 if not interruptible_sleep(self.REVIEW_DELAY):
@@ -268,11 +317,23 @@ class WorkflowStageHandler:
                 console.warning(
                     f"CI failed: {pr_status.checks_failed} failed, {pr_status.checks_passed} passed"
                 )
+                # Collect failed check names for webhook
+                failed_checks = []
                 for check in pr_status.check_details:
                     conclusion = (check.get("conclusion") or "").upper()
                     if conclusion in ("FAILURE", "ERROR"):
                         check_name = self._get_check_name(check)
                         console.detail(f"  ✗ {check_name}: {conclusion}")
+                        failed_checks.append(check_name)
+                # Emit ci.failed webhook
+                self._emit_ci_event(
+                    event_type="ci.failed",
+                    pr_number=state.current_pr,
+                    branch=self._get_current_branch() or "",
+                    failure_reason=f"Failed checks: {', '.join(failed_checks)}"
+                    if failed_checks
+                    else None,
+                )
                 state.workflow_stage = "ci_failed"
                 self.state_manager.save_state(state)
                 return None
