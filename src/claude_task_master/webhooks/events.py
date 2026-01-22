@@ -43,7 +43,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -142,7 +142,7 @@ def _current_timestamp() -> str:
     Returns:
         ISO 8601 formatted timestamp string with timezone.
     """
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 @dataclass

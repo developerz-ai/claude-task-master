@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 
-def run_async_with_cleanup(coro: Coroutine[Any, Any, T]) -> T:
+def run_async_with_cleanup[T](coro: Coroutine[Any, Any, T]) -> T:
     """Run async coroutine with proper cleanup on KeyboardInterrupt.
 
     This ensures that when Ctrl+C is pressed, all pending tasks are cancelled

@@ -13,7 +13,7 @@ from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Generic, TypeVar
+from typing import Any, TypeVar
 
 from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig, get_circuit_breaker
 
@@ -31,7 +31,7 @@ class TaskStatus(Enum):
 
 
 @dataclass
-class TaskResult(Generic[T]):
+class TaskResult[T]:
     """Result of a parallel task execution."""
 
     task_id: str
@@ -82,7 +82,7 @@ class ParallelExecutorConfig:
 
 
 @dataclass
-class ParallelTask(Generic[T]):
+class ParallelTask[T]:
     """A task to be executed in parallel."""
 
     task_id: str
@@ -406,7 +406,7 @@ class AsyncParallelExecutor:
                     task_result = await asyncio.wait_for(coro, timeout=self.timeout)
                     result.result = task_result
                     result.status = TaskStatus.COMPLETED
-                except asyncio.TimeoutError as e:
+                except TimeoutError as e:
                     result.error = e
                     result.status = TaskStatus.FAILED
                 except Exception as e:

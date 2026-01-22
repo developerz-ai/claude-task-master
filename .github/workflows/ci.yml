@@ -20,7 +20,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -39,21 +39,17 @@ jobs:
       - name: Run mypy
         run: mypy .
 
-  # Unit tests - fast, run on multiple Python versions
+  # Unit tests - fast, Python 3.12 only
   test-unit:
-    name: Unit Tests (Python ${{ matrix.python-version }})
+    name: Unit Tests
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v6
 
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.12"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -69,25 +65,25 @@ jobs:
             --ignore=tests/integration/ \
             --ignore=tests/property/ \
             --cov=claude_task_master \
-            --cov-report=xml:coverage-unit-${{ matrix.python-version }}.xml \
+            --cov-report=xml:coverage-unit.xml \
             --cov-report=term-missing \
             -v \
-            2>&1 | tee pytest-unit-${{ matrix.python-version }}.txt
+            2>&1 | tee pytest-unit.txt
           exit ${PIPESTATUS[0]}
 
       - name: Upload test output on failure
         if: failure()
         uses: actions/upload-artifact@v6
         with:
-          name: pytest-unit-${{ matrix.python-version }}
-          path: pytest-unit-${{ matrix.python-version }}.txt
+          name: pytest-unit
+          path: pytest-unit.txt
           retention-days: 7
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v6
         with:
-          name: coverage-unit-${{ matrix.python-version }}
-          path: coverage-unit-${{ matrix.python-version }}.xml
+          name: coverage-unit
+          path: coverage-unit.xml
           retention-days: 7
 
   # Integration tests - may be slower, test component interactions
@@ -214,7 +210,7 @@ jobs:
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
-          files: ./coverage-unit-3.11.xml,./coverage-unit-3.12.xml,./coverage-integration.xml,./coverage-property.xml
+          files: ./coverage-unit.xml,./coverage-integration.xml,./coverage-property.xml
           fail_ci_if_error: false
           verbose: true
         env:
@@ -232,7 +228,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -261,7 +257,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
