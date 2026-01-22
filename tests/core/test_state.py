@@ -140,6 +140,71 @@ class TestTaskState:
         assert dump["current_pr"] == 456
         assert "options" in dump
 
+    def test_task_state_mailbox_defaults(self, sample_task_options):
+        """Test TaskState mailbox fields have correct defaults."""
+        timestamp = datetime.now().isoformat()
+        state = TaskState(
+            status="planning",
+            created_at=timestamp,
+            updated_at=timestamp,
+            run_id="20250115-120000",
+            model="sonnet",
+            options=TaskOptions(**sample_task_options),
+        )
+        # Mailbox should be enabled by default
+        assert state.mailbox_enabled is True
+        # Last mailbox check should be None initially
+        assert state.last_mailbox_check is None
+
+    def test_task_state_mailbox_enabled_false(self, sample_task_options):
+        """Test TaskState with mailbox_enabled set to False."""
+        timestamp = datetime.now().isoformat()
+        state = TaskState(
+            status="working",
+            created_at=timestamp,
+            updated_at=timestamp,
+            run_id="20250115-120000",
+            model="sonnet",
+            options=TaskOptions(**sample_task_options),
+            mailbox_enabled=False,
+        )
+        assert state.mailbox_enabled is False
+
+    def test_task_state_last_mailbox_check_timestamp(self, sample_task_options):
+        """Test TaskState with last_mailbox_check set to a timestamp."""
+        timestamp = datetime.now().isoformat()
+        check_time = datetime.now()
+        state = TaskState(
+            status="working",
+            created_at=timestamp,
+            updated_at=timestamp,
+            run_id="20250115-120000",
+            model="sonnet",
+            options=TaskOptions(**sample_task_options),
+            last_mailbox_check=check_time,
+        )
+        assert state.last_mailbox_check == check_time
+
+    def test_task_state_mailbox_fields_in_model_dump(self, sample_task_options):
+        """Test that mailbox fields are included in model dump."""
+        timestamp = datetime.now().isoformat()
+        check_time = datetime.now()
+        state = TaskState(
+            status="working",
+            created_at=timestamp,
+            updated_at=timestamp,
+            run_id="20250115-120000",
+            model="sonnet",
+            options=TaskOptions(**sample_task_options),
+            mailbox_enabled=False,
+            last_mailbox_check=check_time,
+        )
+        dump = state.model_dump()
+        assert "mailbox_enabled" in dump
+        assert dump["mailbox_enabled"] is False
+        assert "last_mailbox_check" in dump
+        assert dump["last_mailbox_check"] == check_time
+
 
 # =============================================================================
 # StateManager Initialization Tests
@@ -1846,3 +1911,139 @@ class TestParsePlanTasks:
         plan = "- [ ] Task with **bold** and `code`"
         tasks = state_manager._parse_plan_tasks(plan)
         assert tasks == ["Task with **bold** and `code`"]
+
+
+# =============================================================================
+# Mailbox State Tests
+# =============================================================================
+
+
+class TestMailboxStateFields:
+    """Tests for mailbox-related state fields."""
+
+    def test_initialize_sets_mailbox_enabled_default(self, temp_dir):
+        """Test that initialize sets mailbox_enabled to True by default."""
+        state_dir = temp_dir / ".claude-task-master"
+        manager = StateManager(state_dir)
+
+        options = TaskOptions()
+        state = manager.initialize(goal="Test goal", model="sonnet", options=options)
+
+        assert state.mailbox_enabled is True
+        assert state.last_mailbox_check is None
+
+    def test_save_and_load_mailbox_enabled(self, initialized_state_manager):
+        """Test saving and loading mailbox_enabled field."""
+        state = initialized_state_manager.load_state()
+        state.mailbox_enabled = False
+        initialized_state_manager.save_state(state)
+
+        loaded = initialized_state_manager.load_state()
+        assert loaded.mailbox_enabled is False
+
+    def test_save_and_load_last_mailbox_check(self, initialized_state_manager):
+        """Test saving and loading last_mailbox_check timestamp."""
+        check_time = datetime.now()
+        state = initialized_state_manager.load_state()
+        state.last_mailbox_check = check_time
+        initialized_state_manager.save_state(state)
+
+        loaded = initialized_state_manager.load_state()
+        assert loaded.last_mailbox_check is not None
+        # Compare timestamps (may have slight precision difference)
+        assert abs((loaded.last_mailbox_check - check_time).total_seconds()) < 1
+
+    def test_state_file_contains_mailbox_fields(self, initialized_state_manager):
+        """Test state.json contains mailbox fields."""
+        check_time = datetime.now()
+        state = initialized_state_manager.load_state()
+        state.mailbox_enabled = False
+        state.last_mailbox_check = check_time
+        initialized_state_manager.save_state(state)
+
+        state_file = initialized_state_manager.state_dir / "state.json"
+        data = json.loads(state_file.read_text())
+
+        assert "mailbox_enabled" in data
+        assert data["mailbox_enabled"] is False
+        assert "last_mailbox_check" in data
+
+    def test_mailbox_fields_persist_across_sessions(self, temp_dir):
+        """Test mailbox fields persist when creating new StateManager instance."""
+        state_dir = temp_dir / ".claude-task-master"
+        manager1 = StateManager(state_dir)
+
+        options = TaskOptions()
+        manager1.initialize(goal="Test", model="sonnet", options=options)
+
+        check_time = datetime.now()
+        state = manager1.load_state()
+        state.mailbox_enabled = False
+        state.last_mailbox_check = check_time
+        manager1.save_state(state)
+
+        # Create new manager instance (simulates restart)
+        manager2 = StateManager(state_dir)
+        loaded = manager2.load_state()
+
+        assert loaded.mailbox_enabled is False
+        assert loaded.last_mailbox_check is not None
+
+    def test_mailbox_enabled_toggle(self, initialized_state_manager):
+        """Test toggling mailbox_enabled on and off."""
+        state = initialized_state_manager.load_state()
+        assert state.mailbox_enabled is True  # Default
+
+        # Disable
+        state.mailbox_enabled = False
+        initialized_state_manager.save_state(state)
+        loaded = initialized_state_manager.load_state()
+        assert loaded.mailbox_enabled is False
+
+        # Re-enable
+        loaded.mailbox_enabled = True
+        initialized_state_manager.save_state(loaded)
+        reloaded = initialized_state_manager.load_state()
+        assert reloaded.mailbox_enabled is True
+
+    def test_last_mailbox_check_updates(self, initialized_state_manager):
+        """Test updating last_mailbox_check timestamp."""
+        state = initialized_state_manager.load_state()
+        assert state.last_mailbox_check is None
+
+        first_check = datetime.now()
+        state.last_mailbox_check = first_check
+        initialized_state_manager.save_state(state)
+
+        loaded = initialized_state_manager.load_state()
+        assert loaded.last_mailbox_check is not None
+
+        # Update with new check time
+        time.sleep(0.1)  # Ensure different timestamp
+        second_check = datetime.now()
+        loaded.last_mailbox_check = second_check
+        initialized_state_manager.save_state(loaded)
+
+        reloaded = initialized_state_manager.load_state()
+        assert reloaded.last_mailbox_check is not None
+        # Second check should be later
+        assert reloaded.last_mailbox_check >= loaded.last_mailbox_check
+
+    def test_mailbox_fields_work_with_status_transitions(self, initialized_state_manager):
+        """Test mailbox fields work correctly during status transitions."""
+        state = initialized_state_manager.load_state()
+        assert state.status == "planning"
+
+        # Set mailbox fields
+        state.mailbox_enabled = True
+        check_time = datetime.now()
+        state.last_mailbox_check = check_time
+
+        # Transition to working
+        state.status = "working"
+        initialized_state_manager.save_state(state)
+
+        loaded = initialized_state_manager.load_state()
+        assert loaded.status == "working"
+        assert loaded.mailbox_enabled is True
+        assert loaded.last_mailbox_check is not None
