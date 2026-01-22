@@ -1583,3 +1583,172 @@ def setup_repo(
             setup_scripts_run=setup_scripts_run,
             error=str(e),
         ).model_dump()
+
+
+def plan_repo(
+    work_dir: str | Path,
+    goal: str,
+    model: str = "opus",
+) -> dict[str, Any]:
+    """Create a plan for a repository without executing any work.
+
+    This is a plan-only mode that reads the codebase using read-only tools
+    (Read, Glob, Grep, Bash) and outputs a structured plan with tasks and
+    success criteria. No changes are made to the repository.
+
+    Use this after `clone_repo` and `setup_repo` to plan work before execution,
+    or to get a plan for a new goal in an existing repository.
+
+    Args:
+        work_dir: Path to the repository directory to plan for.
+        goal: The goal/task description to plan for.
+        model: Model to use for planning (default: "opus" for best quality).
+
+    Returns:
+        Dictionary containing planning result with success status, plan, and criteria.
+    """
+    work_path = Path(work_dir).expanduser().resolve()
+
+    # Validate work directory
+    if not work_path.exists():
+        return PlanRepoResult(
+            success=False,
+            message=f"Directory does not exist: {work_path}",
+            work_dir=str(work_path),
+            goal=goal,
+            error="Work directory not found",
+        ).model_dump()
+
+    if not work_path.is_dir():
+        return PlanRepoResult(
+            success=False,
+            message=f"Path is not a directory: {work_path}",
+            work_dir=str(work_path),
+            goal=goal,
+            error="Path is not a directory",
+        ).model_dump()
+
+    # Validate goal
+    if not goal or not goal.strip():
+        return PlanRepoResult(
+            success=False,
+            message="Goal is required",
+            work_dir=str(work_path),
+            error="Goal cannot be empty",
+        ).model_dump()
+
+    goal = goal.strip()
+
+    # Initialize state manager for this repo
+    state_path = work_path / ".claude-task-master"
+    state_manager = StateManager(state_dir=state_path)
+
+    # Check if task already exists
+    if state_manager.exists():
+        # Load existing state to check if we can replan
+        try:
+            existing_state = state_manager.load_state()
+            # If task is in progress, don't overwrite
+            if existing_state.status in ("planning", "working"):
+                return PlanRepoResult(
+                    success=False,
+                    message=f"Task already in progress (status: {existing_state.status})",
+                    work_dir=str(work_path),
+                    goal=goal,
+                    run_id=existing_state.run_id,
+                    error="Cannot create new plan while task is active. Use clean_task first.",
+                ).model_dump()
+        except Exception:
+            pass  # State exists but couldn't be loaded - will be overwritten
+
+    try:
+        # Import credentials and agent here to avoid circular imports
+        from claude_task_master.core.agent import AgentWrapper
+        from claude_task_master.core.agent_models import ModelType
+        from claude_task_master.core.credentials import CredentialManager
+
+        # Get valid access token
+        cred_manager = CredentialManager()
+        access_token = cred_manager.get_valid_token()
+
+        # Map model string to ModelType
+        model_map = {
+            "opus": ModelType.OPUS,
+            "sonnet": ModelType.SONNET,
+            "haiku": ModelType.HAIKU,
+        }
+        model_type = model_map.get(model.lower(), ModelType.OPUS)
+
+        # Initialize task state
+        options = TaskOptions(
+            auto_merge=False,  # Plan-only mode
+            max_sessions=1,
+            pause_on_pr=True,
+        )
+        state = state_manager.initialize(goal=goal, model=model, options=options)
+
+        # Update status to planning
+        state.status = "planning"
+        state_manager.save_state(state)
+
+        # Create agent wrapper
+        agent = AgentWrapper(
+            access_token=access_token,
+            model=model_type,
+            working_dir=str(work_path),
+            enable_safety_hooks=True,
+        )
+
+        # Run planning phase (read-only)
+        result = agent.run_planning_phase(goal=goal, context="")
+
+        # Extract plan and criteria
+        plan = result.get("plan", "")
+        criteria = result.get("criteria", "")
+
+        # Save plan and criteria to state
+        if plan:
+            state_manager.save_plan(plan)
+        if criteria:
+            state_manager.save_criteria(criteria)
+
+        # Update state to paused (plan complete, ready for work)
+        state.status = "paused"
+        state_manager.save_state(state)
+
+        return PlanRepoResult(
+            success=True,
+            message=f"Successfully created plan for: {goal}",
+            work_dir=str(work_path),
+            goal=goal,
+            plan=plan,
+            criteria=criteria,
+            run_id=state.run_id,
+        ).model_dump()
+
+    except ImportError as e:
+        return PlanRepoResult(
+            success=False,
+            message="Failed to import required modules",
+            work_dir=str(work_path),
+            goal=goal,
+            error=f"Import error: {e}. Ensure claude-agent-sdk is installed.",
+        ).model_dump()
+
+    except Exception as e:
+        # Try to update state to failed if possible
+        try:
+            if state_manager.exists():
+                state = state_manager.load_state()
+                state.status = "blocked"
+                state_manager.save_state(state)
+        except Exception:
+            pass  # State update failed, continue with error return
+
+        return PlanRepoResult(
+            success=False,
+            message=f"Planning failed: {e}",
+            work_dir=str(work_path),
+            goal=goal,
+            error=str(e),
+        ).model_dump()
