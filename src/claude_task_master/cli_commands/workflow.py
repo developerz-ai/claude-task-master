@@ -13,6 +13,7 @@ from ..core.context_accumulator import ContextAccumulator
 from ..core.credentials import CredentialManager
 from ..core.logger import LogFormat, LogLevel, TaskLogger
 from ..core.orchestrator import WorkLoopOrchestrator
+from ..core.plan_updater import PlanUpdater
 from ..core.planner import Planner
 from ..core.state import StateManager, StateResumeValidationError, TaskOptions
 from ..webhooks import WebhookClient
@@ -276,6 +277,12 @@ def start(
 
 
 def resume(
+    message: Annotated[
+        str | None,
+        typer.Argument(
+            help="Optional change request to update the plan before resuming",
+        ),
+    ] = None,
     force: Annotated[
         bool,
         typer.Option("--force", "-f", help="Force resume from failed/blocked state"),
@@ -288,11 +295,16 @@ def resume(
     - Interrupted by Ctrl+C
     - Blocked and waiting for intervention
 
+    Optionally provide a message to update the plan before resuming.
+    This is useful when requirements change mid-task.
+
     Use --force to recover from a failed state.
 
     Examples:
         claudetm resume
         claudetm resume --force  # Recover from failed state
+        claudetm resume "Add authentication to the API"
+        claudetm resume "Fix the bug in the login form instead"
     """
     console.print("[bold blue]Resuming task...[/bold blue]")
 
@@ -382,6 +394,31 @@ def resume(
             state.status = "working"
             state_manager.save_state(state)
             console.print("\n[yellow]Attempting to resume blocked task...[/yellow]")
+
+        # If a message was provided, update the plan first
+        if message:
+            console.print("\n[bold cyan]Updating plan with change request...[/bold cyan]")
+            console.print(
+                f"[dim]Message: {message[:100]}{'...' if len(message) > 100 else ''}[/dim]"
+            )
+
+            plan_updater = PlanUpdater(agent, state_manager, logger=logger)
+            try:
+                update_result = plan_updater.update_plan(message)
+                if update_result["changes_made"]:
+                    console.print("[green]Plan updated successfully[/green]")
+                    # Display a brief summary of the updated plan
+                    plan = state_manager.load_plan()
+                    if plan:
+                        # Count tasks
+                        completed = plan.count("- [x]")
+                        pending = plan.count("- [ ]")
+                        console.print(f"[dim]Tasks: {completed} completed, {pending} pending[/dim]")
+                else:
+                    console.print("[yellow]No changes needed to plan[/yellow]")
+            except Exception as e:
+                console.print(f"[red]Error updating plan: {e}[/red]")
+                console.print("[yellow]Continuing with existing plan...[/yellow]")
 
         # Create webhook client if URL was configured
         wh_client: WebhookClient | None = None
