@@ -9,6 +9,7 @@ The key behavior being tested:
 3. Single commits can address both CI failures and review comments
 """
 
+import json
 import shutil
 from collections.abc import Generator
 from pathlib import Path
@@ -578,7 +579,24 @@ class TestIntegrationScenarios:
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
+                # Call 1: gh repo view (for save_pr_comments)
                 MagicMock(returncode=0, stdout="owner/repo\n"),
+                # Call 2: gh api REST call to get PR comments
+                MagicMock(
+                    returncode=0,
+                    stdout=json.dumps(
+                        [
+                            {
+                                "id": 123456,
+                                "user": {"login": "coderabbitai"},
+                                "body": "Consider using a constant for this magic number",
+                                "path": "src/main.py",
+                                "line": 42,
+                            }
+                        ]
+                    ),
+                ),
+                # Call 3: GraphQL query to get resolved status
                 MagicMock(
                     returncode=0,
                     stdout="""{
@@ -593,11 +611,7 @@ class TestIntegrationScenarios:
                                                 "comments": {
                                                     "nodes": [
                                                         {
-                                                            "id": "comment_1",
-                                                            "author": {"login": "coderabbitai"},
-                                                            "body": "Consider using a constant for this magic number",
-                                                            "path": "src/main.py",
-                                                            "line": 42
+                                                            "databaseId": 123456
                                                         }
                                                     ]
                                                 }
@@ -632,7 +646,24 @@ class TestIntegrationScenarios:
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
+                # Call 1: gh repo view
                 MagicMock(returncode=0, stdout="owner/repo\n"),
+                # Call 2: gh api REST call to get PR comments
+                MagicMock(
+                    returncode=0,
+                    stdout=json.dumps(
+                        [
+                            {
+                                "id": 789012,
+                                "user": {"login": "reviewer"},
+                                "body": "Please add error handling here",
+                                "path": "src/handler.py",
+                                "line": 100,
+                            }
+                        ]
+                    ),
+                ),
+                # Call 3: GraphQL query to get resolved status
                 MagicMock(
                     returncode=0,
                     stdout="""{
@@ -647,11 +678,7 @@ class TestIntegrationScenarios:
                                                 "comments": {
                                                     "nodes": [
                                                         {
-                                                            "id": "comment_2",
-                                                            "author": {"login": "reviewer"},
-                                                            "body": "Please add error handling here",
-                                                            "path": "src/handler.py",
-                                                            "line": 100
+                                                            "databaseId": 789012
                                                         }
                                                     ]
                                                 }

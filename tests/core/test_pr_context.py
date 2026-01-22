@@ -56,8 +56,47 @@ def pr_context_manager(
 
 
 def make_graphql_response(threads: list[dict[str, Any]]) -> dict[str, Any]:
-    """Helper to create GraphQL response structure."""
+    """Helper to create GraphQL response structure for old format."""
     return {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": threads}}}}}
+
+
+def make_rest_comment(
+    comment_id: int, user: str, body: str, path: str | None, line: int | None
+) -> dict[str, Any]:
+    """Helper to create REST API comment format."""
+    return {
+        "id": comment_id,
+        "user": {"login": user},
+        "body": body,
+        "path": path,
+        "line": line,
+    }
+
+
+def make_resolved_status_response(resolved_map: dict[int, tuple[bool, str]]) -> dict[str, Any]:
+    """Helper to create GraphQL resolved status response.
+
+    Args:
+        resolved_map: Maps comment_id -> (is_resolved, thread_id)
+    """
+    # Group by thread_id
+    thread_data: dict[str, tuple[bool, list[int]]] = {}
+    for comment_id, (is_resolved, thread_id) in resolved_map.items():
+        if thread_id not in thread_data:
+            thread_data[thread_id] = (is_resolved, [])
+        thread_data[thread_id][1].append(comment_id)
+
+    nodes = []
+    for thread_id, (is_resolved, comment_ids) in thread_data.items():
+        nodes.append(
+            {
+                "id": thread_id,
+                "isResolved": is_resolved,
+                "comments": {"nodes": [{"databaseId": cid} for cid in comment_ids]},
+            }
+        )
+
+    return {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": nodes}}}}}
 
 
 # =============================================================================
@@ -240,32 +279,22 @@ class TestSavePRComments:
         pr_context_manager: PRContextManager,
         state_manager: StateManager,
     ) -> None:
-        """Test fetching and saving PR comments via GraphQL."""
-        graphql_response = make_graphql_response(
-            [
-                {
-                    "id": "thread_1",
-                    "isResolved": False,
-                    "comments": {
-                        "nodes": [
-                            {
-                                "id": "comment_1",
-                                "author": {"login": "reviewer"},
-                                "body": "Please fix this issue in the code.",
-                                "path": "src/main.py",
-                                "line": 42,
-                            }
-                        ]
-                    },
-                }
-            ]
-        )
+        """Test fetching and saving PR comments via REST API + GraphQL."""
+        # REST API returns all comments
+        rest_comments = [
+            make_rest_comment(
+                1, "reviewer", "Please fix this issue in the code.", "src/main.py", 42
+            ),
+        ]
+        # GraphQL returns resolved status
+        resolved_response = make_resolved_status_response({1: (False, "thread_1")})
 
         with patch("subprocess.run") as mock_run:
-            # First call: repo info
+            # Calls: 1) repo info, 2) REST API comments, 3) GraphQL resolved status
             mock_run.side_effect = [
                 MagicMock(stdout="owner/repo\n"),
-                MagicMock(stdout=json.dumps(graphql_response)),
+                MagicMock(stdout=json.dumps(rest_comments)),
+                MagicMock(stdout=json.dumps(resolved_response)),
             ]
 
             pr_context_manager.save_pr_comments(123)
@@ -280,46 +309,27 @@ class TestSavePRComments:
         pr_context_manager: PRContextManager,
         state_manager: StateManager,
     ) -> None:
-        """Test that resolved threads are skipped."""
-        graphql_response = make_graphql_response(
-            [
-                {
-                    "id": "thread_resolved",
-                    "isResolved": True,  # Should be skipped
-                    "comments": {
-                        "nodes": [
-                            {
-                                "id": "comment_1",
-                                "author": {"login": "reviewer"},
-                                "body": "Already resolved comment",
-                                "path": "src/main.py",
-                                "line": 42,
-                            }
-                        ]
-                    },
-                },
-                {
-                    "id": "thread_unresolved",
-                    "isResolved": False,  # Should be saved
-                    "comments": {
-                        "nodes": [
-                            {
-                                "id": "comment_2",
-                                "author": {"login": "reviewer"},
-                                "body": "Unresolved comment needs attention",
-                                "path": "src/utils.py",
-                                "line": 10,
-                            }
-                        ]
-                    },
-                },
-            ]
+        """Test that resolved comments are skipped."""
+        # REST API returns all comments
+        rest_comments = [
+            make_rest_comment(1, "reviewer", "Already resolved comment", "src/main.py", 42),
+            make_rest_comment(
+                2, "reviewer", "Unresolved comment needs attention", "src/utils.py", 10
+            ),
+        ]
+        # GraphQL returns resolved status: comment 1 resolved, comment 2 unresolved
+        resolved_response = make_resolved_status_response(
+            {
+                1: (True, "thread_resolved"),
+                2: (False, "thread_unresolved"),
+            }
         )
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
                 MagicMock(stdout="owner/repo\n"),
-                MagicMock(stdout=json.dumps(graphql_response)),
+                MagicMock(stdout=json.dumps(rest_comments)),
+                MagicMock(stdout=json.dumps(resolved_response)),
             ]
 
             pr_context_manager.save_pr_comments(123)
@@ -343,45 +353,26 @@ class TestSavePRComments:
         # Mark a thread as addressed
         state_manager.mark_threads_addressed(123, ["thread_addressed"])
 
-        graphql_response = make_graphql_response(
-            [
-                {
-                    "id": "thread_addressed",  # Already addressed
-                    "isResolved": False,
-                    "comments": {
-                        "nodes": [
-                            {
-                                "id": "comment_1",
-                                "author": {"login": "reviewer"},
-                                "body": "Already addressed comment text",
-                                "path": "src/main.py",
-                                "line": 42,
-                            }
-                        ]
-                    },
-                },
-                {
-                    "id": "thread_new",  # New thread
-                    "isResolved": False,
-                    "comments": {
-                        "nodes": [
-                            {
-                                "id": "comment_2",
-                                "author": {"login": "reviewer"},
-                                "body": "New comment needs attention here",
-                                "path": "src/utils.py",
-                                "line": 10,
-                            }
-                        ]
-                    },
-                },
-            ]
+        # REST API returns all comments
+        rest_comments = [
+            make_rest_comment(1, "reviewer", "Already addressed comment text", "src/main.py", 42),
+            make_rest_comment(
+                2, "reviewer", "New comment needs attention here", "src/utils.py", 10
+            ),
+        ]
+        # GraphQL returns resolved status (both unresolved, but one is addressed)
+        resolved_response = make_resolved_status_response(
+            {
+                1: (False, "thread_addressed"),  # This thread was already addressed
+                2: (False, "thread_new"),
+            }
         )
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
                 MagicMock(stdout="owner/repo\n"),
-                MagicMock(stdout=json.dumps(graphql_response)),
+                MagicMock(stdout=json.dumps(rest_comments)),
+                MagicMock(stdout=json.dumps(resolved_response)),
             ]
 
             pr_context_manager.save_pr_comments(123)
@@ -972,31 +963,19 @@ class TestPRContextIntegration:
         mock_github_client: MagicMock,
     ) -> None:
         """Test full workflow: save comments -> create resolutions -> post replies."""
-        # Step 1: Save PR comments
-        graphql_response = make_graphql_response(
-            [
-                {
-                    "id": "thread_review",
-                    "isResolved": False,
-                    "comments": {
-                        "nodes": [
-                            {
-                                "id": "comment_1",
-                                "author": {"login": "reviewer"},
-                                "body": "Please add error handling for null values",
-                                "path": "src/utils.py",
-                                "line": 50,
-                            }
-                        ]
-                    },
-                }
-            ]
-        )
+        # Step 1: Save PR comments using REST API + GraphQL
+        rest_comments = [
+            make_rest_comment(
+                1, "reviewer", "Please add error handling for null values", "src/utils.py", 50
+            ),
+        ]
+        resolved_response = make_resolved_status_response({1: (False, "thread_review")})
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
                 MagicMock(stdout="owner/repo\n"),
-                MagicMock(stdout=json.dumps(graphql_response)),
+                MagicMock(stdout=json.dumps(rest_comments)),
+                MagicMock(stdout=json.dumps(resolved_response)),
             ]
             pr_context_manager.save_pr_comments(123)
 
@@ -1051,31 +1030,17 @@ class TestPRContextIntegration:
         # Save CI failures
         pr_context_manager.save_ci_failures(123)
 
-        # Setup and save comments
-        graphql_response = make_graphql_response(
-            [
-                {
-                    "id": "thread_1",
-                    "isResolved": False,
-                    "comments": {
-                        "nodes": [
-                            {
-                                "id": "c1",
-                                "author": {"login": "user"},
-                                "body": "Review comment text here",
-                                "path": "test.py",
-                                "line": 1,
-                            }
-                        ]
-                    },
-                }
-            ]
-        )
+        # Setup and save comments using REST API + GraphQL
+        rest_comments = [
+            make_rest_comment(1, "user", "Review comment text here", "test.py", 1),
+        ]
+        resolved_response = make_resolved_status_response({1: (False, "thread_1")})
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
                 MagicMock(stdout="owner/repo\n"),
-                MagicMock(stdout=json.dumps(graphql_response)),
+                MagicMock(stdout=json.dumps(rest_comments)),
+                MagicMock(stdout=json.dumps(resolved_response)),
             ]
             pr_context_manager.save_pr_comments(123)
 
