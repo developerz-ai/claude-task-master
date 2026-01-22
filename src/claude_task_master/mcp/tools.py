@@ -146,6 +146,43 @@ class ClearMailboxResult(BaseModel):
     error: str | None = None
 
 
+class CloneRepoResult(BaseModel):
+    """Result from clone_repo tool."""
+
+    success: bool
+    message: str
+    repo_url: str | None = None
+    target_dir: str | None = None
+    branch: str | None = None
+    error: str | None = None
+
+
+class SetupRepoResult(BaseModel):
+    """Result from setup_repo tool."""
+
+    success: bool
+    message: str
+    work_dir: str | None = None
+    steps_completed: list[str] = []
+    venv_path: str | None = None
+    dependencies_installed: bool = False
+    setup_scripts_run: list[str] = []
+    error: str | None = None
+
+
+class PlanRepoResult(BaseModel):
+    """Result from plan_repo tool."""
+
+    success: bool
+    message: str
+    work_dir: str | None = None
+    goal: str | None = None
+    plan: str | None = None
+    criteria: str | None = None
+    run_id: str | None = None
+    error: str | None = None
+
+
 # =============================================================================
 # Tool Implementations
 # =============================================================================
