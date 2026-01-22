@@ -113,8 +113,18 @@ Claude Task Master uses the Claude Agent SDK to autonomously work on complex tas
 4. **Handle CI** - Wait for checks, fix failures, address review comments
 5. **Merge** - Auto-merge when approved (configurable)
 6. **Verify** - Confirm all success criteria are met
+7. **Adapt** - Accept dynamic plan updates via mailbox while working
 
 **Core Philosophy**: Claude is smart enough to do the work AND verify it. Task Master keeps the loop going and persists state between sessions.
+
+### Key Features
+
+- **Autonomous Execution** - Runs until goal is achieved or needs human input
+- **PR-Based Workflow** - All work flows through pull requests for review
+- **CI Integration** - Handles CI failures and review comments together
+- **Mailbox System** - Receive dynamic plan updates while working (via REST API, MCP, or CLI)
+- **Multi-Instance Coordination** - Multiple instances can communicate via mailbox
+- **State Persistence** - Survives interruptions, resumes where it left off
 
 ## Workflow
 
@@ -320,6 +330,9 @@ Complete documentation for all features and deployment options:
 | `claudetm comments` | Show review comments |
 | `claudetm clean` | Clean up task state |
 | `claudetm doctor` | Verify system setup |
+| `claudetm mailbox` | Show mailbox status |
+| `claudetm mailbox send "msg"` | Send message to mailbox |
+| `claudetm mailbox clear` | Clear pending messages |
 
 ### Start Options
 
@@ -593,6 +606,7 @@ Each stage has specific handlers that determine when to transition to the next s
 ├── state.json            # Machine-readable state
 ├── progress.md           # Progress summary
 ├── context.md            # Accumulated learnings
+├── mailbox.json          # Pending messages for plan updates
 └── logs/
     └── run-{timestamp}.txt    # Full log (kept on success)
 ```
