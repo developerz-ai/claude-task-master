@@ -18,11 +18,17 @@ from datetime import datetime
 import pytest
 
 from claude_task_master.webhooks.events import (
+    CIFailedEvent,
+    CIPassedEvent,
     EventType,
+    PlanUpdatedEvent,
     PRCreatedEvent,
     PRMergedEvent,
+    RunCompletedEvent,
+    RunStartedEvent,
     SessionCompletedEvent,
     SessionStartedEvent,
+    StatusChangedEvent,
     TaskCompletedEvent,
     TaskFailedEvent,
     TaskStartedEvent,
@@ -181,7 +187,7 @@ class TestWebhookEventBase:
         """Test that string event_type is normalized to EventType enum."""
         # This tests __post_init__ normalization
         event = TaskStartedEvent(task_index=0, task_description="Test")
-        event.event_type = "task.started"  # type: ignore[assignment]
+        event.event_type = "task.started"  # type: ignore
         event.__post_init__()
 
         assert isinstance(event.event_type, EventType)
@@ -674,6 +680,495 @@ class TestSessionCompletedEvent:
 
 
 # =============================================================================
+# Test: CIPassedEvent
+# =============================================================================
+
+
+class TestCIPassedEvent:
+    """Tests for CIPassedEvent serialization."""
+
+    def test_ci_passed_event_initialization(self) -> None:
+        """Test CIPassedEvent initialization."""
+        event = CIPassedEvent(
+            pr_number=123,
+            pr_url="https://github.com/org/repo/pull/123",
+            branch="feat/new-feature",
+        )
+
+        assert event.event_type == EventType.CI_PASSED
+        assert event.pr_number == 123
+        assert event.pr_url == "https://github.com/org/repo/pull/123"
+        assert event.branch == "feat/new-feature"
+        assert event.check_name is None
+        assert event.check_url is None
+
+    def test_ci_passed_event_with_all_fields(self) -> None:
+        """Test CIPassedEvent with all fields."""
+        event = CIPassedEvent(
+            pr_number=456,
+            pr_url="https://github.com/org/repo/pull/456",
+            branch="fix/bug",
+            check_name="pytest",
+            check_url="https://github.com/org/repo/actions/runs/123",
+            duration_seconds=45.3,
+            repository="org/repo",
+            run_id="run-xyz",
+        )
+
+        assert event.check_name == "pytest"
+        assert event.check_url == "https://github.com/org/repo/actions/runs/123"
+        assert event.duration_seconds == 45.3
+        assert event.repository == "org/repo"
+        assert event.run_id == "run-xyz"
+
+    def test_ci_passed_event_to_dict(self) -> None:
+        """Test CIPassedEvent serialization."""
+        event = CIPassedEvent(
+            pr_number=789,
+            pr_url="https://github.com/test/project/pull/789",
+            branch="feature/awesome",
+            check_name="build",
+            duration_seconds=120.5,
+        )
+
+        data = event.to_dict()
+
+        assert data["event_type"] == "ci.passed"
+        assert data["pr_number"] == 789
+        assert data["pr_url"] == "https://github.com/test/project/pull/789"
+        assert data["branch"] == "feature/awesome"
+        assert data["check_name"] == "build"
+        assert data["duration_seconds"] == 120.5
+        assert "event_id" in data
+        assert "timestamp" in data
+
+    def test_ci_passed_event_defaults(self) -> None:
+        """Test CIPassedEvent default values."""
+        event = CIPassedEvent()
+
+        assert event.pr_number == 0
+        assert event.pr_url == ""
+        assert event.branch == ""
+        assert event.check_name is None
+        assert event.duration_seconds is None
+
+
+# =============================================================================
+# Test: CIFailedEvent
+# =============================================================================
+
+
+class TestCIFailedEvent:
+    """Tests for CIFailedEvent serialization."""
+
+    def test_ci_failed_event_initialization(self) -> None:
+        """Test CIFailedEvent initialization."""
+        event = CIFailedEvent(
+            pr_number=123,
+            pr_url="https://github.com/org/repo/pull/123",
+            branch="feat/broken",
+        )
+
+        assert event.event_type == EventType.CI_FAILED
+        assert event.pr_number == 123
+        assert event.pr_url == "https://github.com/org/repo/pull/123"
+        assert event.branch == "feat/broken"
+        assert event.check_name is None
+        assert event.recoverable is True
+
+    def test_ci_failed_event_with_all_fields(self) -> None:
+        """Test CIFailedEvent with all fields."""
+        event = CIFailedEvent(
+            pr_number=456,
+            pr_url="https://github.com/org/repo/pull/456",
+            branch="fix/failing-test",
+            check_name="lint",
+            check_url="https://github.com/org/repo/actions/runs/456",
+            failure_reason="Linting errors found",
+            failure_log="Error: Line too long at line 42",
+            duration_seconds=15.8,
+            repository="org/repo",
+            recoverable=False,
+            run_id="run-abc",
+        )
+
+        assert event.check_name == "lint"
+        assert event.check_url == "https://github.com/org/repo/actions/runs/456"
+        assert event.failure_reason == "Linting errors found"
+        assert event.failure_log == "Error: Line too long at line 42"
+        assert event.duration_seconds == 15.8
+        assert event.repository == "org/repo"
+        assert event.recoverable is False
+        assert event.run_id == "run-abc"
+
+    def test_ci_failed_event_to_dict(self) -> None:
+        """Test CIFailedEvent serialization."""
+        event = CIFailedEvent(
+            pr_number=999,
+            pr_url="https://github.com/test/project/pull/999",
+            branch="feature/test",
+            check_name="pytest",
+            failure_reason="3 tests failed",
+            recoverable=True,
+        )
+
+        data = event.to_dict()
+
+        assert data["event_type"] == "ci.failed"
+        assert data["pr_number"] == 999
+        assert data["pr_url"] == "https://github.com/test/project/pull/999"
+        assert data["branch"] == "feature/test"
+        assert data["check_name"] == "pytest"
+        assert data["failure_reason"] == "3 tests failed"
+        assert data["recoverable"] is True
+        assert "event_id" in data
+        assert "timestamp" in data
+
+    def test_ci_failed_event_defaults(self) -> None:
+        """Test CIFailedEvent default values."""
+        event = CIFailedEvent()
+
+        assert event.pr_number == 0
+        assert event.pr_url == ""
+        assert event.branch == ""
+        assert event.check_name is None
+        assert event.failure_reason is None
+        assert event.failure_log is None
+        assert event.recoverable is True
+
+
+# =============================================================================
+# Test: PlanUpdatedEvent
+# =============================================================================
+
+
+class TestPlanUpdatedEvent:
+    """Tests for PlanUpdatedEvent serialization."""
+
+    def test_plan_updated_event_initialization(self) -> None:
+        """Test PlanUpdatedEvent initialization."""
+        event = PlanUpdatedEvent(
+            update_source="mailbox",
+            tasks_added=2,
+            total_tasks=10,
+        )
+
+        assert event.event_type == EventType.PLAN_UPDATED
+        assert event.update_source == "mailbox"
+        assert event.tasks_added == 2
+        assert event.total_tasks == 10
+        assert event.message is None
+
+    def test_plan_updated_event_with_all_fields(self) -> None:
+        """Test PlanUpdatedEvent with all fields."""
+        event = PlanUpdatedEvent(
+            update_source="resume",
+            message="Add rate limiting to API",
+            tasks_added=3,
+            tasks_modified=1,
+            tasks_removed=0,
+            total_tasks=15,
+            completed_tasks=7,
+            run_id="run-123",
+        )
+
+        assert event.update_source == "resume"
+        assert event.message == "Add rate limiting to API"
+        assert event.tasks_added == 3
+        assert event.tasks_modified == 1
+        assert event.tasks_removed == 0
+        assert event.total_tasks == 15
+        assert event.completed_tasks == 7
+        assert event.run_id == "run-123"
+
+    def test_plan_updated_event_to_dict(self) -> None:
+        """Test PlanUpdatedEvent serialization."""
+        event = PlanUpdatedEvent(
+            update_source="manual",
+            message="Refactor authentication module",
+            tasks_added=1,
+            tasks_modified=2,
+            tasks_removed=1,
+            total_tasks=12,
+            completed_tasks=5,
+        )
+
+        data = event.to_dict()
+
+        assert data["event_type"] == "plan.updated"
+        assert data["update_source"] == "manual"
+        assert data["message"] == "Refactor authentication module"
+        assert data["tasks_added"] == 1
+        assert data["tasks_modified"] == 2
+        assert data["tasks_removed"] == 1
+        assert data["total_tasks"] == 12
+        assert data["completed_tasks"] == 5
+        assert "event_id" in data
+        assert "timestamp" in data
+
+    def test_plan_updated_event_defaults(self) -> None:
+        """Test PlanUpdatedEvent default values."""
+        event = PlanUpdatedEvent()
+
+        assert event.update_source == "manual"
+        assert event.message is None
+        assert event.tasks_added == 0
+        assert event.tasks_modified == 0
+        assert event.tasks_removed == 0
+        assert event.total_tasks == 0
+        assert event.completed_tasks == 0
+
+
+# =============================================================================
+# Test: StatusChangedEvent
+# =============================================================================
+
+
+class TestStatusChangedEvent:
+    """Tests for StatusChangedEvent serialization."""
+
+    def test_status_changed_event_initialization(self) -> None:
+        """Test StatusChangedEvent initialization."""
+        event = StatusChangedEvent(
+            previous_status="idle",
+            new_status="planning",
+        )
+
+        assert event.event_type == EventType.STATUS_CHANGED
+        assert event.previous_status == "idle"
+        assert event.new_status == "planning"
+        assert event.reason is None
+
+    def test_status_changed_event_with_all_fields(self) -> None:
+        """Test StatusChangedEvent with all fields."""
+        event = StatusChangedEvent(
+            previous_status="working",
+            new_status="blocked",
+            reason="Waiting for CI checks",
+            task_index=3,
+            session_number=5,
+            run_id="run-xyz",
+        )
+
+        assert event.previous_status == "working"
+        assert event.new_status == "blocked"
+        assert event.reason == "Waiting for CI checks"
+        assert event.task_index == 3
+        assert event.session_number == 5
+        assert event.run_id == "run-xyz"
+
+    def test_status_changed_event_to_dict(self) -> None:
+        """Test StatusChangedEvent serialization."""
+        event = StatusChangedEvent(
+            previous_status="planning",
+            new_status="working",
+            reason="Plan approved",
+            task_index=0,
+        )
+
+        data = event.to_dict()
+
+        assert data["event_type"] == "status.changed"
+        assert data["previous_status"] == "planning"
+        assert data["new_status"] == "working"
+        assert data["reason"] == "Plan approved"
+        assert data["task_index"] == 0
+        assert "event_id" in data
+        assert "timestamp" in data
+
+    def test_status_changed_event_defaults(self) -> None:
+        """Test StatusChangedEvent default values."""
+        event = StatusChangedEvent()
+
+        assert event.previous_status == ""
+        assert event.new_status == ""
+        assert event.reason is None
+        assert event.task_index is None
+        assert event.session_number is None
+
+
+# =============================================================================
+# Test: RunStartedEvent
+# =============================================================================
+
+
+class TestRunStartedEvent:
+    """Tests for RunStartedEvent serialization."""
+
+    def test_run_started_event_initialization(self) -> None:
+        """Test RunStartedEvent initialization."""
+        event = RunStartedEvent(
+            goal="Implement user authentication",
+            working_directory="/home/user/project",
+        )
+
+        assert event.event_type == EventType.RUN_STARTED
+        assert event.goal == "Implement user authentication"
+        assert event.working_directory == "/home/user/project"
+        assert event.max_sessions is None
+        assert event.auto_merge is False
+
+    def test_run_started_event_with_all_fields(self) -> None:
+        """Test RunStartedEvent with all fields."""
+        event = RunStartedEvent(
+            goal="Add API rate limiting",
+            working_directory="/workspace/api-project",
+            max_sessions=20,
+            auto_merge=True,
+            pr_mode="per-task",
+            resumed=True,
+            run_id="run-abc123",
+        )
+
+        assert event.goal == "Add API rate limiting"
+        assert event.working_directory == "/workspace/api-project"
+        assert event.max_sessions == 20
+        assert event.auto_merge is True
+        assert event.pr_mode == "per-task"
+        assert event.resumed is True
+        assert event.run_id == "run-abc123"
+
+    def test_run_started_event_to_dict(self) -> None:
+        """Test RunStartedEvent serialization."""
+        event = RunStartedEvent(
+            goal="Fix critical bug",
+            working_directory="/code/bugfix",
+            max_sessions=10,
+            auto_merge=False,
+            pr_mode="per-group",
+            resumed=False,
+        )
+
+        data = event.to_dict()
+
+        assert data["event_type"] == "run.started"
+        assert data["goal"] == "Fix critical bug"
+        assert data["working_directory"] == "/code/bugfix"
+        assert data["max_sessions"] == 10
+        assert data["auto_merge"] is False
+        assert data["pr_mode"] == "per-group"
+        assert data["resumed"] is False
+        assert "event_id" in data
+        assert "timestamp" in data
+
+    def test_run_started_event_defaults(self) -> None:
+        """Test RunStartedEvent default values."""
+        event = RunStartedEvent()
+
+        assert event.goal == ""
+        assert event.working_directory == ""
+        assert event.max_sessions is None
+        assert event.auto_merge is False
+        assert event.pr_mode == "per-group"
+        assert event.resumed is False
+
+
+# =============================================================================
+# Test: RunCompletedEvent
+# =============================================================================
+
+
+class TestRunCompletedEvent:
+    """Tests for RunCompletedEvent serialization."""
+
+    def test_run_completed_event_initialization(self) -> None:
+        """Test RunCompletedEvent initialization."""
+        event = RunCompletedEvent(
+            goal="Implement feature X",
+            result="success",
+            exit_code=0,
+            total_tasks=10,
+            completed_tasks=10,
+        )
+
+        assert event.event_type == EventType.RUN_COMPLETED
+        assert event.goal == "Implement feature X"
+        assert event.result == "success"
+        assert event.exit_code == 0
+        assert event.total_tasks == 10
+        assert event.completed_tasks == 10
+
+    def test_run_completed_event_with_all_fields(self) -> None:
+        """Test RunCompletedEvent with all fields."""
+        event = RunCompletedEvent(
+            goal="Deploy application",
+            result="blocked",
+            exit_code=1,
+            total_tasks=15,
+            completed_tasks=12,
+            total_sessions=25,
+            duration_seconds=3600.5,
+            prs_created=3,
+            prs_merged=2,
+            final_status="waiting_for_approval",
+            error_message="Manual approval required",
+            run_id="run-final",
+        )
+
+        assert event.goal == "Deploy application"
+        assert event.result == "blocked"
+        assert event.exit_code == 1
+        assert event.total_tasks == 15
+        assert event.completed_tasks == 12
+        assert event.total_sessions == 25
+        assert event.duration_seconds == 3600.5
+        assert event.prs_created == 3
+        assert event.prs_merged == 2
+        assert event.final_status == "waiting_for_approval"
+        assert event.error_message == "Manual approval required"
+        assert event.run_id == "run-final"
+
+    def test_run_completed_event_to_dict(self) -> None:
+        """Test RunCompletedEvent serialization."""
+        event = RunCompletedEvent(
+            goal="Refactor codebase",
+            result="failed",
+            exit_code=2,
+            total_tasks=8,
+            completed_tasks=5,
+            total_sessions=15,
+            duration_seconds=1800.0,
+            prs_created=2,
+            prs_merged=1,
+            final_status="failed",
+            error_message="Unrecoverable error",
+        )
+
+        data = event.to_dict()
+
+        assert data["event_type"] == "run.completed"
+        assert data["goal"] == "Refactor codebase"
+        assert data["result"] == "failed"
+        assert data["exit_code"] == 2
+        assert data["total_tasks"] == 8
+        assert data["completed_tasks"] == 5
+        assert data["total_sessions"] == 15
+        assert data["duration_seconds"] == 1800.0
+        assert data["prs_created"] == 2
+        assert data["prs_merged"] == 1
+        assert data["final_status"] == "failed"
+        assert data["error_message"] == "Unrecoverable error"
+        assert "event_id" in data
+        assert "timestamp" in data
+
+    def test_run_completed_event_defaults(self) -> None:
+        """Test RunCompletedEvent default values."""
+        event = RunCompletedEvent()
+
+        assert event.goal == ""
+        assert event.result == "success"
+        assert event.exit_code == 0
+        assert event.total_tasks == 0
+        assert event.completed_tasks == 0
+        assert event.total_sessions == 0
+        assert event.duration_seconds is None
+        assert event.prs_created == 0
+        assert event.prs_merged == 0
+        assert event.final_status == ""
+        assert event.error_message is None
+
+
+# =============================================================================
 # Test: Event Factory - create_event()
 # =============================================================================
 
@@ -712,8 +1207,14 @@ class TestCreateEvent:
             (EventType.TASK_FAILED, TaskFailedEvent, {"task_index": 0}),
             (EventType.PR_CREATED, PRCreatedEvent, {"pr_number": 1}),
             (EventType.PR_MERGED, PRMergedEvent, {"pr_number": 1}),
+            (EventType.CI_PASSED, CIPassedEvent, {"pr_number": 1}),
+            (EventType.CI_FAILED, CIFailedEvent, {"pr_number": 1}),
             (EventType.SESSION_STARTED, SessionStartedEvent, {}),
             (EventType.SESSION_COMPLETED, SessionCompletedEvent, {}),
+            (EventType.PLAN_UPDATED, PlanUpdatedEvent, {}),
+            (EventType.STATUS_CHANGED, StatusChangedEvent, {}),
+            (EventType.RUN_STARTED, RunStartedEvent, {}),
+            (EventType.RUN_COMPLETED, RunCompletedEvent, {}),
         ]
 
         for event_type, expected_class, kwargs in events:
@@ -763,8 +1264,14 @@ class TestGetEventClass:
             EventType.TASK_FAILED: TaskFailedEvent,
             EventType.PR_CREATED: PRCreatedEvent,
             EventType.PR_MERGED: PRMergedEvent,
+            EventType.CI_PASSED: CIPassedEvent,
+            EventType.CI_FAILED: CIFailedEvent,
             EventType.SESSION_STARTED: SessionStartedEvent,
             EventType.SESSION_COMPLETED: SessionCompletedEvent,
+            EventType.PLAN_UPDATED: PlanUpdatedEvent,
+            EventType.STATUS_CHANGED: StatusChangedEvent,
+            EventType.RUN_STARTED: RunStartedEvent,
+            EventType.RUN_COMPLETED: RunCompletedEvent,
         }
 
         for event_type, expected_class in mappings.items():
