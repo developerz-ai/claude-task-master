@@ -619,6 +619,34 @@ class WorkLoopOrchestrator:
             console.warning(f"Error updating plan from mailbox: {e}")
             return False
 
+    def _emit_status_changed(
+        self,
+        previous_status: str,
+        new_status: str,
+        state: TaskState,
+        reason: str | None = None,
+    ) -> None:
+        """Emit a status.changed webhook event when status transitions.
+
+        Args:
+            previous_status: The status before the change.
+            new_status: The status after the change.
+            state: Current task state.
+            reason: Optional reason for the status change.
+        """
+        # Only emit if status actually changed
+        if previous_status == new_status:
+            return
+
+        self.webhook_emitter.emit(
+            "status.changed",
+            previous_status=previous_status,
+            new_status=new_status,
+            reason=reason,
+            task_index=state.current_task_index,
+            session_number=state.session_count,
+        )
+
     def _emit_run_completed(
         self,
         state: TaskState,
@@ -733,7 +761,9 @@ class WorkLoopOrchestrator:
             console.newline()
             console.warning(f"{reason} - pausing...")
             self.tracker.end_session(outcome="cancelled")
+            previous_status = state.status
             state.status = "paused"
+            self._emit_status_changed(previous_status, "paused", state, reason)
             self.state_manager.save_state(state)
             self.state_manager.create_state_backup()
             console.newline()
@@ -759,7 +789,9 @@ class WorkLoopOrchestrator:
                 should_abort, abort_reason = self.tracker.should_abort()
                 if should_abort:
                     console.warning(f"Execution issue: {abort_reason}")
+                    previous_status = state.status
                     state.status = "blocked"
+                    self._emit_status_changed(previous_status, "blocked", state, abort_reason)
                     self.state_manager.save_state(state)
                     stop_listening()
                     unregister_handlers()
@@ -788,7 +820,11 @@ class WorkLoopOrchestrator:
                 # Check session limit
                 if state.options.max_sessions and state.session_count >= state.options.max_sessions:
                     console.warning(f"Max sessions ({state.options.max_sessions}) reached")
+                    previous_status = state.status
                     state.status = "blocked"
+                    self._emit_status_changed(
+                        previous_status, "blocked", state, "Max sessions reached"
+                    )
                     self.state_manager.save_state(state)
                     stop_listening()
                     unregister_handlers()
@@ -812,7 +848,11 @@ class WorkLoopOrchestrator:
                 if verification["success"]:
                     # Success! Checkout to main and cleanup
                     self._checkout_to_main()
+                    previous_status = state.status
                     state.status = "success"
+                    self._emit_status_changed(
+                        previous_status, "success", state, "All tasks completed successfully"
+                    )
                     self.state_manager.save_state(state)
                     self.state_manager.cleanup_on_success(state.run_id)
                     console.success("All tasks completed successfully!")
@@ -827,7 +867,11 @@ class WorkLoopOrchestrator:
                     # Max attempts reached - checkout to main and fail
                     console.error(f"Max fix attempts ({max_fix_attempts}) reached")
                     self._checkout_to_main()
+                    previous_status = state.status
                     state.status = "blocked"
+                    self._emit_status_changed(
+                        previous_status, "blocked", state, "Max fix attempts reached"
+                    )
                     self.state_manager.save_state(state)
                     console.info(self.tracker.get_cost_report())
                     self._emit_run_completed(
@@ -842,7 +886,11 @@ class WorkLoopOrchestrator:
                     # Fix failed - checkout to main and fail
                     console.error("Fix attempt failed")
                     self._checkout_to_main()
+                    previous_status = state.status
                     state.status = "blocked"
+                    self._emit_status_changed(
+                        previous_status, "blocked", state, "Verification fix failed"
+                    )
                     self.state_manager.save_state(state)
                     console.info(self.tracker.get_cost_report())
                     self._emit_run_completed(
@@ -855,7 +903,11 @@ class WorkLoopOrchestrator:
                     # PR merge failed - checkout to main and fail
                     console.error("Fix PR merge failed")
                     self._checkout_to_main()
+                    previous_status = state.status
                     state.status = "blocked"
+                    self._emit_status_changed(
+                        previous_status, "blocked", state, "Fix PR merge failed"
+                    )
                     self.state_manager.save_state(state)
                     console.info(self.tracker.get_cost_report())
                     self._emit_run_completed(
@@ -869,7 +921,11 @@ class WorkLoopOrchestrator:
 
             # Should not reach here, but handle it gracefully
             self._checkout_to_main()
+            previous_status = state.status
             state.status = "blocked"
+            self._emit_status_changed(
+                previous_status, "blocked", state, "Unexpected exit from verification loop"
+            )
             self.state_manager.save_state(state)
             console.info(self.tracker.get_cost_report())
             self._emit_run_completed(
@@ -883,7 +939,9 @@ class WorkLoopOrchestrator:
             stop_listening()
             unregister_handlers()
             console.error(f"Orchestrator error: {e.message}")
+            previous_status = state.status
             state.status = "failed"
+            self._emit_status_changed(previous_status, "failed", state, e.message)
             try:
                 self._checkout_to_main()
                 self.state_manager.save_state(state)
@@ -895,13 +953,16 @@ class WorkLoopOrchestrator:
             stop_listening()
             unregister_handlers()
             console.error(f"Unexpected error: {type(e).__name__}: {e}")
+            previous_status = state.status
             state.status = "failed"
+            error_message = f"{type(e).__name__}: {e}"
+            self._emit_status_changed(previous_status, "failed", state, error_message)
             try:
                 self._checkout_to_main()
                 self.state_manager.save_state(state)
             except Exception:
                 pass  # Best effort - state save failed but we still return error
-            self._emit_run_completed(state, 1, "failed", run_start_time, f"{type(e).__name__}: {e}")
+            self._emit_run_completed(state, 1, "failed", run_start_time, error_message)
             return 1
 
     def _run_workflow_cycle(self, state: TaskState) -> int | None:
@@ -951,24 +1012,38 @@ class WorkLoopOrchestrator:
 
         except NoPlanFoundError as e:
             console.error(e.message)
+            previous_status = state.status
             state.status = "failed"
+            self._emit_status_changed(previous_status, "failed", state, e.message)
             self.state_manager.save_state(state)
             return 1
         except NoTasksFoundError:
             return None  # Continue to completion check
         except ContentFilterError as e:
             console.error(f"Content filter: {e.message}")
+            previous_status = state.status
             state.status = "blocked"
+            self._emit_status_changed(
+                previous_status, "blocked", state, f"Content filter: {e.message}"
+            )
             self.state_manager.save_state(state)
             return 1
         except CircuitBreakerError as e:
             console.warning(f"Circuit breaker: {e.message}")
+            previous_status = state.status
             state.status = "blocked"
+            self._emit_status_changed(
+                previous_status, "blocked", state, f"Circuit breaker: {e.message}"
+            )
             self.state_manager.save_state(state)
             return 1
         except ConsecutiveFailuresError as e:
             console.error(f"Consecutive failures: {e.message}")
+            previous_status = state.status
             state.status = "blocked"
+            self._emit_status_changed(
+                previous_status, "blocked", state, f"Consecutive failures: {e.message}"
+            )
             self.state_manager.save_state(state)
             return 1
         except AgentError as e:
