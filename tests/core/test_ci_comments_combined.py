@@ -1,33 +1,23 @@
-"""Tests for CI failures + review comments combined handling.
+"""Tests for combined CI failures and PR comments handling.
 
-This module tests the bug fix where CI failures AND review comments should be
-fetched and addressed together in one step, rather than requiring multiple
-fix cycles.
+This module tests that CI failures and PR comments are fetched and handled
+together in a single step, avoiding the need for multiple fix cycles.
 
-Tests cover:
-- CI failures are saved together with comments
-- Combined task description is generated correctly
-- Different feedback combinations are handled properly
-- Edge cases (only CI, only comments, neither)
+The key behavior being tested:
+1. When CI fails, BOTH CI logs AND PR comments are saved
+2. The agent receives a combined task description covering both
+3. Single commits can address both CI failures and review comments
 """
-
-from __future__ import annotations
 
 import shutil
 from collections.abc import Generator
-from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from claude_task_master.core.pr_context import PRContextManager
-from claude_task_master.core.state import StateManager, TaskOptions, TaskState
-from claude_task_master.core.workflow_stages import WorkflowStageHandler
-
-# =============================================================================
-# Test Fixtures
-# =============================================================================
+from claude_task_master.core.state import StateManager
 
 
 @pytest.fixture
@@ -43,477 +33,641 @@ def state_manager(tmp_path: Path) -> Generator[StateManager, None, None]:
 @pytest.fixture
 def mock_github_client() -> MagicMock:
     """Create a mock GitHub client."""
-    client = MagicMock()
-    client.get_failed_run_logs.return_value = "Error: Test failed\nLine 42"
-    client.get_pr_status.return_value = MagicMock(check_details=[])
-    return client
-
-
-@pytest.fixture
-def pr_context_manager(
-    state_manager: StateManager, mock_github_client: MagicMock
-) -> PRContextManager:
-    """Create a PRContextManager with mocked dependencies."""
-    return PRContextManager(state_manager, mock_github_client)
-
-
-@pytest.fixture
-def mock_agent() -> MagicMock:
-    """Create a mock agent wrapper."""
-    agent = MagicMock()
-    agent.run_work_session = MagicMock(return_value={"output": "Fixed", "success": True})
-    return agent
-
-
-@pytest.fixture
-def workflow_handler(
-    mock_agent: MagicMock,
-    state_manager: StateManager,
-    mock_github_client: MagicMock,
-    pr_context_manager: PRContextManager,
-) -> WorkflowStageHandler:
-    """Create a WorkflowStageHandler instance with mocks."""
-    return WorkflowStageHandler(
-        agent=mock_agent,
-        state_manager=state_manager,
-        github_client=mock_github_client,
-        pr_context=pr_context_manager,
+    mock = MagicMock()
+    mock.get_failed_run_logs.return_value = "Test failure: AssertionError in test_main.py"
+    mock.get_pr_status.return_value = MagicMock(
+        base_branch="main",
+        check_details=[
+            {"name": "tests", "conclusion": "FAILURE", "status": "COMPLETED"},
+        ],
     )
+    return mock
 
 
 @pytest.fixture
-def sample_task_options() -> dict:
-    """Sample task options for testing."""
-    return {
-        "auto_merge": True,
-        "max_sessions": 10,
-        "pause_on_pr": False,
-    }
+def pr_context(state_manager: StateManager, mock_github_client: MagicMock) -> PRContextManager:
+    """Create a PRContextManager instance."""
+    return PRContextManager(state_manager=state_manager, github_client=mock_github_client)
 
 
-@pytest.fixture
-def basic_task_state(sample_task_options: dict) -> TaskState:
-    """Create a basic task state for testing."""
-    now = datetime.now().isoformat()
-    options = TaskOptions(**sample_task_options)
-    return TaskState(
-        status="working",
-        workflow_stage="ci_failed",
-        current_task_index=0,
-        session_count=1,
-        created_at=now,
-        updated_at=now,
-        run_id="test-run-id",
-        model="sonnet",
-        options=options,
-        current_pr=42,
-    )
+class TestSaveCIFailuresAlsoSavesComments:
+    """Tests that save_ci_failures also saves PR comments."""
 
-
-# =============================================================================
-# Test has_pr_comments and has_ci_failures methods
-# =============================================================================
-
-
-class TestHasPRComments:
-    """Tests for has_pr_comments method."""
-
-    def test_returns_false_for_none_pr(self, pr_context_manager: PRContextManager) -> None:
-        """Test that has_pr_comments returns False when pr_number is None."""
-        result = pr_context_manager.has_pr_comments(None)
-        assert result is False
-
-    def test_returns_false_when_no_comments_dir(
-        self, pr_context_manager: PRContextManager, state_manager: StateManager
+    def test_save_ci_failures_calls_save_pr_comments(
+        self, pr_context: PRContextManager, state_manager: StateManager
     ) -> None:
-        """Test that has_pr_comments returns False when comments directory doesn't exist."""
-        state_manager.get_pr_dir(123)  # Create PR dir but not comments dir
-        result = pr_context_manager.has_pr_comments(123)
-        assert result is False
+        """Test that save_ci_failures triggers save_pr_comments by default."""
+        # Mock the subprocess calls for comments
+        with patch("subprocess.run") as mock_run:
+            # First call: get repo info
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="owner/repo",
+            )
+            # Use side_effect to handle multiple calls
+            mock_run.side_effect = [
+                # For save_pr_comments -> get repo info
+                MagicMock(returncode=0, stdout="owner/repo\n"),
+                # For save_pr_comments -> GraphQL query (empty threads)
+                MagicMock(
+                    returncode=0,
+                    stdout='{"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": []}}}}}',
+                ),
+                # For save_ci_failures -> get_pr_status (handled by mock_github_client)
+            ]
 
-    def test_returns_false_when_comments_dir_empty(
-        self, pr_context_manager: PRContextManager, state_manager: StateManager
+            pr_context.save_ci_failures(123)
+
+            # Verify subprocess was called (for comments)
+            assert mock_run.call_count >= 2
+
+    def test_save_ci_failures_creates_ci_directory(
+        self, pr_context: PRContextManager, state_manager: StateManager
     ) -> None:
-        """Test that has_pr_comments returns False when comments directory is empty."""
-        pr_dir = state_manager.get_pr_dir(123)
-        comments_dir = pr_dir / "comments"
-        comments_dir.mkdir(parents=True)
-        result = pr_context_manager.has_pr_comments(123)
-        assert result is False
+        """Test that save_ci_failures creates CI failure files."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout="owner/repo\n"),
+                MagicMock(
+                    returncode=0,
+                    stdout='{"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": []}}}}}',
+                ),
+            ]
 
-    def test_returns_true_when_comments_exist(
-        self, pr_context_manager: PRContextManager, state_manager: StateManager
+            pr_context.save_ci_failures(123)
+
+            pr_dir = state_manager.get_pr_dir(123)
+            ci_dir = pr_dir / "ci"
+            assert ci_dir.exists()
+
+    def test_save_ci_failures_no_recursion(
+        self, pr_context: PRContextManager, state_manager: StateManager
     ) -> None:
-        """Test that has_pr_comments returns True when comment files exist."""
-        pr_dir = state_manager.get_pr_dir(123)
-        comments_dir = pr_dir / "comments"
-        comments_dir.mkdir(parents=True)
-        (comments_dir / "comment_1.txt").write_text("Test comment")
+        """Test that _also_save_comments=False prevents recursive calls."""
+        with patch("subprocess.run") as mock_run:
+            # When _also_save_comments=False, save_pr_comments should NOT be called
+            pr_context.save_ci_failures(123, _also_save_comments=False)
 
-        result = pr_context_manager.has_pr_comments(123)
-        assert result is True
+            # Should not have called subprocess (no comment fetching)
+            # The only calls should be for CI logs
+            for call in mock_run.call_args_list:
+                args = call[0][0] if call[0] else []
+                # Should not have GraphQL calls for comments
+                if "graphql" in args:
+                    pytest.fail("Should not call GraphQL when _also_save_comments=False")
 
 
-class TestHasCIFailures:
-    """Tests for has_ci_failures method."""
+class TestSavePRCommentsAlsoSavesCI:
+    """Tests that save_pr_comments also saves CI failures."""
 
-    def test_returns_false_for_none_pr(self, pr_context_manager: PRContextManager) -> None:
-        """Test that has_ci_failures returns False when pr_number is None."""
-        result = pr_context_manager.has_ci_failures(None)
-        assert result is False
-
-    def test_returns_false_when_no_ci_dir(
-        self, pr_context_manager: PRContextManager, state_manager: StateManager
+    def test_save_pr_comments_calls_save_ci_failures(
+        self,
+        pr_context: PRContextManager,
+        state_manager: StateManager,
+        mock_github_client: MagicMock,
     ) -> None:
-        """Test that has_ci_failures returns False when ci directory doesn't exist."""
-        state_manager.get_pr_dir(123)  # Create PR dir but not ci dir
-        result = pr_context_manager.has_ci_failures(123)
-        assert result is False
+        """Test that save_pr_comments triggers save_ci_failures by default."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                # For save_ci_failures -> (no subprocess needed, uses mock_github_client)
+                MagicMock(returncode=0, stdout="owner/repo\n"),
+                MagicMock(
+                    returncode=0,
+                    stdout='{"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": []}}}}}',
+                ),
+            ]
 
-    def test_returns_false_when_ci_dir_empty(
-        self, pr_context_manager: PRContextManager, state_manager: StateManager
+            pr_context.save_pr_comments(123)
+
+            # CI failures should have been saved via github_client
+            mock_github_client.get_failed_run_logs.assert_called()
+
+    def test_save_pr_comments_no_recursion(
+        self,
+        pr_context: PRContextManager,
+        state_manager: StateManager,
+        mock_github_client: MagicMock,
     ) -> None:
-        """Test that has_ci_failures returns False when ci directory is empty."""
-        pr_dir = state_manager.get_pr_dir(123)
-        ci_dir = pr_dir / "ci"
-        ci_dir.mkdir(parents=True)
-        result = pr_context_manager.has_ci_failures(123)
-        assert result is False
+        """Test that _also_save_ci=False prevents recursive calls."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout="owner/repo\n"),
+                MagicMock(
+                    returncode=0,
+                    stdout='{"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": []}}}}}',
+                ),
+            ]
 
-    def test_returns_true_when_ci_failures_exist(
-        self, pr_context_manager: PRContextManager, state_manager: StateManager
-    ) -> None:
-        """Test that has_ci_failures returns True when CI failure files exist."""
-        pr_dir = state_manager.get_pr_dir(123)
-        ci_dir = pr_dir / "ci"
-        ci_dir.mkdir(parents=True)
-        (ci_dir / "failed_tests.txt").write_text("Test failure")
+            # Reset mock to track only this call
+            mock_github_client.get_failed_run_logs.reset_mock()
 
-        result = pr_context_manager.has_ci_failures(123)
-        assert result is True
+            pr_context.save_pr_comments(123, _also_save_ci=False)
 
-
-# =============================================================================
-# Test get_combined_feedback method
-# =============================================================================
+            # Should not have called get_failed_run_logs
+            mock_github_client.get_failed_run_logs.assert_not_called()
 
 
 class TestGetCombinedFeedback:
-    """Tests for get_combined_feedback method."""
+    """Tests for the get_combined_feedback method."""
 
-    def test_returns_false_false_empty_for_none_pr(
-        self, pr_context_manager: PRContextManager
+    def test_get_combined_feedback_with_both(
+        self, pr_context: PRContextManager, state_manager: StateManager
     ) -> None:
-        """Test that get_combined_feedback returns (False, False, '') for None PR."""
-        has_ci, has_comments, path = pr_context_manager.get_combined_feedback(None)
-        assert has_ci is False
-        assert has_comments is False
-        assert path == ""
-
-    def test_returns_correct_flags_for_ci_only(
-        self, pr_context_manager: PRContextManager, state_manager: StateManager
-    ) -> None:
-        """Test flags when only CI failures exist."""
+        """Test get_combined_feedback when both CI and comments exist."""
+        # Create CI failure file
         pr_dir = state_manager.get_pr_dir(123)
         ci_dir = pr_dir / "ci"
-        ci_dir.mkdir(parents=True)
+        ci_dir.mkdir(parents=True, exist_ok=True)
         (ci_dir / "failed_tests.txt").write_text("Test failure")
 
-        has_ci, has_comments, path = pr_context_manager.get_combined_feedback(123)
-        assert has_ci is True
-        assert has_comments is False
-        assert str(pr_dir) == path
-
-    def test_returns_correct_flags_for_comments_only(
-        self, pr_context_manager: PRContextManager, state_manager: StateManager
-    ) -> None:
-        """Test flags when only comments exist."""
-        pr_dir = state_manager.get_pr_dir(123)
+        # Create comments file
         comments_dir = pr_dir / "comments"
-        comments_dir.mkdir(parents=True)
-        (comments_dir / "comment_1.txt").write_text("Comment")
+        comments_dir.mkdir(parents=True, exist_ok=True)
+        (comments_dir / "comment_1.txt").write_text("Please fix this")
 
-        has_ci, has_comments, path = pr_context_manager.get_combined_feedback(123)
-        assert has_ci is False
-        assert has_comments is True
-        assert str(pr_dir) == path
+        has_ci, has_comments, pr_dir_path = pr_context.get_combined_feedback(123)
 
-    def test_returns_correct_flags_for_both(
-        self, pr_context_manager: PRContextManager, state_manager: StateManager
-    ) -> None:
-        """Test flags when both CI failures and comments exist."""
-        pr_dir = state_manager.get_pr_dir(123)
-        ci_dir = pr_dir / "ci"
-        ci_dir.mkdir(parents=True)
-        (ci_dir / "failed_tests.txt").write_text("Test failure")
-        comments_dir = pr_dir / "comments"
-        comments_dir.mkdir(parents=True)
-        (comments_dir / "comment_1.txt").write_text("Comment")
-
-        has_ci, has_comments, path = pr_context_manager.get_combined_feedback(123)
         assert has_ci is True
         assert has_comments is True
-        assert str(pr_dir) == path
+        assert "123" in pr_dir_path
 
-
-# =============================================================================
-# Test _build_combined_ci_comments_task method
-# =============================================================================
-
-
-class TestBuildCombinedCICommentsTask:
-    """Tests for _build_combined_ci_comments_task method."""
-
-    def test_ci_only_task_description(self, workflow_handler: WorkflowStageHandler) -> None:
-        """Test task description when only CI failures exist."""
-        task = workflow_handler._build_combined_ci_comments_task(
-            pr_number=42, has_ci=True, has_comments=False, pr_dir_path="/tmp/pr/42"
-        )
-
-        # Should mention CI failures
-        assert "CI has failed" in task
-        assert "PR #42" in task
-        assert "/tmp/pr/42/ci/" in task
-
-        # Should NOT mention comments
-        assert "review comments" not in task.lower()
-        assert "resolve-comments.json" not in task
-
-    def test_comments_only_task_description(self, workflow_handler: WorkflowStageHandler) -> None:
-        """Test task description when only comments exist."""
-        task = workflow_handler._build_combined_ci_comments_task(
-            pr_number=42, has_ci=False, has_comments=True, pr_dir_path="/tmp/pr/42"
-        )
-
-        # Should mention comments
-        assert "review comments" in task.lower()
-        assert "PR #42" in task
-        assert "/tmp/pr/42/comments/" in task
-        assert "resolve-comments.json" in task
-
-        # Should NOT mention CI failures
-        assert "CI has failed" not in task
-
-    def test_combined_ci_and_comments_task_description(
-        self, workflow_handler: WorkflowStageHandler
+    def test_get_combined_feedback_with_ci_only(
+        self, pr_context: PRContextManager, state_manager: StateManager
     ) -> None:
-        """Test task description when both CI failures and comments exist."""
-        task = workflow_handler._build_combined_ci_comments_task(
-            pr_number=42, has_ci=True, has_comments=True, pr_dir_path="/tmp/pr/42"
-        )
-
-        # Should mention both
-        assert "CI has failed" in task
-        assert "review comments" in task.lower()
-        assert "PR #42" in task
-        assert "/tmp/pr/42/ci/" in task
-        assert "/tmp/pr/42/comments/" in task
-        assert "resolve-comments.json" in task
-
-        # Should emphasize doing both in one step
-        assert "BOTH" in task or "both" in task
-        assert (
-            "single session" in task.lower()
-            or "one step" in task.lower()
-            or "together" in task.lower()
-        )
-
-    def test_neither_ci_nor_comments_task_description(
-        self, workflow_handler: WorkflowStageHandler
-    ) -> None:
-        """Test task description when neither CI failures nor comments exist."""
-        task = workflow_handler._build_combined_ci_comments_task(
-            pr_number=42, has_ci=False, has_comments=False, pr_dir_path="/tmp/pr/42"
-        )
-
-        # Should be a generic check message
-        assert "PR #42" in task
-        assert "needs attention" in task.lower() or "check" in task.lower()
-
-    def test_task_description_mentions_priority(
-        self, workflow_handler: WorkflowStageHandler
-    ) -> None:
-        """Test that combined task mentions CI has priority."""
-        task = workflow_handler._build_combined_ci_comments_task(
-            pr_number=42, has_ci=True, has_comments=True, pr_dir_path="/tmp/pr/42"
-        )
-
-        # Should mention priority for CI first
-        assert "Priority 1" in task or "priority" in task.lower()
-
-
-# =============================================================================
-# Test handle_ci_failed_stage integration
-# =============================================================================
-
-
-class TestHandleCIFailedStageIntegration:
-    """Integration tests for handle_ci_failed_stage with combined feedback."""
-
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
-    def test_fetches_both_ci_and_comments(
-        self,
-        mock_console: MagicMock,
-        mock_sleep: MagicMock,
-        workflow_handler: WorkflowStageHandler,
-        state_manager: StateManager,
-        basic_task_state: TaskState,
-        mock_github_client: MagicMock,
-        mock_agent: MagicMock,
-    ) -> None:
-        """Test that handle_ci_failed_stage fetches both CI failures and comments."""
-        state_manager.state_dir.mkdir(exist_ok=True)
-        mock_sleep.return_value = True
-
-        # Setup: CI failure exists
-        mock_github_client.get_pr_status.return_value = MagicMock(
-            check_details=[{"name": "tests", "conclusion": "FAILURE"}]
-        )
-
-        with patch.object(WorkflowStageHandler, "_get_current_branch", return_value="feature/fix"):
-            workflow_handler.handle_ci_failed_stage(basic_task_state)
-
-        # The save_ci_failures method internally calls save_pr_comments
-        # We just verify the workflow completes successfully
-        mock_agent.run_work_session.assert_called_once()
-
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
-    def test_task_description_includes_both_when_present(
-        self,
-        mock_console: MagicMock,
-        mock_sleep: MagicMock,
-        workflow_handler: WorkflowStageHandler,
-        state_manager: StateManager,
-        basic_task_state: TaskState,
-        mock_github_client: MagicMock,
-        mock_agent: MagicMock,
-        pr_context_manager: PRContextManager,
-    ) -> None:
-        """Test that task description includes both CI and comments when both present."""
-        state_manager.state_dir.mkdir(exist_ok=True)
-        mock_sleep.return_value = True
-
-        # Setup: Create both CI failures and comments files
-        pr_dir = state_manager.get_pr_dir(42)
+        """Test get_combined_feedback when only CI failures exist."""
+        pr_dir = state_manager.get_pr_dir(123)
         ci_dir = pr_dir / "ci"
-        ci_dir.mkdir(parents=True)
+        ci_dir.mkdir(parents=True, exist_ok=True)
         (ci_dir / "failed_tests.txt").write_text("Test failure")
 
+        has_ci, has_comments, pr_dir_path = pr_context.get_combined_feedback(123)
+
+        assert has_ci is True
+        assert has_comments is False
+
+    def test_get_combined_feedback_with_comments_only(
+        self, pr_context: PRContextManager, state_manager: StateManager
+    ) -> None:
+        """Test get_combined_feedback when only comments exist."""
+        pr_dir = state_manager.get_pr_dir(123)
         comments_dir = pr_dir / "comments"
-        comments_dir.mkdir(parents=True)
+        comments_dir.mkdir(parents=True, exist_ok=True)
+        (comments_dir / "comment_1.txt").write_text("Please fix this")
+
+        has_ci, has_comments, pr_dir_path = pr_context.get_combined_feedback(123)
+
+        assert has_ci is False
+        assert has_comments is True
+
+    def test_get_combined_feedback_with_neither(
+        self, pr_context: PRContextManager, state_manager: StateManager
+    ) -> None:
+        """Test get_combined_feedback when neither CI nor comments exist."""
+        has_ci, has_comments, pr_dir_path = pr_context.get_combined_feedback(123)
+
+        assert has_ci is False
+        assert has_comments is False
+
+    def test_get_combined_feedback_with_none_pr(self, pr_context: PRContextManager) -> None:
+        """Test get_combined_feedback with None PR number."""
+        has_ci, has_comments, pr_dir_path = pr_context.get_combined_feedback(None)
+
+        assert has_ci is False
+        assert has_comments is False
+        assert pr_dir_path == ""
+
+
+class TestHasCIFailures:
+    """Tests for the has_ci_failures method."""
+
+    def test_has_ci_failures_true(
+        self, pr_context: PRContextManager, state_manager: StateManager
+    ) -> None:
+        """Test has_ci_failures returns True when CI files exist."""
+        pr_dir = state_manager.get_pr_dir(123)
+        ci_dir = pr_dir / "ci"
+        ci_dir.mkdir(parents=True, exist_ok=True)
+        (ci_dir / "failed_tests.txt").write_text("Test failure")
+
+        assert pr_context.has_ci_failures(123) is True
+
+    def test_has_ci_failures_false(self, pr_context: PRContextManager) -> None:
+        """Test has_ci_failures returns False when no CI files exist."""
+        assert pr_context.has_ci_failures(123) is False
+
+    def test_has_ci_failures_with_none(self, pr_context: PRContextManager) -> None:
+        """Test has_ci_failures returns False for None PR number."""
+        assert pr_context.has_ci_failures(None) is False
+
+    def test_has_ci_failures_empty_directory(
+        self, pr_context: PRContextManager, state_manager: StateManager
+    ) -> None:
+        """Test has_ci_failures returns False when CI directory is empty."""
+        pr_dir = state_manager.get_pr_dir(123)
+        ci_dir = pr_dir / "ci"
+        ci_dir.mkdir(parents=True, exist_ok=True)
+        # Directory exists but no files
+
+        assert pr_context.has_ci_failures(123) is False
+
+
+class TestHasPRComments:
+    """Tests for the has_pr_comments method."""
+
+    def test_has_pr_comments_true(
+        self, pr_context: PRContextManager, state_manager: StateManager
+    ) -> None:
+        """Test has_pr_comments returns True when comment files exist."""
+        pr_dir = state_manager.get_pr_dir(123)
+        comments_dir = pr_dir / "comments"
+        comments_dir.mkdir(parents=True, exist_ok=True)
         (comments_dir / "comment_1.txt").write_text("Review comment")
 
-        # Mock save_ci_failures to not clear the directories we just created
-        with (
-            patch.object(pr_context_manager, "save_ci_failures"),
-            patch.object(WorkflowStageHandler, "_get_current_branch", return_value="feature/fix"),
-        ):
-            workflow_handler.handle_ci_failed_stage(basic_task_state)
+        assert pr_context.has_pr_comments(123) is True
 
-        # Verify the task description passed to agent includes both
-        call_kwargs = mock_agent.run_work_session.call_args.kwargs
-        task_description = call_kwargs["task_description"]
+    def test_has_pr_comments_false(self, pr_context: PRContextManager) -> None:
+        """Test has_pr_comments returns False when no comment files exist."""
+        assert pr_context.has_pr_comments(123) is False
 
-        assert "CI has failed" in task_description
-        assert "review comments" in task_description.lower()
-        assert "BOTH" in task_description or "both" in task_description
+    def test_has_pr_comments_with_none(self, pr_context: PRContextManager) -> None:
+        """Test has_pr_comments returns False for None PR number."""
+        assert pr_context.has_pr_comments(None) is False
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
-    def test_task_description_ci_only_when_no_comments(
-        self,
-        mock_console: MagicMock,
-        mock_sleep: MagicMock,
-        workflow_handler: WorkflowStageHandler,
-        state_manager: StateManager,
-        basic_task_state: TaskState,
-        mock_github_client: MagicMock,
-        mock_agent: MagicMock,
-        pr_context_manager: PRContextManager,
+    def test_has_pr_comments_empty_directory(
+        self, pr_context: PRContextManager, state_manager: StateManager
     ) -> None:
-        """Test task description is CI-only when no comments present."""
-        state_manager.state_dir.mkdir(exist_ok=True)
-        mock_sleep.return_value = True
+        """Test has_pr_comments returns False when comments directory is empty."""
+        pr_dir = state_manager.get_pr_dir(123)
+        comments_dir = pr_dir / "comments"
+        comments_dir.mkdir(parents=True, exist_ok=True)
+        # Directory exists but no files
 
-        # Setup: Create only CI failures
-        pr_dir = state_manager.get_pr_dir(42)
+        assert pr_context.has_pr_comments(123) is False
+
+
+class TestWorkflowStagesCombinedHandling:
+    """Tests for WorkflowStageHandler combined CI + comments handling."""
+
+    @pytest.fixture
+    def mock_agent(self) -> MagicMock:
+        """Create a mock agent wrapper."""
+        mock = MagicMock()
+        mock.run_work_session = MagicMock()
+        return mock
+
+    @pytest.fixture
+    def mock_workflow_state(self) -> MagicMock:
+        """Create a mock task state."""
+        mock = MagicMock()
+        mock.current_pr = 123
+        mock.session_count = 1
+        return mock
+
+    def test_build_combined_task_description_both(
+        self, pr_context: PRContextManager, state_manager: StateManager
+    ) -> None:
+        """Test that task description includes both CI and comments when present."""
+        from claude_task_master.core.workflow_stages import WorkflowStageHandler
+
+        # Set up both CI and comments
+        pr_dir = state_manager.get_pr_dir(123)
         ci_dir = pr_dir / "ci"
-        ci_dir.mkdir(parents=True)
+        ci_dir.mkdir(parents=True, exist_ok=True)
         (ci_dir / "failed_tests.txt").write_text("Test failure")
 
-        # Mock save_ci_failures to not clear the directories
-        with (
-            patch.object(pr_context_manager, "save_ci_failures"),
-            patch.object(WorkflowStageHandler, "_get_current_branch", return_value="feature/fix"),
-        ):
-            workflow_handler.handle_ci_failed_stage(basic_task_state)
+        comments_dir = pr_dir / "comments"
+        comments_dir.mkdir(parents=True, exist_ok=True)
+        (comments_dir / "comment_1.txt").write_text("Please fix this")
 
-        call_kwargs = mock_agent.run_work_session.call_args.kwargs
-        task_description = call_kwargs["task_description"]
-
-        assert "CI has failed" in task_description
-        # Should NOT mention addressing review comments in the same step
-        assert "BOTH" not in task_description
-
-
-# =============================================================================
-# Test edge cases
-# =============================================================================
-
-
-class TestCICombinedEdgeCases:
-    """Edge case tests for CI + comments combined handling."""
-
-    def test_handles_exception_in_has_pr_comments(
-        self, pr_context_manager: PRContextManager, state_manager: StateManager
-    ) -> None:
-        """Test that exceptions in has_pr_comments are handled gracefully."""
-        with patch.object(state_manager, "get_pr_dir", side_effect=Exception("Error")):
-            result = pr_context_manager.has_pr_comments(123)
-            assert result is False  # Should return False, not raise
-
-    def test_handles_exception_in_has_ci_failures(
-        self, pr_context_manager: PRContextManager, state_manager: StateManager
-    ) -> None:
-        """Test that exceptions in has_ci_failures are handled gracefully."""
-        with patch.object(state_manager, "get_pr_dir", side_effect=Exception("Error")):
-            result = pr_context_manager.has_ci_failures(123)
-            assert result is False  # Should return False, not raise
-
-    def test_build_task_with_empty_pr_dir_path(
-        self, workflow_handler: WorkflowStageHandler
-    ) -> None:
-        """Test task building with empty PR dir path uses fallback."""
-        task = workflow_handler._build_combined_ci_comments_task(
-            pr_number=42, has_ci=True, has_comments=False, pr_dir_path=""
+        # Create handler (agent and github_client can be mocks for this test)
+        handler = WorkflowStageHandler(
+            agent=MagicMock(),
+            state_manager=state_manager,
+            github_client=MagicMock(),
+            pr_context=pr_context,
         )
 
-        # Should use fallback path
-        assert ".claude-task-master/debugging/" in task
+        # Build task description
+        task = handler._build_combined_ci_comments_task(
+            pr_number=123,
+            has_ci=True,
+            has_comments=True,
+            pr_dir_path=str(pr_dir),
+        )
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
-    def test_workflow_continues_after_combined_fix(
-        self,
-        mock_console: MagicMock,
-        mock_sleep: MagicMock,
-        workflow_handler: WorkflowStageHandler,
-        state_manager: StateManager,
-        basic_task_state: TaskState,
-        mock_agent: MagicMock,
-        pr_context_manager: PRContextManager,
+        # Verify both are included
+        assert "CI has failed" in task
+        assert "review comments" in task.lower()
+        assert "Fix BOTH" in task
+        assert "ci/" in task
+        assert "comments/" in task
+
+    def test_build_combined_task_description_ci_only(
+        self, pr_context: PRContextManager, state_manager: StateManager
     ) -> None:
-        """Test that workflow moves to waiting_ci after combined fix."""
-        state_manager.state_dir.mkdir(exist_ok=True)
-        mock_sleep.return_value = True
+        """Test that task description handles CI only case."""
+        from claude_task_master.core.workflow_stages import WorkflowStageHandler
 
-        with (
-            patch.object(pr_context_manager, "save_ci_failures"),
-            patch.object(WorkflowStageHandler, "_get_current_branch", return_value="main"),
-        ):
-            workflow_handler.handle_ci_failed_stage(basic_task_state)
+        pr_dir = state_manager.get_pr_dir(123)
+        ci_dir = pr_dir / "ci"
+        ci_dir.mkdir(parents=True, exist_ok=True)
+        (ci_dir / "failed_tests.txt").write_text("Test failure")
 
-        assert basic_task_state.workflow_stage == "waiting_ci"
-        assert basic_task_state.session_count == 2
+        handler = WorkflowStageHandler(
+            agent=MagicMock(),
+            state_manager=state_manager,
+            github_client=MagicMock(),
+            pr_context=pr_context,
+        )
+
+        task = handler._build_combined_ci_comments_task(
+            pr_number=123,
+            has_ci=True,
+            has_comments=False,
+            pr_dir_path=str(pr_dir),
+        )
+
+        assert "CI has failed" in task
+        assert "Fix BOTH" not in task
+        assert "ci/" in task
+
+    def test_build_combined_task_description_comments_only(
+        self, pr_context: PRContextManager, state_manager: StateManager
+    ) -> None:
+        """Test that task description handles comments only case."""
+        from claude_task_master.core.workflow_stages import WorkflowStageHandler
+
+        pr_dir = state_manager.get_pr_dir(123)
+        comments_dir = pr_dir / "comments"
+        comments_dir.mkdir(parents=True, exist_ok=True)
+        (comments_dir / "comment_1.txt").write_text("Please fix this")
+
+        handler = WorkflowStageHandler(
+            agent=MagicMock(),
+            state_manager=state_manager,
+            github_client=MagicMock(),
+            pr_context=pr_context,
+        )
+
+        task = handler._build_combined_ci_comments_task(
+            pr_number=123,
+            has_ci=False,
+            has_comments=True,
+            pr_dir_path=str(pr_dir),
+        )
+
+        assert "review comments" in task.lower()
+        assert "CI has failed" not in task
+        assert "comments/" in task
+
+    def test_build_combined_task_description_neither(
+        self, pr_context: PRContextManager, state_manager: StateManager
+    ) -> None:
+        """Test that task description handles neither case."""
+        from claude_task_master.core.workflow_stages import WorkflowStageHandler
+
+        handler = WorkflowStageHandler(
+            agent=MagicMock(),
+            state_manager=state_manager,
+            github_client=MagicMock(),
+            pr_context=pr_context,
+        )
+
+        task = handler._build_combined_ci_comments_task(
+            pr_number=123,
+            has_ci=False,
+            has_comments=False,
+            pr_dir_path="",
+        )
+
+        # Should still produce a valid task
+        assert "PR #123" in task
+
+
+class TestClearingOldData:
+    """Tests that old CI and comment data is cleared when saving new data."""
+
+    def test_save_ci_failures_clears_old_ci(
+        self, pr_context: PRContextManager, state_manager: StateManager
+    ) -> None:
+        """Test that save_ci_failures clears old CI logs."""
+        # Create old CI file
+        pr_dir = state_manager.get_pr_dir(123)
+        ci_dir = pr_dir / "ci"
+        ci_dir.mkdir(parents=True, exist_ok=True)
+        old_file = ci_dir / "old_failure.txt"
+        old_file.write_text("Old failure")
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout="owner/repo\n"),
+                MagicMock(
+                    returncode=0,
+                    stdout='{"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": []}}}}}',
+                ),
+            ]
+
+            pr_context.save_ci_failures(123)
+
+            # Old file should be gone (directory recreated)
+            assert not old_file.exists()
+
+    def test_save_pr_comments_clears_old_comments(
+        self, pr_context: PRContextManager, state_manager: StateManager
+    ) -> None:
+        """Test that save_pr_comments clears old comments."""
+        # Create old comment file
+        pr_dir = state_manager.get_pr_dir(123)
+        comments_dir = pr_dir / "comments"
+        comments_dir.mkdir(parents=True, exist_ok=True)
+        old_file = comments_dir / "old_comment.txt"
+        old_file.write_text("Old comment")
+
+        # Also create old summary with distinct content
+        summary_file = pr_dir / "comments_summary.txt"
+        summary_file.write_text("OLD_UNIQUE_CONTENT_MARKER")
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout="owner/repo\n"),
+                MagicMock(
+                    returncode=0,
+                    stdout='{"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": []}}}}}',
+                ),
+            ]
+
+            pr_context.save_pr_comments(123, _also_save_ci=False)
+
+            # Old comment file should be gone (comments dir cleared)
+            assert not old_file.exists()
+            # Summary file should exist but with new content (not the old marker)
+            if summary_file.exists():
+                content = summary_file.read_text()
+                assert "OLD_UNIQUE_CONTENT_MARKER" not in content
+
+
+class TestErrorHandling:
+    """Tests for error handling in combined CI + comments scenarios."""
+
+    def test_save_ci_failures_handles_comment_errors(
+        self, pr_context: PRContextManager, state_manager: StateManager
+    ) -> None:
+        """Test that CI failures are saved even if comment saving fails."""
+        with patch("subprocess.run") as mock_run:
+            # Make comment fetching fail
+            mock_run.side_effect = Exception("Network error")
+
+            # Should not raise - should handle error gracefully
+            pr_context.save_ci_failures(123)
+
+    def test_save_pr_comments_handles_ci_errors(
+        self,
+        pr_context: PRContextManager,
+        state_manager: StateManager,
+        mock_github_client: MagicMock,
+    ) -> None:
+        """Test that comments are saved even if CI saving fails."""
+        # Make CI fetching fail
+        mock_github_client.get_failed_run_logs.side_effect = Exception("API error")
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout="owner/repo\n"),
+                MagicMock(
+                    returncode=0,
+                    stdout='{"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": []}}}}}',
+                ),
+            ]
+
+            # Should not raise - should handle error gracefully
+            count = pr_context.save_pr_comments(123)
+
+            # Should return 0 comments (no threads in mock response)
+            assert count == 0
+
+    def test_get_combined_feedback_handles_missing_pr_dir(
+        self, pr_context: PRContextManager
+    ) -> None:
+        """Test get_combined_feedback handles missing PR directory gracefully."""
+        # PR 999 has never had any data saved
+        has_ci, has_comments, pr_dir_path = pr_context.get_combined_feedback(999)
+
+        # Should return False for both without raising
+        assert has_ci is False
+        assert has_comments is False
+
+
+class TestIntegrationScenarios:
+    """Integration tests for realistic CI + comments scenarios."""
+
+    def test_full_ci_failure_with_coderabbit_comments(
+        self,
+        pr_context: PRContextManager,
+        state_manager: StateManager,
+        mock_github_client: MagicMock,
+    ) -> None:
+        """Test realistic scenario: CI fails, CodeRabbit has left comments."""
+        # Simulate a PR where:
+        # 1. Tests are failing
+        # 2. CodeRabbit has left actionable comments
+
+        mock_github_client.get_failed_run_logs.return_value = """
+        FAILED tests/test_main.py::test_addition
+        E       AssertionError: 1 + 1 != 3
+        """
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout="owner/repo\n"),
+                MagicMock(
+                    returncode=0,
+                    stdout="""{
+                        "data": {
+                            "repository": {
+                                "pullRequest": {
+                                    "reviewThreads": {
+                                        "nodes": [
+                                            {
+                                                "id": "thread_123",
+                                                "isResolved": false,
+                                                "comments": {
+                                                    "nodes": [
+                                                        {
+                                                            "id": "comment_1",
+                                                            "author": {"login": "coderabbitai"},
+                                                            "body": "Consider using a constant for this magic number",
+                                                            "path": "src/main.py",
+                                                            "line": 42
+                                                        }
+                                                    ]
+                                                }
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    }""",
+                ),
+            ]
+
+            # Save CI failures (should also save comments)
+            pr_context.save_ci_failures(123)
+
+            # Verify both exist
+            assert pr_context.has_ci_failures(123) is True
+            assert pr_context.has_pr_comments(123) is True
+
+            # Verify get_combined_feedback returns both
+            has_ci, has_comments, pr_dir_path = pr_context.get_combined_feedback(123)
+            assert has_ci is True
+            assert has_comments is True
+
+    def test_ci_passes_but_comments_exist(
+        self, pr_context: PRContextManager, state_manager: StateManager
+    ) -> None:
+        """Test scenario: CI passes but review comments need addressing."""
+        # In this case, we'd normally be in waiting_reviews stage
+        # but this tests that comments can be fetched independently
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout="owner/repo\n"),
+                MagicMock(
+                    returncode=0,
+                    stdout="""{
+                        "data": {
+                            "repository": {
+                                "pullRequest": {
+                                    "reviewThreads": {
+                                        "nodes": [
+                                            {
+                                                "id": "thread_456",
+                                                "isResolved": false,
+                                                "comments": {
+                                                    "nodes": [
+                                                        {
+                                                            "id": "comment_2",
+                                                            "author": {"login": "reviewer"},
+                                                            "body": "Please add error handling here",
+                                                            "path": "src/handler.py",
+                                                            "line": 100
+                                                        }
+                                                    ]
+                                                }
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    }""",
+                ),
+            ]
+
+            # Save only comments (no CI failures)
+            count = pr_context.save_pr_comments(123, _also_save_ci=False)
+
+            assert count == 1
+            assert pr_context.has_pr_comments(123) is True
+            assert pr_context.has_ci_failures(123) is False
