@@ -120,6 +120,7 @@ from claude_task_master.core.parallel import (
     TaskResult,
     TaskStatus,
 )
+from claude_task_master.core.plan_updater import PlanUpdater
 from claude_task_master.core.pr_context import PRContextManager
 from claude_task_master.core.progress_tracker import (
     ExecutionTracker,
@@ -274,6 +275,8 @@ __all__ = [
     "MaxSessionsReachedError",
     # Orchestrator classes
     "WorkLoopOrchestrator",
+    # Plan updater classes
+    "PlanUpdater",
     # Task runner exceptions
     "TaskRunnerError",
     "NoPlanFoundError",
