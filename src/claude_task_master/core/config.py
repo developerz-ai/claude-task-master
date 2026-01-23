@@ -109,8 +109,8 @@ class ToolsConfig(BaseModel):
     """
 
     planning: list[str] = Field(
-        default_factory=lambda: ["Read", "Glob", "Grep", "Bash"],
-        description="Tools available during planning phase (read-only + bash for checks).",
+        default_factory=lambda: ["Read", "Glob", "Grep", "Bash", "WebFetch", "WebSearch"],
+        description="Tools available during planning phase (read-only + bash for checks + web tools for research).",
     )
     verification: list[str] = Field(
         default_factory=lambda: ["Read", "Glob", "Grep", "Bash"],
@@ -152,7 +152,7 @@ class ClaudeTaskMasterConfig(BaseModel):
         "auto_push": true
       },
       "tools": {
-        "planning": ["Read", "Glob", "Grep", "Bash"],
+        "planning": ["Read", "Glob", "Grep", "Bash", "WebFetch", "WebSearch"],
         "verification": ["Read", "Glob", "Grep", "Bash"],
         "working": []
       }
