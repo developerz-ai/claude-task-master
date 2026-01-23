@@ -12,9 +12,10 @@ For 1 task: remaining = 1 - 0 - 1 = 0, should return True.
 """
 
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock
 
-from claude_task_master.core.state import StateManager, TaskOptions
+from claude_task_master.core.state import StateManager, TaskOptions, WorkflowStageType
 from claude_task_master.core.task_runner import TaskRunner
 from claude_task_master.core.workflow_stages import WorkflowStageHandler
 
@@ -253,7 +254,7 @@ class TestSingleTaskPRFullWorkflow:
 
         # Should transition to waiting_ci with PR number set
         assert state.current_pr == 123
-        assert state.workflow_stage == "waiting_ci"
+        assert cast(str, state.workflow_stage) == "waiting_ci"
         assert result is None  # No exit, continue
 
     def test_single_task_pr_workflow_waiting_ci_to_ready_to_merge(
@@ -475,6 +476,7 @@ class TestSingleTaskPREdgeCases:
 
         # Verify the plan was updated
         updated_plan = state_manager.load_plan()
+        assert updated_plan is not None
         assert "- [x]" in updated_plan
         assert task_runner.is_task_complete(updated_plan, 0) is True
 
@@ -507,7 +509,13 @@ class TestSingleTaskStatePersistence:
         )
 
         # Simulate workflow progression
-        stages = ["working", "pr_created", "waiting_ci", "ready_to_merge", "merged"]
+        stages: list[WorkflowStageType] = [
+            "working",
+            "pr_created",
+            "waiting_ci",
+            "ready_to_merge",
+            "merged",
+        ]
 
         for stage in stages:
             state.workflow_stage = stage
