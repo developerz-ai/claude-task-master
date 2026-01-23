@@ -521,6 +521,42 @@ class TestIsLastTaskInGroup:
         basic_task_state.current_task_index = 99
         assert task_runner.is_last_task_in_group(basic_task_state)
 
+    def test_is_last_in_group_single_task_pr(self, task_runner, state_manager, basic_task_state):
+        """Should return True for PR with single task.
+
+        This is a critical edge case where a PR group contains only one task.
+        The formula: remaining = len(tasks_in_group) - current_task_in_group_idx - 1
+        For 1 task: remaining = 1 - 0 - 1 = 0, so should return True.
+
+        This test ensures that single-task PRs trigger the PR creation workflow
+        correctly instead of waiting for more tasks.
+        """
+        single_task_pr_plan = """## Task List
+
+### PR 1: Single Task PR
+
+- [ ] `[coding]` The only task in this PR group
+
+### PR 2: Multi Task PR
+
+- [ ] `[coding]` First task in second PR
+- [ ] `[coding]` Second task in second PR
+"""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan(single_task_pr_plan)
+
+        # Task index 0 is the only task in PR 1
+        basic_task_state.current_task_index = 0
+        assert task_runner.is_last_task_in_group(basic_task_state)
+
+        # Task index 1 is NOT the last task in PR 2 (first of two)
+        basic_task_state.current_task_index = 1
+        assert not task_runner.is_last_task_in_group(basic_task_state)
+
+        # Task index 2 IS the last task in PR 2 (second of two)
+        basic_task_state.current_task_index = 2
+        assert task_runner.is_last_task_in_group(basic_task_state)
+
 
 # =============================================================================
 # Test Run Work Session
