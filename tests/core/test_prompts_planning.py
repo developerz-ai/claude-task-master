@@ -146,15 +146,27 @@ class TestToolRestrictions:
         result = build_planning_prompt("Any goal")
         assert "TodoWrite" in result
 
-    def test_webfetch_tool_forbidden(self) -> None:
-        """Test WebFetch tool is explicitly forbidden."""
+    def test_webfetch_tool_allowed(self) -> None:
+        """Test WebFetch tool is explicitly allowed."""
         result = build_planning_prompt("Any goal")
         assert "WebFetch" in result
+        # Should be in ALLOWED section, not FORBIDDEN
+        # Check it appears before the FORBIDDEN section
+        allowed_section_start = result.find("ALLOWED TOOLS")
+        forbidden_section_start = result.find("FORBIDDEN TOOLS")
+        webfetch_position = result.find("WebFetch")
+        assert allowed_section_start < webfetch_position < forbidden_section_start
 
-    def test_websearch_tool_forbidden(self) -> None:
-        """Test WebSearch tool is explicitly forbidden."""
+    def test_websearch_tool_allowed(self) -> None:
+        """Test WebSearch tool is explicitly allowed."""
         result = build_planning_prompt("Any goal")
         assert "WebSearch" in result
+        # Should be in ALLOWED section, not FORBIDDEN
+        # Check it appears before the FORBIDDEN section
+        allowed_section_start = result.find("ALLOWED TOOLS")
+        forbidden_section_start = result.find("FORBIDDEN TOOLS")
+        websearch_position = result.find("WebSearch")
+        assert allowed_section_start < websearch_position < forbidden_section_start
 
     def test_why_explanation_present(self) -> None:
         """Test WHY explanation is present."""
