@@ -570,6 +570,150 @@ class TestHandleWorkingStage:
         # Tracker error count should be incremented
         # The tracker records the error before re-raising
 
+    @patch("claude_task_master.core.task_runner.get_current_branch")
+    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.orchestrator.reset_escape")
+    def test_handle_working_stage_single_task_pr(
+        self,
+        mock_reset,
+        mock_console,
+        mock_branch,
+        basic_orchestrator,
+        state_manager,
+        mock_agent,
+        basic_task_state,
+    ):
+        """Should correctly handle single-task PR workflow.
+
+        This tests the critical single-task PR edge case where:
+        1. is_last_task_in_group() returns True for the only task
+        2. workflow_stage should be set to "pr_created"
+        3. task_index should NOT be incremented (stays at 0 until merged)
+
+        This is the key bug scenario for PRs with 1 task.
+        """
+        # Single-task PR plan
+        single_task_plan = """## Task List
+
+### PR 1: Single Task Feature
+
+- [ ] `[coding]` Implement the only feature in this PR
+"""
+        mock_branch.return_value = "feature/single-task"
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan(single_task_plan)
+        state_manager.save_goal("Test single task PR")
+
+        # Ensure pr_per_task is False (default grouped mode)
+        basic_task_state.options.pr_per_task = False
+        basic_task_state.current_task_index = 0
+
+        result = basic_orchestrator._handle_working_stage(basic_task_state)
+
+        # Verify correct behavior for single-task PR
+        assert result is None
+        assert basic_task_state.session_count == 2
+        # Critical: workflow_stage should be pr_created (triggers PR workflow)
+        assert basic_task_state.workflow_stage == "pr_created"
+        # Critical: task_index should NOT be incremented yet (stays at 0)
+        # Task index is only incremented after PR merge in handle_merged_stage()
+        assert basic_task_state.current_task_index == 0
+        mock_agent.run_work_session.assert_called_once()
+        mock_reset.assert_called_once()
+
+    @patch("claude_task_master.core.task_runner.get_current_branch")
+    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.orchestrator.reset_escape")
+    def test_handle_working_stage_multi_task_first_stays_in_working(
+        self,
+        mock_reset,
+        mock_console,
+        mock_branch,
+        basic_orchestrator,
+        state_manager,
+        mock_agent,
+        basic_task_state,
+    ):
+        """Should continue to next task (not create PR) for first task of multi-task PR.
+
+        This tests that in grouped mode:
+        1. First task of multi-task PR should NOT trigger PR creation
+        2. task_index should be incremented (move to next task)
+        3. workflow_stage should stay "working"
+        """
+        # Multi-task PR plan
+        multi_task_plan = """## Task List
+
+### PR 1: Multi Task Feature
+
+- [ ] `[coding]` First task of the PR
+- [ ] `[coding]` Second task of the PR
+"""
+        mock_branch.return_value = "feature/multi-task"
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan(multi_task_plan)
+        state_manager.save_goal("Test multi task PR")
+
+        # Grouped mode (default)
+        basic_task_state.options.pr_per_task = False
+        basic_task_state.current_task_index = 0
+
+        result = basic_orchestrator._handle_working_stage(basic_task_state)
+
+        # Verify correct behavior for first task of multi-task PR
+        assert result is None
+        # Should stay in working stage (not trigger PR)
+        assert basic_task_state.workflow_stage == "working"
+        # Task index should be incremented to move to next task
+        assert basic_task_state.current_task_index == 1
+
+    @patch("claude_task_master.core.task_runner.get_current_branch")
+    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.orchestrator.reset_escape")
+    def test_handle_working_stage_multi_task_last_creates_pr(
+        self,
+        mock_reset,
+        mock_console,
+        mock_branch,
+        basic_orchestrator,
+        state_manager,
+        mock_agent,
+        basic_task_state,
+    ):
+        """Should create PR after completing last task of multi-task PR group.
+
+        This tests that in grouped mode:
+        1. Last task of multi-task PR should trigger PR creation
+        2. task_index should NOT be incremented (only after merge)
+        3. workflow_stage should be "pr_created"
+        """
+        # Multi-task PR plan
+        multi_task_plan = """## Task List
+
+### PR 1: Multi Task Feature
+
+- [x] `[coding]` First task (already done)
+- [ ] `[coding]` Second task of the PR
+"""
+        mock_branch.return_value = "feature/multi-task"
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan(multi_task_plan)
+        state_manager.save_goal("Test multi task PR")
+
+        # Grouped mode (default)
+        basic_task_state.options.pr_per_task = False
+        # Start at task index 1 (the second/last task)
+        basic_task_state.current_task_index = 1
+
+        result = basic_orchestrator._handle_working_stage(basic_task_state)
+
+        # Verify correct behavior for last task of multi-task PR
+        assert result is None
+        # Should trigger PR workflow (this is the last task in group)
+        assert basic_task_state.workflow_stage == "pr_created"
+        # Task index should NOT be incremented (stays at 1 until merged)
+        assert basic_task_state.current_task_index == 1
+
 
 # =============================================================================
 # Test Run Workflow Cycle
