@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from claude_task_master.core.agent import AgentWrapper, ModelType, ToolConfig
+from claude_task_master.core.config_loader import reset_config
 from claude_task_master.core.rate_limit import RateLimitConfig
 
 # =============================================================================
@@ -501,8 +502,13 @@ class TestPhaseToolRestrictions:
     """Tests to verify tool restrictions are correctly enforced per phase."""
 
     @pytest.fixture
-    def agent(self, temp_dir):
+    def agent(self, temp_dir, monkeypatch):
         """Create an AgentWrapper instance for testing."""
+        # Change to temp directory to avoid loading local config.json
+        monkeypatch.chdir(temp_dir)
+        # Reset config to ensure we use default values (not local config.json)
+        reset_config()
+
         mock_sdk = MagicMock()
         mock_sdk.query = AsyncMock()
         mock_sdk.ClaudeAgentOptions = MagicMock()
@@ -555,11 +561,18 @@ class TestPhaseToolRestrictions:
         assert working_tools == []
 
         # These tools should NOT be in planning or verification phases
-        exclusive_tools = {"Write", "Edit", "Task", "TodoWrite", "WebSearch", "WebFetch", "Skill"}
+        # Note: WebFetch and WebSearch ARE allowed in planning phase for research
+        exclusive_write_tools = {"Write", "Edit", "Task", "TodoWrite", "Skill"}
 
-        for tool in exclusive_tools:
+        for tool in exclusive_write_tools:
             assert tool not in planning_tools
             assert tool not in verification_tools
+
+        # WebFetch and WebSearch should be in planning but not verification
+        assert "WebFetch" in planning_tools
+        assert "WebSearch" in planning_tools
+        assert "WebFetch" not in verification_tools
+        assert "WebSearch" not in verification_tools
 
     def test_case_insensitive_phase_matching(self, agent):
         """Test phase matching is case-insensitive for user convenience.
