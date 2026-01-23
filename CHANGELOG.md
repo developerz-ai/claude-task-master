@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-01-23
+
+### Changed
+- Improved planning prompt with web research workflow guidance
+- Clarified WebFetch can only fetch URLs from search results or user-provided URLs
+- Added recommended workflow: WebSearch first, then WebFetch for full content
+- Documented PDF support for technical documentation in WebFetch
+
 ## [0.1.5] - 2026-01-22
 
 ### Changed
@@ -239,7 +247,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.2...v0.1.3
