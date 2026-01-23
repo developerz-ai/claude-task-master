@@ -478,6 +478,130 @@ class TestCaching:
 
 
 # =============================================================================
+# Test Get Group Context (Internal Helper)
+# =============================================================================
+
+
+class TestGetGroupContext:
+    """Tests for _get_group_context internal helper method.
+
+    This method consolidates PR group logic used by both run_work_session()
+    and is_last_task_in_group() to avoid code duplication.
+    """
+
+    def test_get_group_context_single_task(self, task_runner, state_manager, basic_task_state):
+        """Should return correct context for single-task PR."""
+        single_task_plan = """## Task List
+
+### PR 1: Single Task
+
+- [ ] `[coding]` Only task
+"""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan(single_task_plan)
+
+        basic_task_state.current_task_index = 0
+        context = task_runner._get_group_context(basic_task_state)
+
+        assert context is not None
+        assert context["group_id"] == "pr_1"
+        assert context["group_name"] == "Single Task"
+        assert context["is_last_in_group"] is True
+        assert context["remaining_in_group"] == 0
+        assert context["completed_tasks"] == []
+        assert len(context["tasks_in_group"]) == 1
+
+    def test_get_group_context_multi_task_first(
+        self, task_runner, state_manager, basic_task_state, plan_with_pr_groups
+    ):
+        """Should return correct context for first task in multi-task PR."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan(plan_with_pr_groups)
+
+        basic_task_state.current_task_index = 0
+        context = task_runner._get_group_context(basic_task_state)
+
+        assert context is not None
+        assert context["group_id"] == "pr_1"
+        assert context["is_last_in_group"] is False
+        assert context["remaining_in_group"] == 1  # 1 more task in PR 1
+
+    def test_get_group_context_multi_task_last(
+        self, task_runner, state_manager, basic_task_state, plan_with_pr_groups
+    ):
+        """Should return correct context for last task in multi-task PR."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan(plan_with_pr_groups)
+
+        basic_task_state.current_task_index = 1  # Last task in PR 1
+        context = task_runner._get_group_context(basic_task_state)
+
+        assert context is not None
+        assert context["is_last_in_group"] is True
+        assert context["remaining_in_group"] == 0
+
+    def test_get_group_context_no_plan(self, task_runner, basic_task_state):
+        """Should return None when no plan exists."""
+        context = task_runner._get_group_context(basic_task_state)
+        assert context is None
+
+    def test_get_group_context_out_of_range(
+        self, task_runner, state_manager, basic_task_state, basic_plan
+    ):
+        """Should return None for out-of-range task index."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan(basic_plan)
+
+        basic_task_state.current_task_index = 99
+        context = task_runner._get_group_context(basic_task_state)
+        assert context is None
+
+    def test_get_group_context_with_completed_tasks(
+        self, task_runner, state_manager, basic_task_state
+    ):
+        """Should include completed tasks in context."""
+        plan_with_completed = """## Task List
+
+### PR 1: Mixed Tasks
+
+- [x] `[coding]` Completed task one
+- [x] `[coding]` Completed task two
+- [ ] `[coding]` Pending task
+"""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan(plan_with_completed)
+
+        basic_task_state.current_task_index = 2  # The pending task
+        context = task_runner._get_group_context(basic_task_state)
+
+        assert context is not None
+        assert len(context["completed_tasks"]) == 2
+        assert "Completed task one" in context["completed_tasks"][0]
+        assert "Completed task two" in context["completed_tasks"][1]
+
+    def test_get_group_context_with_plan_argument(
+        self, task_runner, state_manager, basic_task_state
+    ):
+        """Should use provided plan instead of loading from state manager."""
+        # Save a different plan to state manager
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan("## No tasks here")
+
+        # Provide a different plan as argument
+        custom_plan = """## Task List
+
+### PR 1: Custom
+
+- [ ] `[coding]` Custom task
+"""
+        basic_task_state.current_task_index = 0
+        context = task_runner._get_group_context(basic_task_state, plan=custom_plan)
+
+        assert context is not None
+        assert context["group_name"] == "Custom"
+
+
+# =============================================================================
 # Test Is Last Task In Group
 # =============================================================================
 
@@ -519,6 +643,42 @@ class TestIsLastTaskInGroup:
         state_manager.save_plan(plan_with_pr_groups)
 
         basic_task_state.current_task_index = 99
+        assert task_runner.is_last_task_in_group(basic_task_state)
+
+    def test_is_last_in_group_single_task_pr(self, task_runner, state_manager, basic_task_state):
+        """Should return True for PR with single task.
+
+        This is a critical edge case where a PR group contains only one task.
+        The formula: remaining = len(tasks_in_group) - current_task_in_group_idx - 1
+        For 1 task: remaining = 1 - 0 - 1 = 0, so should return True.
+
+        This test ensures that single-task PRs trigger the PR creation workflow
+        correctly instead of waiting for more tasks.
+        """
+        single_task_pr_plan = """## Task List
+
+### PR 1: Single Task PR
+
+- [ ] `[coding]` The only task in this PR group
+
+### PR 2: Multi Task PR
+
+- [ ] `[coding]` First task in second PR
+- [ ] `[coding]` Second task in second PR
+"""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan(single_task_pr_plan)
+
+        # Task index 0 is the only task in PR 1
+        basic_task_state.current_task_index = 0
+        assert task_runner.is_last_task_in_group(basic_task_state)
+
+        # Task index 1 is NOT the last task in PR 2 (first of two)
+        basic_task_state.current_task_index = 1
+        assert not task_runner.is_last_task_in_group(basic_task_state)
+
+        # Task index 2 IS the last task in PR 2 (second of two)
+        basic_task_state.current_task_index = 2
         assert task_runner.is_last_task_in_group(basic_task_state)
 
 
