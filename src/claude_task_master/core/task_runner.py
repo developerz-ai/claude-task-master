@@ -157,6 +157,62 @@ class TaskRunner:
         self._parsed_groups_cache = None
         self._plan_hash = None
 
+    def _get_group_context(self, state: TaskState, plan: str | None = None) -> dict | None:
+        """Get PR group context for the current task.
+
+        Computes information about the current task's PR group including:
+        - Group name and ID
+        - Whether this is the last task in the group
+        - Remaining tasks in the group
+        - Completed tasks in the group
+
+        Args:
+            state: Current task state.
+            plan: Optional plan content. If not provided, loads from state manager.
+
+        Returns:
+            Dict with group context, or None if no plan or task out of range.
+            Keys: group_id, group_name, is_last_in_group, remaining_in_group,
+                  completed_tasks, tasks_in_group
+        """
+        if plan is None:
+            plan = self.state_manager.load_plan()
+        if not plan:
+            return None
+
+        parsed_tasks, _ = self._get_parsed_tasks(plan)
+        if state.current_task_index >= len(parsed_tasks):
+            return None
+
+        current_task = parsed_tasks[state.current_task_index]
+        group_id = current_task.group_id
+        group_name = current_task.group_name
+
+        # Get all tasks in this group
+        tasks_in_group = [t for t in parsed_tasks if t.group_id == group_id]
+
+        # Find the current task's position within the group
+        current_task_in_group_idx = next(
+            (i for i, t in enumerate(tasks_in_group) if t.index == state.current_task_index),
+            0,
+        )
+
+        # Calculate remaining tasks
+        remaining_in_group = len(tasks_in_group) - current_task_in_group_idx - 1
+        is_last_in_group = remaining_in_group == 0
+
+        # Get completed tasks in this group (for context)
+        completed_tasks = [t.cleaned_description for t in tasks_in_group if t.is_complete]
+
+        return {
+            "group_id": group_id,
+            "group_name": group_name,
+            "is_last_in_group": is_last_in_group,
+            "remaining_in_group": remaining_in_group,
+            "completed_tasks": completed_tasks,
+            "tasks_in_group": tasks_in_group,
+        }
+
     def run_work_session(self, state: TaskState) -> None:
         """Run a single work session.
 
@@ -204,25 +260,19 @@ class TaskRunner:
         complexity, cleaned_task = parse_task_complexity(current_task)
         target_model = TaskComplexity.get_model_for_complexity(complexity)
 
-        # Get PR/group info for this task
-        parsed_tasks, groups = self._get_parsed_tasks(plan)
-        pr_name = "Default"
-        pr_group_id = "default"
-        if state.current_task_index < len(parsed_tasks):
-            pr_name = parsed_tasks[state.current_task_index].group_name
-            pr_group_id = parsed_tasks[state.current_task_index].group_id
-
-        # Determine if this is the last task in the PR group
-        tasks_in_group = [t for t in parsed_tasks if t.group_id == pr_group_id]
-        current_task_in_group_idx = next(
-            (i for i, t in enumerate(tasks_in_group) if t.index == state.current_task_index),
-            0,
-        )
-        remaining_in_group = len(tasks_in_group) - current_task_in_group_idx - 1
-        is_last_in_group = remaining_in_group == 0
-
-        # Get completed tasks in this group (for context)
-        completed_in_group = [t.cleaned_description for t in tasks_in_group if t.is_complete]
+        # Get PR/group context for this task (reuses _get_group_context for DRY)
+        group_context = self._get_group_context(state, plan)
+        if group_context:
+            pr_name = group_context["group_name"]
+            is_last_in_group = group_context["is_last_in_group"]
+            remaining_in_group = group_context["remaining_in_group"]
+            completed_in_group = group_context["completed_tasks"]
+        else:
+            # Fallback for edge cases (shouldn't happen in normal operation)
+            pr_name = "Default"
+            is_last_in_group = True
+            remaining_in_group = 0
+            completed_in_group = []
 
         # Load context safely
         try:
@@ -480,19 +530,8 @@ Please complete this task."""
         Returns:
             True if this is the last task in the PR group.
         """
-        plan = self.state_manager.load_plan()
-        if not plan:
+        group_context = self._get_group_context(state)
+        if group_context is None:
+            # No plan or task out of range - treat as last task
             return True
-
-        parsed_tasks, _ = self._get_parsed_tasks(plan)
-        if state.current_task_index >= len(parsed_tasks):
-            return True
-
-        current_group_id = parsed_tasks[state.current_task_index].group_id
-        tasks_in_group = [t for t in parsed_tasks if t.group_id == current_group_id]
-        current_task_in_group_idx = next(
-            (i for i, t in enumerate(tasks_in_group) if t.index == state.current_task_index),
-            0,
-        )
-        remaining_in_group = len(tasks_in_group) - current_task_in_group_idx - 1
-        return remaining_in_group == 0
+        return bool(group_context["is_last_in_group"])
