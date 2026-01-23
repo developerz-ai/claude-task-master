@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from claude_task_master.core.agent import AgentWrapper, ModelType, ToolConfig
+from claude_task_master.core.config_loader import reset_config
 
 # =============================================================================
 # ToolConfig Enum Tests
@@ -79,8 +80,13 @@ class TestAgentWrapperGetToolsForPhase:
     """Tests for get_tools_for_phase method."""
 
     @pytest.fixture
-    def agent(self):
+    def agent(self, temp_dir, monkeypatch):
         """Create an AgentWrapper instance for testing."""
+        # Change to temp directory to avoid loading local config.json
+        monkeypatch.chdir(temp_dir)
+        # Reset config to ensure we use default values (not local config.json)
+        reset_config()
+
         mock_sdk = MagicMock()
         mock_sdk.query = AsyncMock()
         mock_sdk.ClaudeAgentOptions = MagicMock()
@@ -92,13 +98,15 @@ class TestAgentWrapperGetToolsForPhase:
             )
 
     def test_planning_phase_tools(self, agent):
-        """Test get_tools_for_phase returns planning tools including Bash for checks."""
+        """Test get_tools_for_phase returns planning tools including Bash for checks and web tools for research."""
         tools = agent.get_tools_for_phase("planning")
         expected = [
             "Read",
             "Glob",
             "Grep",
             "Bash",
+            "WebFetch",
+            "WebSearch",
         ]
         assert tools == expected
 

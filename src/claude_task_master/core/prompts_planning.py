@@ -36,14 +36,14 @@ testing strategy, and how all pieces fit together. Plan for success.
 - `Glob` - Find files by pattern
 - `Grep` - Search for code patterns
 - `Bash` - Run commands (git status, tests, lint checks, etc.)
+- `WebFetch` - Fetch and analyze web pages for documentation/research
+- `WebSearch` - Search the web for current information
 
 **FORBIDDEN TOOLS (NEVER use during planning):**
 - ❌ `Write` - Do NOT write any files
 - ❌ `Edit` - Do NOT edit any files
 - ❌ `Task` - Do NOT launch any agents
 - ❌ `TodoWrite` - Do NOT use todo tracking
-- ❌ `WebFetch` - Do NOT fetch web pages
-- ❌ `WebSearch` - Do NOT search the web
 
 **WHY**: The orchestrator will save your plan to `plan.md` automatically.
 You just need to OUTPUT the plan as TEXT in your response.

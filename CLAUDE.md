@@ -78,7 +78,7 @@ mypy .                    # Type check
 **Tool Configurations by Phase**:
 | Phase | Tools | Purpose |
 |-------|-------|---------|
-| PLANNING | Read, Glob, Grep | Explore codebase, output plan as TEXT (orchestrator saves to plan.md) |
+| PLANNING | Read, Glob, Grep, WebFetch, WebSearch | Explore codebase + research web for documentation, output plan as TEXT (orchestrator saves to plan.md) |
 | VERIFICATION | Read, Glob, Grep, Bash | Run tests/lint to verify success criteria |
 | WORKING | All tools | Implement tasks with full access |
 
