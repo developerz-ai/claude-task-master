@@ -36,8 +36,12 @@ testing strategy, and how all pieces fit together. Plan for success.
 - `Glob` - Find files by pattern
 - `Grep` - Search for code patterns
 - `Bash` - Run commands (git status, tests, lint checks, etc.)
-- `WebFetch` - Fetch and analyze web pages for documentation/research
-- `WebSearch` - Search the web for current information
+- `WebSearch` - Search the web for current information (use FIRST to find URLs)
+- `WebFetch` - Fetch full content from URLs (only URLs from search results or user-provided)
+
+**Web Research Workflow:** Use `WebSearch` first to find relevant documentation/articles,
+then use `WebFetch` to retrieve full content from specific URLs in the search results.
+WebFetch can also retrieve PDFs for technical documentation.
 
 **FORBIDDEN TOOLS (NEVER use during planning):**
 - ❌ `Write` - Do NOT write any files
