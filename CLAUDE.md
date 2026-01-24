@@ -62,6 +62,24 @@ ruff check . && ruff format .  # Lint & format
 mypy .                    # Type check
 ```
 
+## Releasing
+
+```bash
+# 1. Update version in all places:
+#    - pyproject.toml (version = "X.Y.Z")
+#    - src/claude_task_master/__init__.py (__version__ = "X.Y.Z")
+#    - CHANGELOG.md (add entry, update links at bottom)
+
+# 2. Commit and tag
+git add -A && git commit -m "chore: Release vX.Y.Z"
+git tag vX.Y.Z
+git push origin main --tags
+
+# 3. CI publishes to PyPI automatically on tag push
+# 4. Install from PyPI after release:
+uv tool install claude-task-master --force --reinstall
+```
+
 ## Architecture
 
 **Components** (Single Responsibility):
