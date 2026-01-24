@@ -218,7 +218,32 @@ EOF
 **Note:** The `.claude-task-master/` directory is automatically gitignored - it contains
 orchestrator state files that should never be committed.
 
-**6. Push and Create PR** (REQUIRED - DO NOT SKIP!)
+**6. Rebase onto main BEFORE pushing** (CRITICAL!)
+```bash
+git fetch origin main
+git rebase origin/main
+```
+
+⚠️ **This step prevents merge conflicts in the PR!** Other PRs may have been merged
+while you were working. You MUST rebase before pushing.
+
+**If rebase has conflicts:**
+1. Check which files have conflicts: `git status`
+2. For each conflicted file:
+   - Open the file and look for conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`)
+   - Resolve by keeping the correct code (often you need BOTH changes)
+   - Remove the conflict markers
+   - `git add <file>`
+3. Continue the rebase: `git rebase --continue`
+4. If you get stuck, you can abort and retry: `git rebase --abort` then try again
+5. After resolving all conflicts, run tests again to verify nothing broke
+
+**Common conflict resolution patterns:**
+- **mod.rs / index.ts imports**: Keep BOTH the new import from main AND your import
+- **Package versions**: Usually take the newer version from main
+- **Config files**: Merge both sets of changes carefully
+
+**7. Push and Create PR** (REQUIRED - DO NOT SKIP!)
 ```bash
 git push -u origin HEAD
 gh pr create --title "type: description" --body "..." --label "claudetm"
@@ -238,7 +263,7 @@ If label doesn't exist, create it and retry.
 
 **The orchestrator handles CI/reviews/merge automatically.**
 
-**7. Log File Best Practices**
+**8. Log File Best Practices**
 - For log/progress files, use APPEND mode (don't read entire file)
 - Example: `echo "message" >> progress.md` instead of Read + Write
 - This avoids context bloat from reading large log files"""

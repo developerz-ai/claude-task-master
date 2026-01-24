@@ -467,12 +467,24 @@ Use Glob to find all .txt files in both directories, then Read each one.
   - Make the requested change, OR
   - Explain why it's not needed
 
-## Step 4: Verify and Commit
+## Step 4: Verify, Commit, Rebase, and Push
 
 1. Run tests/lint locally to verify ALL passes
 2. Commit all fixes together with a descriptive message
-3. Push the fixes
-4. Create a resolution summary file at: `{resolve_json_path}`
+3. **Rebase onto main before pushing** (CRITICAL - prevents merge conflicts!):
+   ```bash
+   git fetch origin main
+   git rebase origin/main
+   ```
+   If conflicts occur during rebase:
+   - Check `git status` to see conflicted files
+   - Open each file and resolve conflicts (look for `<<<<<<<` markers)
+   - Usually you need BOTH changes (yours AND from main)
+   - `git add <file>` after resolving each file
+   - `git rebase --continue` to proceed
+   - Run tests again after resolving conflicts
+4. Push the fixes: `git push --force-with-lease`
+5. Create a resolution summary file at: `{resolve_json_path}`
 
 **Resolution file format:**
 ```json
@@ -511,7 +523,14 @@ Please:
 2. Understand ALL error messages (lint, tests, types, etc.)
 3. Fix everything that's failing - don't skip anything
 4. Run tests/lint locally to verify ALL passes
-5. Commit and push the fixes
+5. Commit fixes with a descriptive message
+6. **Rebase onto main before pushing** (CRITICAL - prevents merge conflicts!):
+   ```bash
+   git fetch origin main
+   git rebase origin/main
+   ```
+   If conflicts occur: resolve them, `git add`, `git rebase --continue`, run tests again.
+7. Push the fixes: `git push --force-with-lease`
 
 After fixing, end with: TASK COMPLETE"""
 
@@ -529,8 +548,15 @@ Please:
    - Make the requested change, OR
    - Explain why it's not needed
 3. Run tests to verify
-4. Commit and push the fixes
-5. Create a resolution summary file at: `{resolve_json_path}`
+4. Commit fixes with a descriptive message
+5. **Rebase onto main before pushing** (CRITICAL - prevents merge conflicts!):
+   ```bash
+   git fetch origin main
+   git rebase origin/main
+   ```
+   If conflicts occur: resolve them, `git add`, `git rebase --continue`, run tests again.
+6. Push the fixes: `git push --force-with-lease`
+7. Create a resolution summary file at: `{resolve_json_path}`
 
 **Resolution file format:**
 ```json
@@ -681,8 +707,15 @@ Please:
    - Make the requested change, OR
    - Explain why it's not needed
 3. Run tests to verify
-4. Commit and push the fixes
-5. Create a resolution summary file at: `{resolve_json_path}`
+4. Commit fixes with a descriptive message
+5. **Rebase onto main before pushing** (CRITICAL - prevents merge conflicts!):
+   ```bash
+   git fetch origin main
+   git rebase origin/main
+   ```
+   If conflicts occur: resolve them, `git add`, `git rebase --continue`, run tests again.
+6. Push the fixes: `git push --force-with-lease`
+7. Create a resolution summary file at: `{resolve_json_path}`
 
 **Resolution file format:**
 ```json
