@@ -151,6 +151,7 @@ class AgentPhaseExecutor:
         required_branch: str | None = None,
         create_pr: bool = True,
         pr_group_info: dict | None = None,
+        target_branch: str = "main",
     ) -> dict[str, Any]:
         """Run a work session with full tools.
 
@@ -163,6 +164,7 @@ class AgentPhaseExecutor:
             required_branch: Optional branch name the agent should be on.
             create_pr: If True, instruct agent to create PR. If False, commit only.
             pr_group_info: Optional dict with PR group context (name, completed_tasks, etc).
+            target_branch: The target branch for rebasing (default: "main").
 
         Returns:
             Dict with 'output', 'success', and 'model_used' keys.
@@ -175,6 +177,7 @@ class AgentPhaseExecutor:
             required_branch=required_branch,
             create_pr=create_pr,
             pr_group_info=pr_group_info,
+            target_branch=target_branch,
         )
 
         # Run async query with optional model override

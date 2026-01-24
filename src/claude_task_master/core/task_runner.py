@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from . import console
 from .agent import ModelType
 from .agent_exceptions import AgentError
+from .config_loader import get_config
 from .console import clear_task_context, set_task_context
 from .task_group import (
     ParsedTask,
@@ -327,6 +328,9 @@ Please complete this task."""
         try:
             # Convert string model name to ModelType enum
             model_type = ModelType(target_model)
+            # Get target branch from config for rebase instructions
+            config = get_config()
+            target_branch = config.git.target_branch
             result = self.agent.run_work_session(
                 task_description=task_description,
                 context=context,
@@ -334,6 +338,7 @@ Please complete this task."""
                 required_branch=current_branch,
                 create_pr=should_create_pr,
                 pr_group_info=pr_group_info,
+                target_branch=target_branch,
             )
         except AgentError:
             if self.logger:

@@ -17,6 +17,7 @@ def build_work_prompt(
     required_branch: str | None = None,
     create_pr: bool = True,
     pr_group_info: dict | None = None,
+    target_branch: str = "main",
 ) -> str:
     """Build the work session prompt.
 
@@ -31,6 +32,7 @@ def build_work_prompt(
             - name: PR group name
             - completed_tasks: List of completed task descriptions in this group
             - remaining_tasks: Number of tasks remaining after current
+        target_branch: The target branch for rebasing (default: "main").
 
     Returns:
         Complete work session prompt.
@@ -119,7 +121,7 @@ def build_work_prompt(
 
     # Execution guidelines - conditional based on create_pr flag
     if create_pr:
-        execution_content = _build_full_workflow_execution()
+        execution_content = _build_full_workflow_execution(target_branch=target_branch)
     else:
         execution_content = _build_commit_only_execution()
 
@@ -173,9 +175,13 @@ TASK COMPLETE
     return builder.build()
 
 
-def _build_full_workflow_execution() -> str:
-    """Build execution instructions for full workflow (commit + push + PR)."""
-    return """**1. Check git status first**
+def _build_full_workflow_execution(target_branch: str = "main") -> str:
+    """Build execution instructions for full workflow (commit + push + PR).
+
+    Args:
+        target_branch: The target branch to rebase onto (e.g., main, master, develop).
+    """
+    return f"""**1. Check git status first**
 ```bash
 git status
 ```
@@ -218,10 +224,10 @@ EOF
 **Note:** The `.claude-task-master/` directory is automatically gitignored - it contains
 orchestrator state files that should never be committed.
 
-**6. Rebase onto main BEFORE pushing** (CRITICAL!)
+**6. Rebase onto {target_branch} BEFORE pushing** (CRITICAL!)
 ```bash
-git fetch origin main
-git rebase origin/main
+git fetch origin {target_branch}
+git rebase origin/{target_branch}
 ```
 
 ⚠️ **This step prevents merge conflicts in the PR!** Other PRs may have been merged
@@ -239,8 +245,8 @@ while you were working. You MUST rebase before pushing.
 5. After resolving all conflicts, run tests again to verify nothing broke
 
 **Common conflict resolution patterns:**
-- **mod.rs / index.ts imports**: Keep BOTH the new import from main AND your import
-- **Package versions**: Usually take the newer version from main
+- **mod.rs / index.ts imports**: Keep BOTH the new import from {target_branch} AND your import
+- **Package versions**: Usually take the newer version from {target_branch}
 - **Config files**: Merge both sets of changes carefully
 
 **7. Push and Create PR** (REQUIRED - DO NOT SKIP!)
