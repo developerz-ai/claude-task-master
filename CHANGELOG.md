@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-01-24
+
+### Fixed
+- **Merge conflict prevention**: Agent now rebases onto target branch before pushing PRs
+  - Fetches latest changes from target branch and rebases before push
+  - Includes detailed conflict resolution instructions for the agent
+  - Prevents merge conflicts when other PRs are merged during long-running tasks
+
+### Changed
+- **Configurable target branch**: Rebase instructions now use `config.git.target_branch`
+  instead of hardcoded "main"
+  - Supports repos using different default branches (master, develop, etc.)
+  - Configurable via config file or `CLAUDETM_TARGET_BRANCH` env var
+
 ## [0.1.6] - 2026-01-23
 
 ### Changed
@@ -247,7 +261,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.3...v0.1.4
