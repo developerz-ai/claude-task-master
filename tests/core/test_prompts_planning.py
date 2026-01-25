@@ -304,6 +304,111 @@ class TestExploreCodebaseSection:
 
 
 # =============================================================================
+# CLAUDE.md Coding Requirements Tests
+# =============================================================================
+
+
+class TestClaudeMdGuidance:
+    """Tests for CLAUDE.md coding requirements guidance."""
+
+    def test_claude_md_reading_instruction_present(self) -> None:
+        """Test prompt instructs Claude to read CLAUDE.md file."""
+        result = build_planning_prompt("Any goal")
+        assert "CLAUDE.md" in result
+
+    def test_claude_md_reading_is_first_step(self) -> None:
+        """Test CLAUDE.md reading is emphasized as FIRST step."""
+        result = build_planning_prompt("Any goal")
+        # Should contain instruction to read conventions FIRST
+        assert "FIRST" in result or "first" in result
+        # CLAUDE.md should be mentioned in the explore codebase section
+        step1_section_start = result.find("Step 1")
+        claude_md_position = result.find("CLAUDE.md")
+        step2_section_start = result.find("Step 2")
+        # CLAUDE.md should be mentioned in Step 1
+        assert step1_section_start < claude_md_position < step2_section_start
+
+    def test_critical_marker_for_conventions(self) -> None:
+        """Test CRITICAL marker emphasizes reading project conventions."""
+        result = build_planning_prompt("Any goal")
+        # Should have CRITICAL marker near CLAUDE.md or conventions
+        assert "CRITICAL" in result
+        # Check that CRITICAL appears near "convention" or "CLAUDE.md"
+        critical_pos = result.find("CRITICAL")
+        claude_md_pos = result.find("CLAUDE.md")
+        # They should be relatively close (within 200 characters)
+        assert abs(critical_pos - claude_md_pos) < 200
+
+    def test_alternative_convention_files_listed(self) -> None:
+        """Test alternative convention file paths are listed."""
+        result = build_planning_prompt("Any goal")
+        # Should mention common alternative paths
+        assert ".claude/instructions.md" in result
+        assert "CONTRIBUTING.md" in result
+        assert ".cursorrules" in result
+        assert ".github/copilot-instructions.md" in result
+
+    def test_coding_requirements_must_be_followed(self) -> None:
+        """Test prompt emphasizes coding requirements MUST be followed."""
+        result = build_planning_prompt("Any goal")
+        # Should emphasize that requirements MUST be respected
+        assert "MUST" in result
+        # Should mention following or respecting requirements/standards
+        result_lower = result.lower()
+        assert (
+            "coding requirements" in result_lower
+            or "coding standards" in result_lower
+            or "project standards" in result_lower
+        )
+
+    def test_requirements_should_be_in_task_descriptions(self) -> None:
+        """Test prompt instructs to include requirements in task descriptions."""
+        result = build_planning_prompt("Any goal")
+        # Should mention including requirements in task descriptions
+        result_lower = result.lower()
+        assert "task descriptions" in result_lower or "task description" in result_lower
+        # Should mention that working phase should follow standards
+        assert "working phase" in result_lower or "working" in result_lower
+
+    def test_architecture_and_coding_standards_both_mentioned(self) -> None:
+        """Test prompt mentions understanding both architecture AND coding standards."""
+        result = build_planning_prompt("Any goal")
+        result_lower = result.lower()
+        assert "architecture" in result_lower
+        assert (
+            "coding standards" in result_lower
+            or "coding requirements" in result_lower
+            or "conventions" in result_lower
+        )
+
+    def test_conventions_reading_before_other_exploration(self) -> None:
+        """Test reading conventions is positioned before other exploration steps."""
+        result = build_planning_prompt("Any goal")
+
+        # Find positions of key elements
+        claude_md_pos = result.find("CLAUDE.md")
+        readme_pos = result.find("README")
+
+        # CLAUDE.md should be mentioned before README
+        assert claude_md_pos < readme_pos
+        # Also check it appears early in the exploration section
+        step1_start = result.find("Step 1")
+        step2_start = result.find("Step 2")
+        # Get just Step 1 section
+        step1_section = result[step1_start:step2_start]
+        # In Step 1, CLAUDE.md should appear before Glob
+        step1_claude_md = step1_section.find("CLAUDE.md")
+        step1_glob = step1_section.find("Glob")
+        assert step1_claude_md < step1_glob
+
+    def test_if_exists_conditional_for_claude_md(self) -> None:
+        """Test CLAUDE.md reading includes 'if exists' conditional."""
+        result = build_planning_prompt("Any goal")
+        # Should indicate CLAUDE.md might not exist in all projects
+        assert "if exists" in result.lower() or "(if exists)" in result
+
+
+# =============================================================================
 # Step 2: Create Task List Tests
 # =============================================================================
 
