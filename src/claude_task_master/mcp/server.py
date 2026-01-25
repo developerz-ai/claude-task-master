@@ -69,6 +69,7 @@ ClearMailboxResult = tools.ClearMailboxResult
 CloneRepoResult = tools.CloneRepoResult
 SetupRepoResult = tools.SetupRepoResult
 PlanRepoResult = tools.PlanRepoResult
+DeleteCodingStyleResult = tools.DeleteCodingStyleResult
 
 
 # =============================================================================
@@ -200,6 +201,24 @@ def create_server(
             Dictionary indicating success or failure.
         """
         return tools.clean_task(work_dir, force, state_dir)
+
+    @mcp.tool()
+    def delete_coding_style(
+        state_dir: str | None = None,
+    ) -> dict[str, Any]:
+        """Delete the coding style guide file (coding-style.md).
+
+        The coding style file is a cached guide that's preserved across runs to save
+        tokens. Call this to force regeneration on the next planning phase when
+        project conventions have changed.
+
+        Args:
+            state_dir: Optional custom state directory path.
+
+        Returns:
+            Dictionary indicating success or failure with deletion status.
+        """
+        return tools.delete_coding_style(work_dir, state_dir)
 
     @mcp.tool()
     def initialize_task(
