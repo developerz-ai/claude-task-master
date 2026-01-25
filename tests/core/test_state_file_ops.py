@@ -375,6 +375,38 @@ def test_example():
 
         assert state_manager.load_coding_style() == "Second style"
 
+    def test_delete_coding_style_when_exists(self, state_manager):
+        """Test delete_coding_style returns True and deletes file when it exists."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+
+        state_manager.save_coding_style("Test style")
+        style_file = state_manager.state_dir / "coding-style.md"
+        assert style_file.exists()
+
+        result = state_manager.delete_coding_style()
+        assert result is True
+        assert not style_file.exists()
+
+    def test_delete_coding_style_when_not_exists(self, state_manager):
+        """Test delete_coding_style returns False when file doesn't exist."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+
+        style_file = state_manager.state_dir / "coding-style.md"
+        assert not style_file.exists()
+
+        result = state_manager.delete_coding_style()
+        assert result is False
+
+    def test_delete_coding_style_clears_content(self, state_manager):
+        """Test delete_coding_style makes load_coding_style return None."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+
+        state_manager.save_coding_style("Test style")
+        assert state_manager.load_coding_style() == "Test style"
+
+        state_manager.delete_coding_style()
+        assert state_manager.load_coding_style() is None
+
 
 # =============================================================================
 # Log File Operations Tests
