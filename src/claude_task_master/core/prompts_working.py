@@ -194,12 +194,18 @@ git status
 - Check existing patterns
 - Identify tests to run
 
-**3. Make changes**
-- Edit existing files, Write new files
-- Follow project coding style
-- Stay focused on current task
+**3. Read project conventions FIRST**
+- Check for `CLAUDE.md` at the repository root - it contains coding requirements
+- Also check: `.claude/instructions.md`, `CONTRIBUTING.md`, `.cursorrules`
+- These files define project-specific coding standards you MUST follow
 
-**4. Verify work**
+**4. Make changes**
+- Edit existing files, Write new files
+- Follow project coding style from `CLAUDE.md` and conventions files
+- Stay focused on current task
+- Match existing patterns and code style in the codebase
+
+**5. Verify work**
 ```bash
 # Common verification commands
 pytest                    # Python tests
@@ -208,7 +214,7 @@ ruff check . && mypy .   # Python lint/types
 eslint . && tsc          # JS lint/types
 ```
 
-**5. Commit properly**
+**6. Commit properly**
 ```bash
 git add -A && git commit -m "$(cat <<'EOF'
 type: Brief description (50 chars)
@@ -224,7 +230,7 @@ EOF
 **Note:** The `.claude-task-master/` directory is automatically gitignored - it contains
 orchestrator state files that should never be committed.
 
-**6. Rebase onto {target_branch} BEFORE pushing** (CRITICAL!)
+**7. Rebase onto {target_branch} BEFORE pushing** (CRITICAL!)
 ```bash
 git fetch origin {target_branch}
 git rebase origin/{target_branch}
@@ -249,7 +255,7 @@ while you were working. You MUST rebase before pushing.
 - **Package versions**: Usually take the newer version from {target_branch}
 - **Config files**: Merge both sets of changes carefully
 
-**7. Push and Create PR** (REQUIRED - DO NOT SKIP!)
+**8. Push and Create PR** (REQUIRED - DO NOT SKIP!)
 ```bash
 git push -u origin HEAD
 gh pr create --title "type: description" --body "..." --label "claudetm"
@@ -269,7 +275,7 @@ If label doesn't exist, create it and retry.
 
 **The orchestrator handles CI/reviews/merge automatically.**
 
-**8. Log File Best Practices**
+**9. Log File Best Practices**
 - For log/progress files, use APPEND mode (don't read entire file)
 - Example: `echo "message" >> progress.md` instead of Read + Write
 - This avoids context bloat from reading large log files"""
@@ -290,12 +296,18 @@ git status
 - Check existing patterns
 - Identify tests to run
 
-**3. Make changes**
-- Edit existing files, Write new files
-- Follow project coding style
-- Stay focused on current task
+**3. Read project conventions FIRST**
+- Check for `CLAUDE.md` at the repository root - it contains coding requirements
+- Also check: `.claude/instructions.md`, `CONTRIBUTING.md`, `.cursorrules`
+- These files define project-specific coding standards you MUST follow
 
-**4. Verify work**
+**4. Make changes**
+- Edit existing files, Write new files
+- Follow project coding style from `CLAUDE.md` and conventions files
+- Stay focused on current task
+- Match existing patterns and code style in the codebase
+
+**5. Verify work**
 ```bash
 # Common verification commands
 pytest                    # Python tests
@@ -304,7 +316,7 @@ ruff check . && mypy .   # Python lint/types
 eslint . && tsc          # JS lint/types
 ```
 
-**5. Commit properly**
+**6. Commit properly**
 ```bash
 git add -A && git commit -m "$(cat <<'EOF'
 type: Brief description (50 chars)
@@ -320,13 +332,13 @@ EOF
 **Note:** The `.claude-task-master/` directory is automatically gitignored - it contains
 orchestrator state files that should never be committed.
 
-**6. DO NOT create PR yet**
+**7. DO NOT create PR yet**
 
 ⚠️ **More tasks remain in this PR group. Just commit, do NOT push or create PR.**
 
 The orchestrator will tell you when to create the PR (after all tasks in this group are done).
 
-**7. Log File Best Practices**
+**8. Log File Best Practices**
 - For log/progress files, use APPEND mode (don't read entire file)
 - Example: `echo "message" >> progress.md` instead of Read + Write
 - This avoids context bloat from reading large log files"""
