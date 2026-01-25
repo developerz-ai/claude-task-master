@@ -183,6 +183,15 @@ class PlanRepoResult(BaseModel):
     error: str | None = None
 
 
+class DeleteCodingStyleResult(BaseModel):
+    """Result from delete_coding_style tool."""
+
+    success: bool
+    message: str
+    deleted: bool = False
+    error: str | None = None
+
+
 # =============================================================================
 # Tool Implementations
 # =============================================================================
@@ -400,6 +409,57 @@ def get_context(
             "success": False,
             "error": str(e),
         }
+
+
+def delete_coding_style(
+    work_dir: Path,
+    state_dir: str | None = None,
+) -> dict[str, Any]:
+    """Delete the coding style guide file (coding-style.md).
+
+    The coding style file is a cached guide that's preserved across runs to save
+    tokens. Call this to force regeneration on the next planning phase when
+    project conventions have changed.
+
+    Args:
+        work_dir: Working directory for the server.
+        state_dir: Optional custom state directory path.
+
+    Returns:
+        Dictionary indicating success or failure with deletion status.
+    """
+    state_path = Path(state_dir) if state_dir else work_dir / ".claude-task-master"
+    state_manager = StateManager(state_dir=state_path)
+
+    if not state_manager.exists():
+        return DeleteCodingStyleResult(
+            success=False,
+            message="No task state found",
+            deleted=False,
+            error="No active task found. Initialize a task first.",
+        ).model_dump()
+
+    try:
+        deleted = state_manager.delete_coding_style()
+        if deleted:
+            return DeleteCodingStyleResult(
+                success=True,
+                message="Coding style guide deleted successfully",
+                deleted=True,
+            ).model_dump()
+        else:
+            return DeleteCodingStyleResult(
+                success=True,
+                message="Coding style guide did not exist",
+                deleted=False,
+            ).model_dump()
+    except Exception as e:
+        return DeleteCodingStyleResult(
+            success=False,
+            message=f"Failed to delete coding style guide: {e}",
+            deleted=False,
+            error=str(e),
+        ).model_dump()
 
 
 def clean_task(

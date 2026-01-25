@@ -10,6 +10,7 @@ Endpoints:
 - GET /progress: Get progress summary
 - GET /context: Get accumulated context/learnings
 - GET /health: Health check endpoint
+- DELETE /coding-style: Delete the coding-style.md file
 - POST /task/init: Initialize a new task
 - DELETE /task: Delete/cleanup current task
 - POST /control/stop: Stop a running task with optional cleanup
@@ -51,6 +52,7 @@ from claude_task_master.api.models import (
     ConfigUpdateRequest,
     ContextResponse,
     ControlResponse,
+    DeleteCodingStyleResponse,
     ErrorResponse,
     HealthResponse,
     LogsResponse,
@@ -612,6 +614,68 @@ def create_info_router() -> APIRouter:
             uptime_seconds=uptime,
             active_tasks=active_tasks,
         )
+
+    @router.delete(
+        "/coding-style",
+        response_model=DeleteCodingStyleResponse,
+        responses={
+            404: {"model": ErrorResponse, "description": "No active task found"},
+            500: {"model": ErrorResponse, "description": "Internal server error"},
+        },
+        summary="Delete Coding Style",
+        description="Delete the coding-style.md file from the state directory.",
+    )
+    async def delete_coding_style(request: Request) -> DeleteCodingStyleResponse | JSONResponse:
+        """Delete the coding-style.md file.
+
+        Removes the coding-style.md file from the state directory. This file
+        contains extracted coding conventions and is regenerated on the next run.
+
+        Returns:
+            DeleteCodingStyleResponse indicating whether the file was deleted.
+
+        Raises:
+            404: If no active task exists.
+            500: If an error occurs during deletion.
+        """
+        state_manager = _get_state_manager(request)
+
+        if not state_manager.exists():
+            return JSONResponse(
+                status_code=404,
+                content=ErrorResponse(
+                    error="not_found",
+                    message="No active task found",
+                    suggestion="Start a new task with 'claudetm start <goal>'",
+                ).model_dump(),
+            )
+
+        try:
+            file_existed = state_manager.delete_coding_style()
+
+            if file_existed:
+                return DeleteCodingStyleResponse(
+                    success=True,
+                    message="Coding style file deleted successfully",
+                    file_existed=True,
+                )
+            else:
+                return DeleteCodingStyleResponse(
+                    success=True,
+                    message="Coding style file did not exist",
+                    file_existed=False,
+                )
+
+        except Exception as e:
+            logger.exception("Error deleting coding style file")
+            return JSONResponse(
+                status_code=500,
+                content=ErrorResponse(
+                    error="internal_error",
+                    message="Failed to delete coding style file",
+                    detail=str(e),
+                ).model_dump(),
+            )
 
     return router
 
@@ -1356,7 +1420,9 @@ def register_routes(app: FastAPI) -> None:
     repo_router = create_repo_router()
     app.include_router(repo_router, prefix="/repo")
 
-    logger.debug("Registered info routes: /status, /plan, /logs, /progress, /context, /health")
+    logger.debug(
+        "Registered info routes: /status, /plan, /logs, /progress, /context, /health, /coding-style"
+    )
     logger.debug("Registered control routes: /control/stop, /control/resume, /config")
     logger.debug("Registered task routes: /task/init, /task")
     logger.debug("Registered webhook routes: /webhooks, /webhooks/{id}, /webhooks/test")

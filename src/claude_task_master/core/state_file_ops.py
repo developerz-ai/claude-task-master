@@ -146,6 +146,18 @@ class FileOperationsMixin:
             return coding_style_file.read_text()
         return None
 
+    def delete_coding_style(self) -> bool:
+        """Delete coding style guide file (coding-style.md).
+
+        Returns:
+            True if file was deleted, False if file did not exist.
+        """
+        coding_style_file = self.state_dir / "coding-style.md"
+        if coding_style_file.exists():
+            coding_style_file.unlink()
+            return True
+        return False
+
     def _parse_plan_tasks(self, plan: str) -> list[str]:
         """Parse tasks from plan markdown.
 

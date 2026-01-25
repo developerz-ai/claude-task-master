@@ -25,6 +25,7 @@ Response Models:
 - CloneRepoResponse: Result of cloning a repository
 - SetupRepoResponse: Result of setting up a repository
 - PlanRepoResponse: Result of planning for a repository
+- DeleteCodingStyleResponse: Result of deleting coding-style.md
 
 Usage:
     from claude_task_master.api.models import (
@@ -859,4 +860,25 @@ class PlanRepoResponse(BaseModel):
     plan: str | None = None
     criteria: str | None = None
     run_id: str | None = None
+    error: str | None = None
+
+
+# =============================================================================
+# Coding Style Response Models
+# =============================================================================
+
+
+class DeleteCodingStyleResponse(BaseModel):
+    """Response model for deleting the coding-style.md file.
+
+    Attributes:
+        success: Whether the deletion operation succeeded.
+        message: Human-readable result message.
+        file_existed: Whether the file existed before deletion.
+        error: Error message if deletion failed.
+    """
+
+    success: bool
+    message: str
+    file_existed: bool = False
     error: str | None = None
