@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-01-24
+
+### Added
+- **Coding style guide generation**: Automatically generates `coding-style.md` from CLAUDE.md
+  - Extracts development workflow, code conventions, and project-specific requirements
+  - Injects coding style into planning and work prompts for consistent code quality
+  - Preserved across runs to save tokens (not deleted on success)
+  - Uses Opus model for high-quality extraction
+
+### Changed
+- Planning and work prompts now respect coding requirements from CLAUDE.md
+- Coding style guide (~600 words) provides concise guidance for agents
+
 ## [0.1.7] - 2026-01-24
 
 ### Fixed
@@ -261,7 +274,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.8...HEAD
+[0.1.8]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.4...v0.1.5
