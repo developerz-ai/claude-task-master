@@ -6,6 +6,8 @@ This module tests the prompts from prompts_working.py:
 - _build_commit_only_execution: Commit-only workflow (more tasks in group)
 """
 
+from typing import Any
+
 from claude_task_master.core.prompts_working import (
     _build_commit_only_execution,
     _build_full_workflow_execution,
@@ -1111,7 +1113,7 @@ class TestClaudeMdGuidance:
     def test_coding_requirements_context_preserved(self) -> None:
         """Test coding requirements guidance appears regardless of other parameters."""
         # Test with various parameter combinations
-        test_cases = [
+        test_cases: list[dict[str, Any]] = [
             {"task_description": "Task"},
             {"task_description": "Task", "context": "Some context"},
             {"task_description": "Task", "pr_comments": "Some comments"},
