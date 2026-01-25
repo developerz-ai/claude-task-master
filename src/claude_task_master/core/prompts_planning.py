@@ -69,12 +69,23 @@ You just need to OUTPUT the plan as TEXT in your response.
     builder.add_section(
         "Step 1: Explore Codebase (READ ONLY)",
         """Thoroughly analyze the codebase using READ-ONLY operations:
-1. **Read** key files (README, configs, main modules)
-2. **Glob** to find patterns (`**/*.py`, `src/**/*.ts`)
-3. **Grep** for specific code (class definitions, imports)
-4. **Identify** tests, CI config, and coding standards
 
-Understand the architecture before creating tasks.""",
+**CRITICAL: Read Project Conventions FIRST**
+1. **Read `CLAUDE.md`** (if exists) - Contains coding requirements, project instructions,
+   and conventions that MUST be followed. This file defines how code should be written.
+2. Also check: `.claude/instructions.md`, `CONTRIBUTING.md`, `.cursorrules`, `.github/copilot-instructions.md`
+
+**Then explore the codebase:**
+3. **Read** key files (README, configs, main modules)
+4. **Glob** to find patterns (`**/*.py`, `src/**/*.ts`)
+5. **Grep** for specific code (class definitions, imports)
+6. **Identify** tests, CI config, and existing code patterns
+
+**Remember:** Any coding requirements found in `CLAUDE.md` or similar convention files
+MUST be respected when creating tasks. Include relevant requirements in task descriptions
+so the working phase follows project standards.
+
+Understand the architecture AND coding standards before creating tasks.""",
     )
 
     # Task creation phase - organized by PR
