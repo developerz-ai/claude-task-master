@@ -263,6 +263,9 @@ Server runs on port 8000 by default (`claudetm-server`):
 - `POST /repo/setup` - Setup cloned repository (install dependencies, create venv, run setup scripts)
 - `POST /repo/plan` - Plan-only mode: analyze codebase and generate task plan without executing
 
+**File Operations**:
+- `DELETE /coding-style` - Delete the coding-style.md file from the state directory
+
 ### MCP Tools
 Available via IDE integration:
 
@@ -281,6 +284,9 @@ Available via IDE integration:
 - `clone_repo` - Clone a git repository to `~/workspace/claude-task-master/{project-name}`
 - `setup_repo` - Setup cloned repository (install dependencies, create venv, run setup scripts)
 - `plan_repo` - Plan-only mode: analyze codebase and generate task plan without executing
+
+**File Operations**:
+- `delete_coding_style` - Delete the coding-style.md file from the state directory
 
 ## Workflow Integration
 
