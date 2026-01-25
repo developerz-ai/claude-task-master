@@ -84,7 +84,7 @@ Note line length, quote style, import ordering rules.""",
         """Create a CONCISE guide with these sections (skip if not applicable):
 
 ```markdown
-# Coding Guide
+# Coding Style
 
 ## Workflow
 - [TDD approach? Test-first? Iteration pattern?]
@@ -122,7 +122,7 @@ Note line length, quote style, import ordering rules.""",
         "Output Format",
         """Output ONLY the coding guide in markdown format.
 
-Start with `# Coding Guide` and include only relevant sections.
+Start with `# Coding Style` and include only relevant sections.
 
 Do NOT include explanations or meta-commentary - just the guide itself.
 
