@@ -121,7 +121,11 @@ class BackupRecoveryMixin:
         return self._create_backup(self.state_file)
 
     def cleanup_on_success(self, run_id: str) -> None:
-        """Clean up all state files except logs on success.
+        """Clean up all state files except logs and coding-style.md on success.
+
+        Preserves:
+        - logs/ directory (keeps last 10 log files)
+        - coding-style.md (reusable across runs to save tokens)
 
         Args:
             run_id: The run ID (used for identifying which log file belongs to this run).
@@ -129,10 +133,14 @@ class BackupRecoveryMixin:
         # Release session lock first
         self.release_session_lock()
 
-        # Delete all files in state directory except logs/
+        # Files to preserve (besides logs/ directory)
+        preserved_files = {"coding-style.md"}
+
+        # Delete all files in state directory except preserved ones and logs/
         for item in self.state_dir.iterdir():
             if item.is_file():
-                item.unlink()
+                if item.name not in preserved_files:
+                    item.unlink()
             elif item.is_dir() and item != self.logs_dir:
                 shutil.rmtree(item)
 

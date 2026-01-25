@@ -324,6 +324,13 @@ Please complete this task."""
         # Set task context for Claude prefix display [claude HH:MM:SS N/M]
         set_task_context(state.current_task_index + 1, len(tasks))
 
+        # Load coding style guide for token-efficient style injection
+        try:
+            coding_style = self.state_manager.load_coding_style()
+        except Exception as e:
+            console.warning(f"Could not load coding style: {e}")
+            coding_style = None
+
         # Run work session with model routing based on task complexity
         try:
             # Convert string model name to ModelType enum
@@ -339,6 +346,7 @@ Please complete this task."""
                 create_pr=should_create_pr,
                 pr_group_info=pr_group_info,
                 target_branch=target_branch,
+                coding_style=coding_style,
             )
         except AgentError:
             if self.logger:

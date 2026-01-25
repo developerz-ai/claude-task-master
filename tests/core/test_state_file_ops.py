@@ -304,6 +304,79 @@ Implementation started.
 
 
 # =============================================================================
+# Coding Style File Operations Tests
+# =============================================================================
+
+
+class TestStateManagerCodingStyle:
+    """Tests for coding style save/load operations."""
+
+    def test_save_load_coding_style(self, state_manager):
+        """Test save and load coding style."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+
+        coding_style = """# Coding Guide
+
+## Workflow
+- Write tests first (TDD)
+- Run `pytest` before commit
+
+## Code Style
+- Use snake_case for functions
+- Max line length: 100 chars
+"""
+        state_manager.save_coding_style(coding_style)
+
+        loaded_style = state_manager.load_coding_style()
+        assert loaded_style == coding_style
+
+    def test_load_coding_style_no_file(self, state_manager):
+        """Test load_coding_style returns None when file doesn't exist."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+
+        result = state_manager.load_coding_style()
+        assert result is None
+
+    def test_coding_style_with_code_blocks(self, state_manager):
+        """Test coding style with code block examples."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+
+        coding_style = """# Coding Guide
+
+## Testing
+- Test file naming: `test_*.py`
+- Example:
+
+```python
+def test_example():
+    assert func() == expected
+```
+"""
+        state_manager.save_coding_style(coding_style)
+
+        loaded_style = state_manager.load_coding_style()
+        assert loaded_style == coding_style
+
+    def test_coding_style_file_path(self, state_manager):
+        """Test coding style is saved to correct file path."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+
+        state_manager.save_coding_style("Test style")
+
+        style_file = state_manager.state_dir / "coding-style.md"
+        assert style_file.exists()
+
+    def test_coding_style_overwrite(self, state_manager):
+        """Test that saving coding style overwrites previous content."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+
+        state_manager.save_coding_style("First style")
+        state_manager.save_coding_style("Second style")
+
+        assert state_manager.load_coding_style() == "Second style"
+
+
+# =============================================================================
 # Log File Operations Tests
 # =============================================================================
 

@@ -301,6 +301,12 @@ def mock_agent_wrapper(temp_dir: Path):
         if phase == "planning"
         else ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
     )
+    mock.generate_coding_style = MagicMock(
+        return_value={
+            "coding_style": "# Coding Guide\n\n## Workflow\n- Write tests first",
+            "raw_output": "Coding style generation output",
+        }
+    )
 
     return mock
 

@@ -170,15 +170,35 @@ class AgentWrapper:
                 ValueError("query must be callable"),
             )
 
-    def run_planning_phase(self, goal: str, context: str = "") -> dict[str, Any]:
+    def run_planning_phase(
+        self, goal: str, context: str = "", coding_style: str | None = None
+    ) -> dict[str, Any]:
         """Run planning phase with read-only tools.
 
         Always uses Opus (smartest model) for planning to ensure
         high-quality task breakdown and complexity classification.
 
+        Args:
+            goal: The goal to plan for.
+            context: Additional context for planning.
+            coding_style: Optional coding style guide to inject into prompt.
+
         Delegates to AgentPhaseExecutor for implementation.
         """
-        return self._phase_executor.run_planning_phase(goal, context)
+        return self._phase_executor.run_planning_phase(goal, context, coding_style)
+
+    def generate_coding_style(self) -> dict[str, Any]:
+        """Generate a coding style guide by analyzing the codebase.
+
+        Analyzes CLAUDE.md, convention files, and codebase to create a
+        concise coding style guide with workflow and conventions.
+
+        Returns:
+            Dict with 'coding_style' and 'raw_output' keys.
+
+        Delegates to AgentPhaseExecutor for implementation.
+        """
+        return self._phase_executor.generate_coding_style()
 
     def run_work_session(
         self,
@@ -190,6 +210,7 @@ class AgentWrapper:
         create_pr: bool = True,
         pr_group_info: dict | None = None,
         target_branch: str = "main",
+        coding_style: str | None = None,
     ) -> dict[str, Any]:
         """Run a work session with full tools.
 
@@ -203,6 +224,7 @@ class AgentWrapper:
             create_pr: If True, instruct agent to create PR. If False, commit only.
             pr_group_info: Optional dict with PR group context (name, completed_tasks, etc).
             target_branch: The target branch for rebasing (default: "main").
+            coding_style: Optional coding style guide to inject into prompt.
 
         Returns:
             Dict with 'output', 'success', and 'model_used' keys.
@@ -218,6 +240,7 @@ class AgentWrapper:
             create_pr=create_pr,
             pr_group_info=pr_group_info,
             target_branch=target_branch,
+            coding_style=coding_style,
         )
 
     def verify_success_criteria(self, criteria: str, context: str = "") -> dict[str, Any]:

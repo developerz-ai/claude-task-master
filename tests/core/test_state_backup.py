@@ -378,6 +378,26 @@ class TestStateManagerCleanup:
 
         assert not initialized_state_manager.backup_dir.exists()
 
+    def test_cleanup_preserves_coding_style(self, initialized_state_manager):
+        """Test cleanup preserves coding-style.md for reuse across runs."""
+        # Create coding style file
+        coding_style = """# Coding Guide
+
+## Workflow
+- Write tests first (TDD)
+- Run pytest before commit
+"""
+        initialized_state_manager.save_coding_style(coding_style)
+        coding_style_file = initialized_state_manager.state_dir / "coding-style.md"
+        assert coding_style_file.exists()
+
+        run_id = initialized_state_manager.load_state().run_id
+        initialized_state_manager.cleanup_on_success(run_id)
+
+        # Coding style should be preserved
+        assert coding_style_file.exists()
+        assert coding_style_file.read_text() == coding_style
+
 
 # =============================================================================
 # Log Rotation Tests

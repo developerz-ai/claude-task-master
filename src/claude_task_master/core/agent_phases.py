@@ -13,7 +13,13 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from . import console
 from .agent_models import ModelType, get_tools_for_phase
-from .prompts import build_planning_prompt, build_verification_prompt, build_work_prompt
+from .prompts import (
+    build_coding_style_prompt,
+    build_planning_prompt,
+    build_verification_prompt,
+    build_work_prompt,
+    extract_coding_style,
+)
 
 if TYPE_CHECKING:
     from .agent_query import AgentQueryExecutor
@@ -104,7 +110,9 @@ class AgentPhaseExecutor:
         self.get_agents_func = get_agents_func
         self.process_message_func = process_message_func
 
-    def run_planning_phase(self, goal: str, context: str = "") -> dict[str, Any]:
+    def run_planning_phase(
+        self, goal: str, context: str = "", coding_style: str | None = None
+    ) -> dict[str, Any]:
         """Run planning phase with read-only tools.
 
         Always uses Opus (smartest model) for planning to ensure
@@ -113,12 +121,17 @@ class AgentPhaseExecutor:
         Args:
             goal: The goal to plan for.
             context: Additional context for planning.
+            coding_style: Optional coding style guide to inject into prompt.
 
         Returns:
             Dict with 'plan', 'criteria', and 'raw_output' keys.
         """
         # Build prompt for planning
-        prompt = build_planning_prompt(goal=goal, context=context if context else None)
+        prompt = build_planning_prompt(
+            goal=goal,
+            context=context if context else None,
+            coding_style=coding_style,
+        )
 
         # Always use Opus for planning (smartest model)
         console.info("Planning with Opus (smartest model)...")
@@ -152,6 +165,7 @@ class AgentPhaseExecutor:
         create_pr: bool = True,
         pr_group_info: dict | None = None,
         target_branch: str = "main",
+        coding_style: str | None = None,
     ) -> dict[str, Any]:
         """Run a work session with full tools.
 
@@ -165,6 +179,7 @@ class AgentPhaseExecutor:
             create_pr: If True, instruct agent to create PR. If False, commit only.
             pr_group_info: Optional dict with PR group context (name, completed_tasks, etc).
             target_branch: The target branch for rebasing (default: "main").
+            coding_style: Optional coding style guide to inject into prompt.
 
         Returns:
             Dict with 'output', 'success', and 'model_used' keys.
@@ -178,6 +193,7 @@ class AgentPhaseExecutor:
             create_pr=create_pr,
             pr_group_info=pr_group_info,
             target_branch=target_branch,
+            coding_style=coding_style,
         )
 
         # Run async query with optional model override
@@ -328,3 +344,37 @@ class AgentPhaseExecutor:
 
         # Default criteria if none specified
         return "All tasks in the task list are completed successfully."
+
+    def generate_coding_style(self) -> dict[str, Any]:
+        """Generate a coding style guide by analyzing the codebase.
+
+        Analyzes CLAUDE.md, convention files, and sample source files
+        to create a concise coding style guide.
+
+        Returns:
+            Dict with 'coding_style' and 'raw_output' keys.
+        """
+        # Build prompt for coding style generation
+        prompt = build_coding_style_prompt()
+
+        console.info("Generating coding style guide with Opus...")
+
+        # Run with planning tools (read-only) and Opus for quality
+        result = run_async_with_cleanup(
+            self.query_executor.run_query(
+                prompt=prompt,
+                tools=self.get_tools_for_phase("planning"),
+                model_override=ModelType.OPUS,  # Use Opus for quality
+                get_model_name_func=self.get_model_name_func,
+                get_agents_func=self.get_agents_func,
+                process_message_func=self.process_message_func,
+            )
+        )
+
+        # Extract the coding style content
+        coding_style = extract_coding_style(result)
+
+        return {
+            "coding_style": coding_style,
+            "raw_output": result,
+        }
