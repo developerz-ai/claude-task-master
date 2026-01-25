@@ -1,6 +1,7 @@
 """Prompt Templates - Centralized, maintainable prompt generation.
 
 This module provides structured prompt templates for different agent phases:
+- Coding Style: Generate concise coding style guide from codebase analysis
 - Planning: Initial codebase analysis and task creation
 - Plan Update: Modifying existing plans based on change requests
 - Working: Task execution with verification
@@ -12,6 +13,7 @@ All prompts are designed to be concise, structured, and token-efficient.
 This module re-exports all prompt functions for backward compatibility.
 The actual implementations are in:
 - prompts_base.py: PromptSection, PromptBuilder
+- prompts_coding_style.py: build_coding_style_prompt, extract_coding_style
 - prompts_planning.py: build_planning_prompt
 - prompts_plan_update.py: build_plan_update_prompt
 - prompts_working.py: build_work_prompt
@@ -23,6 +25,9 @@ from __future__ import annotations
 
 # Re-export base classes
 from .prompts_base import PromptBuilder, PromptSection
+
+# Re-export coding style prompts
+from .prompts_coding_style import build_coding_style_prompt, extract_coding_style
 
 # Re-export planning prompts
 from .prompts_plan_update import build_plan_update_prompt
@@ -43,6 +48,9 @@ __all__ = [
     # Base classes
     "PromptSection",
     "PromptBuilder",
+    # Coding Style
+    "build_coding_style_prompt",
+    "extract_coding_style",
     # Planning
     "build_planning_prompt",
     "build_plan_update_prompt",

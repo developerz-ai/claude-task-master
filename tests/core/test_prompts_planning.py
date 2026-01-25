@@ -264,6 +264,78 @@ def main():
 
 
 # =============================================================================
+# Coding Style Section Tests
+# =============================================================================
+
+
+class TestCodingStyleSection:
+    """Tests for coding style section handling."""
+
+    def test_no_coding_style_by_default(self) -> None:
+        """Test no coding style section when coding_style is None."""
+        result = build_planning_prompt("Any goal", coding_style=None)
+        assert "## Project Coding Style" not in result
+
+    def test_coding_style_included_when_provided(self) -> None:
+        """Test coding style is included when provided."""
+        coding_style = """# Coding Guide
+
+## Workflow
+- Write tests first (TDD)
+"""
+        result = build_planning_prompt(
+            goal="Any goal",
+            coding_style=coding_style,
+        )
+        assert "Project Coding Style" in result
+        assert "Write tests first" in result
+
+    def test_coding_style_instructions_present(self) -> None:
+        """Test instructions to follow coding style are present."""
+        result = build_planning_prompt(
+            goal="Goal",
+            coding_style="## Testing\n- Use pytest",
+        )
+        assert "MUST respect" in result or "must respect" in result.lower()
+
+    def test_coding_style_stripped(self) -> None:
+        """Test coding style whitespace is stripped."""
+        result = build_planning_prompt(
+            goal="Goal",
+            coding_style="  Style content  \n\n",
+        )
+        assert "Style content" in result
+
+    def test_empty_coding_style_treated_as_none(self) -> None:
+        """Test empty string coding_style is treated like no style."""
+        result = build_planning_prompt(goal="Goal", coding_style="")
+        assert "## Project Coding Style" not in result
+
+    def test_coding_style_with_code_blocks(self) -> None:
+        """Test coding style with code blocks is preserved."""
+        coding_style = """## Testing
+```python
+def test_example():
+    assert func() == expected
+```"""
+        result = build_planning_prompt(goal="Goal", coding_style=coding_style)
+        assert "```python" in result
+        assert "test_example" in result
+
+    def test_coding_style_and_context_both_included(self) -> None:
+        """Test both coding style and context can be included."""
+        result = build_planning_prompt(
+            goal="Goal",
+            context="Found: uses Flask",
+            coding_style="## Naming\n- Use snake_case",
+        )
+        assert "Previous Context" in result
+        assert "uses Flask" in result
+        assert "Project Coding Style" in result
+        assert "snake_case" in result
+
+
+# =============================================================================
 # Step 1: Explore Codebase Tests
 # =============================================================================
 

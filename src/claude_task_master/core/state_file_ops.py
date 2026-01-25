@@ -126,6 +126,26 @@ class FileOperationsMixin:
             return context_file.read_text()
         return ""
 
+    def save_coding_style(self, coding_style: str) -> None:
+        """Save coding style guide to coding-style.md.
+
+        Args:
+            coding_style: The coding style guide content.
+        """
+        coding_style_file = self.state_dir / "coding-style.md"
+        coding_style_file.write_text(coding_style)
+
+    def load_coding_style(self) -> str | None:
+        """Load coding style guide from coding-style.md.
+
+        Returns:
+            The coding style guide content, or None if not found.
+        """
+        coding_style_file = self.state_dir / "coding-style.md"
+        if coding_style_file.exists():
+            return coding_style_file.read_text()
+        return None
+
     def _parse_plan_tasks(self, plan: str) -> list[str]:
         """Parse tasks from plan markdown.
 

@@ -18,6 +18,7 @@ def build_work_prompt(
     create_pr: bool = True,
     pr_group_info: dict | None = None,
     target_branch: str = "main",
+    coding_style: str | None = None,
 ) -> str:
     """Build the work session prompt.
 
@@ -33,6 +34,7 @@ def build_work_prompt(
             - completed_tasks: List of completed task descriptions in this group
             - remaining_tasks: Number of tasks remaining after current
         target_branch: The target branch for rebasing (default: "main").
+        coding_style: Optional coding style guide to follow.
 
     Returns:
         Complete work session prompt.
@@ -85,6 +87,15 @@ def build_work_prompt(
     # Context section
     if context:
         builder.add_section("Context", context.strip())
+
+    # Coding style section - concise guide to follow
+    if coding_style:
+        builder.add_section(
+            "Coding Style (MUST FOLLOW)",
+            f"""Follow these project conventions:
+
+{coding_style.strip()}""",
+        )
 
     # File hints
     if file_hints:

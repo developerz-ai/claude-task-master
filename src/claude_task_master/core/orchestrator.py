@@ -1337,11 +1337,15 @@ After fixing everything, run the tests again to confirm they pass.
 After completing your fixes, end with: TASK COMPLETE"""
 
         try:
+            # Load coding style for consistent style in fix session
+            coding_style = self.state_manager.load_coding_style()
+
             self.agent.run_work_session(
                 task_description=task_description,
                 context=context,
                 model_override=ModelType.OPUS,
                 create_pr=True,
+                coding_style=coding_style,
             )
             state.session_count += 1
             self.state_manager.save_state(state)

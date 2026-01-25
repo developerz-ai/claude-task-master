@@ -9,12 +9,15 @@ from __future__ import annotations
 from .prompts_base import PromptBuilder
 
 
-def build_planning_prompt(goal: str, context: str | None = None) -> str:
+def build_planning_prompt(
+    goal: str, context: str | None = None, coding_style: str | None = None
+) -> str:
     """Build the planning phase prompt.
 
     Args:
         goal: The user's goal to achieve.
         context: Optional accumulated context from previous sessions.
+        coding_style: Optional coding style guide to inject.
 
     Returns:
         Complete planning prompt.
@@ -64,6 +67,16 @@ You just need to OUTPUT the plan as TEXT in your response.
     # Context section if available
     if context:
         builder.add_section("Previous Context", context.strip())
+
+    # Coding style section if available (generated from codebase analysis)
+    if coding_style:
+        builder.add_section(
+            "Project Coding Style",
+            f"""The following coding style guide was extracted from this codebase.
+**Tasks you create MUST respect these conventions.**
+
+{coding_style.strip()}""",
+        )
 
     # Exploration phase - READ ONLY
     builder.add_section(

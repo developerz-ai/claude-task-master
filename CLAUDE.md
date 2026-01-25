@@ -109,6 +109,7 @@ uv tool install claude-task-master --force --reinstall
 ├── state.json            # Machine state
 ├── progress.md           # Progress summary
 ├── context.md            # Accumulated learnings
+├── coding-style.md       # Coding style guide (generated from CLAUDE.md)
 ├── mailbox.json          # Pending messages for plan updates
 ├── logs/
 │   └── run-*.txt         # Last 10 logs kept
@@ -119,7 +120,7 @@ uv tool install claude-task-master --force --reinstall
 
 ## Exit Codes
 
-- **0 (Success)**: Tasks done, cleanup all except logs/, keep last 10 logs
+- **0 (Success)**: Tasks done, cleanup all except logs/ and coding-style.md, keep last 10 logs
 - **1 (Blocked)**: Need intervention, keep everything for resume
 - **2 (Interrupted)**: Ctrl+C, keep everything for resume
 
@@ -177,11 +178,22 @@ All commands check `state_manager.exists()` first:
 - Uses `PlanUpdater` to integrate change request into existing plan
 - Preserves completed tasks, modifies pending tasks as needed
 
+### Coding Style Generation
+- Before planning, generates `coding-style.md` if it doesn't exist
+- Analyzes `CLAUDE.md` and convention files to extract:
+  - Development workflow (TDD, test-first patterns)
+  - Code style conventions (naming, formatting)
+  - Project-specific requirements
+- Concise guide (~600 words) injected into planning and work prompts
+- Preserved across runs (not deleted on success) to save tokens
+- Uses Opus for high-quality extraction
+
 ### Planning Prompt
 - Instructs Claude to add `.claude-task-master/` to .gitignore
 - Use Read, Glob, Grep to explore codebase
 - Create task list with checkboxes
 - Define success criteria
+- Includes coding style guide for task planning
 
 ## Testing
 
