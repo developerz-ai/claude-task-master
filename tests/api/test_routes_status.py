@@ -1140,3 +1140,71 @@ def test_status_and_plan_consistency(api_client, api_complete_state, api_plan_fi
     # Verify status matches plan
     assert status_data["tasks"]["completed"] == completed
     assert status_data["tasks"]["total"] == total
+
+
+# =============================================================================
+# DELETE /coding-style Tests
+# =============================================================================
+
+
+def test_delete_coding_style_success(api_client, api_complete_state, api_state_dir):
+    """Test successful deletion of coding-style.md via DELETE /coding-style."""
+    # Create a coding-style.md file
+    coding_style_file = api_state_dir / "coding-style.md"
+    coding_style_file.write_text("# Coding Style\n\nFollow PEP 8 guidelines.\n")
+
+    response = api_client.delete("/coding-style")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["file_existed"] is True
+    assert "deleted successfully" in data["message"]
+    # Verify file is actually deleted
+    assert not coding_style_file.exists()
+
+
+def test_delete_coding_style_file_not_exists(api_client, api_complete_state, api_state_dir):
+    """Test deletion when coding-style.md does not exist."""
+    # Ensure file doesn't exist
+    coding_style_file = api_state_dir / "coding-style.md"
+    if coding_style_file.exists():
+        coding_style_file.unlink()
+
+    response = api_client.delete("/coding-style")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["file_existed"] is False
+    assert "did not exist" in data["message"]
+
+
+def test_delete_coding_style_no_task(api_client, temp_dir):
+    """Test that delete coding-style returns 404 when no task exists."""
+    response = api_client.delete("/coding-style")
+
+    assert response.status_code == 404
+    data = response.json()
+    assert data["success"] is False
+    assert data["error"] == "not_found"
+    assert "No active task found" in data["message"]
+
+
+def test_delete_coding_style_idempotent(api_client, api_complete_state, api_state_dir):
+    """Test that deleting coding-style.md twice is idempotent."""
+    # Create a coding-style.md file
+    coding_style_file = api_state_dir / "coding-style.md"
+    coding_style_file.write_text("# Coding Style\n")
+
+    # First delete
+    response1 = api_client.delete("/coding-style")
+    assert response1.status_code == 200
+    data1 = response1.json()
+    assert data1["file_existed"] is True
+
+    # Second delete (file already gone)
+    response2 = api_client.delete("/coding-style")
+    assert response2.status_code == 200
+    data2 = response2.json()
+    assert data2["file_existed"] is False
