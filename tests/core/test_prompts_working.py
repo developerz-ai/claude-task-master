@@ -6,6 +6,8 @@ This module tests the prompts from prompts_working.py:
 - _build_commit_only_execution: Commit-only workflow (more tasks in group)
 """
 
+from typing import Any
+
 from claude_task_master.core.prompts_working import (
     _build_commit_only_execution,
     _build_full_workflow_execution,
@@ -1013,3 +1015,139 @@ class TestVerificationCommands:
         """Test tsc is mentioned for TypeScript."""
         result = build_work_prompt("Any task")
         assert "tsc" in result
+
+
+# =============================================================================
+# CLAUDE.md Coding Requirements Tests
+# =============================================================================
+
+
+class TestClaudeMdGuidance:
+    """Tests for CLAUDE.md coding requirements guidance in work prompts."""
+
+    def test_claude_md_reading_instruction_present(self) -> None:
+        """Test prompt instructs Claude to read CLAUDE.md file."""
+        result = build_work_prompt("Any task")
+        assert "CLAUDE.md" in result
+
+    def test_claude_md_reading_is_before_making_changes(self) -> None:
+        """Test CLAUDE.md reading is emphasized BEFORE making changes."""
+        result = build_work_prompt("Any task")
+        # Should have instruction to read conventions FIRST
+        assert "FIRST" in result or "first" in result
+        # CLAUDE.md should be mentioned before "Make changes"
+        claude_md_position = result.find("CLAUDE.md")
+        make_changes_position = result.find("Make changes")
+        assert claude_md_position < make_changes_position
+
+    def test_alternative_convention_files_listed(self) -> None:
+        """Test alternative convention file paths are listed."""
+        result = build_work_prompt("Any task")
+        # Should mention common alternative paths
+        assert ".claude/instructions.md" in result
+        assert "CONTRIBUTING.md" in result
+        assert ".cursorrules" in result
+
+    def test_coding_standards_must_be_followed(self) -> None:
+        """Test prompt emphasizes coding standards MUST be followed."""
+        result = build_work_prompt("Any task")
+        # Should emphasize that requirements MUST be respected
+        assert "MUST" in result
+        # Should mention following standards
+        result_lower = result.lower()
+        assert (
+            "coding standards" in result_lower
+            or "coding style" in result_lower
+            or "coding requirements" in result_lower
+        )
+
+    def test_follow_project_coding_style_in_make_changes(self) -> None:
+        """Test 'Make changes' section mentions following project coding style."""
+        result = build_work_prompt("Any task")
+        # Find the "Make changes" section
+        make_changes_pos = result.find("Make changes")
+        # Find the next numbered step after "Make changes"
+        next_step_pos = result.find("**5.", make_changes_pos)
+        if next_step_pos == -1:
+            next_step_pos = result.find("**6.", make_changes_pos)
+        # Extract just the "Make changes" section
+        make_changes_section = result[make_changes_pos:next_step_pos]
+        # Should mention following coding style from CLAUDE.md
+        assert "CLAUDE.md" in make_changes_section or "coding style" in make_changes_section.lower()
+
+    def test_match_existing_patterns_instruction(self) -> None:
+        """Test instruction to match existing patterns in codebase."""
+        result = build_work_prompt("Any task")
+        assert "Match existing patterns" in result or "existing patterns" in result.lower()
+
+    def test_conventions_in_both_create_pr_and_commit_only_modes(self) -> None:
+        """Test CLAUDE.md guidance appears in both create_pr and commit-only modes."""
+        result_with_pr = build_work_prompt("Task", create_pr=True)
+        result_without_pr = build_work_prompt("Task", create_pr=False)
+
+        # Both should have CLAUDE.md reading instruction
+        assert "CLAUDE.md" in result_with_pr
+        assert "CLAUDE.md" in result_without_pr
+
+        # Both should have instruction to follow coding style
+        assert "coding style" in result_with_pr.lower()
+        assert "coding style" in result_without_pr.lower()
+
+    def test_read_conventions_step_before_make_changes_step(self) -> None:
+        """Test 'Read project conventions' step comes before 'Make changes' step."""
+        result = build_work_prompt("Any task")
+
+        # Find the step numbers
+        conventions_step = result.find("Read project conventions")
+        make_changes_step = result.find("Make changes")
+
+        # Conventions should come first
+        assert conventions_step < make_changes_step
+
+    def test_conventions_files_in_repository_root(self) -> None:
+        """Test prompt specifies CLAUDE.md is at repository root."""
+        result = build_work_prompt("Any task")
+        # Should mention repository root
+        assert "repository root" in result.lower() or "root" in result
+
+    def test_coding_requirements_context_preserved(self) -> None:
+        """Test coding requirements guidance appears regardless of other parameters."""
+        # Test with various parameter combinations
+        test_cases: list[dict[str, Any]] = [
+            {"task_description": "Task"},
+            {"task_description": "Task", "context": "Some context"},
+            {"task_description": "Task", "pr_comments": "Some comments"},
+            {"task_description": "Task", "file_hints": ["file.py"]},
+            {
+                "task_description": "Task",
+                "pr_group_info": {"name": "Group", "completed_tasks": [], "remaining_tasks": 1},
+            },
+        ]
+
+        for params in test_cases:
+            result = build_work_prompt(**params)
+            assert "CLAUDE.md" in result, f"CLAUDE.md missing for params: {params}"
+
+    def test_both_workflows_have_same_coding_guidance(self) -> None:
+        """Test both full workflow and commit-only have same coding guidance."""
+        result_full = build_work_prompt("Task", create_pr=True)
+        result_commit = build_work_prompt("Task", create_pr=False)
+
+        # Extract the "Read project conventions" sections from both
+        conventions_marker = "Read project conventions"
+        full_conventions_pos = result_full.find(conventions_marker)
+        commit_conventions_pos = result_commit.find(conventions_marker)
+
+        # Both should have the section
+        assert full_conventions_pos != -1
+        assert commit_conventions_pos != -1
+
+        # Get a snippet around the conventions section to compare
+        full_snippet = result_full[full_conventions_pos : full_conventions_pos + 300]
+        commit_snippet = result_commit[commit_conventions_pos : commit_conventions_pos + 300]
+
+        # Both should mention the same convention files
+        assert "CLAUDE.md" in full_snippet
+        assert "CLAUDE.md" in commit_snippet
+        assert ".claude/instructions.md" in full_snippet
+        assert ".claude/instructions.md" in commit_snippet
