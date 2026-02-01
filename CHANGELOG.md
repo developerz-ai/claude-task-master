@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-02-01
+
+### Changed
+- **Bump claude-agent-sdk to >=0.1.27**: Fixes automatic token refresh that was failing with "Token refresh failed: Bad request - the refresh token may be malformed" error. Users no longer need to manually open Claude CLI to refresh tokens.
+
 ## [0.1.8] - 2026-01-24
 
 ### Added
@@ -274,7 +279,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.8...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.9...HEAD
+[0.1.9]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.5...v0.1.6
