@@ -1381,7 +1381,7 @@ After completing your fixes, end with: TASK COMPLETE"""
             return False
 
         # Allow up to 2 CI fix attempts before giving up
-        max_ci_fix_attempts = 2
+        max_ci_fix_attempts = 1  # 0 and 1 = 2 attempts
         ci_fix_attempt = 0
 
         while ci_fix_attempt <= max_ci_fix_attempts:
@@ -1504,7 +1504,7 @@ The CI checks have failed for this fix PR. Your task is to:
 1. Read the CI failure logs in `{ci_path}`
 2. Understand what tests/lints are failing
 3. Fix the issues in the codebase
-4. Run tests locally to verify fixes (use the appropriate test command for your project)
+4. Run tests locally to verify fixes (check package.json, Makefile, or pyproject.toml for test commands)
 5. Commit and push the fixes
 
 Important:

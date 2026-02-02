@@ -88,6 +88,7 @@ class MessageProcessor:
                 # If we have no accumulated text, use the result
                 if not result_text.strip():
                     result_text = message.result
+                    console.newline()  # Add newline after completion
                 # If message.result contains verification markers we're missing,
                 # prefer message.result (it might be more complete)
                 elif (
@@ -95,8 +96,8 @@ class MessageProcessor:
                     and "verification_result:" not in result_text.lower()
                 ):
                     result_text = message.result
+                    console.newline()  # Add newline after completion
                 # Otherwise keep our accumulated text (it has the markers)
-                console.newline()  # Add newline after completion
 
         return result_text
 
