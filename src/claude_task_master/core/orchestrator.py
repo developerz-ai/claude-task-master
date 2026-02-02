@@ -1504,7 +1504,7 @@ The CI checks have failed for this fix PR. Your task is to:
 1. Read the CI failure logs in `{ci_path}`
 2. Understand what tests/lints are failing
 3. Fix the issues in the codebase
-4. Run tests locally to verify fixes: `pnpm test` or equivalent
+4. Run tests locally to verify fixes (use the appropriate test command for your project)
 5. Commit and push the fixes
 
 Important:
