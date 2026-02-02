@@ -79,9 +79,23 @@ class MessageProcessor:
                             self.logger.log_tool_result(block.tool_use_id, "completed")
 
         # Collect final result from ResultMessage
+        # Important: Only use message.result if we have no accumulated text,
+        # or if message.result contains content not in our accumulated text.
+        # This preserves verification markers (VERIFICATION_RESULT: PASS/FAIL)
+        # that may be output in earlier TextBlocks.
         if message_type == "ResultMessage":
-            if hasattr(message, "result"):
-                result_text = message.result
+            if hasattr(message, "result") and message.result:
+                # If we have no accumulated text, use the result
+                if not result_text.strip():
+                    result_text = message.result
+                # If message.result contains verification markers we're missing,
+                # prefer message.result (it might be more complete)
+                elif (
+                    "verification_result:" in message.result.lower()
+                    and "verification_result:" not in result_text.lower()
+                ):
+                    result_text = message.result
+                # Otherwise keep our accumulated text (it has the markers)
                 console.newline()  # Add newline after completion
 
         return result_text
