@@ -1357,6 +1357,9 @@ After completing your fixes, end with: TASK COMPLETE"""
     def _wait_for_fix_pr_merge(self, state: TaskState) -> bool:
         """Wait for fix PR to pass CI and merge it.
 
+        If CI fails, attempts to fix the issues (up to 2 retries) before giving up.
+        This mirrors the regular PR workflow where CI failures trigger fix sessions.
+
         Args:
             state: Current task state.
 
@@ -1377,35 +1380,38 @@ After completing your fixes, end with: TASK COMPLETE"""
             console.warning(f"Could not detect fix PR: {e}")
             return False
 
-        # Poll CI until success or failure
-        max_wait = 600  # 10 minutes max
-        poll_interval = 10
-        waited = 0
+        # Allow up to 2 CI fix attempts before giving up
+        max_ci_fix_attempts = 1  # 0 and 1 = 2 attempts
+        ci_fix_attempt = 0
 
-        while waited < max_wait:
-            try:
-                pr_status = self.github_client.get_pr_status(pr_number)
+        while ci_fix_attempt <= max_ci_fix_attempts:
+            # Poll CI until success or failure
+            ci_result = self._poll_fix_pr_ci(pr_number, state)
 
-                if pr_status.ci_state == "SUCCESS":
-                    console.success("Fix PR CI passed!")
-                    break
-                elif pr_status.ci_state in ("FAILURE", "ERROR"):
-                    console.error("Fix PR CI failed - cannot auto-merge")
+            if ci_result == "success":
+                # CI passed, proceed to merge
+                break
+            elif ci_result == "failure":
+                ci_fix_attempt += 1
+                if ci_fix_attempt > max_ci_fix_attempts:
+                    console.error(f"Fix PR CI failed after {max_ci_fix_attempts} fix attempts")
                     return False
-                else:
-                    console.info(f"Waiting for fix PR CI... ({pr_status.checks_pending} pending)")
-                    if not interruptible_sleep(poll_interval):
-                        return False
-                    waited += poll_interval
-            except Exception as e:
-                console.warning(f"Error checking CI: {e}")
-                if not interruptible_sleep(poll_interval):
-                    return False
-                waited += poll_interval
 
-        if waited >= max_wait:
-            console.warning("Timed out waiting for fix PR CI")
-            return False
+                # Attempt to fix the CI failure
+                console.info(
+                    f"Attempting to fix CI failure ({ci_fix_attempt}/{max_ci_fix_attempts})..."
+                )
+                if not self._fix_pr_ci_failure(pr_number, state):
+                    console.error("Failed to fix CI issues")
+                    return False
+
+                # Wait for CI to restart after push
+                console.info("Waiting 30s for CI to restart...")
+                if not interruptible_sleep(30):
+                    return False
+            else:
+                # Interrupted or timed out
+                return False
 
         # Merge the PR
         if state.options.auto_merge:
@@ -1424,4 +1430,106 @@ After completing your fixes, end with: TASK COMPLETE"""
         else:
             console.info(f"Fix PR #{pr_number} ready to merge (auto_merge disabled)")
             console.detail("Merge manually then run 'claudetm resume'")
+            return False
+
+    def _poll_fix_pr_ci(self, pr_number: int, state: TaskState) -> str:
+        """Poll CI status for a fix PR.
+
+        Args:
+            pr_number: The PR number to check.
+            state: Current task state.
+
+        Returns:
+            "success" if CI passed, "failure" if CI failed, "interrupted" if cancelled.
+        """
+        max_wait = 600  # 10 minutes max
+        poll_interval = 10
+        waited = 0
+
+        while waited < max_wait:
+            try:
+                pr_status = self.github_client.get_pr_status(pr_number)
+
+                if pr_status.ci_state == "SUCCESS":
+                    console.success("Fix PR CI passed!")
+                    return "success"
+                elif pr_status.ci_state in ("FAILURE", "ERROR"):
+                    console.warning("Fix PR CI failed")
+                    return "failure"
+                else:
+                    console.info(f"Waiting for fix PR CI... ({pr_status.checks_pending} pending)")
+                    if not interruptible_sleep(poll_interval):
+                        return "interrupted"
+                    waited += poll_interval
+            except Exception as e:
+                console.warning(f"Error checking CI: {e}")
+                if not interruptible_sleep(poll_interval):
+                    return "interrupted"
+                waited += poll_interval
+
+        console.warning("Timed out waiting for fix PR CI")
+        return "interrupted"
+
+    def _fix_pr_ci_failure(self, pr_number: int, state: TaskState) -> bool:
+        """Fix CI failures on a fix PR.
+
+        Saves CI failure logs and runs an agent to fix the issues.
+
+        Args:
+            pr_number: The PR number with failing CI.
+            state: Current task state.
+
+        Returns:
+            True if fix session completed successfully.
+        """
+        try:
+            # Save CI failure logs
+            self.pr_context.save_ci_failures(pr_number)
+
+            # Get feedback (CI failures)
+            has_ci, has_comments, pr_dir_path = self.pr_context.get_combined_feedback(pr_number)
+
+            if not has_ci and not has_comments:
+                console.warning("No CI failures or comments found to fix")
+                return False
+
+            # Build task description
+            ci_path = f"{pr_dir_path}/ci/" if pr_dir_path else ".claude-task-master/debugging/"
+
+            task_description = f"""
+Fix PR CI Failure
+
+The CI checks have failed for this fix PR. Your task is to:
+
+1. Read the CI failure logs in `{ci_path}`
+2. Understand what tests/lints are failing
+3. Fix the issues in the codebase
+4. Run tests locally to verify fixes (check package.json, Makefile, or pyproject.toml for test commands)
+5. Commit and push the fixes
+
+Important:
+- Only fix issues identified in the CI logs
+- Run tests locally before committing
+- Push changes to trigger a new CI run
+"""
+
+            # Run agent to fix issues
+            context = self.state_manager.load_context()
+            coding_style = self.state_manager.load_coding_style()
+
+            current_branch = self._get_current_branch()
+            self.agent.run_work_session(
+                task_description=task_description,
+                context=context,
+                model_override=ModelType.OPUS,
+                required_branch=current_branch,
+                coding_style=coding_style,
+            )
+
+            state.session_count += 1
+            self.state_manager.save_state(state)
+            return True
+
+        except Exception as e:
+            console.error(f"Failed to fix CI issues: {e}")
             return False

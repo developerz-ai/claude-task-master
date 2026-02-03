@@ -567,7 +567,14 @@ class TestAgentWrapperProcessMessage:
         assert result == "Initial First Second"
 
     def test_process_message_result_message(self, agent):
-        """Test processing ResultMessage overwrites accumulated text."""
+        """Test processing ResultMessage preserves accumulated text.
+
+        The new behavior preserves accumulated text when it already has content,
+        to ensure verification markers (VERIFICATION_RESULT: PASS/FAIL) are not lost.
+        ResultMessage.result only replaces accumulated text when:
+        1. Accumulated text is empty, or
+        2. ResultMessage.result contains verification markers we're missing
+        """
         result_message = MagicMock()
         type(result_message).__name__ = "ResultMessage"
         result_message.result = "Final result"
@@ -575,7 +582,8 @@ class TestAgentWrapperProcessMessage:
 
         result = agent._message_processor.process_message(result_message, "Previous text")
 
-        assert result == "Final result"
+        # New behavior: preserve accumulated text that has content
+        assert result == "Previous text"
 
     def test_process_message_without_content(self, agent):
         """Test processing message without content."""

@@ -320,24 +320,27 @@ class TestMessageProcessingEdgeCases:
         result = agent._message_processor.process_message(mock_message, "Previous")
         assert result == "Previous"
 
-    def test_process_message_result_message_replaces_text(self, agent):
-        """Test ResultMessage replaces accumulated text."""
+    def test_process_message_result_message_preserves_text(self, agent):
+        """Test ResultMessage preserves accumulated text.
+
+        The new behavior preserves accumulated text when it already has content,
+        to ensure verification markers (VERIFICATION_RESULT: PASS/FAIL) are not lost.
+        """
         result_message = MagicMock()
         type(result_message).__name__ = "ResultMessage"
         result_message.result = "Final result"
         result_message.content = None
 
-        result = agent._message_processor.process_message(result_message, "Should be replaced")
+        result = agent._message_processor.process_message(result_message, "Should be preserved")
 
-        assert result == "Final result"
-        assert "Should be replaced" not in result
+        # New behavior: preserve accumulated text that has content
+        assert result == "Should be preserved"
+        assert "Final result" not in result
 
     def test_process_message_result_message_with_none_result(self, agent):
-        """Test ResultMessage with None result overwrites accumulated text.
+        """Test ResultMessage with None result preserves accumulated text.
 
-        Note: The implementation assigns message.result directly to result_text,
-        so if result is None, the returned value will be None. This is the
-        actual behavior of process_message.
+        When message.result is None (falsy), the accumulated text is preserved.
         """
         result_message = MagicMock()
         type(result_message).__name__ = "ResultMessage"
@@ -346,8 +349,41 @@ class TestMessageProcessingEdgeCases:
 
         result = agent._message_processor.process_message(result_message, "Previous text")
 
-        # When result is None, the implementation returns None
-        assert result is None
+        # New behavior: preserve accumulated text when message.result is None
+        assert result == "Previous text"
+
+    def test_process_message_result_message_replaces_empty_text(self, agent):
+        """Test ResultMessage replaces empty accumulated text.
+
+        When accumulated text is empty/whitespace, ResultMessage.result is used.
+        """
+        result_message = MagicMock()
+        type(result_message).__name__ = "ResultMessage"
+        result_message.result = "Final result"
+        result_message.content = None
+
+        result = agent._message_processor.process_message(result_message, "")
+
+        # ResultMessage.result is used when accumulated text is empty
+        assert result == "Final result"
+
+    def test_process_message_result_message_uses_verification_marker(self, agent):
+        """Test ResultMessage.result is used when it contains verification markers.
+
+        If ResultMessage.result contains 'verification_result:' but accumulated
+        text does not, we prefer ResultMessage.result to preserve the marker.
+        """
+        result_message = MagicMock()
+        type(result_message).__name__ = "ResultMessage"
+        result_message.result = "VERIFICATION_RESULT: PASS\n\nAll tests passed"
+        result_message.content = None
+
+        result = agent._message_processor.process_message(
+            result_message, "Some text without marker"
+        )
+
+        # ResultMessage.result is used because it contains verification marker
+        assert result == "VERIFICATION_RESULT: PASS\n\nAll tests passed"
 
 
 # =============================================================================
@@ -487,7 +523,9 @@ class TestToolUsageIntegration:
 
         result = await agent._run_query("test prompt", ["Read"])
 
-        assert result == "Analysis complete"
+        # New behavior: accumulated text from TextBlock is preserved
+        # (ResultMessage.result doesn't replace it unless it contains verification markers)
+        assert result == "File content processed"
         captured = capsys.readouterr()
         assert "Using tool: Read" in captured.out
         assert "Tool completed" in captured.out
