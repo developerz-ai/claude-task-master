@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-02-05
+
+### Changed
+- **Upgrade to Claude Opus 4.6**: Default opus model updated from `claude-opus-4-5-20251101` to `claude-opus-4-6`
+  - 1M token context window now available in beta (use `context-1m-2025-08-07` beta header)
+  - 128K max output tokens (up from 64K)
+  - Adaptive thinking support (Opus-only feature)
+  - Same pricing: $5/$25 per MTok, premium $10/$37.50 for >200K input
+- **Configurable context windows**: New `context_windows` section in config.json
+  - Defaults to 200K (standard) for all models
+  - Tier 4+ users can set to 1000000 (1M) for Opus and Sonnet
+- **Dependency updates**: Updated all dependencies to latest stable versions
+
 ## [0.1.10] - 2026-02-05
 
 ### Added
@@ -303,7 +316,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.10...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.11...HEAD
+[0.1.11]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.7...v0.1.8

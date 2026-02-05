@@ -19,6 +19,7 @@ from pydantic import ValidationError
 from claude_task_master.core.config import (
     APIConfig,
     ClaudeTaskMasterConfig,
+    ContextWindowsConfig,
     GitConfig,
     ModelConfig,
     ToolsConfig,
@@ -78,19 +79,37 @@ class TestModelConfig:
         """Test that ModelConfig has correct default values."""
         config = ModelConfig()
         assert config.sonnet == "claude-sonnet-4-5-20250929"
-        assert config.opus == "claude-opus-4-5-20251101"
+        assert config.opus == "claude-opus-4-6"
         assert config.haiku == "claude-haiku-4-5-20251001"
 
     def test_custom_models(self) -> None:
         """Test that ModelConfig accepts custom model names."""
         config = ModelConfig(
             sonnet="anthropic/claude-sonnet-4-5-20250929",
-            opus="anthropic/claude-opus-4-5-20251101",
+            opus="anthropic/claude-opus-4-6",
             haiku="anthropic/claude-haiku-4-5-20251001",
         )
         assert config.sonnet == "anthropic/claude-sonnet-4-5-20250929"
-        assert config.opus == "anthropic/claude-opus-4-5-20251101"
+        assert config.opus == "anthropic/claude-opus-4-6"
         assert config.haiku == "anthropic/claude-haiku-4-5-20251001"
+
+
+class TestContextWindowsConfig:
+    """Tests for ContextWindowsConfig model."""
+
+    def test_default_values(self) -> None:
+        """Test that ContextWindowsConfig has correct default values (200K standard)."""
+        config = ContextWindowsConfig()
+        assert config.opus == 200_000
+        assert config.sonnet == 200_000
+        assert config.haiku == 200_000
+
+    def test_tier4_context(self) -> None:
+        """Test setting 1M context windows for tier 4+ users."""
+        config = ContextWindowsConfig(opus=1_000_000, sonnet=1_000_000, haiku=200_000)
+        assert config.opus == 1_000_000
+        assert config.sonnet == 1_000_000
+        assert config.haiku == 200_000
 
 
 class TestGitConfig:
@@ -271,8 +290,8 @@ class TestUtilityFunctions:
     def test_get_model_name_opus(self) -> None:
         """Test get_model_name returns correct model for opus."""
         config = ClaudeTaskMasterConfig()
-        assert get_model_name(config, "opus") == "claude-opus-4-5-20251101"
-        assert get_model_name(config, "OPUS") == "claude-opus-4-5-20251101"
+        assert get_model_name(config, "opus") == "claude-opus-4-6"
+        assert get_model_name(config, "OPUS") == "claude-opus-4-6"
 
     def test_get_model_name_haiku(self) -> None:
         """Test get_model_name returns correct model for haiku."""

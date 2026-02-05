@@ -71,7 +71,7 @@ class ModelConfig(BaseModel):
         description="Model name for 'sonnet' (balanced). Overridden by CLAUDETM_MODEL_SONNET.",
     )
     opus: str = Field(
-        default="claude-opus-4-5-20251101",
+        default="claude-opus-4-6",
         description="Model name for 'opus' (smartest). Overridden by CLAUDETM_MODEL_OPUS.",
     )
     haiku: str = Field(
@@ -94,6 +94,30 @@ class GitConfig(BaseModel):
     auto_push: bool = Field(
         default=True,
         description="Whether to automatically push branches after commits.",
+    )
+
+
+class ContextWindowsConfig(BaseModel):
+    """Context window sizes per model (in tokens).
+
+    Controls the max context window size used for auto-compact threshold calculation.
+    Opus 4.6 and Sonnet 4.5 support 1M context in beta (tier 4+ users).
+    Users on lower tiers should set these to 200000.
+
+    To enable 1M context via the API, use the beta header: context-1m-2025-08-07
+    """
+
+    opus: int = Field(
+        default=200_000,
+        description="Opus context window size in tokens. 200000 (standard) or 1000000 (beta, tier 4+).",
+    )
+    sonnet: int = Field(
+        default=200_000,
+        description="Sonnet context window size in tokens. 200000 (standard) or 1000000 (beta, tier 4+).",
+    )
+    haiku: int = Field(
+        default=200_000,
+        description="Haiku context window size in tokens.",
     )
 
 
@@ -144,12 +168,17 @@ class ClaudeTaskMasterConfig(BaseModel):
       },
       "models": {
         "sonnet": "claude-sonnet-4-5-20250929",
-        "opus": "claude-opus-4-5-20251101",
+        "opus": "claude-opus-4-6",
         "haiku": "claude-haiku-4-5-20251001"
       },
       "git": {
         "target_branch": "main",
         "auto_push": true
+      },
+      "context_windows": {
+        "opus": 200000,
+        "sonnet": 200000,
+        "haiku": 200000
       },
       "tools": {
         "planning": ["Read", "Glob", "Grep", "Bash", "WebFetch", "WebSearch"],
@@ -171,6 +200,10 @@ class ClaudeTaskMasterConfig(BaseModel):
     models: ModelConfig = Field(
         default_factory=ModelConfig,
         description="Model name mappings.",
+    )
+    context_windows: ContextWindowsConfig = Field(
+        default_factory=ContextWindowsConfig,
+        description="Context window sizes per model (tokens). Set to 200000 if not on tier 4+.",
     )
     git: GitConfig = Field(
         default_factory=GitConfig,
