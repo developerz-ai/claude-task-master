@@ -297,9 +297,11 @@ def mock_agent_wrapper(temp_dir: Path):
         return_value={"success": True, "details": "All criteria met"}
     )
     mock.get_tools_for_phase = MagicMock(
-        side_effect=lambda phase: ["Read", "Glob", "Grep"]
-        if phase == "planning"
-        else ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
+        side_effect=lambda phase: (
+            ["Read", "Glob", "Grep"]
+            if phase == "planning"
+            else ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
+        )
     )
     mock.generate_coding_style = MagicMock(
         return_value={
