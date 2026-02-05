@@ -78,18 +78,18 @@ class TestModelConfig:
         """Test that ModelConfig has correct default values."""
         config = ModelConfig()
         assert config.sonnet == "claude-sonnet-4-5-20250929"
-        assert config.opus == "claude-opus-4-5-20251101"
+        assert config.opus == "claude-opus-4-6"
         assert config.haiku == "claude-haiku-4-5-20251001"
 
     def test_custom_models(self) -> None:
         """Test that ModelConfig accepts custom model names."""
         config = ModelConfig(
             sonnet="anthropic/claude-sonnet-4-5-20250929",
-            opus="anthropic/claude-opus-4-5-20251101",
+            opus="anthropic/claude-opus-4-6",
             haiku="anthropic/claude-haiku-4-5-20251001",
         )
         assert config.sonnet == "anthropic/claude-sonnet-4-5-20250929"
-        assert config.opus == "anthropic/claude-opus-4-5-20251101"
+        assert config.opus == "anthropic/claude-opus-4-6"
         assert config.haiku == "anthropic/claude-haiku-4-5-20251001"
 
 
@@ -271,8 +271,8 @@ class TestUtilityFunctions:
     def test_get_model_name_opus(self) -> None:
         """Test get_model_name returns correct model for opus."""
         config = ClaudeTaskMasterConfig()
-        assert get_model_name(config, "opus") == "claude-opus-4-5-20251101"
-        assert get_model_name(config, "OPUS") == "claude-opus-4-5-20251101"
+        assert get_model_name(config, "opus") == "claude-opus-4-6"
+        assert get_model_name(config, "OPUS") == "claude-opus-4-6"
 
     def test_get_model_name_haiku(self) -> None:
         """Test get_model_name returns correct model for haiku."""

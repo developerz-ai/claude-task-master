@@ -71,7 +71,7 @@ class ModelConfig(BaseModel):
         description="Model name for 'sonnet' (balanced). Overridden by CLAUDETM_MODEL_SONNET.",
     )
     opus: str = Field(
-        default="claude-opus-4-5-20251101",
+        default="claude-opus-4-6",
         description="Model name for 'opus' (smartest). Overridden by CLAUDETM_MODEL_OPUS.",
     )
     haiku: str = Field(
@@ -144,7 +144,7 @@ class ClaudeTaskMasterConfig(BaseModel):
       },
       "models": {
         "sonnet": "claude-sonnet-4-5-20250929",
-        "opus": "claude-opus-4-5-20251101",
+        "opus": "claude-opus-4-6",
         "haiku": "claude-haiku-4-5-20251001"
       },
       "git": {

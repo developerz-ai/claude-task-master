@@ -193,8 +193,8 @@ class TestModelContextWindows:
             assert model in MODEL_CONTEXT_WINDOWS_STANDARD
 
     def test_opus_context_window(self):
-        """Test Opus context window is 200K."""
-        assert MODEL_CONTEXT_WINDOWS[ModelType.OPUS] == 200_000
+        """Test Opus context window is 1M (beta, tier 4+)."""
+        assert MODEL_CONTEXT_WINDOWS[ModelType.OPUS] == 1_000_000
 
     def test_sonnet_context_window_tier4(self):
         """Test Sonnet context window is 1M for tier 4+."""

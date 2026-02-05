@@ -92,11 +92,12 @@ class ToolConfig(Enum):
 # =============================================================================
 
 # Model context window sizes (tokens) for auto-compact threshold calculation
-# Sonnet 4/4.5 supports 1M context (available for tier 4+ users)
-# See: https://www.claude.com/blog/1m-context
+# Opus 4.6 and Sonnet 4.5 support 1M context (beta, tier 4+ users)
+# Use beta header: context-1m-2025-08-07
+# See: https://platform.claude.com/docs/en/build-with-claude/context-windows
 MODEL_CONTEXT_WINDOWS = {
-    ModelType.OPUS: 200_000,  # Claude Opus 4.5: 200K context
-    ModelType.SONNET: 1_000_000,  # Claude Sonnet 4/4.5: 1M context (tier 4+)
+    ModelType.OPUS: 1_000_000,  # Claude Opus 4.6: 1M context (beta, tier 4+)
+    ModelType.SONNET: 1_000_000,  # Claude Sonnet 4.5: 1M context (beta, tier 4+)
     ModelType.HAIKU: 200_000,  # Claude Haiku 4.5: 200K context
 }
 
