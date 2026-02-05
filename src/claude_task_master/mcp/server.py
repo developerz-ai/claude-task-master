@@ -226,6 +226,7 @@ def create_server(
         model: str = "opus",
         auto_merge: bool = True,
         max_sessions: int | None = None,
+        max_prs: int | None = None,
         pause_on_pr: bool = False,
         state_dir: str | None = None,
     ) -> dict[str, Any]:
@@ -239,6 +240,7 @@ def create_server(
             model: Model to use (opus, sonnet, haiku).
             auto_merge: Whether to auto-merge PRs when approved.
             max_sessions: Max work sessions before pausing.
+            max_prs: Max pull requests to create.
             pause_on_pr: Pause after creating PR for manual review.
             state_dir: Optional custom state directory path.
 
@@ -246,7 +248,7 @@ def create_server(
             Dictionary indicating success with run_id or failure.
         """
         return tools.initialize_task(
-            work_dir, goal, model, auto_merge, max_sessions, pause_on_pr, state_dir
+            work_dir, goal, model, auto_merge, max_sessions, max_prs, pause_on_pr, state_dir
         )
 
     @mcp.tool()
@@ -336,6 +338,7 @@ def create_server(
     def update_config(
         auto_merge: bool | None = None,
         max_sessions: int | None = None,
+        max_prs: int | None = None,
         pause_on_pr: bool | None = None,
         enable_checkpointing: bool | None = None,
         log_level: str | None = None,
@@ -351,6 +354,7 @@ def create_server(
         Args:
             auto_merge: Whether to auto-merge PRs when approved.
             max_sessions: Maximum number of work sessions before pausing.
+            max_prs: Maximum number of pull requests to create.
             pause_on_pr: Whether to pause after creating PR for manual review.
             enable_checkpointing: Whether to enable state checkpointing.
             log_level: Log level (quiet, normal, verbose).
@@ -365,6 +369,7 @@ def create_server(
             work_dir,
             auto_merge=auto_merge,
             max_sessions=max_sessions,
+            max_prs=max_prs,
             pause_on_pr=pause_on_pr,
             enable_checkpointing=enable_checkpointing,
             log_level=log_level,

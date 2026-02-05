@@ -287,6 +287,7 @@ def create_info_router() -> APIRouter:
                 options=TaskOptionsResponse(
                     auto_merge=state.options.auto_merge,
                     max_sessions=state.options.max_sessions,
+                    max_prs=state.options.max_prs,
                     pause_on_pr=state.options.pause_on_pr,
                     enable_checkpointing=state.options.enable_checkpointing,
                     log_level=state.options.log_level,
@@ -1068,6 +1069,7 @@ def create_task_router() -> APIRouter:
             options = TaskOptions(
                 auto_merge=task_init.auto_merge,
                 max_sessions=task_init.max_sessions,
+                max_prs=task_init.max_prs,
                 pause_on_pr=task_init.pause_on_pr,
                 enable_checkpointing=False,  # Default to False
                 log_level="normal",  # Default to normal

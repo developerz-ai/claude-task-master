@@ -128,6 +128,25 @@ class TestStartCommand:
         # Should start without error related to max-sessions
         assert result.exit_code == 1  # Still fails at planning, but accepted option
 
+    def test_start_with_max_prs(self, cli_runner: CliRunner, temp_dir):
+        """Test start with --prs option."""
+        with patch.object(StateManager, "STATE_DIR", temp_dir / ".claude-task-master"):
+            with patch(
+                "claude_task_master.cli_commands.workflow.CredentialManager"
+            ) as mock_cred_manager:
+                mock_cred_manager.return_value.get_valid_token.return_value = "test-token"
+                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                    with patch("claude_task_master.cli_commands.workflow.Planner") as mock_planner:
+                        mock_planner.return_value.create_plan.side_effect = Exception("Test stop")
+
+                        result = cli_runner.invoke(
+                            app,
+                            ["start", "Test goal", "--prs", "2"],
+                        )
+
+        # Should start without error related to --prs
+        assert result.exit_code == 1  # Still fails at planning, but accepted option
+
     def test_start_with_pause_on_pr(self, cli_runner: CliRunner, temp_dir):
         """Test start with --pause-on-pr option."""
         with patch.object(StateManager, "STATE_DIR", temp_dir / ".claude-task-master"):

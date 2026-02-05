@@ -46,6 +46,8 @@ uv run claudetm doctor           # Check system (runs from .venv)
 # Usage (after global install)
 cd <project-dir>
 claudetm start "Your task here" --max-sessions 10
+claudetm start "Add feature" --prs 1         # Limit to 1 PR
+claudetm start "Implement API" --prs 3 -n 10 # Max 3 PRs, 10 sessions
 claudetm status           # Check progress
 claudetm plan             # View task list
 claudetm clean -f         # Clean state
@@ -178,6 +180,16 @@ All commands check `state_manager.exists()` first:
 - Uses `PlanUpdater` to integrate change request into existing plan
 - Preserves completed tasks, modifies pending tasks as needed
 
+### PR Limit (--prs flag)
+- `--prs N` limits the maximum number of pull requests that can be created
+- Injected into planning prompt to guide task organization
+- Claude plans work to fit within the PR limit by grouping tasks intelligently
+- Examples:
+  - `claudetm start "Add auth" --prs 1` → Everything in one PR
+  - `claudetm start "Build dashboard" --prs 3` → Max 3 PRs
+- Default: unlimited PRs
+- Useful for keeping changes focused and manageable
+
 ### Coding Style Generation
 - Before planning, generates `coding-style.md` if it doesn't exist
 - Analyzes `CLAUDE.md` and convention files to extract:
@@ -200,7 +212,7 @@ All commands check `state_manager.exists()` first:
 Test in `tmp/test-project-1/`:
 ```bash
 cd tmp/test-project-1
-uv run claudetm start "Implement TODO" --max-sessions 3 --no-auto-merge
+uv run claudetm start "Implement TODO" --max-sessions 3 --prs 2 --no-auto-merge
 ```
 
 ## Code Style

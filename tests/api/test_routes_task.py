@@ -29,6 +29,7 @@ def test_post_task_init_success(api_client_empty_state, api_empty_state_dir):
             "model": "opus",
             "auto_merge": True,
             "max_sessions": 10,
+            "max_prs": 2,
             "pause_on_pr": False,
         },
     )
@@ -49,6 +50,7 @@ def test_post_task_init_success(api_client_empty_state, api_empty_state_dir):
     assert state["status"] == "planning"
     assert state["options"]["auto_merge"] is True
     assert state["options"]["max_sessions"] == 10
+    assert state["options"]["max_prs"] == 2
     assert state["options"]["pause_on_pr"] is False
 
     # Verify goal was saved separately
@@ -78,6 +80,7 @@ def test_post_task_init_default_options(api_client_empty_state, api_empty_state_
     assert state["model"] == "opus"  # Default model
     assert state["options"]["auto_merge"] is True  # Default
     assert state["options"]["max_sessions"] is None  # Default (unlimited)
+    assert state["options"]["max_prs"] is None  # Default (unlimited)
     assert state["options"]["pause_on_pr"] is False  # Default
 
 

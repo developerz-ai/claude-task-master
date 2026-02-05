@@ -55,9 +55,15 @@ class Planner:
         # Load any existing context
         context = self.state_manager.load_context()
 
-        # Run planning phase with Claude (with coding style)
+        # Get max_prs from state options (if state exists)
+        max_prs = None
+        if self.state_manager.state_file.exists():
+            state = self.state_manager.load_state()
+            max_prs = state.options.max_prs
+
+        # Run planning phase with Claude (with coding style and max_prs)
         result = self.agent.run_planning_phase(
-            goal=goal, context=context, coding_style=coding_style
+            goal=goal, context=context, coding_style=coding_style, max_prs=max_prs
         )
 
         # Extract plan and criteria from result

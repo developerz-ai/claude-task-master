@@ -164,6 +164,7 @@ Get comprehensive status information about the current task.
   "options": {
     "auto_merge": true,
     "max_sessions": 10,
+    "max_prs": null,
     "pause_on_pr": false
   }
 }
@@ -290,6 +291,7 @@ Initialize a new task with the given goal.
 | `model` | string | No | `opus` | Model to use (opus, sonnet, haiku) |
 | `auto_merge` | boolean | No | `true` | Auto-merge PRs when approved |
 | `max_sessions` | integer | No | - | Max work sessions before pausing |
+| `max_prs` | integer | No | - | Max pull requests to create |
 | `pause_on_pr` | boolean | No | `false` | Pause after creating PR |
 | `state_dir` | string | No | - | Custom state directory path |
 
@@ -435,6 +437,7 @@ Update task configuration options at runtime.
 |-----------|------|----------|-------------|
 | `auto_merge` | boolean | No | Auto-merge PRs when approved |
 | `max_sessions` | integer | No | Max work sessions before pausing |
+| `max_prs` | integer | No | Max pull requests to create |
 | `pause_on_pr` | boolean | No | Pause after creating PR |
 | `enable_checkpointing` | boolean | No | Enable state checkpointing |
 | `log_level` | string | No | Log level: quiet, normal, verbose |

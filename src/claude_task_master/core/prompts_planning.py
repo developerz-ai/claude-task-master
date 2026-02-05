@@ -10,7 +10,10 @@ from .prompts_base import PromptBuilder
 
 
 def build_planning_prompt(
-    goal: str, context: str | None = None, coding_style: str | None = None
+    goal: str,
+    context: str | None = None,
+    coding_style: str | None = None,
+    max_prs: int | None = None,
 ) -> str:
     """Build the planning phase prompt.
 
@@ -18,6 +21,7 @@ def build_planning_prompt(
         goal: The user's goal to achieve.
         context: Optional accumulated context from previous sessions.
         coding_style: Optional coding style guide to inject.
+        max_prs: Optional maximum number of PRs to create.
 
     Returns:
         Complete planning prompt.
@@ -174,6 +178,28 @@ executed in a continuous conversation, so Claude remembers previous work.
 
 **Each PR should be mergeable independently when possible.**""",
     )
+
+    # PR limit constraint (if specified)
+    if max_prs:
+        builder.add_section(
+            "⚠️ PR LIMIT CONSTRAINT (MANDATORY)",
+            f"""**CRITICAL: You MUST create EXACTLY {max_prs} pull request(s) or fewer. This is MANDATORY.**
+
+🚫 **YOU ARE NOT ALLOWED TO EXCEED {max_prs} PR(s). NO EXCEPTIONS.**
+
+Everything MUST fit within {max_prs} PR(s). Plan accordingly:
+
+{"**For 1 PR: Put EVERYTHING in a single pull request.**" if max_prs == 1 else f"**For {max_prs} PRs: Intelligently group all work into {max_prs} or fewer pull requests.**"}
+
+- Combine ALL related changes together
+- Group tests, docs, and code in the same PR
+- Keep dependencies together (schema + model + service in one PR)
+- Prioritize essential work if needed
+
+**DO NOT CREATE MORE THAN {max_prs} PR(s) under any circumstances.**
+
+Any plan that exceeds {max_prs} PR(s) is INVALID and will be REJECTED.""",
+        )
 
     # Success criteria
     builder.add_section(
