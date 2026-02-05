@@ -97,6 +97,30 @@ class GitConfig(BaseModel):
     )
 
 
+class ContextWindowsConfig(BaseModel):
+    """Context window sizes per model (in tokens).
+
+    Controls the max context window size used for auto-compact threshold calculation.
+    Opus 4.6 and Sonnet 4.5 support 1M context in beta (tier 4+ users).
+    Users on lower tiers should set these to 200000.
+
+    To enable 1M context via the API, use the beta header: context-1m-2025-08-07
+    """
+
+    opus: int = Field(
+        default=1_000_000,
+        description="Opus context window size in tokens. 1M (beta, tier 4+) or 200000 (standard).",
+    )
+    sonnet: int = Field(
+        default=1_000_000,
+        description="Sonnet context window size in tokens. 1M (beta, tier 4+) or 200000 (standard).",
+    )
+    haiku: int = Field(
+        default=200_000,
+        description="Haiku context window size in tokens.",
+    )
+
+
 class ToolsConfig(BaseModel):
     """Tool configurations per execution phase.
 
@@ -151,6 +175,11 @@ class ClaudeTaskMasterConfig(BaseModel):
         "target_branch": "main",
         "auto_push": true
       },
+      "context_windows": {
+        "opus": 1000000,
+        "sonnet": 1000000,
+        "haiku": 200000
+      },
       "tools": {
         "planning": ["Read", "Glob", "Grep", "Bash", "WebFetch", "WebSearch"],
         "verification": ["Read", "Glob", "Grep", "Bash"],
@@ -171,6 +200,10 @@ class ClaudeTaskMasterConfig(BaseModel):
     models: ModelConfig = Field(
         default_factory=ModelConfig,
         description="Model name mappings.",
+    )
+    context_windows: ContextWindowsConfig = Field(
+        default_factory=ContextWindowsConfig,
+        description="Context window sizes per model (tokens). Set to 200000 if not on tier 4+.",
     )
     git: GitConfig = Field(
         default_factory=GitConfig,

@@ -292,6 +292,11 @@ default_config = {
         "opus": "claude-opus-4-6",
         "haiku": "claude-haiku-4-5-20251001"
     },
+    "context_windows": {
+        "opus": 1000000,
+        "sonnet": 1000000,
+        "haiku": 200000
+    },
     "git": {
         "target_branch": "main",
         "auto_push": True

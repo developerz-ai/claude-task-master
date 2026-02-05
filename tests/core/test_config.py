@@ -19,6 +19,7 @@ from pydantic import ValidationError
 from claude_task_master.core.config import (
     APIConfig,
     ClaudeTaskMasterConfig,
+    ContextWindowsConfig,
     GitConfig,
     ModelConfig,
     ToolsConfig,
@@ -91,6 +92,24 @@ class TestModelConfig:
         assert config.sonnet == "anthropic/claude-sonnet-4-5-20250929"
         assert config.opus == "anthropic/claude-opus-4-6"
         assert config.haiku == "anthropic/claude-haiku-4-5-20251001"
+
+
+class TestContextWindowsConfig:
+    """Tests for ContextWindowsConfig model."""
+
+    def test_default_values(self) -> None:
+        """Test that ContextWindowsConfig has correct default values."""
+        config = ContextWindowsConfig()
+        assert config.opus == 1_000_000
+        assert config.sonnet == 1_000_000
+        assert config.haiku == 200_000
+
+    def test_standard_tier(self) -> None:
+        """Test setting standard tier context windows (200K for all)."""
+        config = ContextWindowsConfig(opus=200_000, sonnet=200_000, haiku=200_000)
+        assert config.opus == 200_000
+        assert config.sonnet == 200_000
+        assert config.haiku == 200_000
 
 
 class TestGitConfig:

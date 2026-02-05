@@ -15,7 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 128K max output tokens (up from 64K)
   - Adaptive thinking support (Opus-only feature)
   - Same pricing: $5/$25 per MTok, premium $10/$37.50 for >200K input
-- **Updated context window sizes**: Opus context window updated to 1M tokens (beta, tier 4+)
+- **Configurable context windows**: New `context_windows` section in config.json
+  - Users on lower tiers can set context windows to 200000 (200K standard)
+  - Defaults to 1M for Opus and Sonnet (beta, tier 4+), 200K for Haiku
 - **Dependency updates**: Updated all dependencies to latest stable versions
 
 ## [0.1.10] - 2026-02-05

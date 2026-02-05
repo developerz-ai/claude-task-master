@@ -91,9 +91,11 @@ class ToolConfig(Enum):
 # Constants
 # =============================================================================
 
-# Model context window sizes (tokens) for auto-compact threshold calculation
-# Opus 4.6 and Sonnet 4.5 support 1M context (beta, tier 4+ users)
-# Use beta header: context-1m-2025-08-07
+# Model context window sizes (tokens) for auto-compact threshold calculation.
+# These are defaults; users can override via config.json "context_windows" section.
+# Opus 4.6 and Sonnet 4.5 support 1M context (beta, tier 4+ users).
+# Note: The Agent SDK handles the `context-1m-2025-08-07` beta header internally.
+# These values are only used to calculate when to trigger context compaction.
 # See: https://platform.claude.com/docs/en/build-with-claude/context-windows
 MODEL_CONTEXT_WINDOWS = {
     ModelType.OPUS: 1_000_000,  # Claude Opus 4.6: 1M context (beta, tier 4+)
@@ -107,6 +109,30 @@ MODEL_CONTEXT_WINDOWS_STANDARD = {
     ModelType.SONNET: 200_000,
     ModelType.HAIKU: 200_000,
 }
+
+
+def get_context_window(
+    model: ModelType,
+    config: ClaudeTaskMasterConfig | None = None,
+) -> int:
+    """Get context window size for a model, reading from config if available.
+
+    Args:
+        model: The model type.
+        config: Optional config object. If None, uses hardcoded defaults.
+
+    Returns:
+        Context window size in tokens.
+    """
+    if config is not None:
+        context_map = {
+            ModelType.OPUS: config.context_windows.opus,
+            ModelType.SONNET: config.context_windows.sonnet,
+            ModelType.HAIKU: config.context_windows.haiku,
+        }
+        return context_map.get(model, MODEL_CONTEXT_WINDOWS[model])
+    return MODEL_CONTEXT_WINDOWS[model]
+
 
 # Default compact threshold as percentage of context window
 DEFAULT_COMPACT_THRESHOLD_PERCENT = 0.85  # Compact at 85% usage

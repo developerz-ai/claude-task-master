@@ -253,12 +253,26 @@ This creates `.claude-task-master/config.json`:
     "opus": "claude-opus-4-6",
     "haiku": "claude-haiku-4-5-20251001"
   },
+  "context_windows": {
+    "opus": 1000000,
+    "sonnet": 1000000,
+    "haiku": 200000
+  },
   "git": {
     "target_branch": "main",
     "auto_push": true
   }
 }
 ```
+
+> **Note:** The 1M token context window for Opus 4.6 and Sonnet 4.5 is in beta and requires **tier 4+** API access. If you're on a lower tier, set the context windows to `200000`:
+> ```json
+> "context_windows": {
+>   "opus": 200000,
+>   "sonnet": 200000,
+>   "haiku": 200000
+> }
+> ```
 
 ### Environment Variables
 
