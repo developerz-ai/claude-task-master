@@ -149,6 +149,7 @@ Get comprehensive status information about the current task.
   "options": {
     "auto_merge": true,
     "max_sessions": 10,
+    "max_prs": null,
     "pause_on_pr": false,
     "enable_checkpointing": false,
     "log_level": "normal",
@@ -401,6 +402,7 @@ Update runtime task configuration options.
 {
   "auto_merge": false,
   "max_sessions": 20,
+  "max_prs": 3,
   "log_level": "verbose"
 }
 ```
@@ -409,6 +411,7 @@ Update runtime task configuration options.
 
 - `auto_merge` (boolean) - Whether to auto-merge PRs when approved
 - `max_sessions` (integer, 1-1000) - Maximum work sessions before pausing
+- `max_prs` (integer, 1-100) - Maximum number of pull requests to create
 - `pause_on_pr` (boolean) - Whether to pause after creating PR
 - `enable_checkpointing` (boolean) - Enable state checkpointing
 - `log_level` (string) - Log level: `quiet`, `normal`, `verbose`
@@ -458,6 +461,7 @@ Initialize a new task with the given goal and options.
   "model": "opus",
   "auto_merge": true,
   "max_sessions": 10,
+  "max_prs": 2,
   "pause_on_pr": false
 }
 ```
@@ -468,6 +472,7 @@ Initialize a new task with the given goal and options.
 - `model` (optional, string) - Model to use: `opus`, `sonnet`, `haiku` (default: `opus`)
 - `auto_merge` (optional, boolean) - Auto-merge PRs when approved (default: `true`)
 - `max_sessions` (optional, integer, 1-1000) - Max sessions before pausing
+- `max_prs` (optional, integer, 1-100) - Max pull requests to create
 - `pause_on_pr` (optional, boolean) - Pause after creating PR (default: `false`)
 
 **Response:** `TaskInitResponse` (201 Created)

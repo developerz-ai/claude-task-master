@@ -159,6 +159,7 @@ class ConfigUpdateRequest(BaseModel):
     Attributes:
         auto_merge: Whether to auto-merge PRs when approved.
         max_sessions: Maximum number of work sessions before pausing.
+        max_prs: Maximum number of pull requests to create.
         pause_on_pr: Whether to pause after creating PR for manual review.
         enable_checkpointing: Whether to enable state checkpointing.
         log_level: Log level (quiet, normal, verbose).
@@ -175,6 +176,12 @@ class ConfigUpdateRequest(BaseModel):
         ge=1,
         le=1000,
         description="Maximum number of work sessions before pausing",
+    )
+    max_prs: int | None = Field(
+        default=None,
+        ge=1,
+        le=100,
+        description="Maximum number of pull requests to create",
     )
     pause_on_pr: bool | None = Field(
         default=None,
@@ -228,6 +235,7 @@ class TaskInitRequest(BaseModel):
         model: Model to use (opus, sonnet, haiku).
         auto_merge: Whether to auto-merge PRs when approved.
         max_sessions: Max work sessions before pausing.
+        max_prs: Max pull requests to create.
         pause_on_pr: Pause after creating PR for manual review.
     """
 
@@ -252,6 +260,12 @@ class TaskInitRequest(BaseModel):
         ge=1,
         le=1000,
         description="Maximum number of work sessions before pausing",
+    )
+    max_prs: int | None = Field(
+        default=None,
+        ge=1,
+        le=100,
+        description="Maximum number of pull requests to create",
     )
     pause_on_pr: bool = Field(
         default=False,
@@ -384,6 +398,7 @@ class TaskOptionsResponse(BaseModel):
     Attributes:
         auto_merge: Whether to auto-merge PRs when approved.
         max_sessions: Maximum number of work sessions before pausing.
+        max_prs: Maximum number of pull requests to create.
         pause_on_pr: Whether to pause after creating PR for manual review.
         enable_checkpointing: Whether state checkpointing is enabled.
         log_level: Current log level.
@@ -393,6 +408,7 @@ class TaskOptionsResponse(BaseModel):
 
     auto_merge: bool
     max_sessions: int | None
+    max_prs: int | None
     pause_on_pr: bool
     enable_checkpointing: bool
     log_level: str

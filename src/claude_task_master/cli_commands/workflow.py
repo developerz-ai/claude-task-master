@@ -113,6 +113,11 @@ def start(
         "-n",
         help="Max work sessions before pausing (default: unlimited)",
     ),
+    max_prs: int | None = typer.Option(
+        None,
+        "--prs",
+        help="Max pull requests to create (default: unlimited)",
+    ),
     pause_on_pr: bool = typer.Option(
         False,
         "--pause-on-pr",
@@ -158,6 +163,8 @@ def start(
         claudetm start "Add dark mode toggle"
         claudetm start "Fix bug #123" -m opus --no-auto-merge
         claudetm start "Refactor auth" -n 5 --pause-on-pr
+        claudetm start "Add user auth" --prs 1
+        claudetm start "Implement dashboard" --prs 3 --max-sessions 10
         claudetm start "Debug issue" -l verbose --log-format json
         claudetm start "Deploy feature" --webhook-url https://example.com/hooks
 
@@ -212,6 +219,7 @@ def start(
         options = TaskOptions(
             auto_merge=auto_merge,
             max_sessions=max_sessions,
+            max_prs=max_prs,
             pause_on_pr=pause_on_pr,
             enable_checkpointing=enable_checkpointing,
             log_level=log_level.lower(),

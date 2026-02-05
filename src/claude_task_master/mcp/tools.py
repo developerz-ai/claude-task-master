@@ -524,6 +524,7 @@ def initialize_task(
     model: str = "opus",
     auto_merge: bool = True,
     max_sessions: int | None = None,
+    max_prs: int | None = None,
     pause_on_pr: bool = False,
     state_dir: str | None = None,
 ) -> dict[str, Any]:
@@ -535,6 +536,7 @@ def initialize_task(
         model: Model to use (opus, sonnet, haiku).
         auto_merge: Whether to auto-merge PRs when approved.
         max_sessions: Max work sessions before pausing.
+        max_prs: Max pull requests to create.
         pause_on_pr: Pause after creating PR for manual review.
         state_dir: Optional custom state directory path.
 
@@ -554,6 +556,7 @@ def initialize_task(
         options = TaskOptions(
             auto_merge=auto_merge,
             max_sessions=max_sessions,
+            max_prs=max_prs,
             pause_on_pr=pause_on_pr,
         )
         state = state_manager.initialize(goal=goal, model=model, options=options)
@@ -832,6 +835,7 @@ def update_config(
     work_dir: Path,
     auto_merge: bool | None = None,
     max_sessions: int | None = None,
+    max_prs: int | None = None,
     pause_on_pr: bool | None = None,
     enable_checkpointing: bool | None = None,
     log_level: str | None = None,
@@ -848,6 +852,7 @@ def update_config(
         work_dir: Working directory for the server.
         auto_merge: Whether to auto-merge PRs when approved.
         max_sessions: Maximum number of work sessions before pausing.
+        max_prs: Maximum number of pull requests to create.
         pause_on_pr: Whether to pause after creating PR for manual review.
         enable_checkpointing: Whether to enable state checkpointing.
         log_level: Log level (quiet, normal, verbose).
@@ -868,6 +873,8 @@ def update_config(
         kwargs["auto_merge"] = auto_merge
     if max_sessions is not None:
         kwargs["max_sessions"] = max_sessions
+    if max_prs is not None:
+        kwargs["max_prs"] = max_prs
     if pause_on_pr is not None:
         kwargs["pause_on_pr"] = pause_on_pr
     if enable_checkpointing is not None:

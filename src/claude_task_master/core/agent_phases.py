@@ -111,7 +111,11 @@ class AgentPhaseExecutor:
         self.process_message_func = process_message_func
 
     def run_planning_phase(
-        self, goal: str, context: str = "", coding_style: str | None = None
+        self,
+        goal: str,
+        context: str = "",
+        coding_style: str | None = None,
+        max_prs: int | None = None,
     ) -> dict[str, Any]:
         """Run planning phase with read-only tools.
 
@@ -122,6 +126,7 @@ class AgentPhaseExecutor:
             goal: The goal to plan for.
             context: Additional context for planning.
             coding_style: Optional coding style guide to inject into prompt.
+            max_prs: Optional maximum number of PRs to create.
 
         Returns:
             Dict with 'plan', 'criteria', and 'raw_output' keys.
@@ -131,6 +136,7 @@ class AgentPhaseExecutor:
             goal=goal,
             context=context if context else None,
             coding_style=coding_style,
+            max_prs=max_prs,
         )
 
         # Always use Opus for planning (smartest model)

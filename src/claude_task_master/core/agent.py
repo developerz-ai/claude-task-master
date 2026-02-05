@@ -171,7 +171,11 @@ class AgentWrapper:
             )
 
     def run_planning_phase(
-        self, goal: str, context: str = "", coding_style: str | None = None
+        self,
+        goal: str,
+        context: str = "",
+        coding_style: str | None = None,
+        max_prs: int | None = None,
     ) -> dict[str, Any]:
         """Run planning phase with read-only tools.
 
@@ -182,10 +186,11 @@ class AgentWrapper:
             goal: The goal to plan for.
             context: Additional context for planning.
             coding_style: Optional coding style guide to inject into prompt.
+            max_prs: Optional maximum number of PRs to create.
 
         Delegates to AgentPhaseExecutor for implementation.
         """
-        return self._phase_executor.run_planning_phase(goal, context, coding_style)
+        return self._phase_executor.run_planning_phase(goal, context, coding_style, max_prs)
 
     def generate_coding_style(self) -> dict[str, Any]:
         """Generate a coding style guide by analyzing the codebase.

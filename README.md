@@ -345,6 +345,7 @@ claudetm start "Your goal here" [OPTIONS]
 | `--model` | Model to use (sonnet, opus, haiku) | sonnet |
 | `--auto-merge/--no-auto-merge` | Auto-merge PRs when ready | True |
 | `--max-sessions` | Limit number of sessions | unlimited |
+| `--prs` | Limit number of PRs to create | unlimited |
 | `--pause-on-pr` | Pause after creating PR | False |
 
 ### Common Workflows
@@ -358,6 +359,10 @@ claudetm start "Refactor auth system" --model opus --no-auto-merge
 
 # Limited sessions to prevent runaway
 claudetm start "Fix bug in parser" --max-sessions 5
+
+# Limit number of PRs (forces everything into fewer PRs)
+claudetm start "Add user dashboard" --prs 1
+claudetm start "Implement notifications" --prs 3 --max-sessions 10
 
 # Monitor progress
 watch -n 5 'claudetm status'
@@ -389,6 +394,10 @@ claudetm start "Add dark mode toggle to settings" --model opus
 
 # Refactoring
 claudetm start "Refactor API client to use async/await" --max-sessions 5
+
+# Limit PRs for focused changes
+claudetm start "Add user authentication" --prs 1
+claudetm start "Build admin dashboard" --prs 2 --max-sessions 8
 
 # Documentation
 claudetm start "Add API documentation and examples"

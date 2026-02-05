@@ -40,13 +40,15 @@ class TestTaskOptions:
         options = TaskOptions()
         assert options.auto_merge is True
         assert options.max_sessions is None
+        assert options.max_prs is None
         assert options.pause_on_pr is False
 
     def test_custom_values(self):
         """Test TaskOptions with custom values."""
-        options = TaskOptions(auto_merge=False, max_sessions=5, pause_on_pr=True)
+        options = TaskOptions(auto_merge=False, max_sessions=5, max_prs=3, pause_on_pr=True)
         assert options.auto_merge is False
         assert options.max_sessions == 5
+        assert options.max_prs == 3
         assert options.pause_on_pr is True
 
     def test_partial_custom_values(self):
@@ -56,13 +58,21 @@ class TestTaskOptions:
         assert options.max_sessions == 10
         assert options.pause_on_pr is False
 
+    def test_max_prs_option(self):
+        """Test TaskOptions with max_prs set."""
+        options = TaskOptions(max_prs=1)
+        assert options.max_prs == 1
+        assert options.auto_merge is True
+        assert options.max_sessions is None
+
     def test_model_dump(self):
         """Test TaskOptions model dump."""
-        options = TaskOptions(auto_merge=False, max_sessions=3)
+        options = TaskOptions(auto_merge=False, max_sessions=3, max_prs=2)
         dump = options.model_dump()
         assert dump == {
             "auto_merge": False,
             "max_sessions": 3,
+            "max_prs": 2,
             "pause_on_pr": False,
             "enable_checkpointing": False,
             "log_level": "normal",
