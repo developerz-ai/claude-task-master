@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-02-05
+
+### Added
+- **`--prs` flag to limit pull requests**: New CLI flag to constrain the number of PRs created
+  - Injected into planning prompt to guide task organization
+  - Claude plans work to fit within the specified PR limit
+  - Example: `claudetm start "Add auth" --prs 1` → Everything in one PR
+  - Available in CLI, REST API, and MCP tools
+  - Supports dynamic configuration via `max_prs` parameter
+
+### Changed
+- **Dependency updates**: Updated to latest stable versions
+  - claude-agent-sdk: 0.1.27 → 0.1.30
+  - rich: 13.0.0 → 14.3.2
+  - ruff: 0.3.0 → 0.15.0
+  - hypothesis: 6.100.0 → 6.151.5
+  - mcp: 1.0.0 → 1.26.0
+  - fastapi: 0.100.0 → 0.128.1
+
+### Fixed
+- **Enum inheritance**: Updated string enums to use `StrEnum` for Python 3.11+ compatibility
+- **CI optimization**: Removed Docker build from PR checks (now only runs on releases)
+- **CI concurrency**: Added cancel-in-progress to avoid redundant CI runs
+
 ## [0.1.9] - 2026-02-01
 
 ### Changed
@@ -279,7 +303,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.9...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.10...HEAD
+[0.1.10]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.6...v0.1.7
