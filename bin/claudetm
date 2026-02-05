@@ -293,8 +293,8 @@ default_config = {
         "haiku": "claude-haiku-4-5-20251001"
     },
     "context_windows": {
-        "opus": 1000000,
-        "sonnet": 1000000,
+        "opus": 200000,
+        "sonnet": 200000,
         "haiku": 200000
     },
     "git": {

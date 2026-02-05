@@ -108,12 +108,12 @@ class ContextWindowsConfig(BaseModel):
     """
 
     opus: int = Field(
-        default=1_000_000,
-        description="Opus context window size in tokens. 1M (beta, tier 4+) or 200000 (standard).",
+        default=200_000,
+        description="Opus context window size in tokens. 200000 (standard) or 1000000 (beta, tier 4+).",
     )
     sonnet: int = Field(
-        default=1_000_000,
-        description="Sonnet context window size in tokens. 1M (beta, tier 4+) or 200000 (standard).",
+        default=200_000,
+        description="Sonnet context window size in tokens. 200000 (standard) or 1000000 (beta, tier 4+).",
     )
     haiku: int = Field(
         default=200_000,
@@ -176,8 +176,8 @@ class ClaudeTaskMasterConfig(BaseModel):
         "auto_push": true
       },
       "context_windows": {
-        "opus": 1000000,
-        "sonnet": 1000000,
+        "opus": 200000,
+        "sonnet": 200000,
         "haiku": 200000
       },
       "tools": {

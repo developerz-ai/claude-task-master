@@ -98,17 +98,17 @@ class TestContextWindowsConfig:
     """Tests for ContextWindowsConfig model."""
 
     def test_default_values(self) -> None:
-        """Test that ContextWindowsConfig has correct default values."""
+        """Test that ContextWindowsConfig has correct default values (200K standard)."""
         config = ContextWindowsConfig()
-        assert config.opus == 1_000_000
-        assert config.sonnet == 1_000_000
-        assert config.haiku == 200_000
-
-    def test_standard_tier(self) -> None:
-        """Test setting standard tier context windows (200K for all)."""
-        config = ContextWindowsConfig(opus=200_000, sonnet=200_000, haiku=200_000)
         assert config.opus == 200_000
         assert config.sonnet == 200_000
+        assert config.haiku == 200_000
+
+    def test_tier4_context(self) -> None:
+        """Test setting 1M context windows for tier 4+ users."""
+        config = ContextWindowsConfig(opus=1_000_000, sonnet=1_000_000, haiku=200_000)
+        assert config.opus == 1_000_000
+        assert config.sonnet == 1_000_000
         assert config.haiku == 200_000
 
 
