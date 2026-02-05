@@ -48,7 +48,7 @@ Usage:
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -58,7 +58,7 @@ from pydantic import BaseModel, Field
 # =============================================================================
 
 
-class TaskStatus(str, Enum):
+class TaskStatus(StrEnum):
     """Valid task status values."""
 
     PLANNING = "planning"
@@ -70,7 +70,7 @@ class TaskStatus(str, Enum):
     FAILED = "failed"
 
 
-class WorkflowStage(str, Enum):
+class WorkflowStage(StrEnum):
     """Valid workflow stage values for PR lifecycle."""
 
     WORKING = "working"
@@ -83,7 +83,7 @@ class WorkflowStage(str, Enum):
     MERGED = "merged"
 
 
-class LogLevel(str, Enum):
+class LogLevel(StrEnum):
     """Valid log level values."""
 
     QUIET = "quiet"
@@ -91,7 +91,7 @@ class LogLevel(str, Enum):
     VERBOSE = "verbose"
 
 
-class LogFormat(str, Enum):
+class LogFormat(StrEnum):
     """Valid log format values."""
 
     TEXT = "text"
