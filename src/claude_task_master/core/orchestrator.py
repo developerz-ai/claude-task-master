@@ -386,13 +386,22 @@ class WorkLoopOrchestrator:
             return None
 
     def _emit_pr_created_event(self, state: TaskState) -> None:
-        """Emit a pr.created webhook event.
+        """Emit a pr.created webhook event and increment prs_created counter.
 
         Args:
             state: Current task state with PR information.
         """
         if not state.current_pr:
             return
+
+        # Check for idempotency - skip if this PR was already counted
+        if state.last_counted_pr_created == state.current_pr:
+            return
+
+        # Increment PR created counter and mark this PR as counted
+        state.prs_created += 1
+        state.last_counted_pr_created = state.current_pr
+        self.state_manager.save_state(state)
 
         # Get PR details from GitHub
         pr_url = ""
@@ -420,13 +429,22 @@ class WorkLoopOrchestrator:
         )
 
     def _emit_pr_merged_event(self, state: TaskState) -> None:
-        """Emit a pr.merged webhook event.
+        """Emit a pr.merged webhook event and increment prs_merged counter.
 
         Args:
             state: Current task state with PR information.
         """
         if not state.current_pr:
             return
+
+        # Check for idempotency - skip if this PR was already counted
+        if state.last_counted_pr_merged == state.current_pr:
+            return
+
+        # Increment PR merged counter and mark this PR as counted
+        state.prs_merged += 1
+        state.last_counted_pr_merged = state.current_pr
+        self.state_manager.save_state(state)
 
         # Get PR details from GitHub
         pr_url = ""
@@ -714,8 +732,8 @@ class WorkLoopOrchestrator:
             completed_tasks=completed_tasks,
             total_sessions=state.session_count,
             duration_seconds=duration_seconds,
-            prs_created=0,  # TODO: Track PR counts in state
-            prs_merged=0,  # TODO: Track PR counts in state
+            prs_created=state.prs_created,
+            prs_merged=state.prs_merged,
             final_status=state.status,
             error_message=error_message,
         )

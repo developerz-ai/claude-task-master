@@ -1006,11 +1006,12 @@ class TestRunLifecycleWebhooks:
         # Mock cancellation request
         mock_cancel_requested.return_value = True
 
-        # Mock the work loop to check cancellation
+        # Mock the work loop to check cancellation - always return an int exit code
         def mock_workflow_cycle(state):
             # Simulate cancellation during run
             if mock_cancel_requested():
                 return 2
+            return 0  # Default to success if not cancelled
 
         with patch.object(
             orchestrator_with_webhooks, "_run_workflow_cycle", side_effect=mock_workflow_cycle
@@ -1286,3 +1287,305 @@ class TestPlanUpdatedWebhooks:
         assert event_data["update_source"] == "mailbox"
         assert event_data["tasks_added"] == 0
         assert event_data["tasks_removed"] == 0
+
+
+# =============================================================================
+# Test PR Count Tracking in Webhook Events
+# =============================================================================
+
+
+class TestPRCountTrackingWebhooks:
+    """Tests for PR count tracking in webhook events."""
+
+    @patch("claude_task_master.core.orchestrator.register_handlers")
+    @patch("claude_task_master.core.orchestrator.start_listening")
+    def test_run_completed_includes_pr_counts(
+        self,
+        mock_start_listening,
+        mock_register,
+        orchestrator_with_webhooks,
+        state_manager,
+        mock_webhook_client,
+        sample_task_options,
+        basic_plan,
+    ):
+        """Should include PR counts in run.completed webhook event."""
+        from claude_task_master.core.state import TaskOptions
+
+        state_manager.state_dir.mkdir(exist_ok=True)
+        options = TaskOptions(**sample_task_options)
+        state_manager.initialize(goal="Test PR tracking", model="sonnet", options=options)
+        state_manager.save_plan(basic_plan)
+        state_manager.save_goal("Test PR tracking")
+
+        # Set up initial PR counts
+        state = state_manager.load_state()
+        state.prs_created = 3
+        state.prs_merged = 2
+        state_manager.save_state(state)
+
+        # Mock the work loop to exit with success
+        with patch.object(orchestrator_with_webhooks, "_run_workflow_cycle", return_value=0):
+            exit_code = orchestrator_with_webhooks.run()
+
+        assert exit_code == 0
+
+        # Find the run.completed event call
+        calls = mock_webhook_client.send_sync.call_args_list
+        run_completed_calls = [c for c in calls if c.kwargs.get("event_type") == "run.completed"]
+
+        assert len(run_completed_calls) == 1
+        event_data = run_completed_calls[0].kwargs["data"]
+        assert event_data["event_type"] == "run.completed"
+        assert event_data["prs_created"] == 3
+        assert event_data["prs_merged"] == 2
+        assert event_data["result"] == "success"
+
+    @patch("claude_task_master.core.orchestrator.register_handlers")
+    @patch("claude_task_master.core.orchestrator.start_listening")
+    def test_run_completed_with_zero_pr_counts(
+        self,
+        mock_start_listening,
+        mock_register,
+        orchestrator_with_webhooks,
+        state_manager,
+        mock_webhook_client,
+        sample_task_options,
+        basic_plan,
+    ):
+        """Should include zero PR counts when no PRs have been created."""
+        from claude_task_master.core.state import TaskOptions
+
+        state_manager.state_dir.mkdir(exist_ok=True)
+        options = TaskOptions(**sample_task_options)
+        state_manager.initialize(goal="No PRs", model="sonnet", options=options)
+        state_manager.save_plan(basic_plan)
+        state_manager.save_goal("No PRs")
+
+        # Verify initial state has zero PR counts
+        state = state_manager.load_state()
+        assert state.prs_created == 0
+        assert state.prs_merged == 0
+
+        # Mock the work loop to exit with success
+        with patch.object(orchestrator_with_webhooks, "_run_workflow_cycle", return_value=0):
+            exit_code = orchestrator_with_webhooks.run()
+
+        assert exit_code == 0
+
+        # Find the run.completed event call
+        calls = mock_webhook_client.send_sync.call_args_list
+        run_completed_calls = [c for c in calls if c.kwargs.get("event_type") == "run.completed"]
+
+        assert len(run_completed_calls) == 1
+        event_data = run_completed_calls[0].kwargs["data"]
+        assert event_data["prs_created"] == 0
+        assert event_data["prs_merged"] == 0
+
+    @patch("claude_task_master.core.orchestrator.register_handlers")
+    @patch("claude_task_master.core.orchestrator.start_listening")
+    def test_run_completed_blocked_includes_pr_counts(
+        self,
+        mock_start_listening,
+        mock_register,
+        orchestrator_with_webhooks,
+        state_manager,
+        mock_webhook_client,
+        sample_task_options,
+        basic_plan,
+    ):
+        """Should include PR counts in run.completed event even when blocked."""
+        from claude_task_master.core.state import TaskOptions
+
+        state_manager.state_dir.mkdir(exist_ok=True)
+        options = TaskOptions(**sample_task_options)
+        options.max_sessions = 3
+        state_manager.initialize(goal="Test PR counts on blocked", model="sonnet", options=options)
+        state_manager.save_plan(basic_plan)
+        state_manager.save_goal("Test PR counts on blocked")
+
+        # Set up PR counts
+        state = state_manager.load_state()
+        state.session_count = 3
+        state.prs_created = 5
+        state.prs_merged = 3
+        state_manager.save_state(state)
+
+        # Run orchestrator (should exit due to max sessions)
+        exit_code = orchestrator_with_webhooks.run()
+        assert exit_code == 1
+
+        # Find the run.completed event call
+        calls = mock_webhook_client.send_sync.call_args_list
+        run_completed_calls = [c for c in calls if c.kwargs.get("event_type") == "run.completed"]
+
+        assert len(run_completed_calls) == 1
+        event_data = run_completed_calls[0].kwargs["data"]
+        assert event_data["result"] == "blocked"
+        assert event_data["prs_created"] == 5
+        assert event_data["prs_merged"] == 3
+
+    @patch("claude_task_master.core.orchestrator.register_handlers")
+    @patch("claude_task_master.core.orchestrator.start_listening")
+    @patch("claude_task_master.core.orchestrator.unregister_handlers")
+    @patch("claude_task_master.core.orchestrator.stop_listening")
+    @patch("claude_task_master.core.orchestrator.reset_shutdown")
+    @patch("claude_task_master.core.orchestrator.is_cancellation_requested")
+    def test_run_completed_interrupted_includes_pr_counts(
+        self,
+        mock_cancel_requested,
+        mock_reset_shutdown,
+        mock_stop_listening,
+        mock_unregister,
+        mock_start_listening,
+        mock_register,
+        orchestrator_with_webhooks,
+        state_manager,
+        mock_webhook_client,
+        sample_task_options,
+        basic_plan,
+    ):
+        """Should include PR counts in run.completed event when interrupted."""
+        from claude_task_master.core.state import TaskOptions
+
+        state_manager.state_dir.mkdir(exist_ok=True)
+        options = TaskOptions(**sample_task_options)
+        state_manager.initialize(
+            goal="Test PR counts on interrupt", model="sonnet", options=options
+        )
+        state_manager.save_plan(basic_plan)
+        state_manager.save_goal("Test PR counts on interrupt")
+
+        # Set up PR counts
+        state = state_manager.load_state()
+        state.prs_created = 2
+        state.prs_merged = 1
+        state_manager.save_state(state)
+
+        # Mock cancellation request
+        mock_cancel_requested.return_value = True
+
+        # Mock the work loop to check cancellation - always return an int exit code
+        def mock_workflow_cycle(state):
+            # Simulate cancellation during run
+            if mock_cancel_requested():
+                return 2
+            return 0  # Default to success if not cancelled
+
+        with patch.object(
+            orchestrator_with_webhooks,
+            "_run_workflow_cycle",
+            side_effect=mock_workflow_cycle,
+        ):
+            exit_code = orchestrator_with_webhooks.run()
+
+        assert exit_code == 2
+
+        # Find the run.completed event call
+        calls = mock_webhook_client.send_sync.call_args_list
+        run_completed_calls = [c for c in calls if c.kwargs.get("event_type") == "run.completed"]
+
+        assert len(run_completed_calls) == 1
+        event_data = run_completed_calls[0].kwargs["data"]
+        assert event_data["result"] == "interrupted"
+        assert event_data["prs_created"] == 2
+        assert event_data["prs_merged"] == 1
+
+    @patch("claude_task_master.core.workflow_stages.console")
+    def test_pr_created_event_increments_count(
+        self,
+        mock_console,
+        orchestrator_with_webhooks,
+        state_manager,
+        mock_github_client,
+        mock_webhook_client,
+        basic_task_state,
+        sample_task_options,
+    ):
+        """Should increment prs_created count when PR is created."""
+        from claude_task_master.core.state import TaskOptions
+
+        state_manager.state_dir.mkdir(exist_ok=True)
+        options = TaskOptions(**sample_task_options)
+        state_manager.initialize(goal="Test PR created", model="sonnet", options=options)
+        basic_task_state.workflow_stage = "pr_created"
+
+        # Mock GitHub to return a PR
+        mock_github_client.get_pr_for_current_branch.return_value = 42
+        mock_pr_status = Mock()
+        mock_pr_status.pr_url = "https://github.com/owner/repo/pull/42"
+        mock_pr_status.pr_title = "Test PR"
+        mock_pr_status.base_branch = "main"
+        mock_pr_status.ci_state = "SUCCESS"
+        mock_pr_status.checks_pending = 0
+        mock_github_client.get_pr_status.return_value = mock_pr_status
+
+        # Handle PR creation stage
+        orchestrator_with_webhooks._run_workflow_cycle(basic_task_state)
+
+        # Verify counter was incremented
+        updated_state = state_manager.load_state()
+        assert updated_state.prs_created == 1
+
+        # Find the pr.created event call
+        calls = mock_webhook_client.send_sync.call_args_list
+        pr_created_calls = [c for c in calls if c.kwargs.get("event_type") == "pr.created"]
+
+        assert len(pr_created_calls) == 1
+        event_data = pr_created_calls[0].kwargs["data"]
+        assert event_data["event_type"] == "pr.created"
+        assert event_data["pr_number"] == 42
+
+    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.orchestrator.interruptible_sleep")
+    def test_pr_merged_event_increments_count(
+        self,
+        mock_sleep,
+        mock_console,
+        orchestrator_with_webhooks,
+        state_manager,
+        mock_github_client,
+        mock_webhook_client,
+        basic_task_state,
+        sample_task_options,
+    ):
+        """Should increment prs_merged count when PR is merged."""
+        from claude_task_master.core.state import TaskOptions
+
+        state_manager.state_dir.mkdir(exist_ok=True)
+        options = TaskOptions(**sample_task_options)
+        state_manager.initialize(goal="Test PR merged", model="sonnet", options=options)
+        basic_task_state.workflow_stage = "ready_to_merge"
+        basic_task_state.current_pr = 42
+        basic_task_state.options.auto_merge = True
+
+        # Mock GitHub PR status
+        mock_pr_status = Mock()
+        mock_pr_status.pr_url = "https://github.com/owner/repo/pull/42"
+        mock_pr_status.pr_title = "Test PR"
+        mock_pr_status.base_branch = "main"
+        mock_pr_status.ci_state = "SUCCESS"
+        mock_pr_status.checks_pending = 0
+        mock_pr_status.reviews_approved = 1
+        mock_pr_status.reviews_requested = 0
+        mock_github_client.get_pr_status.return_value = mock_pr_status
+
+        # Mock successful merge
+        mock_github_client.merge_pr.return_value = True
+
+        # Handle PR merge stage
+        orchestrator_with_webhooks._run_workflow_cycle(basic_task_state)
+
+        # Verify counter was incremented
+        updated_state = state_manager.load_state()
+        assert updated_state.prs_merged == 1
+
+        # Find the pr.merged event call
+        calls = mock_webhook_client.send_sync.call_args_list
+        pr_merged_calls = [c for c in calls if c.kwargs.get("event_type") == "pr.merged"]
+
+        assert len(pr_merged_calls) == 1
+        event_data = pr_merged_calls[0].kwargs["data"]
+        assert event_data["event_type"] == "pr.merged"
+        assert event_data["pr_number"] == 42
+        assert event_data["auto_merged"] is True

@@ -215,6 +215,56 @@ class TestTaskState:
         assert "last_mailbox_check" in dump
         assert dump["last_mailbox_check"] == check_time
 
+    def test_task_state_pr_tracking_defaults(self, sample_task_options):
+        """Test TaskState PR tracking fields have correct defaults."""
+        timestamp = datetime.now().isoformat()
+        state = TaskState(
+            status="planning",
+            created_at=timestamp,
+            updated_at=timestamp,
+            run_id="20250115-120000",
+            model="sonnet",
+            options=TaskOptions(**sample_task_options),
+        )
+        # PR tracking fields should default to 0
+        assert state.prs_created == 0
+        assert state.prs_merged == 0
+
+    def test_task_state_pr_tracking_custom_values(self, sample_task_options):
+        """Test TaskState with custom PR tracking values."""
+        timestamp = datetime.now().isoformat()
+        state = TaskState(
+            status="working",
+            created_at=timestamp,
+            updated_at=timestamp,
+            run_id="20250115-120000",
+            model="sonnet",
+            options=TaskOptions(**sample_task_options),
+            prs_created=3,
+            prs_merged=2,
+        )
+        assert state.prs_created == 3
+        assert state.prs_merged == 2
+
+    def test_task_state_pr_tracking_in_model_dump(self, sample_task_options):
+        """Test that PR tracking fields are included in model dump."""
+        timestamp = datetime.now().isoformat()
+        state = TaskState(
+            status="working",
+            created_at=timestamp,
+            updated_at=timestamp,
+            run_id="20250115-120000",
+            model="sonnet",
+            options=TaskOptions(**sample_task_options),
+            prs_created=5,
+            prs_merged=3,
+        )
+        dump = state.model_dump()
+        assert "prs_created" in dump
+        assert dump["prs_created"] == 5
+        assert "prs_merged" in dump
+        assert dump["prs_merged"] == 3
+
 
 # =============================================================================
 # StateManager Initialization Tests
@@ -2057,3 +2107,180 @@ class TestMailboxStateFields:
         assert loaded.status == "working"
         assert loaded.mailbox_enabled is True
         assert loaded.last_mailbox_check is not None
+
+
+# =============================================================================
+# PR Tracking State Tests
+# =============================================================================
+
+
+class TestPRTrackingStateFields:
+    """Tests for PR tracking-related state fields."""
+
+    def test_initialize_sets_pr_tracking_defaults(self, temp_dir):
+        """Test that initialize sets PR tracking fields to 0 by default."""
+        state_dir = temp_dir / ".claude-task-master"
+        manager = StateManager(state_dir)
+
+        options = TaskOptions()
+        state = manager.initialize(goal="Test goal", model="sonnet", options=options)
+
+        assert state.prs_created == 0
+        assert state.prs_merged == 0
+
+    def test_save_and_load_prs_created(self, initialized_state_manager):
+        """Test saving and loading prs_created field."""
+        state = initialized_state_manager.load_state()
+        state.prs_created = 5
+        initialized_state_manager.save_state(state)
+
+        loaded = initialized_state_manager.load_state()
+        assert loaded.prs_created == 5
+
+    def test_save_and_load_prs_merged(self, initialized_state_manager):
+        """Test saving and loading prs_merged field."""
+        state = initialized_state_manager.load_state()
+        state.prs_merged = 3
+        initialized_state_manager.save_state(state)
+
+        loaded = initialized_state_manager.load_state()
+        assert loaded.prs_merged == 3
+
+    def test_state_file_contains_pr_tracking_fields(self, initialized_state_manager):
+        """Test state.json contains PR tracking fields."""
+        state = initialized_state_manager.load_state()
+        state.prs_created = 2
+        state.prs_merged = 1
+        initialized_state_manager.save_state(state)
+
+        state_file = initialized_state_manager.state_dir / "state.json"
+        data = json.loads(state_file.read_text())
+
+        assert "prs_created" in data
+        assert data["prs_created"] == 2
+        assert "prs_merged" in data
+        assert data["prs_merged"] == 1
+
+    def test_pr_tracking_fields_persist_across_sessions(self, temp_dir):
+        """Test PR tracking fields persist when creating new StateManager instance."""
+        state_dir = temp_dir / ".claude-task-master"
+        manager1 = StateManager(state_dir)
+
+        options = TaskOptions()
+        manager1.initialize(goal="Test", model="sonnet", options=options)
+
+        state = manager1.load_state()
+        state.prs_created = 4
+        state.prs_merged = 2
+        manager1.save_state(state)
+
+        # Create new manager instance (simulates restart)
+        manager2 = StateManager(state_dir)
+        loaded = manager2.load_state()
+
+        assert loaded.prs_created == 4
+        assert loaded.prs_merged == 2
+
+    def test_pr_tracking_increment(self, initialized_state_manager):
+        """Test incrementing PR tracking counters."""
+        state = initialized_state_manager.load_state()
+        assert state.prs_created == 0
+        assert state.prs_merged == 0
+
+        # Increment prs_created
+        state.prs_created += 1
+        initialized_state_manager.save_state(state)
+        loaded = initialized_state_manager.load_state()
+        assert loaded.prs_created == 1
+
+        # Increment prs_merged
+        loaded.prs_merged += 1
+        initialized_state_manager.save_state(loaded)
+        reloaded = initialized_state_manager.load_state()
+        assert reloaded.prs_merged == 1
+
+    def test_pr_tracking_fields_work_with_status_transitions(self, initialized_state_manager):
+        """Test PR tracking fields work correctly during status transitions."""
+        state = initialized_state_manager.load_state()
+        assert state.status == "planning"
+
+        # Set PR tracking fields
+        state.prs_created = 2
+        state.prs_merged = 1
+
+        # Transition to working
+        state.status = "working"
+        initialized_state_manager.save_state(state)
+
+        loaded = initialized_state_manager.load_state()
+        assert loaded.status == "working"
+        assert loaded.prs_created == 2
+        assert loaded.prs_merged == 1
+
+    def test_load_state_without_pr_tracking_fields_uses_defaults(self, temp_dir):
+        """Test loading state file without PR tracking fields uses defaults (migration)."""
+        state_dir = temp_dir / ".claude-task-master"
+        state_dir.mkdir(parents=True)
+        state_file = state_dir / "state.json"
+
+        # Create a state file without PR tracking fields (simulating old format)
+        old_state_data = {
+            "status": "working",
+            "workflow_stage": None,
+            "current_task_index": 0,
+            "session_count": 1,
+            "current_pr": None,
+            "created_at": "2025-01-15T12:00:00",
+            "updated_at": "2025-01-15T12:00:00",
+            "run_id": "20250115-120000",
+            "model": "sonnet",
+            "options": {
+                "auto_merge": True,
+                "max_sessions": None,
+                "max_prs": None,
+                "pause_on_pr": False,
+                "enable_checkpointing": False,
+                "log_level": "normal",
+                "log_format": "text",
+                "pr_per_task": False,
+                "webhook_url": None,
+                "webhook_secret": None,
+            },
+            "mailbox_enabled": True,
+            "last_mailbox_check": None,
+            # Note: prs_created and prs_merged are intentionally omitted
+        }
+        state_file.write_text(json.dumps(old_state_data))
+
+        manager = StateManager(state_dir)
+        loaded = manager.load_state()
+
+        # Should use default values for missing fields
+        assert loaded.prs_created == 0
+        assert loaded.prs_merged == 0
+
+    def test_prs_created_not_negative(self, initialized_state_manager):
+        """Test that prs_created can be set to 0 or positive values."""
+        state = initialized_state_manager.load_state()
+        state.prs_created = 0
+        initialized_state_manager.save_state(state)
+
+        loaded = initialized_state_manager.load_state()
+        assert loaded.prs_created == 0
+
+        loaded.prs_created = 10
+        initialized_state_manager.save_state(loaded)
+
+        reloaded = initialized_state_manager.load_state()
+        assert reloaded.prs_created == 10
+
+    def test_prs_merged_cannot_exceed_created(self, initialized_state_manager):
+        """Test that prs_merged and prs_created can be set independently."""
+        state = initialized_state_manager.load_state()
+        state.prs_created = 5
+        state.prs_merged = 3
+        initialized_state_manager.save_state(state)
+
+        loaded = initialized_state_manager.load_state()
+        assert loaded.prs_created == 5
+        assert loaded.prs_merged == 3
