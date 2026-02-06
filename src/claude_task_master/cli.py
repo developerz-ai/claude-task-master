@@ -91,17 +91,159 @@ def comments(
 
 
 @app.command()
-def pr() -> None:
+def pr(
+    pr_number: int | None = typer.Option(None, "--pr", "-p", help="PR number to check"),
+) -> None:
     """Display current PR status and CI checks.
 
-    Shows the status of the PR associated with the current task.
+    Shows the status of the PR associated with the current task, or a specified PR.
+    Displays PR number, URL, title, CI status, review status, and merge status.
 
     Examples:
-        claudetm pr
+        claudetm pr          # Show status for current task's PR
+        claudetm pr -p 123   # Show status for PR #123
     """
-    console.print("[bold blue]PR Status[/bold blue]")
-    # TODO: Implement pr logic
-    raise typer.Exit(1)
+    from .github.client import GitHubClient
+    from .github.exceptions import GitHubError
+
+    # Determine which PR to check
+    if pr_number is None:
+        # Try to get from task state first
+        state_manager = StateManager()
+        if state_manager.exists():
+            try:
+                state = state_manager.load_state()
+                pr_number = state.current_pr
+            except Exception:
+                pass  # Ignore state loading errors
+
+        # If no PR in state, try to get from current branch
+        if pr_number is None:
+            try:
+                gh_client = GitHubClient()
+                pr_number = gh_client.get_pr_for_current_branch()
+            except GitHubError as e:
+                console.print(f"[red]Error checking current branch: {e}[/red]")
+                raise typer.Exit(1) from None
+
+        if pr_number is None:
+            console.print("[yellow]No PR found for current branch or task.[/yellow]")
+            raise typer.Exit(1)
+
+    # Get PR status
+    try:
+        gh_client = GitHubClient()
+        pr_status = gh_client.get_pr_status(pr_number)
+
+        # Get additional PR info (title, URL) using gh pr view
+        import json
+        import subprocess
+
+        result = subprocess.run(
+            ["gh", "pr", "view", str(pr_number), "--json", "title,url,state,isDraft"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if result.returncode == 0:
+            pr_info = json.loads(result.stdout)
+            pr_title = pr_info.get("title", "Unknown")
+            pr_url = pr_info.get("url", "")
+            is_draft = pr_info.get("isDraft", False)
+        else:
+            pr_title = "Unknown"
+            pr_url = ""
+            is_draft = False
+
+    except GitHubError as e:
+        console.print(f"[red]Error fetching PR status: {e}[/red]")
+        raise typer.Exit(1) from None
+
+    # Display PR info
+    console.print("\n[bold blue]PR Status[/bold blue]\n")
+    console.print(f"[cyan]PR:[/cyan] #{pr_number}")
+    console.print(f"[cyan]Title:[/cyan] {pr_title}")
+    if is_draft:
+        console.print("[cyan]Draft:[/cyan] [yellow]Yes[/yellow]")
+    if pr_url:
+        console.print(f"[cyan]URL:[/cyan] {pr_url}")
+
+    # PR State
+    state_color = {
+        "OPEN": "green",
+        "CLOSED": "red",
+        "MERGED": "magenta",
+    }.get(pr_status.state, "white")
+    console.print(f"[cyan]State:[/cyan] [{state_color}]{pr_status.state}[/{state_color}]")
+
+    # CI Status
+    console.print("\n[bold]CI Status[/bold]")
+    ci_color = {
+        "SUCCESS": "green",
+        "PENDING": "yellow",
+        "FAILURE": "red",
+        "ERROR": "red",
+    }.get(pr_status.ci_state, "white")
+    console.print(f"  [cyan]Overall:[/cyan] [{ci_color}]{pr_status.ci_state}[/{ci_color}]")
+
+    if pr_status.checks_passed or pr_status.checks_failed or pr_status.checks_pending:
+        console.print(
+            f"  [green]✓ Passed:[/green] {pr_status.checks_passed}  "
+            f"[red]✗ Failed:[/red] {pr_status.checks_failed}  "
+            f"[yellow]⏳ Pending:[/yellow] {pr_status.checks_pending}"
+        )
+        if pr_status.checks_skipped:
+            console.print(f"  [dim]Skipped:[/dim] {pr_status.checks_skipped}")
+
+    # Show check details if there are failures
+    if pr_status.checks_failed > 0:
+        console.print("\n  [bold red]Failed Checks:[/bold red]")
+        for check in pr_status.check_details:
+            conclusion = (check.get("conclusion") or "").upper()
+            if conclusion in ("FAILURE", "ERROR", "CANCELLED", "TIMED_OUT"):
+                name = check.get("name", "Unknown")
+                url = check.get("url", "")
+                console.print(f"    [red]✗[/red] {name}")
+                if url:
+                    console.print(f"      [dim]{url}[/dim]")
+
+    # Review Status
+    console.print("\n[bold]Review Status[/bold]")
+    if pr_status.total_threads > 0:
+        console.print(f"  [cyan]Threads:[/cyan] {pr_status.total_threads} total")
+        if pr_status.unresolved_threads > 0:
+            console.print(f"  [yellow]⚠ Unresolved:[/yellow] {pr_status.unresolved_threads}")
+        if pr_status.resolved_threads > 0:
+            console.print(f"  [green]✓ Resolved:[/green] {pr_status.resolved_threads}")
+    else:
+        console.print("  [dim]No review comments[/dim]")
+
+    # Merge Status
+    console.print("\n[bold]Merge Status[/bold]")
+    mergeable_color = {
+        "MERGEABLE": "green",
+        "CONFLICTING": "red",
+        "UNKNOWN": "yellow",
+    }.get(pr_status.mergeable, "white")
+    console.print(
+        f"  [cyan]Mergeable:[/cyan] [{mergeable_color}]{pr_status.mergeable}[/{mergeable_color}]"
+    )
+
+    merge_state_color = {
+        "CLEAN": "green",
+        "BLOCKED": "red",
+        "BEHIND": "yellow",
+        "DIRTY": "red",
+        "HAS_HOOKS": "yellow",
+        "UNKNOWN": "dim",
+        "UNSTABLE": "yellow",
+    }.get(pr_status.merge_state_status, "white")
+    console.print(
+        f"  [cyan]Merge State:[/cyan] [{merge_state_color}]{pr_status.merge_state_status}[/{merge_state_color}]"
+    )
+    console.print(f"  [cyan]Base Branch:[/cyan] {pr_status.base_branch}")
+
+    raise typer.Exit(0)
 
 
 @app.command()
