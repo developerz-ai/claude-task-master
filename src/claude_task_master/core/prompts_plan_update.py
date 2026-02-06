@@ -103,7 +103,13 @@ You just need to OUTPUT the updated plan as TEXT in your response."""
    - Add new PRs if needed for new features
    - Reorder tasks within PRs if dependencies change
 
-5. **Use Proper Format**:
+5. **Preserve Context Sublists**:
+   - Keep indented sublists under tasks (file references, symbols, line numbers)
+   - These are context hints for the worker — NOT subtasks
+   - Update sublists if files/symbols change due to the change request
+   - Add sublists to any new tasks
+
+6. **Use Proper Format**:
    - Keep complexity tags: `[coding]`, `[quick]`, `[general]`
    - Include file paths and symbols in task descriptions
    - Maintain the success criteria section""",
@@ -127,11 +133,16 @@ You just need to OUTPUT the updated plan as TEXT in your response."""
 
 ### PR 1: Infrastructure
 - [x] `[quick]` Setup project structure (COMPLETED - keep as-is)
+  - `src/config.py` — project config
 - [ ] `[coding]` Add new feature from change request
+  - `src/feature.py` — new `Feature` class
+  - `tests/test_feature.py` — add unit tests
 
 ### PR 2: New Requirements (from change request)
 - [ ] `[coding]` Implement new requirement A
+  - `src/requirement.py:42` — `RequirementHandler.process()`
 - [ ] `[general]` Add tests for new requirements
+  - `tests/test_requirement.py` — integration tests
 
 ## Success Criteria
 1. All tasks completed

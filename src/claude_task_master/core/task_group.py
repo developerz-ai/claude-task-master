@@ -132,6 +132,7 @@ class ParsedTask:
     group_id: str  # pr_1, pr_2, etc.
     group_name: str  # "Schema & Model Fixes", etc.
     is_complete: bool = False
+    context_lines: list[str] = field(default_factory=list)
 
     @property
     def complexity(self) -> TaskComplexity:
@@ -206,11 +207,11 @@ def parse_tasks_with_groups(plan: str) -> tuple[list[ParsedTask], list[TaskGroup
     current_group_name = "Default"
     task_index = 0
 
-    for line in plan.split("\n"):
-        line = line.strip()
+    for raw_line in plan.split("\n"):
+        stripped = raw_line.strip()
 
         # Check for PR/Group header
-        pr_match = pr_pattern.match(line)
+        pr_match = pr_pattern.match(stripped)
         if pr_match:
             pr_num = pr_match.group(1)
             pr_name = pr_match.group(2).strip()
@@ -223,7 +224,7 @@ def parse_tasks_with_groups(plan: str) -> tuple[list[ParsedTask], list[TaskGroup
             continue
 
         # Check for task
-        task_match = task_pattern.match(line)
+        task_match = task_pattern.match(stripped)
         if task_match:
             is_complete = task_match.group(1).lower() == "x"
             description = task_match.group(2).strip()
@@ -245,6 +246,21 @@ def parse_tasks_with_groups(plan: str) -> tuple[list[ParsedTask], list[TaskGroup
             group.task_indices.append(task_index)
 
             task_index += 1
+            continue
+
+        # Check for context sublist item (indented bullet, not a checkbox)
+        if (
+            tasks
+            and raw_line
+            and raw_line[0] in (" ", "\t")
+            and stripped.startswith("- ")
+            and not stripped.startswith("- [ ]")
+            and not stripped.startswith("- [x]")
+            and not stripped.startswith("- [X]")
+        ):
+            context_text = stripped[2:].strip()
+            if context_text:
+                tasks[-1].context_lines.append(context_text)
 
     # If no explicit groups, ensure default group exists
     if not groups and tasks:

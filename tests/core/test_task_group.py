@@ -402,3 +402,132 @@ class TestEdgeCases:
         # Note: Current implementation doesn't handle code blocks specially
         # This documents current behavior - may want to enhance later
         assert len(tasks) >= 1
+
+
+class TestContextLines:
+    """Tests for context sublists (file references) under tasks."""
+
+    def test_parse_context_lines(self):
+        """Tasks with sublists should get context_lines populated."""
+        plan = """
+### PR 1: Schema & Model Fixes
+
+- [ ] `[coding]` Make `user_id` nullable in Shift model
+  - `rails/db/migrate/` — add new migration file
+  - `rails/app/models/shift.rb:15` — `Shift` class, `belongs_to :user`
+  - `rails/spec/models/shift_spec.rb` — update validation specs
+"""
+        tasks, _ = parse_tasks_with_groups(plan)
+
+        assert len(tasks) == 1
+        assert len(tasks[0].context_lines) == 3
+        assert tasks[0].context_lines[0] == "`rails/db/migrate/` — add new migration file"
+        assert "`Shift` class" in tasks[0].context_lines[1]
+        assert "update validation specs" in tasks[0].context_lines[2]
+
+    def test_context_lines_not_counted_as_tasks(self):
+        """Sublists should not create extra tasks."""
+        plan = """
+### PR 1: Test
+
+- [ ] `[coding]` Task one
+  - `file1.py` — note 1
+  - `file2.py` — note 2
+- [ ] `[quick]` Task two
+  - `file3.py` — note 3
+"""
+        tasks, _ = parse_tasks_with_groups(plan)
+
+        assert len(tasks) == 2
+        assert tasks[0].description == "`[coding]` Task one"
+        assert tasks[1].description == "`[quick]` Task two"
+
+    def test_context_lines_per_task(self):
+        """Each task should get only its own context lines."""
+        plan = """
+- [ ] Task A
+  - `a1.py` — ref A1
+  - `a2.py` — ref A2
+- [ ] Task B
+  - `b1.py` — ref B1
+- [ ] Task C
+"""
+        tasks, _ = parse_tasks_with_groups(plan)
+
+        assert len(tasks) == 3
+        assert len(tasks[0].context_lines) == 2
+        assert tasks[0].context_lines[0] == "`a1.py` — ref A1"
+        assert tasks[0].context_lines[1] == "`a2.py` — ref A2"
+        assert len(tasks[1].context_lines) == 1
+        assert tasks[1].context_lines[0] == "`b1.py` — ref B1"
+        assert len(tasks[2].context_lines) == 0
+
+    def test_no_context_lines(self):
+        """Tasks without sublists should have empty context_lines."""
+        plan = """
+### PR 1: Simple
+
+- [ ] `[coding]` Simple task without context
+- [ ] `[quick]` Another simple task
+"""
+        tasks, _ = parse_tasks_with_groups(plan)
+
+        assert len(tasks) == 2
+        assert tasks[0].context_lines == []
+        assert tasks[1].context_lines == []
+
+    def test_context_lines_with_groups(self):
+        """Context lines should work correctly within PR groups."""
+        plan = """
+### PR 1: Schema Changes
+
+- [ ] `[coding]` Create migration
+  - `db/migrate/` — new migration file
+  - `app/models/user.rb` — update model
+
+### PR 2: Service Layer
+
+- [ ] `[coding]` Fix service
+  - `app/services/user_service.rb` — `UserService.process()`
+- [ ] `[general]` Add tests
+"""
+        tasks, groups = parse_tasks_with_groups(plan)
+
+        assert len(tasks) == 3
+        assert len(groups) == 2
+
+        # PR 1 task has context
+        assert len(tasks[0].context_lines) == 2
+        assert tasks[0].group_id == "pr_1"
+
+        # PR 2 first task has context, second doesn't
+        assert len(tasks[1].context_lines) == 1
+        assert tasks[1].group_id == "pr_2"
+        assert len(tasks[2].context_lines) == 0
+        assert tasks[2].group_id == "pr_2"
+
+    def test_context_lines_with_tab_indent(self):
+        """Context lines with tab indentation should be captured."""
+        plan = "- [ ] Task with tabs\n\t- `file.py` — tab indented ref\n"
+        tasks, _ = parse_tasks_with_groups(plan)
+
+        assert len(tasks) == 1
+        assert len(tasks[0].context_lines) == 1
+        assert tasks[0].context_lines[0] == "`file.py` — tab indented ref"
+
+    def test_blank_line_between_task_and_sublist(self):
+        """A blank line should stop context line collection."""
+        plan = """
+- [ ] Task A
+  - `a.py` — ref for A
+
+- [ ] Task B
+  - `b.py` — ref for B
+"""
+        tasks, _ = parse_tasks_with_groups(plan)
+
+        assert len(tasks) == 2
+        assert len(tasks[0].context_lines) == 1
+        assert tasks[0].context_lines[0] == "`a.py` — ref for A"
+        assert len(tasks[1].context_lines) == 1
+        assert tasks[1].context_lines[0] == "`b.py` — ref for B"

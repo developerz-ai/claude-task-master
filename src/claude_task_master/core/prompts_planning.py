@@ -118,21 +118,29 @@ executed in a continuous conversation, so Claude remembers previous work.
 ```markdown
 ### PR 1: Schema & Model Fixes (Prerequisites)
 
-- [ ] `[coding]` Create migration to make `user_id` nullable in `rails/db/migrate/`
-- [ ] `[coding]` Update `Shift` model in `rails/app/models/shift.rb`
-- [ ] `[quick]` Update `rails/spec/factories/shifts.rb` to add `:unassigned` trait
+- [ ] `[coding]` Make `user_id` nullable in Shift model
+  - `rails/db/migrate/` — add new migration file
+  - `rails/app/models/shift.rb:15` — `Shift` class, `belongs_to :user`
+  - `rails/spec/models/shift_spec.rb` — update validation specs
 
-### PR 2: Service Layer Fixes
+- [ ] `[coding]` Fix `EmployeeDashboardService`
+  - `rails/app/services/dashboards/employee_dashboard_service.rb` — `#shifts_for_week` method
+  - `rails/spec/services/dashboards/` — update service specs
 
-- [ ] `[coding]` Fix `EmployeeDashboardService` in `rails/app/services/dashboards/`
-- [ ] `[coding]` Fix `AdminDashboardService` spec in `rails/spec/services/dashboards/`
-- [ ] `[general]` Run full test suite and fix any failures
+- [ ] `[quick]` Update factory to add `:unassigned` trait
+  - `rails/spec/factories/shifts.rb` — add `trait :unassigned`
 ```
 
-**IMPORTANT: Include file paths and symbols in EVERY task:**
-- File paths: `src/module/file.py`, `tests/test_file.py`
-- Symbols: `ClassName`, `method_name()`, `CONSTANT_NAME`
-- Line refs when relevant: `file.py:123`
+**IMPORTANT: Add context sublists under each task:**
+Under each task, add an indented sublist referencing relevant files, symbols, and line numbers.
+These are context hints for the worker — NOT subtasks. Include short implementation hints
+(approach, pattern to follow, gotchas) to reduce worker exploration time.
+
+Format:
+- [ ] `[coding]` Task description
+  - `path/to/file.py:42` — `ClassName.method_name()`, brief note on what to change
+  - `path/to/other.py` — `CONSTANT_NAME`, follow existing pattern in `similar_file.py`
+  - `tests/test_file.py` — add/update test for X, mirror `TestExisting` style
 
 **Complexity tags (for model routing):**
 - `[coding]` → Opus (smartest) - new features, complex logic
@@ -163,17 +171,19 @@ executed in a continuous conversation, so Claude remembers previous work.
 
 - [ ] `[quick]` Create feature branch: claudetm/feat/your-feature-name
 - [ ] `[coding]` Add migration for new table
+  - `db/migrate/` — create new migration file
+  - `app/models/` — add model class
 - [ ] `[coding]` Create model with validations
+  - `app/models/user.rb` — `User` class, add `validates :email`
+  - `spec/models/user_spec.rb` — add validation specs
 
 ### PR 2: Business Logic
 
 - [ ] `[coding]` Implement service class
+  - `app/services/user_service.rb` — new `UserService` class
+  - `spec/services/user_service_spec.rb` — add unit tests
 - [ ] `[general]` Add service tests
-
-### PR 3: API Layer
-
-- [ ] `[coding]` Add controller endpoints
-- [ ] `[general]` Add API tests
+  - `spec/services/` — integration tests
 ```
 
 **Each PR should be mergeable independently when possible.**""",
