@@ -1006,11 +1006,12 @@ class TestRunLifecycleWebhooks:
         # Mock cancellation request
         mock_cancel_requested.return_value = True
 
-        # Mock the work loop to check cancellation
+        # Mock the work loop to check cancellation - always return an int exit code
         def mock_workflow_cycle(state):
             # Simulate cancellation during run
             if mock_cancel_requested():
                 return 2
+            return 0  # Default to success if not cancelled
 
         with patch.object(
             orchestrator_with_webhooks, "_run_workflow_cycle", side_effect=mock_workflow_cycle
@@ -1464,11 +1465,12 @@ class TestPRCountTrackingWebhooks:
         # Mock cancellation request
         mock_cancel_requested.return_value = True
 
-        # Mock the work loop to check cancellation
+        # Mock the work loop to check cancellation - always return an int exit code
         def mock_workflow_cycle(state):
             # Simulate cancellation during run
             if mock_cancel_requested():
                 return 2
+            return 0  # Default to success if not cancelled
 
         with patch.object(
             orchestrator_with_webhooks,

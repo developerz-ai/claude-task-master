@@ -124,6 +124,8 @@ class TaskState(BaseModel):
     # PR tracking fields
     prs_created: int = 0  # Total number of PRs created during this run
     prs_merged: int = 0  # Total number of PRs merged during this run
+    last_counted_pr_created: int | None = None  # Last PR number counted for creation
+    last_counted_pr_merged: int | None = None  # Last PR number counted for merge
 
 
 # =============================================================================

@@ -394,8 +394,13 @@ class WorkLoopOrchestrator:
         if not state.current_pr:
             return
 
-        # Increment PR created counter and save state
+        # Check for idempotency - skip if this PR was already counted
+        if state.last_counted_pr_created == state.current_pr:
+            return
+
+        # Increment PR created counter and mark this PR as counted
         state.prs_created += 1
+        state.last_counted_pr_created = state.current_pr
         self.state_manager.save_state(state)
 
         # Get PR details from GitHub
@@ -432,8 +437,13 @@ class WorkLoopOrchestrator:
         if not state.current_pr:
             return
 
-        # Increment PR merged counter and save state
+        # Check for idempotency - skip if this PR was already counted
+        if state.last_counted_pr_merged == state.current_pr:
+            return
+
+        # Increment PR merged counter and mark this PR as counted
         state.prs_merged += 1
+        state.last_counted_pr_merged = state.current_pr
         self.state_manager.save_state(state)
 
         # Get PR details from GitHub
