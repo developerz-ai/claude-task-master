@@ -75,19 +75,113 @@ register_mailbox_commands(app)  # mailbox, mailbox send, mailbox clear
 
 @app.command()
 def comments(
-    pr: int | None = typer.Option(None, "--pr", "-p", help="PR number to show comments for"),
+    pr_number: int | None = typer.Option(None, "--pr", "-p", help="PR number to show comments for"),
+    all_comments: bool = typer.Option(
+        False, "--all", "-a", help="Show all comments including resolved ones"
+    ),
 ) -> None:
     """Display PR review comments.
 
     Shows review comments for the current task's PR or a specified PR.
+    By default, only shows unresolved comments.
 
     Examples:
-        claudetm comments
-        claudetm comments -p 123
+        claudetm comments           # Show unresolved comments for current PR
+        claudetm comments -p 123    # Show unresolved comments for PR #123
+        claudetm comments -a        # Show all comments including resolved
     """
-    console.print("[bold blue]PR Comments[/bold blue]")
-    # TODO: Implement comments logic
-    raise typer.Exit(1)
+    from .github.client import GitHubClient
+    from .github.exceptions import GitHubError
+
+    # Determine which PR to check
+    if pr_number is None:
+        # Try to get from task state first
+        state_manager = StateManager()
+        if state_manager.exists():
+            try:
+                state = state_manager.load_state()
+                pr_number = state.current_pr
+            except Exception:
+                pass  # Ignore state loading errors
+
+        # If no PR in state, try to get from current branch
+        if pr_number is None:
+            try:
+                gh_client = GitHubClient()
+                pr_number = gh_client.get_pr_for_current_branch()
+            except GitHubError as e:
+                console.print(f"[red]Error checking current branch: {e}[/red]")
+                raise typer.Exit(1) from None
+
+        if pr_number is None:
+            console.print("[yellow]No PR found for current branch or task.[/yellow]")
+            raise typer.Exit(1)
+
+    # Get PR comments
+    try:
+        gh_client = GitHubClient()
+
+        # Get PR info for display
+        import json
+        import subprocess
+
+        result = subprocess.run(
+            ["gh", "pr", "view", str(pr_number), "--json", "title,url"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if result.returncode == 0:
+            pr_info = json.loads(result.stdout)
+            pr_title = pr_info.get("title", "Unknown")
+            pr_url = pr_info.get("url", "")
+        else:
+            pr_title = "Unknown"
+            pr_url = ""
+
+        # Get comments using the GitHub client
+        only_unresolved = not all_comments
+        comments_text = gh_client.get_pr_comments(pr_number, only_unresolved=only_unresolved)
+
+    except GitHubError as e:
+        console.print(f"[red]Error fetching PR comments: {e}[/red]")
+        raise typer.Exit(1) from None
+
+    # Display header
+    console.print("\n[bold blue]PR Review Comments[/bold blue]\n")
+    console.print(f"[cyan]PR:[/cyan] #{pr_number}")
+    console.print(f"[cyan]Title:[/cyan] {pr_title}")
+    if pr_url:
+        console.print(f"[cyan]URL:[/cyan] {pr_url}")
+
+    filter_msg = "all" if all_comments else "unresolved"
+    console.print(f"[cyan]Filter:[/cyan] {filter_msg}")
+
+    # Display comments
+    console.print("\n[bold]Comments[/bold]\n")
+
+    if not comments_text.strip():
+        if all_comments:
+            console.print("[dim]No review comments on this PR.[/dim]")
+        else:
+            console.print("[green]✓ No unresolved review comments.[/green]")
+    else:
+        # Parse and display comments in a more readable format
+        from rich.markdown import Markdown
+        from rich.panel import Panel
+
+        # Split comments by the separator used in _format_pr_comments_from_rest
+        comment_blocks = comments_text.split("\n---\n\n")
+
+        for i, block in enumerate(comment_blocks, 1):
+            if block.strip():
+                # Create a panel for each comment
+                console.print(
+                    Panel(Markdown(block.strip()), title=f"Comment {i}", border_style="dim")
+                )
+                console.print()  # Add spacing between comments
+
+    raise typer.Exit(0)
 
 
 @app.command()
