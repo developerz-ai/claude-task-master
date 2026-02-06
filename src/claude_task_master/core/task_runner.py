@@ -289,10 +289,20 @@ class TaskRunner:
             console.warning(f"Could not load goal: {e}")
             goal = "Complete the assigned task"
 
+        # Get context lines from parsed task if available
+        parsed_tasks, _ = self._get_parsed_tasks(plan)
+        context_refs = ""
+        if state.current_task_index < len(parsed_tasks):
+            parsed_task = parsed_tasks[state.current_task_index]
+            if parsed_task.context_lines:
+                context_refs = "\nReferences:\n"
+                for ref in parsed_task.context_lines:
+                    context_refs += f"  - {ref}\n"
+
         task_description = f"""Goal: {goal}
 
 Current Task (#{state.current_task_index + 1}): {cleaned_task}
-
+{context_refs}
 Please complete this task."""
 
         console.newline()

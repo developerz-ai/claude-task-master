@@ -604,23 +604,18 @@ def list_tasks(
                 "error": "No plan found",
             }
 
-        tasks = []
-        for line in plan.split("\n"):
-            stripped = line.strip()
-            if stripped.startswith("- [ ]"):
-                tasks.append(
-                    {
-                        "task": stripped[5:].strip(),
-                        "completed": False,
-                    }
-                )
-            elif stripped.startswith("- [x]"):
-                tasks.append(
-                    {
-                        "task": stripped[5:].strip(),
-                        "completed": True,
-                    }
-                )
+        from claude_task_master.core.task_group import parse_tasks_with_groups
+
+        parsed_tasks, _ = parse_tasks_with_groups(plan)
+        tasks = [
+            {
+                "task": t.description,
+                "completed": t.is_complete,
+                "context": t.context_lines,
+                "group": t.group_name,
+            }
+            for t in parsed_tasks
+        ]
 
         state = state_manager.load_state()
 

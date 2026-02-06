@@ -506,10 +506,10 @@ class TestCreateTaskListSection:
         assert "### PR" in result
         assert "- [ ]" in result
 
-    def test_file_paths_emphasized(self) -> None:
-        """Test file paths requirement is emphasized."""
+    def test_file_references_emphasized(self) -> None:
+        """Test file references requirement is emphasized via context sublists."""
         result = build_planning_prompt("Any goal")
-        assert "file path" in result.lower() or "File paths" in result
+        assert "context sublists" in result.lower() or "referencing relevant files" in result
 
     def test_symbols_emphasized(self) -> None:
         """Test symbols requirement is emphasized."""

@@ -102,23 +102,19 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 
-def _parse_plan_tasks(plan: str) -> list[tuple[str, bool]]:
+def _parse_plan_tasks(plan: str) -> list[tuple[str, bool, list[str]]]:
     """Parse task checkboxes from plan markdown.
 
     Args:
         plan: The plan content in markdown format.
 
     Returns:
-        List of (task_description, is_completed) tuples.
+        List of (task_description, is_completed, context_lines) tuples.
     """
-    tasks: list[tuple[str, bool]] = []
-    for line in plan.splitlines():
-        line = line.strip()
-        if line.startswith("- [ ] "):
-            tasks.append((line[6:], False))
-        elif line.startswith("- [x] ") or line.startswith("- [X] "):
-            tasks.append((line[6:], True))
-    return tasks
+    from claude_task_master.core.task_group import parse_tasks_with_groups
+
+    parsed_tasks, _ = parse_tasks_with_groups(plan)
+    return [(t.description, t.is_complete, t.context_lines) for t in parsed_tasks]
 
 
 def _get_state_manager(request: Request) -> StateManager:
@@ -244,7 +240,7 @@ def create_info_router() -> APIRouter:
             plan = state_manager.load_plan()
             if plan:
                 tasks = _parse_plan_tasks(plan)
-                completed = sum(1 for _, done in tasks if done)
+                completed = sum(1 for _, done, _ in tasks if done)
                 total = len(tasks)
                 tasks_info = TaskProgressInfo(
                     completed=completed,
