@@ -18,7 +18,7 @@ permissions:
 jobs:
   build-and-push:
     name: Build and Push Docker Image
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
