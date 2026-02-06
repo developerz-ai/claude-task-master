@@ -1,6 +1,8 @@
 """CLI entry point for Claude Task Master."""
 
 import asyncio
+import json
+import subprocess
 
 import typer
 from rich.console import Console
@@ -16,6 +18,66 @@ from .cli_commands.workflow import register_workflow_commands
 from .core.state import StateManager
 from .utils.debug_claude_md import debug_claude_md_detection
 from .utils.doctor import SystemDoctor
+
+
+class PRInfoResult:
+    """Result of fetching PR info from GitHub CLI."""
+
+    def __init__(
+        self,
+        title: str = "Unknown",
+        url: str = "",
+        is_draft: bool = False,
+        error: str | None = None,
+    ) -> None:
+        self.title = title
+        self.url = url
+        self.is_draft = is_draft
+        self.error = error
+
+    @property
+    def failed(self) -> bool:
+        """Return True if there was an error fetching PR info."""
+        return self.error is not None
+
+
+def _fetch_pr_info(pr_number: int, fields: list[str] | None = None) -> PRInfoResult:
+    """Fetch PR info using gh CLI with proper error handling.
+
+    Args:
+        pr_number: The PR number to fetch info for
+        fields: JSON fields to request (default: ["title", "url"])
+
+    Returns:
+        PRInfoResult with the PR info or error details
+    """
+    if fields is None:
+        fields = ["title", "url"]
+
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "view", str(pr_number), "--json", ",".join(fields)],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+
+        if result.returncode != 0:
+            # Non-zero return code - gh command failed
+            stderr = result.stderr.strip() if result.stderr else "Unknown error"
+            return PRInfoResult(error=f"gh pr view failed: {stderr}")
+
+        pr_info = json.loads(result.stdout)
+        return PRInfoResult(
+            title=pr_info.get("title", "Unknown"),
+            url=pr_info.get("url", ""),
+            is_draft=pr_info.get("isDraft", False),
+        )
+
+    except subprocess.TimeoutExpired:
+        return PRInfoResult(error="gh pr view timed out after 15 seconds")
+    except json.JSONDecodeError as e:
+        return PRInfoResult(error=f"Failed to parse gh output as JSON: {e}")
 
 
 def version_callback(value: bool) -> None:
@@ -121,23 +183,15 @@ def comments(
     try:
         gh_client = GitHubClient()
 
-        # Get PR info for display
-        import json
-        import subprocess
+        # Get PR info for display with proper error handling
+        pr_info_result = _fetch_pr_info(pr_number, ["title", "url"])
+        pr_title = pr_info_result.title
+        pr_url = pr_info_result.url
 
-        result = subprocess.run(
-            ["gh", "pr", "view", str(pr_number), "--json", "title,url"],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        if result.returncode == 0:
-            pr_info = json.loads(result.stdout)
-            pr_title = pr_info.get("title", "Unknown")
-            pr_url = pr_info.get("url", "")
-        else:
-            pr_title = "Unknown"
-            pr_url = ""
+        if pr_info_result.failed:
+            console.print(
+                f"[yellow]Warning: Could not fetch PR info: {pr_info_result.error}[/yellow]"
+            )
 
         # Get comments using the GitHub client
         only_unresolved = not all_comments
@@ -229,25 +283,16 @@ def pr(
         gh_client = GitHubClient()
         pr_status = gh_client.get_pr_status(pr_number)
 
-        # Get additional PR info (title, URL) using gh pr view
-        import json
-        import subprocess
+        # Get additional PR info (title, URL) using gh pr view with proper error handling
+        pr_info_result = _fetch_pr_info(pr_number, ["title", "url", "isDraft"])
+        pr_title = pr_info_result.title
+        pr_url = pr_info_result.url
+        is_draft = pr_info_result.is_draft
 
-        result = subprocess.run(
-            ["gh", "pr", "view", str(pr_number), "--json", "title,url,state,isDraft"],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        if result.returncode == 0:
-            pr_info = json.loads(result.stdout)
-            pr_title = pr_info.get("title", "Unknown")
-            pr_url = pr_info.get("url", "")
-            is_draft = pr_info.get("isDraft", False)
-        else:
-            pr_title = "Unknown"
-            pr_url = ""
-            is_draft = False
+        if pr_info_result.failed:
+            console.print(
+                f"[yellow]Warning: Could not fetch PR info: {pr_info_result.error}[/yellow]"
+            )
 
     except GitHubError as e:
         console.print(f"[red]Error fetching PR status: {e}[/red]")
