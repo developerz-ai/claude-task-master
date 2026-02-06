@@ -122,8 +122,8 @@ class TaskState(BaseModel):
     mailbox_enabled: bool = True  # Whether mailbox checking is enabled
     last_mailbox_check: datetime | None = None  # Last time mailbox was checked
     # PR tracking fields
-    prs_created: int = 0  # Total number of PRs created during this task
-    prs_merged: int = 0  # Total number of PRs merged during this task
+    prs_created: int = 0  # Total number of PRs created during this run
+    prs_merged: int = 0  # Total number of PRs merged during this run
 
 
 # =============================================================================
