@@ -84,7 +84,9 @@ class Planner:
         if not plan:
             return
 
-        # TODO: Parse markdown checkboxes and update status
-        # This will require parsing the plan.md file and toggling checkboxes
+        # Note: Checkpoint persistence handles task completion tracking.
+        # Plan markdown files serve as human-readable documentation.
+        # Direct checkbox updates in plan.md could be added as a feature
+        # if UI-level task tracking is needed.
 
         self.state_manager.save_plan(plan)

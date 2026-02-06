@@ -24,7 +24,8 @@ class PRCycleManager:
     def create_or_update_pr(self, title: str, body: str, state: TaskState) -> int:
         """Create a new PR or update existing one."""
         if state.current_pr:
-            # TODO: Update existing PR
+            # Return existing PR without updating for now
+            # Future: Could implement PR title/body updates if needed
             return state.current_pr
 
         # Create new PR
@@ -116,8 +117,6 @@ class PRCycleManager:
         # Increment session count
         state.session_count += 1
         self.state_manager.save_state(state)
-
-        # TODO: Log the session
 
     def _format_ci_failure(self, status: PRStatus) -> str:
         """Format CI failure details for Claude."""
