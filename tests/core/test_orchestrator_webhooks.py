@@ -1521,6 +1521,10 @@ class TestPRCountTrackingWebhooks:
         # Handle PR creation stage
         orchestrator_with_webhooks._run_workflow_cycle(basic_task_state)
 
+        # Verify counter was incremented
+        updated_state = state_manager.load_state()
+        assert updated_state.prs_created == 1
+
         # Find the pr.created event call
         calls = mock_webhook_client.send_sync.call_args_list
         pr_created_calls = [c for c in calls if c.kwargs.get("event_type") == "pr.created"]
@@ -1569,6 +1573,10 @@ class TestPRCountTrackingWebhooks:
 
         # Handle PR merge stage
         orchestrator_with_webhooks._run_workflow_cycle(basic_task_state)
+
+        # Verify counter was incremented
+        updated_state = state_manager.load_state()
+        assert updated_state.prs_merged == 1
 
         # Find the pr.merged event call
         calls = mock_webhook_client.send_sync.call_args_list
