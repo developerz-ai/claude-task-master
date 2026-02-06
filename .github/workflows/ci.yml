@@ -46,7 +46,7 @@ jobs:
   # Unit tests - fast, Python 3.12 only
   test-unit:
     name: Unit Tests
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v6
 
@@ -93,7 +93,7 @@ jobs:
   # Integration tests - may be slower, test component interactions
   test-integration:
     name: Integration Tests
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v6
 
@@ -138,7 +138,7 @@ jobs:
   # Property-based tests using Hypothesis
   test-property:
     name: Property-based Tests (Hypothesis)
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v6
 

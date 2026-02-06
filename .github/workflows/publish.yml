@@ -56,7 +56,7 @@ jobs:
 
   test:
     name: Run Tests
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     needs: verify
     steps:
       - uses: actions/checkout@v6
