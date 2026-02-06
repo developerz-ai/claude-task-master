@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.13] - 2026-02-06
+
+### Added
+- **CLI commands for PR status and review comments** (#87): New `claudetm pr-status` and `claudetm pr-comments` commands for inspecting PR state from the terminal
+- **Task context sublists (file references)** (#86): Tasks in plan.md can now include file reference sublists for better context tracking
+
+### Fixed
+- **Clean up remaining minor TODOs**: Resolved leftover TODO items across the codebase
+
+### Testing
+- **Comprehensive PR count tracking tests** (#88): Added thorough test coverage for PR count tracking in webhook events
+
 ## [0.1.12] - 2026-02-06
 
 ### Fixed
@@ -328,7 +340,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.12...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.13...HEAD
+[0.1.13]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.9...v0.1.10
