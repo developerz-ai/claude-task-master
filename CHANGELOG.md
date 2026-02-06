@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-02-06
+
+### Fixed
+- **Downgrade claude-agent-sdk to <0.1.29**: Pin SDK to v0.1.28 (CLI v2.1.30) to avoid
+  "Stream closed" hook callback errors introduced in v0.1.29's new hook events
+  (`SubagentStop`, `Notification`, `PermissionRequest`). These hooks cause noisy but
+  non-fatal `Error in hook callback hook_0: Stream closed` errors on every tool call
+  when using `bypassPermissions` mode. See [claude-agent-sdk-python issue](https://github.com/anthropics/claude-agent-sdk-python/issues/).
+
+### Changed
+- **CI optimization**: Use 2vcpu runners for all CI jobs (tests are single-threaded)
+
 ## [0.1.11] - 2026-02-05
 
 ### Changed
@@ -316,7 +328,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.11...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.12...HEAD
+[0.1.12]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.8...v0.1.9

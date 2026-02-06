@@ -129,23 +129,23 @@ wheels = [
 
 [[package]]
 name = "claude-agent-sdk"
-version = "0.1.30"
+version = "0.1.28"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
     { name = "mcp" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a9/26/760e30919eec42fb1329eebf190ffdc041493e5c25e3f98cc44dd1161f26/claude_agent_sdk-0.1.30.tar.gz", hash = "sha256:f16639143c87ee2d5dbbb96ea848f9fbc54256a60005c3d55df99e4aeb0dc770", size = 59806, upload-time = "2026-02-05T17:58:37.39Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6e/c4/7ddb9e48065e930f09d911def28c4de0177a512734bdec004b3b4f6fb8b0/claude_agent_sdk-0.1.28.tar.gz", hash = "sha256:374a25b1a7744ba1ebd72d758011a6b25d5aaf687cd8ed611ff31f0c335e460b", size = 57660, upload-time = "2026-02-03T18:16:05.71Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/92/7b/3989869b2f1e3dfc07bd541fc04c7283041a4cc0a12288ae4f5bd7c64a26/claude_agent_sdk-0.1.30-py3-none-macosx_11_0_arm64.whl", hash = "sha256:ba63b3c8155519419c4ed72ac5064b815e4c491aecdd58bb0d7ecb61be93193c", size = 54286810, upload-time = "2026-02-05T17:58:14.546Z" },
-    { url = "https://files.pythonhosted.org/packages/56/51/589a70e724088a03ea07d26057da528ac39b0f66a3df167185e12dc6cf88/claude_agent_sdk-0.1.30-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:726ddd437b8a7ef838322f9d055aa2f4d582747c517c88b41bc3feb2ff91bb8f", size = 68478838, upload-time = "2026-02-05T17:58:18.991Z" },
-    { url = "https://files.pythonhosted.org/packages/e2/b0/d262246bafb04754d253f4e55128c1335100650717ef026544ca559816c8/claude_agent_sdk-0.1.30-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:4c57565cd25195aed8ab538332af6d0181d8ecbca8dfe24e8e06fa0fe1baebbd", size = 70184195, upload-time = "2026-02-05T17:58:23.357Z" },
-    { url = "https://files.pythonhosted.org/packages/36/51/0662a3d69353021acf36af6281be86f9bb492058321f1435cf3bf94bef3d/claude_agent_sdk-0.1.30-py3-none-win_amd64.whl", hash = "sha256:238615c2bef09337f9698fe1b48a77f1ba591f8c9bf3e7c498e3d0dc57de1a59", size = 72392677, upload-time = "2026-02-05T17:58:28.854Z" },
+    { url = "https://files.pythonhosted.org/packages/dd/03/5bc4f9e8d5f2e0ed4c8cba0255021f737ec05230cffa7511b5e979e9ced9/claude_agent_sdk-0.1.28-py3-none-macosx_11_0_arm64.whl", hash = "sha256:66630bc1906ca383dfaa5b5e4bc93043d52616dd4b15b96f120631db00f5cbf8", size = 54188673, upload-time = "2026-02-03T18:15:50.652Z" },
+    { url = "https://files.pythonhosted.org/packages/a7/3c/d2d706e2f9b900194fce1bbfa3cf41fc489c3d3e81f7b3b07140f7a5c4f4/claude_agent_sdk-0.1.28-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:6a24a0f699701f42fd4ef3cbe25142397b642fbb9b881a567b051233972e122c", size = 68379018, upload-time = "2026-02-03T18:15:54.917Z" },
+    { url = "https://files.pythonhosted.org/packages/51/85/881eb1ae25d82f5895588b432820f6cf64cdc81783646f1976fc2d6a5109/claude_agent_sdk-0.1.28-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:3b38397be130bc04fe0d70864423fda39444dbc31634fa177fee1b892f1e208f", size = 70095465, upload-time = "2026-02-03T18:15:58.763Z" },
+    { url = "https://files.pythonhosted.org/packages/7f/4d/8dce7bedf4b343f6f5a2342085b7ce509dbecb32e6aeaffe1806736f061b/claude_agent_sdk-0.1.28-py3-none-win_amd64.whl", hash = "sha256:53f5d8e1b1faf09f2b0e2458921a5c6bf6dc11cce55a1be7d52cf5294c4371c0", size = 72281170, upload-time = "2026-02-03T18:16:02.71Z" },
 ]
 
 [[package]]
 name = "claude-task-master"
-version = "0.1.11"
+version = "0.1.12"
 source = { editable = "." }
 dependencies = [
     { name = "claude-agent-sdk" },
@@ -201,7 +201,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "bcrypt", marker = "extra == 'api'", specifier = ">=4.0.0,<4.1.0" },
-    { name = "claude-agent-sdk", specifier = ">=0.1.30" },
+    { name = "claude-agent-sdk", specifier = ">=0.1.27,<0.1.29" },
     { name = "claude-task-master", extras = ["api"], marker = "extra == 'dev'" },
     { name = "claude-task-master", extras = ["mcp", "api", "dev"], marker = "extra == 'all'" },
     { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.128.1" },
