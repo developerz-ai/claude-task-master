@@ -163,13 +163,13 @@ class TestSaveCIFailures:
         mock_github_client: MagicMock,
     ) -> None:
         """Test that CI failures are saved for failed checks."""
-        # Mock PR status with detailsUrl containing run ID
+        # Mock PR status with url containing run ID
         mock_github_client.get_pr_status.return_value = MagicMock(
             check_details=[
                 {
                     "name": "test-job",
                     "conclusion": "FAILURE",
-                    "detailsUrl": "https://github.com/owner/repo/actions/runs/12345/job/789",
+                    "url": "https://github.com/owner/repo/actions/runs/12345/job/789",
                 },
             ]
         )
@@ -231,7 +231,7 @@ class TestSaveCIFailures:
                 {
                     "name": "build-job",
                     "conclusion": "ERROR",
-                    "detailsUrl": "https://github.com/owner/repo/actions/runs/12345/job/789",
+                    "url": "https://github.com/owner/repo/actions/runs/12345/job/789",
                 },
             ]
         )
@@ -1115,13 +1115,13 @@ class TestPRContextIntegration:
         mock_github_client: MagicMock,
     ) -> None:
         """Test saving both CI failures and comments."""
-        # Setup CI failure mocks with detailsUrl
+        # Setup CI failure mocks with url
         mock_github_client.get_pr_status.return_value = MagicMock(
             check_details=[
                 {
                     "name": "tests",
                     "conclusion": "FAILURE",
-                    "detailsUrl": "https://github.com/owner/repo/actions/runs/12345/job/789",
+                    "url": "https://github.com/owner/repo/actions/runs/12345/job/789",
                 }
             ]
         )
