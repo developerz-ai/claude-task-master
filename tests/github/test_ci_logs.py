@@ -69,7 +69,7 @@ class TestGetFailedJobs:
     """Tests for getting failed jobs."""
 
     def test_get_failed_jobs_success(self, ci_downloader, sample_jobs_response):
-        """Test successful retrieval of failed jobs."""
+        """Test successful retrieval of failed jobs (excludes cancelled)."""
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0,
@@ -79,13 +79,11 @@ class TestGetFailedJobs:
 
             failed_jobs = ci_downloader.get_failed_jobs(run_id=123)
 
-            assert len(failed_jobs) == 2
+            # Should only include "failure" jobs, not "cancelled"
+            assert len(failed_jobs) == 1
             assert failed_jobs[0].id == 1
             assert failed_jobs[0].name == "Lint"
             assert failed_jobs[0].conclusion == "failure"
-            assert failed_jobs[1].id == 3
-            assert failed_jobs[1].name == "Build"
-            assert failed_jobs[1].conclusion == "cancelled"
 
     def test_get_failed_jobs_no_failures(self, ci_downloader):
         """Test when no jobs failed."""
@@ -379,20 +377,17 @@ class TestDownloadFailedRunLogs:
 
             logs = ci_downloader.download_failed_run_logs(run_id=123, output_dir=tmp_path)
 
-            assert len(logs) == 2
+            # Only Lint job should be downloaded (Build is cancelled, excluded)
+            assert len(logs) == 1
             assert "Lint" in logs
-            assert "Build" in logs
             assert "##[error]" in logs["Lint"]
 
-            # Check chunked directories were created
+            # Check chunked directory was created
             lint_dir = tmp_path / "Lint"
-            build_dir = tmp_path / "Build"
             assert lint_dir.exists()
-            assert build_dir.exists()
 
-            # Check log files were created (should be 1.log since content is small)
+            # Check log file was created (should be 1.log since content is small)
             assert (lint_dir / "1.log").exists()
-            assert (build_dir / "1.log").exists()
 
     def test_download_failed_run_logs_no_output_dir(
         self, ci_downloader, sample_jobs_response, sample_log_content
@@ -410,16 +405,12 @@ class TestDownloadFailedRunLogs:
                     stdout=sample_log_content.encode("utf-8"),
                     stderr=b"",
                 ),
-                MagicMock(
-                    returncode=0,
-                    stdout=sample_log_content.encode("utf-8"),
-                    stderr=b"",
-                ),
             ]
 
             logs = ci_downloader.download_failed_run_logs(run_id=123)
 
-            assert len(logs) == 2
+            # Only Lint job (Build is cancelled, excluded)
+            assert len(logs) == 1
             assert "Lint" in logs
 
     def test_download_failed_run_logs_no_failures(self, ci_downloader):
@@ -437,10 +428,8 @@ class TestDownloadFailedRunLogs:
 
             assert len(logs) == 0
 
-    def test_download_failed_run_logs_partial_failure(
-        self, ci_downloader, sample_jobs_response, sample_log_content
-    ):
-        """Test when one job log download fails."""
+    def test_download_failed_run_logs_all_downloads_fail(self, ci_downloader, sample_jobs_response):
+        """Test when all job log downloads fail."""
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
                 MagicMock(
@@ -448,19 +437,12 @@ class TestDownloadFailedRunLogs:
                     stdout=json.dumps(sample_jobs_response),
                     stderr="",
                 ),
-                MagicMock(
-                    returncode=0,
-                    stdout=sample_log_content.encode("utf-8"),
-                    stderr=b"",
-                ),
-                subprocess.CalledProcessError(returncode=1, cmd="gh api", stderr="Error"),
+                subprocess.CalledProcessError(returncode=1, cmd="gh api", stderr=b"Network error"),
             ]
 
-            logs = ci_downloader.download_failed_run_logs(run_id=123)
-
-            # Should still get the successful one
-            assert len(logs) == 1
-            assert "Lint" in logs
+            # Should raise error when all downloads fail
+            with pytest.raises(GitHubError, match="Failed to download logs for 1 jobs"):
+                ci_downloader.download_failed_run_logs(run_id=123)
 
     def test_download_failed_run_logs_sanitizes_filenames(
         self, ci_downloader, sample_log_content, tmp_path
@@ -512,11 +494,7 @@ class TestDownloadFailedRunLogs:
                     stdout=json.dumps(sample_jobs_response),
                     stderr="",
                 ),
-                MagicMock(
-                    returncode=0,
-                    stdout=large_log.encode("utf-8"),
-                    stderr=b"",
-                ),
+                # Only one log download now (Build is cancelled, excluded)
                 MagicMock(
                     returncode=0,
                     stdout=large_log.encode("utf-8"),
@@ -600,9 +578,9 @@ class TestGetErrorSummary:
 
             summary = ci_downloader.get_error_summary(run_id=123, max_errors_per_job=3)
 
-            assert "Failed jobs: 2" in summary
+            # Only Lint should be included (Build is cancelled, excluded)
+            assert "Failed jobs: 1" in summary
             assert "## Lint" in summary
-            assert "## Build" in summary
             assert "##[error]" in summary
 
     def test_get_error_summary_no_failures(self, ci_downloader):

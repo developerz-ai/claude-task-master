@@ -163,21 +163,20 @@ class TestSaveCIFailures:
         mock_github_client: MagicMock,
     ) -> None:
         """Test that CI failures are saved for failed checks."""
-        # Mock the workflow runs and subprocess calls for CILogDownloader
-        mock_github_client.get_workflow_runs.return_value = [
-            MagicMock(id=12345, name="CI", status="completed", conclusion="failure")
-        ]
+        # Mock PR status with detailsUrl containing run ID
         mock_github_client.get_pr_status.return_value = MagicMock(
             check_details=[
-                {"name": "test-job", "conclusion": "FAILURE"},
+                {
+                    "name": "test-job",
+                    "conclusion": "FAILURE",
+                    "detailsUrl": "https://github.com/owner/repo/actions/runs/12345/job/789",
+                },
             ]
         )
 
         # Mock subprocess calls for CILogDownloader
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                # gh branch --show-current
-                MagicMock(returncode=0, stdout="feat/test-branch", stderr=""),
                 # gh repo view
                 MagicMock(returncode=0, stdout="owner/repo", stderr=""),
                 # gh api .../jobs (get jobs list)
@@ -227,19 +226,19 @@ class TestSaveCIFailures:
         mock_github_client: MagicMock,
     ) -> None:
         """Test that CI failures are saved for ERROR conclusion."""
-        mock_github_client.get_workflow_runs.return_value = [
-            MagicMock(id=12345, name="CI", status="completed", conclusion="failure")
-        ]
         mock_github_client.get_pr_status.return_value = MagicMock(
             check_details=[
-                {"name": "build-job", "conclusion": "ERROR"},
+                {
+                    "name": "build-job",
+                    "conclusion": "ERROR",
+                    "detailsUrl": "https://github.com/owner/repo/actions/runs/12345/job/789",
+                },
             ]
         )
 
         # Mock subprocess calls
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                MagicMock(returncode=0, stdout="feat/test-branch", stderr=""),
                 MagicMock(returncode=0, stdout="owner/repo", stderr=""),
                 MagicMock(
                     returncode=0,
@@ -1116,19 +1115,20 @@ class TestPRContextIntegration:
         mock_github_client: MagicMock,
     ) -> None:
         """Test saving both CI failures and comments."""
-        # Setup CI failure mocks
-        mock_github_client.get_workflow_runs.return_value = [
-            MagicMock(id=12345, name="CI", status="completed", conclusion="failure")
-        ]
+        # Setup CI failure mocks with detailsUrl
         mock_github_client.get_pr_status.return_value = MagicMock(
-            check_details=[{"name": "tests", "conclusion": "FAILURE"}]
+            check_details=[
+                {
+                    "name": "tests",
+                    "conclusion": "FAILURE",
+                    "detailsUrl": "https://github.com/owner/repo/actions/runs/12345/job/789",
+                }
+            ]
         )
 
         # Save CI failures with subprocess mocks
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                # git branch --show-current
-                MagicMock(returncode=0, stdout="feat/test-branch", stderr=""),
                 # gh repo view
                 MagicMock(returncode=0, stdout="owner/repo\n", stderr=""),
                 # gh api .../jobs

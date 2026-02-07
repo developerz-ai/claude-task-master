@@ -91,11 +91,12 @@ class CILogDownloader:
         data = json.loads(result.stdout)
         jobs = data.get("jobs", [])
 
-        # Filter to only failed jobs
+        # Filter to only failed jobs (exclude cancelled - those were intentionally stopped)
         failed_jobs = []
         for job in jobs:
             conclusion = job.get("conclusion")
-            if conclusion in ("failure", "cancelled", "timed_out", "action_required"):
+            # Only include actual failures, not cancelled jobs
+            if conclusion in ("failure", "timed_out", "action_required"):
                 failed_jobs.append(
                     CIJob(
                         id=job["id"],
@@ -133,7 +134,13 @@ class CILogDownloader:
         except subprocess.TimeoutExpired as e:
             raise GitHubTimeoutError(f"Timeout downloading logs for job {job_id}") from e
         except subprocess.CalledProcessError as e:
-            raise GitHubError(f"Failed to download job logs: {e.stderr}") from e
+            # Decode stderr if it's bytes
+            stderr = (
+                e.stderr.decode("utf-8", errors="replace")
+                if isinstance(e.stderr, bytes)
+                else str(e.stderr)
+            )
+            raise GitHubError(f"Failed to download job logs: {stderr}") from e
 
         # Decode bytes to string
         logs = result.stdout.decode("utf-8", errors="replace")
@@ -228,15 +235,18 @@ class CILogDownloader:
             Dictionary mapping job names to log content.
 
         Raises:
-            GitHubError: If API calls fail.
+            GitHubError: If API calls fail or no logs could be retrieved.
             GitHubTimeoutError: If commands timeout.
         """
+        from .exceptions import GitHubError
+
         failed_jobs = self.get_failed_jobs(run_id)
 
         if not failed_jobs:
             return {}
 
         logs_by_job = {}
+        download_errors = []
 
         for job in failed_jobs:
             try:
@@ -252,9 +262,17 @@ class CILogDownloader:
                         max_lines_per_file=max_lines_per_file,
                     )
 
-            except Exception:
-                # Continue with other jobs even if one fails
+            except Exception as e:
+                # Track errors but continue with other jobs
+                download_errors.append(f"{job.name}: {str(e)}")
                 continue
+
+        # If all downloads failed, raise an error
+        if not logs_by_job and failed_jobs:
+            error_msg = (
+                f"Failed to download logs for {len(failed_jobs)} jobs: {'; '.join(download_errors)}"
+            )
+            raise GitHubError(error_msg)
 
         return logs_by_job
 

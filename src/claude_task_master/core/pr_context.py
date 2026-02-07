@@ -47,10 +47,12 @@ class PRContextManager:
         if pr_number is None:
             return
 
+        # Initialize paths outside try blocks to avoid NameError
+        pr_dir = self.state_manager.get_pr_dir(pr_number)
+        ci_dir = pr_dir / "ci"
+
         # Clear old CI logs to avoid stale data
         try:
-            pr_dir = self.state_manager.get_pr_dir(pr_number)
-            ci_dir = pr_dir / "ci"
             if ci_dir.exists():
                 shutil.rmtree(ci_dir)
         except Exception:
@@ -69,23 +71,21 @@ class PRContextManager:
             if not has_failures:
                 return  # No failures to download
 
-            # Get current branch name
-            result = subprocess.run(
-                ["git", "branch", "--show-current"],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            current_branch = result.stdout.strip()
+            # Extract run ID from check details URL (more reliable than latest run)
+            run_id = None
+            for check in pr_status.check_details:
+                details_url = check.get("detailsUrl", "")
+                # Extract run ID from URL like: .../actions/runs/123456/job/789
+                if "/runs/" in details_url:
+                    try:
+                        run_id = int(details_url.split("/runs/")[1].split("/")[0])
+                        break
+                    except (IndexError, ValueError):
+                        continue
 
-            # Get the latest run for this branch
-            runs = self.github_client.get_workflow_runs(limit=5, branch=current_branch)
-            if not runs:
-                console.warning("No workflow runs found for PR")
+            if not run_id:
+                console.warning("Could not extract run ID from check details")
                 return
-
-            # Use the latest run
-            run_id = runs[0].id
 
             # Get repository info for CILogDownloader
             result = subprocess.run(
