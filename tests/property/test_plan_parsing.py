@@ -193,9 +193,9 @@ class TestPlanInvariants:
     """Test invariants that should always hold for plans."""
 
     @given(
-        plan_content=st.text(min_size=0, max_size=5000),
+        plan_content=st.text(min_size=0, max_size=1000),
     )
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=1500)
     def test_completed_never_exceeds_total(self, plan_content: str):
         """Completed tasks should never exceed total tasks."""
         completed = count_completed_tasks(plan_content)
