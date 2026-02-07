@@ -101,13 +101,20 @@ class PRContextManager:
             ci_dir.mkdir(parents=True, exist_ok=True)
 
             # Download and save logs chunked (500 lines per file)
-            downloader.download_failed_run_logs(
+            logs = downloader.download_failed_run_logs(
                 run_id=run_id,
                 output_dir=ci_dir,
                 max_lines_per_file=500,
             )
 
-            console.detail(f"Downloaded CI logs to {ci_dir}")
+            if logs:
+                console.detail(f"Downloaded CI logs to {ci_dir}")
+            else:
+                # Checks failed but no GitHub Actions jobs failed (e.g., external checks)
+                console.warning(
+                    f"CI checks failed but no GitHub Actions job logs available for run {run_id}. "
+                    f"Failures may be from external checks (CodeRabbit, etc.)"
+                )
 
         except Exception as e:
             console.warning(f"Could not save CI failures: {e}")

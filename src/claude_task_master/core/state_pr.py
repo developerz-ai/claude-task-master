@@ -167,12 +167,19 @@ FAILURE LOGS:
 
                 jobs_logs: dict[str, list] = defaultdict(list)
                 for cf in ci_files:
-                    job_name = cf.parent.name
-                    jobs_logs[job_name].append(cf)
+                    job_dir_name = cf.parent.name
+                    jobs_logs[job_dir_name].append(cf)
 
                 # Output each job's logs
-                for job_name, log_files in sorted(jobs_logs.items()):
-                    sections.append(f"\n### {job_name}\n")
+                for job_dir_name, log_files in sorted(jobs_logs.items()):
+                    # Try to read original job name from metadata
+                    jobname_file = log_files[0].parent / ".jobname"
+                    if jobname_file.exists():
+                        display_name = jobname_file.read_text(encoding="utf-8").strip()
+                    else:
+                        display_name = job_dir_name  # Fallback to directory name
+
+                    sections.append(f"\n### {display_name}\n")
                     for log_file in sorted(log_files):
                         sections.append(f"**{log_file.name}**:\n```\n{log_file.read_text()}\n```\n")
 

@@ -287,20 +287,24 @@ class CILogDownloader:
 
         Instead of saving one huge file, split into:
         job_name/
+          .jobname (original name metadata)
           1.log (500 lines)
           2.log (500 lines)
           3.log (remaining lines)
 
         Args:
             logs: Complete log content.
-            job_name: Name of the job.
+            job_name: Original name of the job (may contain spaces/slashes).
             output_dir: Base output directory.
             max_lines_per_file: Maximum lines per file.
         """
-        # Create job directory
+        # Create job directory with sanitized name
         safe_name = job_name.replace(" ", "_").replace("/", "_")
         job_dir = output_dir / safe_name
         job_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save original job name for display purposes
+        (job_dir / ".jobname").write_text(job_name, encoding="utf-8")
 
         # Split logs into lines
         lines = logs.splitlines(keepends=True)
