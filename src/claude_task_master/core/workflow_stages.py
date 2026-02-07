@@ -206,8 +206,12 @@ class WorkflowStageHandler:
             try:
                 pr_number = self.github_client.get_pr_for_current_branch(cwd=os.getcwd())
                 if pr_number:
+                    from datetime import datetime
+
                     console.success(f"Detected PR #{pr_number} for current branch")
                     state.current_pr = pr_number
+                    # Start PR timing when PR is first detected
+                    state.pr_start_time = datetime.now()
                     self.state_manager.save_state(state)
                 else:
                     # No PR found - agent failed to create one
@@ -853,6 +857,31 @@ After addressing ALL comments and creating the resolution file, end with: TASK C
         if plan:
             mark_task_complete_fn(plan, state.current_task_index)
 
+        # Log PR timing if we have timing data
+        if state.current_pr is not None and state.pr_start_time is not None:
+            from datetime import datetime
+
+            pr_total_seconds = (datetime.now() - state.pr_start_time).total_seconds()
+            pr_active_work_seconds = state.pr_active_work_seconds
+            ci_wait_seconds = pr_total_seconds - pr_active_work_seconds
+
+            # Log to logger if available
+            if hasattr(self, "logger") and self.logger:
+                self.logger.log_pr_timing(
+                    state.current_pr,
+                    pr_total_seconds,
+                    pr_active_work_seconds,
+                    ci_wait_seconds,
+                )
+
+            # Log to console
+            console.info(
+                f"PR #{state.current_pr} timing - "
+                f"Total: {pr_total_seconds / 60:.1f}m, "
+                f"Active work: {pr_active_work_seconds / 60:.1f}m, "
+                f"CI wait: {ci_wait_seconds / 60:.1f}m"
+            )
+
         # Clear PR context files and checkout to base branch (only if PR was merged)
         if state.current_pr is not None:
             base_branch = "main"
@@ -882,10 +911,14 @@ After addressing ALL comments and creating the resolution file, end with: TASK C
 
             console.success(f"Switched to {base_branch}")
 
-        # Move to next task
+        # Move to next task and reset timing fields
         state.current_task_index += 1
         state.current_pr = None
         state.workflow_stage = "working"
+        # Reset timing fields for next task/PR
+        state.task_start_time = None
+        state.pr_start_time = None
+        state.pr_active_work_seconds = 0.0
         self.state_manager.save_state(state)
 
         return None

@@ -190,6 +190,64 @@ class TaskLogger:
         else:
             self._write_raw(f"[ERROR] {self._truncate(error)}")
 
+    def log_task_timing(self, task_index: int, duration_seconds: float) -> None:
+        """Log task completion timing.
+
+        Task timing is always logged regardless of level.
+        """
+        if self.log_format == LogFormat.JSON:
+            self._log_json_entry(
+                "task_timing",
+                task_index=task_index,
+                duration_seconds=duration_seconds,
+            )
+        else:
+            minutes = int(duration_seconds // 60)
+            seconds = duration_seconds % 60
+            if minutes > 0:
+                time_str = f"{minutes}m {seconds:.1f}s"
+            else:
+                time_str = f"{seconds:.1f}s"
+            self._write_raw(f"[TIMING] Task #{task_index + 1} completed in {time_str}")
+
+    def log_pr_timing(
+        self,
+        pr_number: int,
+        total_seconds: float,
+        active_work_seconds: float,
+        ci_wait_seconds: float | None = None,
+    ) -> None:
+        """Log PR merge timing with breakdown.
+
+        PR timing is always logged regardless of level.
+        """
+        if ci_wait_seconds is None:
+            ci_wait_seconds = total_seconds - active_work_seconds
+
+        if self.log_format == LogFormat.JSON:
+            self._log_json_entry(
+                "pr_timing",
+                pr_number=pr_number,
+                total_seconds=total_seconds,
+                active_work_seconds=active_work_seconds,
+                ci_wait_seconds=ci_wait_seconds,
+            )
+        else:
+
+            def format_duration(seconds: float) -> str:
+                minutes = int(seconds // 60)
+                secs = seconds % 60
+                if minutes > 0:
+                    return f"{minutes}m {secs:.1f}s"
+                return f"{secs:.1f}s"
+
+            self._write_raw(
+                f"[TIMING] PR #{pr_number} merged - "
+                f"Total: {format_duration(total_seconds)}, "
+                f"Active work: {format_duration(active_work_seconds)}, "
+                f"CI wait: {format_duration(ci_wait_seconds)}"
+            )
+
     def _log_json_entry(self, entry_type: str, **kwargs: Any) -> None:
         """Add an entry to the JSON buffer."""
         entry: dict[str, Any] = {
