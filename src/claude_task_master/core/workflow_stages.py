@@ -210,8 +210,9 @@ class WorkflowStageHandler:
 
                     console.success(f"Detected PR #{pr_number} for current branch")
                     state.current_pr = pr_number
-                    # Start PR timing when PR is first detected
-                    state.pr_start_time = datetime.now()
+                    # Start PR timing when PR is first detected (avoid overwriting on resume)
+                    if state.pr_start_time is None:
+                        state.pr_start_time = datetime.now()
                     self.state_manager.save_state(state)
                 else:
                     # No PR found - agent failed to create one

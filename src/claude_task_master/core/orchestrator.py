@@ -1413,7 +1413,9 @@ After completing your fixes, end with: TASK COMPLETE"""
 
             console.success(f"Fix PR #{pr_number} detected")
             state.current_pr = pr_number
-            state.pr_start_time = datetime.now()
+            # Only set pr_start_time if not already set (avoid overwriting on resume)
+            if state.pr_start_time is None:
+                state.pr_start_time = datetime.now()
             self.state_manager.save_state(state)
         except Exception as e:
             console.warning(f"Could not detect fix PR: {e}")
