@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.14] - 2026-02-07
+
+### Added
+- **Complete CI log downloads** (#90): New `CILogDownloader` class that downloads full logs from only failed jobs
+  - Downloads complete logs (no 50-line truncation)
+  - Gets logs for ONLY failed jobs (not all jobs)
+  - Splits into 500-line chunks for AI readability
+  - Organized as `.claude-task-master/pr-{N}/ci/{Job_Name}/1.log, 2.log, ...`
+  - No ZIP files, no temp file cleanup needed
+
+### Changed
+- **CI log structure**: Logs now saved in chunked format (`ci/{Job}/1.log`) instead of single files
+- **Extract run ID from check details**: More reliable than using latest run on branch
+- **Exclude cancelled jobs**: Only download logs for actual failures, not intentionally cancelled jobs
+- **Preserve original job names**: Display "Backend Tests" instead of "Backend_Tests"
+
+### Fixed
+- **Get errors at end of logs**: Previous implementation only showed first 50 lines (setup), missing actual errors at the end
+- **Stderr bytes handling**: Properly decode stderr before using in error messages
+- **Scope issues**: Initialize paths outside try blocks to avoid NameError
+- **Silent failures**: Raise error if all log downloads fail instead of returning empty dict
+- **Better error messages**: Warn when checks fail but no GitHub Actions logs available (external checks)
+
+### Testing
+- **29 new tests** for CILogDownloader class
+- **Updated 93 existing tests** for new chunked log structure
+- All tests passing
+
 ## [0.1.13] - 2026-02-06
 
 ### Added
