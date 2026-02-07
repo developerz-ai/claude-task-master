@@ -156,14 +156,25 @@ FAILURE LOGS:
                 for cf in comment_files:
                     sections.append(f"### {cf.stem}\n{cf.read_text()}\n")
 
-        # Load CI failures
+        # Load CI failures (chunked log files organized by job)
         ci_dir = pr_dir / "ci"
         if ci_dir.exists():
-            ci_files = sorted(ci_dir.glob("failed_*.txt"))
+            ci_files = sorted(ci_dir.rglob("*.log"))
             if ci_files:
                 sections.append("## CI Failures\n")
+                # Group by job directory
+                from collections import defaultdict
+
+                jobs_logs: dict[str, list] = defaultdict(list)
                 for cf in ci_files:
-                    sections.append(cf.read_text())
+                    job_name = cf.parent.name
+                    jobs_logs[job_name].append(cf)
+
+                # Output each job's logs
+                for job_name, log_files in sorted(jobs_logs.items()):
+                    sections.append(f"\n### {job_name}\n")
+                    for log_file in sorted(log_files):
+                        sections.append(f"**{log_file.name}**:\n```\n{log_file.read_text()}\n```\n")
 
         return "\n".join(sections)
 

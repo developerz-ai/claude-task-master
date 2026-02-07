@@ -585,7 +585,8 @@ class PRContextManager:
             ci_dir = pr_dir / "ci"
             if not ci_dir.exists():
                 return False
-            ci_files = list(ci_dir.glob("*.txt"))
+            # Check for log files in job subdirectories (new chunked format)
+            ci_files = list(ci_dir.rglob("*.log"))
             return len(ci_files) > 0
         except Exception:
             return False
