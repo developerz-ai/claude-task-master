@@ -29,8 +29,13 @@ class PRCycleManager:
             return state.current_pr
 
         # Create new PR
+        from datetime import datetime
+
         pr_number = self.github.create_pr(title=title, body=body)
         state.current_pr = pr_number
+        # Only set pr_start_time if not already set (avoid overwriting on resume)
+        if state.pr_start_time is None:
+            state.pr_start_time = datetime.now()
         self.state_manager.save_state(state)
 
         return pr_number

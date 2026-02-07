@@ -1103,6 +1103,11 @@ class WorkLoopOrchestrator:
         current_branch = self._get_current_branch()
         session_start_time = time.time()
 
+        # Set task start time if not already set (first work session for this task)
+        if state.task_start_time is None:
+            state.task_start_time = datetime.now()
+            self.state_manager.save_state(state)
+
         self.tracker.start_session(
             session_id=state.session_count + 1,
             task_index=state.current_task_index,
@@ -1178,6 +1183,9 @@ class WorkLoopOrchestrator:
 
         state.session_count += 1
 
+        # Accumulate active work time for PR timing
+        state.pr_active_work_seconds += session_duration
+
         # Mark current task as complete in plan.md
         # This is done by the orchestrator (not the agent) for reliability
         completed_task_index = state.current_task_index
@@ -1185,6 +1193,16 @@ class WorkLoopOrchestrator:
         if plan:
             self.task_runner.mark_task_complete(plan, completed_task_index)
             console.success(f"Task #{completed_task_index + 1} marked complete in plan.md")
+
+        # Calculate and log task duration
+        task_duration_seconds = 0.0
+        if state.task_start_time:
+            task_duration_seconds = (datetime.now() - state.task_start_time).total_seconds()
+            if self.logger:
+                self.logger.log_task_timing(state.current_task_index, task_duration_seconds)
+            console.info(
+                f"Task #{completed_task_index + 1} took {task_duration_seconds / 60:.1f} minutes"
+            )
 
         # Emit task.completed webhook event
         completed_tasks = self._get_completed_tasks(state) + 1  # +1 for task we just completed
@@ -1194,7 +1212,7 @@ class WorkLoopOrchestrator:
             task_description=task_desc,
             total_tasks=total_tasks,
             completed_tasks=completed_tasks,
-            duration_seconds=time.time() - session_start_time,
+            duration_seconds=task_duration_seconds if state.task_start_time else session_duration,
             branch=current_branch,
         )
 
@@ -1231,6 +1249,8 @@ class WorkLoopOrchestrator:
                 console.info("More tasks in PR group - continuing without creating PR")
                 state.current_task_index += 1
                 state.workflow_stage = "working"
+                # Reset task timing for next task, but keep PR timing (same PR group)
+                state.task_start_time = None
 
         # Update progress.md AFTER incrementing task index
         # So the arrow → points to the NEXT task, not the one we just completed
@@ -1393,6 +1413,9 @@ After completing your fixes, end with: TASK COMPLETE"""
 
             console.success(f"Fix PR #{pr_number} detected")
             state.current_pr = pr_number
+            # Only set pr_start_time if not already set (avoid overwriting on resume)
+            if state.pr_start_time is None:
+                state.pr_start_time = datetime.now()
             self.state_manager.save_state(state)
         except Exception as e:
             console.warning(f"Could not detect fix PR: {e}")

@@ -74,17 +74,28 @@ class PRContextManager:
             # Extract run ID from check details URL (more reliable than latest run)
             run_id = None
             for check in pr_status.check_details:
-                details_url = check.get("detailsUrl", "")
+                details_url = check.get("url", "")
                 # Extract run ID from URL like: .../actions/runs/123456/job/789
                 if "/runs/" in details_url:
                     try:
                         run_id = int(details_url.split("/runs/")[1].split("/")[0])
+                        console.detail(
+                            f"Extracted run ID {run_id} from check: {check.get('name', 'unknown')}"
+                        )
                         break
                     except (IndexError, ValueError):
                         continue
 
             if not run_id:
-                console.warning("Could not extract run ID from check details")
+                # Log available check URLs for debugging
+                check_urls = [
+                    f"{c.get('name', 'unknown')}: {c.get('url', 'N/A')}"
+                    for c in pr_status.check_details[:3]
+                ]
+                console.warning(
+                    f"Could not extract run ID from check details. "
+                    f"Sample checks: {', '.join(check_urls)}"
+                )
                 return
 
             # Get repository info for CILogDownloader

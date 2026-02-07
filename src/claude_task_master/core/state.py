@@ -126,6 +126,10 @@ class TaskState(BaseModel):
     prs_merged: int = 0  # Total number of PRs merged during this run
     last_counted_pr_created: int | None = None  # Last PR number counted for creation
     last_counted_pr_merged: int | None = None  # Last PR number counted for merge
+    # Timing fields
+    task_start_time: datetime | None = None  # When current task started
+    pr_start_time: datetime | None = None  # When current PR was created
+    pr_active_work_seconds: float = 0.0  # Accumulated work time for current PR (excluding CI wait)
 
 
 # =============================================================================
