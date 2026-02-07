@@ -14,6 +14,9 @@ if TYPE_CHECKING:
     from .state import StateManager
 
 
+from ..github.ci_logs import CILogDownloader
+
+
 class PRContextManager:
     """Manages PR context data: comments, CI logs, and resolution posting."""
 
@@ -34,6 +37,9 @@ class PRContextManager:
     def save_ci_failures(self, pr_number: int | None, *, _also_save_comments: bool = True) -> None:
         """Save CI failure logs to files for Claude to read.
 
+        Uses CILogDownloader to fetch complete logs from only failed jobs,
+        split into manageable chunks (500 lines per file).
+
         Args:
             pr_number: The PR number.
             _also_save_comments: Internal flag to also save comments (prevents recursion).
@@ -41,30 +47,75 @@ class PRContextManager:
         if pr_number is None:
             return
 
+        # Initialize paths outside try blocks to avoid NameError
+        pr_dir = self.state_manager.get_pr_dir(pr_number)
+        ci_dir = pr_dir / "ci"
+
         # Clear old CI logs to avoid stale data
         try:
-            pr_dir = self.state_manager.get_pr_dir(pr_number)
-            ci_dir = pr_dir / "ci"
             if ci_dir.exists():
                 shutil.rmtree(ci_dir)
         except Exception:
             pass  # Best effort cleanup
 
         try:
-            failed_logs = self.github_client.get_failed_run_logs(max_lines=50)
-        except Exception:
-            failed_logs = "Could not retrieve CI logs"
-
-        try:
+            # Get the latest workflow run for this PR's branch
             pr_status = self.github_client.get_pr_status(pr_number)
+
+            # Check if any CI checks failed
+            has_failures = any(
+                (check.get("conclusion") or "").upper() in ("FAILURE", "ERROR")
+                for check in pr_status.check_details
+            )
+
+            if not has_failures:
+                return  # No failures to download
+
+            # Extract run ID from check details URL (more reliable than latest run)
+            run_id = None
             for check in pr_status.check_details:
-                conclusion = (check.get("conclusion") or "").upper()
-                if conclusion in ("FAILURE", "ERROR"):
-                    self.state_manager.save_ci_failure(
-                        pr_number,
-                        check.get("name", "unknown"),
-                        failed_logs,
-                    )
+                details_url = check.get("detailsUrl", "")
+                # Extract run ID from URL like: .../actions/runs/123456/job/789
+                if "/runs/" in details_url:
+                    try:
+                        run_id = int(details_url.split("/runs/")[1].split("/")[0])
+                        break
+                    except (IndexError, ValueError):
+                        continue
+
+            if not run_id:
+                console.warning("Could not extract run ID from check details")
+                return
+
+            # Get repository info for CILogDownloader
+            result = subprocess.run(
+                ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            repo = result.stdout.strip()
+
+            # Download failed job logs using CILogDownloader
+            downloader = CILogDownloader(repo=repo, timeout=60)
+            ci_dir.mkdir(parents=True, exist_ok=True)
+
+            # Download and save logs chunked (500 lines per file)
+            logs = downloader.download_failed_run_logs(
+                run_id=run_id,
+                output_dir=ci_dir,
+                max_lines_per_file=500,
+            )
+
+            if logs:
+                console.detail(f"Downloaded CI logs to {ci_dir}")
+            else:
+                # Checks failed but no GitHub Actions jobs failed (e.g., external checks)
+                console.warning(
+                    f"CI checks failed but no GitHub Actions job logs available for run {run_id}. "
+                    f"Failures may be from external checks (CodeRabbit, etc.)"
+                )
+
         except Exception as e:
             console.warning(f"Could not save CI failures: {e}")
 
@@ -541,7 +592,8 @@ class PRContextManager:
             ci_dir = pr_dir / "ci"
             if not ci_dir.exists():
                 return False
-            ci_files = list(ci_dir.glob("*.txt"))
+            # Check for log files in job subdirectories (new chunked format)
+            ci_files = list(ci_dir.rglob("*.log"))
             return len(ci_files) > 0
         except Exception:
             return False

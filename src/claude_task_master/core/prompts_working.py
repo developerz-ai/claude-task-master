@@ -102,7 +102,13 @@ def build_work_prompt(
         files_list = "\n".join(f"- `{f}`" for f in file_hints[:10])  # Limit to 10
         builder.add_section(
             "Relevant Files",
-            f"Start by reading these files:\n\n{files_list}",
+            f"""Start by reading these files:
+
+{files_list}
+
+**CI Failure Logs:** If CI failed, check `.claude-task-master/pr-{{number}}/ci/` directory.
+Logs are organized by job name, split into manageable chunks (500 lines per file).
+Use Grep to search error patterns across all log files.""",
         )
 
     # PR comments to address
@@ -118,16 +124,21 @@ def build_work_prompt(
 1. **Explore thoroughly first** - Read the relevant files and understand the context
    before making any changes. Don't rush to implement.
 
-2. **If you agree** - Make the requested change, run tests, and commit.
+2. **Use Grep to find error locations** - If CI logs mention files/functions with errors:
+   - Use Grep with the error message pattern to locate the exact issue
+   - Example: `Grep pattern="Property 'name' does not exist"` to find all type errors
+   - This helps you find ALL instances of the same issue, not just one
 
-3. **If you disagree** - Do NOT implement the change. Instead:
+3. **If you agree** - Make the requested change, run tests, and commit.
+
+4. **If you disagree** - Do NOT implement the change. Instead:
    - Explain your reasoning clearly and respectfully
    - Provide technical justification for your approach
    - This helps the reviewer learn and understand your perspective
    - The reviewer can then decide whether to push back or accept
 
-4. Run tests after any changes
-5. Commit referencing the feedback""",
+5. Run tests after any changes
+6. Commit referencing the feedback""",
         )
 
     # Execution guidelines - conditional based on create_pr flag

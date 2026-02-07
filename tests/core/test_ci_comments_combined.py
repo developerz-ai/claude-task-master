@@ -55,43 +55,111 @@ class TestSaveCIFailuresAlsoSavesComments:
     """Tests that save_ci_failures also saves PR comments."""
 
     def test_save_ci_failures_calls_save_pr_comments(
-        self, pr_context: PRContextManager, state_manager: StateManager
+        self,
+        pr_context: PRContextManager,
+        state_manager: StateManager,
+        mock_github_client: MagicMock,
     ) -> None:
         """Test that save_ci_failures triggers save_pr_comments by default."""
-        # Mock the subprocess calls for comments
+        # Mock PR status with detailsUrl
+        mock_github_client.get_pr_status.return_value = MagicMock(
+            check_details=[
+                {
+                    "name": "test",
+                    "conclusion": "FAILURE",
+                    "detailsUrl": "https://github.com/owner/repo/actions/runs/12345/job/789",
+                }
+            ]
+        )
+
+        # Mock the subprocess calls
         with patch("subprocess.run") as mock_run:
-            # First call: get repo info
-            mock_run.return_value = MagicMock(
-                returncode=0,
-                stdout="owner/repo",
-            )
-            # Use side_effect to handle multiple calls
             mock_run.side_effect = [
+                # For save_ci_failures -> gh repo view
+                MagicMock(returncode=0, stdout="owner/repo\n", stderr=""),
+                # For CILogDownloader -> gh api .../jobs
+                MagicMock(
+                    returncode=0,
+                    stdout=json.dumps(
+                        {
+                            "jobs": [
+                                {
+                                    "id": 1,
+                                    "name": "test",
+                                    "status": "completed",
+                                    "conclusion": "failure",
+                                }
+                            ]
+                        }
+                    ),
+                    stderr="",
+                ),
+                # For CILogDownloader -> gh api .../jobs/1/logs
+                MagicMock(returncode=0, stdout=b"Test logs", stderr=b""),
                 # For save_pr_comments -> get repo info
-                MagicMock(returncode=0, stdout="owner/repo\n"),
+                MagicMock(returncode=0, stdout="owner/repo\n", stderr=""),
                 # For save_pr_comments -> GraphQL query (empty threads)
                 MagicMock(
                     returncode=0,
                     stdout='{"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": []}}}}}',
+                    stderr="",
                 ),
-                # For save_ci_failures -> get_pr_status (handled by mock_github_client)
             ]
 
             pr_context.save_ci_failures(123)
 
-            # Verify subprocess was called (for comments)
-            assert mock_run.call_count >= 2
+            # Verify subprocess was called for both CI and comments
+            # (Exact count may vary based on implementation details)
+            assert mock_run.call_count >= 5
 
     def test_save_ci_failures_creates_ci_directory(
-        self, pr_context: PRContextManager, state_manager: StateManager
+        self,
+        pr_context: PRContextManager,
+        state_manager: StateManager,
+        mock_github_client: MagicMock,
     ) -> None:
         """Test that save_ci_failures creates CI failure files."""
+        # Mock PR status with detailsUrl
+        mock_github_client.get_pr_status.return_value = MagicMock(
+            check_details=[
+                {
+                    "name": "test",
+                    "conclusion": "FAILURE",
+                    "detailsUrl": "https://github.com/owner/repo/actions/runs/12345/job/789",
+                }
+            ]
+        )
+
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                MagicMock(returncode=0, stdout="owner/repo\n"),
+                # gh repo view (for save_ci_failures)
+                MagicMock(returncode=0, stdout="owner/repo\n", stderr=""),
+                # gh api .../jobs
+                MagicMock(
+                    returncode=0,
+                    stdout=json.dumps(
+                        {
+                            "jobs": [
+                                {
+                                    "id": 1,
+                                    "name": "test",
+                                    "status": "completed",
+                                    "conclusion": "failure",
+                                }
+                            ]
+                        }
+                    ),
+                    stderr="",
+                ),
+                # gh api .../jobs/1/logs
+                MagicMock(returncode=0, stdout=b"Test logs", stderr=b""),
+                # gh repo view (for save_pr_comments)
+                MagicMock(returncode=0, stdout="owner/repo\n", stderr=""),
+                # GraphQL query for comments
                 MagicMock(
                     returncode=0,
                     stdout='{"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": []}}}}}',
+                    stderr="",
                 ),
             ]
 
@@ -128,20 +196,54 @@ class TestSavePRCommentsAlsoSavesCI:
         mock_github_client: MagicMock,
     ) -> None:
         """Test that save_pr_comments triggers save_ci_failures by default."""
+        # Setup mock to have CI failures with detailsUrl
+        mock_github_client.get_pr_status.return_value = MagicMock(
+            check_details=[
+                {
+                    "name": "test",
+                    "conclusion": "FAILURE",
+                    "detailsUrl": "https://github.com/owner/repo/actions/runs/12345/job/789",
+                }
+            ]
+        )
+
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                # For save_ci_failures -> (no subprocess needed, uses mock_github_client)
-                MagicMock(returncode=0, stdout="owner/repo\n"),
+                # gh repo view (for save_ci_failures)
+                MagicMock(returncode=0, stdout="owner/repo\n", stderr=""),
+                # gh api .../jobs (for CILogDownloader)
+                MagicMock(
+                    returncode=0,
+                    stdout=json.dumps(
+                        {
+                            "jobs": [
+                                {
+                                    "id": 1,
+                                    "name": "test",
+                                    "status": "completed",
+                                    "conclusion": "failure",
+                                }
+                            ]
+                        }
+                    ),
+                    stderr="",
+                ),
+                # gh api .../jobs/1/logs (download logs)
+                MagicMock(returncode=0, stdout=b"Test logs", stderr=b""),
+                # gh repo view (for save_pr_comments)
+                MagicMock(returncode=0, stdout="owner/repo\n", stderr=""),
+                # GraphQL query for comments
                 MagicMock(
                     returncode=0,
                     stdout='{"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": []}}}}}',
+                    stderr="",
                 ),
             ]
 
             pr_context.save_pr_comments(123)
 
-            # CI failures should have been saved via github_client
-            mock_github_client.get_failed_run_logs.assert_called()
+            # Verify get_pr_status was called (CI save was triggered)
+            mock_github_client.get_pr_status.assert_called()
 
     def test_save_pr_comments_no_recursion(
         self,
@@ -152,20 +254,21 @@ class TestSavePRCommentsAlsoSavesCI:
         """Test that _also_save_ci=False prevents recursive calls."""
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                MagicMock(returncode=0, stdout="owner/repo\n"),
+                MagicMock(returncode=0, stdout="owner/repo\n", stderr=""),
                 MagicMock(
                     returncode=0,
                     stdout='{"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": []}}}}}',
+                    stderr="",
                 ),
             ]
 
             # Reset mock to track only this call
-            mock_github_client.get_failed_run_logs.reset_mock()
+            mock_github_client.get_pr_status.reset_mock()
 
             pr_context.save_pr_comments(123, _also_save_ci=False)
 
-            # Should not have called get_failed_run_logs
-            mock_github_client.get_failed_run_logs.assert_not_called()
+            # Should not have called get_pr_status (CI save was skipped)
+            mock_github_client.get_pr_status.assert_not_called()
 
 
 class TestGetCombinedFeedback:
@@ -175,11 +278,11 @@ class TestGetCombinedFeedback:
         self, pr_context: PRContextManager, state_manager: StateManager
     ) -> None:
         """Test get_combined_feedback when both CI and comments exist."""
-        # Create CI failure file
+        # Create CI failure file in new chunked structure
         pr_dir = state_manager.get_pr_dir(123)
-        ci_dir = pr_dir / "ci"
+        ci_dir = pr_dir / "ci" / "Tests"
         ci_dir.mkdir(parents=True, exist_ok=True)
-        (ci_dir / "failed_tests.txt").write_text("Test failure")
+        (ci_dir / "1.log").write_text("Test failure")
 
         # Create comments file
         comments_dir = pr_dir / "comments"
@@ -197,9 +300,9 @@ class TestGetCombinedFeedback:
     ) -> None:
         """Test get_combined_feedback when only CI failures exist."""
         pr_dir = state_manager.get_pr_dir(123)
-        ci_dir = pr_dir / "ci"
+        ci_dir = pr_dir / "ci" / "Tests"
         ci_dir.mkdir(parents=True, exist_ok=True)
-        (ci_dir / "failed_tests.txt").write_text("Test failure")
+        (ci_dir / "1.log").write_text("Test failure")
 
         has_ci, has_comments, pr_dir_path = pr_context.get_combined_feedback(123)
 
@@ -246,9 +349,9 @@ class TestHasCIFailures:
     ) -> None:
         """Test has_ci_failures returns True when CI files exist."""
         pr_dir = state_manager.get_pr_dir(123)
-        ci_dir = pr_dir / "ci"
+        ci_dir = pr_dir / "ci" / "Tests"
         ci_dir.mkdir(parents=True, exist_ok=True)
-        (ci_dir / "failed_tests.txt").write_text("Test failure")
+        (ci_dir / "1.log").write_text("Test failure")
 
         assert pr_context.has_ci_failures(123) is True
 
@@ -572,16 +675,46 @@ class TestIntegrationScenarios:
         # 1. Tests are failing
         # 2. CodeRabbit has left actionable comments
 
-        mock_github_client.get_failed_run_logs.return_value = """
-        FAILED tests/test_main.py::test_addition
-        E       AssertionError: 1 + 1 != 3
-        """
+        mock_github_client.get_pr_status.return_value = MagicMock(
+            check_details=[
+                {
+                    "name": "test",
+                    "conclusion": "FAILURE",
+                    "detailsUrl": "https://github.com/owner/repo/actions/runs/12345/job/789",
+                }
+            ]
+        )
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                # Call 1: gh repo view (for save_pr_comments)
-                MagicMock(returncode=0, stdout="owner/repo\n"),
-                # Call 2: gh api REST call to get PR comments
+                # gh repo view (for save_ci_failures)
+                MagicMock(returncode=0, stdout="owner/repo\n", stderr=""),
+                # gh api .../jobs (for CILogDownloader)
+                MagicMock(
+                    returncode=0,
+                    stdout=json.dumps(
+                        {
+                            "jobs": [
+                                {
+                                    "id": 1,
+                                    "name": "test",
+                                    "status": "completed",
+                                    "conclusion": "failure",
+                                }
+                            ]
+                        }
+                    ),
+                    stderr="",
+                ),
+                # gh api .../jobs/1/logs (download logs)
+                MagicMock(
+                    returncode=0,
+                    stdout=b"FAILED tests/test_main.py::test_addition\nE       AssertionError: 1 + 1 != 3\n",
+                    stderr=b"",
+                ),
+                # gh repo view (for save_pr_comments)
+                MagicMock(returncode=0, stdout="owner/repo\n", stderr=""),
+                # gh api REST call to get PR comments
                 MagicMock(
                     returncode=0,
                     stdout=json.dumps(
@@ -595,8 +728,9 @@ class TestIntegrationScenarios:
                             }
                         ]
                     ),
+                    stderr="",
                 ),
-                # Call 3: GraphQL query to get resolved status
+                # GraphQL query to get resolved status
                 MagicMock(
                     returncode=0,
                     stdout="""{
@@ -622,6 +756,7 @@ class TestIntegrationScenarios:
                             }
                         }
                     }""",
+                    stderr="",
                 ),
             ]
 

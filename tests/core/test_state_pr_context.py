@@ -164,7 +164,11 @@ class TestPRContextMethods:
 
     def test_load_pr_context_loads_ci_failures(self, state_manager: StateManager) -> None:
         """Test that load_pr_context loads saved CI failures."""
-        state_manager.save_ci_failure(123, "tests", "Test failed")
+        # Create CI log in new chunked structure
+        pr_dir = state_manager.get_pr_dir(123)
+        ci_dir = pr_dir / "ci" / "tests"
+        ci_dir.mkdir(parents=True, exist_ok=True)
+        (ci_dir / "1.log").write_text("Test failed")
 
         context = state_manager.load_pr_context(123)
         assert "CI Failures" in context
@@ -173,7 +177,12 @@ class TestPRContextMethods:
     def test_load_pr_context_loads_both(self, state_manager: StateManager) -> None:
         """Test that load_pr_context loads both comments and CI failures."""
         state_manager.save_pr_comments(123, [{"body": "Comment text"}])
-        state_manager.save_ci_failure(123, "tests", "CI failure text")
+
+        # Create CI log in new chunked structure
+        pr_dir = state_manager.get_pr_dir(123)
+        ci_dir = pr_dir / "ci" / "tests"
+        ci_dir.mkdir(parents=True, exist_ok=True)
+        (ci_dir / "1.log").write_text("CI failure text")
 
         context = state_manager.load_pr_context(123)
         assert "Review Comments" in context

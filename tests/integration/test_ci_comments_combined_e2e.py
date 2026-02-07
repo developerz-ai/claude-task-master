@@ -36,11 +36,11 @@ class TestCIFailureOnlyScenario:
         # Create a PR directory using state_manager's correct path
         pr_number = 123
         pr_dir = state_manager.get_pr_dir(pr_number)  # Uses debugging/pr/{number}
-        ci_dir = pr_dir / "ci"
-        ci_dir.mkdir(exist_ok=True)
+        ci_dir = pr_dir / "ci" / "Tests"
+        ci_dir.mkdir(parents=True, exist_ok=True)
 
-        # Write a mock CI failure log
-        ci_log_file = ci_dir / "test-failure.txt"
+        # Write a mock CI failure log in new chunked structure
+        ci_log_file = ci_dir / "1.log"
         ci_log_file.write_text("npm test failed\nError: Test suite failed")
 
         # Check that CI failure exists
@@ -273,9 +273,9 @@ class TestPRContextManager:
 
         # Create PR directory with both using correct path
         pr_dir = state_manager.get_pr_dir(123)  # Uses debugging/pr/{number}
-        ci_dir = pr_dir / "ci"
+        ci_dir = pr_dir / "ci" / "Tests"
         ci_dir.mkdir(parents=True, exist_ok=True)
-        (ci_dir / "test.txt").write_text("Test failure")
+        (ci_dir / "1.log").write_text("Test failure")
 
         comments_dir = pr_dir / "comments"
         comments_dir.mkdir(exist_ok=True)
@@ -560,12 +560,12 @@ class TestCICommentsEdgeCases:
 
         # Create files with special characters using correct path
         pr_dir = state_manager.get_pr_dir(123)  # Uses debugging/pr/{number}
-        ci_dir = pr_dir / "ci"
+        ci_dir = pr_dir / "ci" / "Special"
         ci_dir.mkdir(parents=True, exist_ok=True)
-        (ci_dir / "special.txt").write_text('Error: "unexpected" <tag> & symbol')
+        (ci_dir / "1.log").write_text('Error: "unexpected" <tag> & symbol')
 
         comments_dir = pr_dir / "comments"
-        comments_dir.mkdir(exist_ok=True)
+        comments_dir.mkdir(parents=True, exist_ok=True)
         (comments_dir / "review.txt").write_text("Fix: `code` with 'quotes'")
 
         has_ci, has_comments, _ = pr_context.get_combined_feedback(123)
@@ -617,9 +617,9 @@ class TestCICommentsSaveOrder:
 
         # Create both CI and comments
         pr_dir = integration_state_dir / "pr-123"
-        ci_dir = pr_dir / "ci"
+        ci_dir = pr_dir / "ci" / "Tests"
         ci_dir.mkdir(parents=True, exist_ok=True)
-        (ci_dir / "test.txt").write_text("Test failure")
+        (ci_dir / "1.log").write_text("Test failure")
 
         comments_dir = pr_dir / "comments"
         comments_dir.mkdir(exist_ok=True)
