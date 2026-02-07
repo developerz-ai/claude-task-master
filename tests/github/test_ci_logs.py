@@ -424,7 +424,7 @@ class TestDownloadFailedRunLogs:
 
     def test_download_failed_run_logs_no_failures(self, ci_downloader):
         """Test when no jobs failed."""
-        response = {"jobs": []}
+        response: dict[str, list] = {"jobs": []}
 
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(
@@ -607,7 +607,7 @@ class TestGetErrorSummary:
 
     def test_get_error_summary_no_failures(self, ci_downloader):
         """Test summary when no failures."""
-        response = {"jobs": []}
+        response: dict[str, list] = {"jobs": []}
 
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(

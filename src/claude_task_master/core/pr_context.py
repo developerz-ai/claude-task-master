@@ -69,8 +69,17 @@ class PRContextManager:
             if not has_failures:
                 return  # No failures to download
 
-            # Get the branch name and latest run
-            runs = self.github_client.get_workflow_runs(limit=5, branch=pr_status.head_branch)
+            # Get current branch name
+            result = subprocess.run(
+                ["git", "branch", "--show-current"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            current_branch = result.stdout.strip()
+
+            # Get the latest run for this branch
+            runs = self.github_client.get_workflow_runs(limit=5, branch=current_branch)
             if not runs:
                 console.warning("No workflow runs found for PR")
                 return
