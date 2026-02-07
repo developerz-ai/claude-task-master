@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.15] - 2026-02-07
+
+### Added
+- **Task and PR timing metrics** (#91): Track and log timing for tasks and PRs
+  - Task timing: Logs how long each task takes from start to completion
+  - PR timing: Logs total time, active work time, and CI wait time
+  - Format: `[TIMING] Task #N completed in Xm Ys`
+  - Format: `[TIMING] PR #N merged - Total: Xm, Active work: Xm, CI wait: Xm`
+  - Supports both text and JSON log formats
+  - Timing logs always written regardless of log level
+
+### Fixed
+- **CI log download bug** (#91): Fixed field name mismatch preventing CI logs from being downloaded
+  - Changed `detailsUrl` to `url` to match actual GitHub API response
+  - Resolves "Could not extract run ID from check details" error
+  - Added debug logging showing sample check URLs when extraction fails
+  - Ensures complete timing metrics across all PR creation paths and resume operations
+
+### Testing
+- **9 new tests** for timing functionality
+- **Updated tests** to use correct GitHub API field names
+- All tests passing
+
 ## [0.1.14] - 2026-02-07
 
 ### Added
@@ -368,7 +391,9 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.13...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.15...HEAD
+[0.1.15]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.14...v0.1.15
+[0.1.14]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.13...v0.1.14
 [0.1.13]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.10...v0.1.11
