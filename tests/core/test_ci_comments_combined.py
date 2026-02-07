@@ -67,7 +67,7 @@ class TestSaveCIFailuresAlsoSavesComments:
                 {
                     "name": "test",
                     "conclusion": "FAILURE",
-                    "detailsUrl": "https://github.com/owner/repo/actions/runs/12345/job/789",
+                    "url": "https://github.com/owner/repo/actions/runs/12345/job/789",
                 }
             ]
         )
@@ -125,7 +125,7 @@ class TestSaveCIFailuresAlsoSavesComments:
                 {
                     "name": "test",
                     "conclusion": "FAILURE",
-                    "detailsUrl": "https://github.com/owner/repo/actions/runs/12345/job/789",
+                    "url": "https://github.com/owner/repo/actions/runs/12345/job/789",
                 }
             ]
         )
@@ -202,7 +202,7 @@ class TestSavePRCommentsAlsoSavesCI:
                 {
                     "name": "test",
                     "conclusion": "FAILURE",
-                    "detailsUrl": "https://github.com/owner/repo/actions/runs/12345/job/789",
+                    "url": "https://github.com/owner/repo/actions/runs/12345/job/789",
                 }
             ]
         )
@@ -680,7 +680,7 @@ class TestIntegrationScenarios:
                 {
                     "name": "test",
                     "conclusion": "FAILURE",
-                    "detailsUrl": "https://github.com/owner/repo/actions/runs/12345/job/789",
+                    "url": "https://github.com/owner/repo/actions/runs/12345/job/789",
                 }
             ]
         )
