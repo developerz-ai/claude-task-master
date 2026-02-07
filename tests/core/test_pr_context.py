@@ -307,8 +307,7 @@ class TestSaveCIFailures:
                 subprocess.CalledProcessError(returncode=1, cmd="gh api", stderr="Network error"),
             ]
 
-            with patch("claude_task_master.core.pr_context.console") as mock_console:
-                pr_context_manager.save_ci_failures(123, _also_save_comments=False)
+            pr_context_manager.save_ci_failures(123, _also_save_comments=False)
 
         # Should handle gracefully - CI dir may not have files due to error
         pr_dir = state_manager.get_pr_dir(123)
