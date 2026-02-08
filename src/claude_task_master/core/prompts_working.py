@@ -106,42 +106,21 @@ def build_work_prompt(
 
 {files_list}
 
-**CI Failure Logs:** If CI failed, check `.claude-task-master/pr-{{number}}/ci/` directory.
+**CI Debugging:** ⚠️ DO NOT read all log files - use this workflow:
+   ```bash
+   # 1. See how many files exist
+   ls .claude-task-master/pr-{{number}}/ci/job-name/
 
-⚠️ **CRITICAL: DO NOT read all log files at once - this will overflow context!**
+   # 2. Grep for errors (searches WITHOUT loading files)
+   Grep pattern="FAIL|Error:|not ok" path=".claude-task-master/pr-{{number}}/ci/" -A 3
 
-**Proper approach for debugging CI failures:**
-
-1. **First, use Grep to locate errors** (this searches WITHOUT loading full files):
-   ```
-   Grep pattern="FAIL|Error:|AssertionError|TypeError" path=".claude-task-master/pr-{{number}}/ci/" -A 3 -B 3
-   ```
-
-2. **Read only relevant files** based on Grep results:
-   - If Grep shows errors in `1.log`, read that file only
-   - Read incrementally: 1-2 files at a time, never all files in parallel
-
-3. **Common error patterns to search for:**
-   - `"FAIL"` - Test failures
-   - `"Error:"` - Error messages
-   - `"AssertionError"` - Failed assertions
-   - `"TypeError|AttributeError"` - Type/attribute errors
-   - `"Expected .* but got"` - Assertion mismatches
-
-4. **Example workflow:**
-   ```
-   # Step 1: Find which files have failures
-   Grep pattern="FAIL" path=".claude-task-master/pr-{{number}}/ci/"
-
-   # Step 2: Read only the file(s) with failures
-   Read file_path=".claude-task-master/pr-{{number}}/ci/job-name/3.log"
-
-   # Step 3: Use Grep to find the error in source code
-   Grep pattern="functionNameThatFailed" path="src/"
+   # 3. Read ONLY the specific file(s) with errors
+   Read file_path=".claude-task-master/pr-{{number}}/ci/job-name/5.log"
    ```
 
-**Why this matters:** CI logs can be 400KB+ split across 15+ files. Reading all files
-simultaneously will cause "Prompt is too long" errors and crash the session.""",
+**Common patterns:** `FAIL`, `Error:`, `AssertionError`, `not ok`, `TypeError`
+
+**Why:** Logs can be 400KB+ across 20+ files. Reading all = context overflow crash.""",
         )
 
     # PR comments to address
@@ -152,41 +131,21 @@ simultaneously will cause "Prompt is too long" errors and crash the session.""",
 
 {pr_comments}
 
-**For each comment:**
+**Workflow:**
+1. Use Grep to find error locations (finds ALL instances, prevents reading huge files)
+2. Read relevant files to understand context
+3. Make changes if you agree, or explain why not
+4. Run tests
+5. Commit
 
-1. **Explore thoroughly first** - Read the relevant files and understand the context
-   before making any changes. Don't rush to implement.
+**Grep examples:**
+```bash
+# Find CI errors
+Grep pattern="FAIL|Error:" path=".claude-task-master/pr-{{number}}/ci/" -A 3
 
-2. **Use Grep to find error locations** - ALWAYS use Grep to search, never read all files:
-
-   **For CI log errors:**
-   ```
-   # First: Find errors in CI logs
-   Grep pattern="FAIL|Error:" path=".claude-task-master/pr-{{number}}/ci/" -A 3
-
-   # Then: Find the error in source code
-   Grep pattern="exact error message" path="src/"
-   ```
-
-   **For code issues:**
-   ```
-   # Example: TypeError about missing property
-   Grep pattern="Property 'name' does not exist" path="src/"
-   ```
-
-   - This helps you find ALL instances of the same issue, not just one
-   - Prevents context overflow from reading large log files
-
-3. **If you agree** - Make the requested change, run tests, and commit.
-
-4. **If you disagree** - Do NOT implement the change. Instead:
-   - Explain your reasoning clearly and respectfully
-   - Provide technical justification for your approach
-   - This helps the reviewer learn and understand your perspective
-   - The reviewer can then decide whether to push back or accept
-
-5. Run tests after any changes
-6. Commit referencing the feedback""",
+# Find code errors
+Grep pattern="exact error message" path="src/"
+```""",
         )
 
     # Execution guidelines - conditional based on create_pr flag
