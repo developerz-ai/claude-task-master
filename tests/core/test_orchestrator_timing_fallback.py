@@ -2,12 +2,11 @@
 
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
 from claude_task_master.core.logger import LogFormat, LogLevel, TaskLogger
-from claude_task_master.core.state import StateManager, TaskOptions, TaskState
+from claude_task_master.core.state import StateManager
 
 
 @pytest.fixture
