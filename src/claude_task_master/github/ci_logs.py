@@ -238,20 +238,28 @@ class CILogDownloader:
             GitHubError: If API calls fail or no logs could be retrieved.
             GitHubTimeoutError: If commands timeout.
         """
+        import logging
+
         from .exceptions import GitHubError
+
+        logger = logging.getLogger(__name__)
 
         failed_jobs = self.get_failed_jobs(run_id)
 
         if not failed_jobs:
+            logger.debug(f"No failed jobs found for run {run_id}")
             return {}
 
+        logger.debug(f"Found {len(failed_jobs)} failed jobs for run {run_id}")
         logs_by_job = {}
         download_errors = []
 
         for job in failed_jobs:
+            logger.debug(f"Downloading logs for job {job.id}: {job.name}")
             try:
                 logs = self.download_job_logs(job.id)
                 logs_by_job[job.name] = logs
+                logger.debug(f"Downloaded {len(logs)} bytes for job {job.name}")
 
                 # Save to file if output_dir provided
                 if output_dir:
@@ -261,10 +269,13 @@ class CILogDownloader:
                         output_dir=output_dir,
                         max_lines_per_file=max_lines_per_file,
                     )
+                    logger.debug(f"Saved logs for {job.name} to {output_dir}")
 
             except Exception as e:
                 # Track errors but continue with other jobs
-                download_errors.append(f"{job.name}: {str(e)}")
+                error_msg = f"{job.name}: {str(e)}"
+                download_errors.append(error_msg)
+                logger.warning(f"Failed to download logs for job {job.name}: {e}")
                 continue
 
         # If all downloads failed, raise an error

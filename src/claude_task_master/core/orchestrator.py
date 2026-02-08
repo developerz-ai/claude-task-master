@@ -1195,14 +1195,19 @@ class WorkLoopOrchestrator:
             console.success(f"Task #{completed_task_index + 1} marked complete in plan.md")
 
         # Calculate and log task duration
-        task_duration_seconds = 0.0
         if state.task_start_time:
             task_duration_seconds = (datetime.now() - state.task_start_time).total_seconds()
-            if self.logger:
-                self.logger.log_task_timing(state.current_task_index, task_duration_seconds)
-            console.info(
-                f"Task #{completed_task_index + 1} took {task_duration_seconds / 60:.1f} minutes"
-            )
+        else:
+            # Fallback to session duration if task_start_time not set
+            # (e.g., state created before timing feature added)
+            task_duration_seconds = session_duration
+
+        # Always log timing (to file and console)
+        if self.logger:
+            self.logger.log_task_timing(state.current_task_index, task_duration_seconds)
+        console.info(
+            f"Task #{completed_task_index + 1} took {task_duration_seconds / 60:.1f} minutes"
+        )
 
         # Emit task.completed webhook event
         completed_tasks = self._get_completed_tasks(state) + 1  # +1 for task we just completed

@@ -99,6 +99,7 @@ class PRContextManager:
                 return
 
             # Get repository info for CILogDownloader
+            console.detail("Getting repository info via gh CLI...")
             result = subprocess.run(
                 ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
                 check=True,
@@ -106,8 +107,12 @@ class PRContextManager:
                 text=True,
             )
             repo = result.stdout.strip()
+            if not repo:
+                raise ValueError("Could not determine repository name from gh CLI")
+            console.detail(f"Repository: {repo}")
 
             # Download failed job logs using CILogDownloader
+            console.detail(f"Downloading CI logs for run {run_id} from {repo}...")
             downloader = CILogDownloader(repo=repo, timeout=60)
             ci_dir.mkdir(parents=True, exist_ok=True)
 
@@ -119,7 +124,7 @@ class PRContextManager:
             )
 
             if logs:
-                console.detail(f"Downloaded CI logs to {ci_dir}")
+                console.detail(f"Downloaded CI logs to {ci_dir} ({len(logs)} jobs)")
             else:
                 # Checks failed but no GitHub Actions jobs failed (e.g., external checks)
                 console.warning(
@@ -128,7 +133,10 @@ class PRContextManager:
                 )
 
         except Exception as e:
+            import traceback
+
             console.warning(f"Could not save CI failures: {e}")
+            console.detail(f"Full error: {traceback.format_exc()}")
 
         # Also save comments when saving CI failures (for complete context)
         # Do this AFTER saving CI failures to ensure CI files exist first
