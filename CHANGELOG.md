@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.16] - 2026-02-08
+
+### Fixed
+- **Task timing always displayed**: Fixed timing not showing for states created before v0.1.15
+  - Always display timing even when `task_start_time` is None
+  - Uses `session_duration` as fallback for backward compatibility
+  - Ensures `[claudetm HH:MM:SS] Task #N took X.X minutes` always shown
+- **Enhanced CI log error reporting**: Added detailed error logging for troubleshooting
+  - Logs repository name and run ID before downloading
+  - Shows job count when logs successfully downloaded
+  - Includes full exception tracebacks for debugging
+  - Helps identify gh CLI, API, and download failures
+
 ## [0.1.15] - 2026-02-07
 
 ### Added
