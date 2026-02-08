@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.19] - 2026-02-08
+
+### Fixed
+- **Stronger CI log warnings with explicit bad examples**: Agents were still reading all log files despite v0.1.18 prompts
+  - Added "⚠️ CRITICAL" warning in intro (first thing agents see)
+  - Shows explicit BAD examples with ❌ marks of what NOT to do
+  - Moved CI workflow above file list so it can't be missed
+  - Explicit prohibition: "NEVER spawn tasks to read all logs"
+  - Stronger language: "NEVER READ ALL FILES" instead of "DO NOT"
+  - Warning now appears in 3 places: intro, file section, and examples
+
 ## [0.1.18] - 2026-02-08
 
 ### Fixed
@@ -425,7 +436,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.18...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.19...HEAD
+[0.1.19]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.18...v0.1.19
 [0.1.18]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.17...v0.1.18
 [0.1.17]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.16...v0.1.17
 [0.1.16]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.15...v0.1.16
