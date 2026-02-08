@@ -483,9 +483,10 @@ class TestDownloadFailedRunLogs:
     def test_download_failed_run_logs_chunks_large_logs(
         self, ci_downloader, sample_jobs_response, tmp_path
     ):
-        """Test that large logs are split into chunks."""
-        # Create log with 1200 lines (should split into 3 files with max 500 lines)
-        large_log = "\n".join([f"Line {i}" for i in range(1200)])
+        """Test that large logs are split into chunks by character count."""
+        # Create log with ~60KB content (should split into 3 files with max 20KB each)
+        # Each line is ~50 chars, 1200 lines = 60KB
+        large_log = "\n".join([f"Line {i:04d} with some padding text here" for i in range(1200)])
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
@@ -503,7 +504,7 @@ class TestDownloadFailedRunLogs:
             ]
 
             ci_downloader.download_failed_run_logs(
-                run_id=123, output_dir=tmp_path, max_lines_per_file=500
+                run_id=123, output_dir=tmp_path, max_chars_per_file=20_000
             )
 
             # Check that Lint job created 3 chunks
@@ -512,36 +513,41 @@ class TestDownloadFailedRunLogs:
             assert (lint_dir / "2.log").exists()
             assert (lint_dir / "3.log").exists()
 
-            # Verify line counts (count actual lines, not newlines)
+            # Verify character counts (each chunk should be ~20KB or less)
             chunk1_content = (lint_dir / "1.log").read_text()
             chunk2_content = (lint_dir / "2.log").read_text()
             chunk3_content = (lint_dir / "3.log").read_text()
 
-            # Each chunk should have roughly 500 lines
-            assert 490 <= len(chunk1_content.splitlines()) <= 500
-            assert 490 <= len(chunk2_content.splitlines()) <= 500
-            assert 190 <= len(chunk3_content.splitlines()) <= 210  # Remaining lines
+            # Each chunk should be <= 20KB (with some tolerance for line boundaries)
+            assert len(chunk1_content) <= 20_500
+            assert len(chunk2_content) <= 20_500
+            assert len(chunk3_content) <= 20_500
 
     def test_save_logs_chunked_preserves_content(self, ci_downloader, tmp_path):
-        """Test that chunking preserves complete log content."""
-        logs = "\n".join([f"Line {i}" for i in range(100)])
+        """Test that chunking by character count preserves complete log content."""
+        # Create log with 100 lines, each ~50 chars = ~5KB total
+        logs = "\n".join([f"Line {i:04d} with some padding text here" for i in range(100)])
 
         ci_downloader._save_logs_chunked(
             logs=logs,
             job_name="Test",
             output_dir=tmp_path,
-            max_lines_per_file=30,
+            max_chars_per_file=1500,  # Should create ~4 chunks
         )
 
         # Read all chunks back
         test_dir = tmp_path / "Test"
-        chunk1 = (test_dir / "1.log").read_text()
-        chunk2 = (test_dir / "2.log").read_text()
-        chunk3 = (test_dir / "3.log").read_text()
-        chunk4 = (test_dir / "4.log").read_text()
+        chunks = []
+        chunk_num = 1
+        while (test_dir / f"{chunk_num}.log").exists():
+            chunks.append((test_dir / f"{chunk_num}.log").read_text())
+            chunk_num += 1
+
+        # Should have created multiple chunks
+        assert len(chunks) >= 2, "Should have split into multiple chunks"
 
         # Combine and verify - remove trailing newline for comparison
-        combined = (chunk1 + chunk2 + chunk3 + chunk4).rstrip("\n")
+        combined = "".join(chunks).rstrip("\n")
         assert combined == logs
 
 

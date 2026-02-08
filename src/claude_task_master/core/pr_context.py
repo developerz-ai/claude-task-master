@@ -116,11 +116,11 @@ class PRContextManager:
             downloader = CILogDownloader(repo=repo, timeout=60)
             ci_dir.mkdir(parents=True, exist_ok=True)
 
-            # Download and save logs chunked (500 lines per file)
+            # Download and save logs chunked (20KB per file ~5K tokens)
             logs = downloader.download_failed_run_logs(
                 run_id=run_id,
                 output_dir=ci_dir,
-                max_lines_per_file=500,
+                max_chars_per_file=20_000,
             )
 
             if logs:

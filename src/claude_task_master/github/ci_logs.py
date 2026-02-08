@@ -219,7 +219,7 @@ class CILogDownloader:
         self,
         run_id: int,
         output_dir: Path | None = None,
-        max_lines_per_file: int = 500,
+        max_chars_per_file: int = 20_000,
     ) -> dict[str, str]:
         """Download logs for all failed jobs in a run.
 
@@ -227,9 +227,9 @@ class CILogDownloader:
             run_id: The workflow run ID.
             output_dir: Optional directory to save logs. If provided, logs
                        are split into chunks and saved to files.
-            max_lines_per_file: Maximum lines per log file (default: 500).
+            max_chars_per_file: Maximum characters per log file (default: 20,000).
                                Logs are split into multiple files to keep
-                               them manageable for AI processing.
+                               them manageable for AI processing (~5,000 tokens/file).
 
         Returns:
             Dictionary mapping job names to log content.
@@ -267,7 +267,7 @@ class CILogDownloader:
                         logs=logs,
                         job_name=job.name,
                         output_dir=output_dir,
-                        max_lines_per_file=max_lines_per_file,
+                        max_chars_per_file=max_chars_per_file,
                     )
                     logger.debug(f"Saved logs for {job.name} to {output_dir}")
 
@@ -292,22 +292,24 @@ class CILogDownloader:
         logs: str,
         job_name: str,
         output_dir: Path,
-        max_lines_per_file: int,
+        max_chars_per_file: int,
     ) -> None:
         """Save logs split into manageable chunks.
 
-        Instead of saving one huge file, split into:
+        Instead of saving one huge file, split into chunks by character count:
         job_name/
           .jobname (original name metadata)
-          1.log (500 lines)
-          2.log (500 lines)
-          3.log (remaining lines)
+          1.log (~20KB)
+          2.log (~20KB)
+          3.log (remaining)
+
+        Splits on line boundaries to preserve readability.
 
         Args:
             logs: Complete log content.
             job_name: Original name of the job (may contain spaces/slashes).
             output_dir: Base output directory.
-            max_lines_per_file: Maximum lines per file.
+            max_chars_per_file: Maximum characters per file.
         """
         # Create job directory with sanitized name
         safe_name = job_name.replace(" ", "_").replace("/", "_")
@@ -317,16 +319,33 @@ class CILogDownloader:
         # Save original job name for display purposes
         (job_dir / ".jobname").write_text(job_name, encoding="utf-8")
 
-        # Split logs into lines
+        # Split logs into lines (preserve line endings)
         lines = logs.splitlines(keepends=True)
 
-        # Write chunks
+        # Write chunks by character count
         chunk_num = 1
-        for i in range(0, len(lines), max_lines_per_file):
-            chunk = lines[i : i + max_lines_per_file]
+        current_chunk: list[str] = []
+        current_size = 0
+
+        for line in lines:
+            line_size = len(line)
+
+            # If adding this line would exceed limit and we have content, write chunk
+            if current_size + line_size > max_chars_per_file and current_chunk:
+                chunk_file = job_dir / f"{chunk_num}.log"
+                chunk_file.write_text("".join(current_chunk), encoding="utf-8")
+                chunk_num += 1
+                current_chunk = []
+                current_size = 0
+
+            # Add line to current chunk
+            current_chunk.append(line)
+            current_size += line_size
+
+        # Write final chunk if any content remains
+        if current_chunk:
             chunk_file = job_dir / f"{chunk_num}.log"
-            chunk_file.write_text("".join(chunk), encoding="utf-8")
-            chunk_num += 1
+            chunk_file.write_text("".join(current_chunk), encoding="utf-8")
 
     def get_error_summary(self, run_id: int, max_errors_per_job: int = 5) -> str:
         """Get a summary of errors from all failed jobs.

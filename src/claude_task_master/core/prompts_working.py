@@ -107,8 +107,41 @@ def build_work_prompt(
 {files_list}
 
 **CI Failure Logs:** If CI failed, check `.claude-task-master/pr-{{number}}/ci/` directory.
-Logs are organized by job name, split into manageable chunks (500 lines per file).
-Use Grep to search error patterns across all log files.""",
+
+⚠️ **CRITICAL: DO NOT read all log files at once - this will overflow context!**
+
+**Proper approach for debugging CI failures:**
+
+1. **First, use Grep to locate errors** (this searches WITHOUT loading full files):
+   ```
+   Grep pattern="FAIL|Error:|AssertionError|TypeError" path=".claude-task-master/pr-{{number}}/ci/" -A 3 -B 3
+   ```
+
+2. **Read only relevant files** based on Grep results:
+   - If Grep shows errors in `1.log`, read that file only
+   - Read incrementally: 1-2 files at a time, never all files in parallel
+
+3. **Common error patterns to search for:**
+   - `"FAIL"` - Test failures
+   - `"Error:"` - Error messages
+   - `"AssertionError"` - Failed assertions
+   - `"TypeError|AttributeError"` - Type/attribute errors
+   - `"Expected .* but got"` - Assertion mismatches
+
+4. **Example workflow:**
+   ```
+   # Step 1: Find which files have failures
+   Grep pattern="FAIL" path=".claude-task-master/pr-{{number}}/ci/"
+
+   # Step 2: Read only the file(s) with failures
+   Read file_path=".claude-task-master/pr-{{number}}/ci/job-name/3.log"
+
+   # Step 3: Use Grep to find the error in source code
+   Grep pattern="functionNameThatFailed" path="src/"
+   ```
+
+**Why this matters:** CI logs can be 400KB+ split across 15+ files. Reading all files
+simultaneously will cause "Prompt is too long" errors and crash the session.""",
         )
 
     # PR comments to address
@@ -124,10 +157,25 @@ Use Grep to search error patterns across all log files.""",
 1. **Explore thoroughly first** - Read the relevant files and understand the context
    before making any changes. Don't rush to implement.
 
-2. **Use Grep to find error locations** - If CI logs mention files/functions with errors:
-   - Use Grep with the error message pattern to locate the exact issue
-   - Example: `Grep pattern="Property 'name' does not exist"` to find all type errors
+2. **Use Grep to find error locations** - ALWAYS use Grep to search, never read all files:
+
+   **For CI log errors:**
+   ```
+   # First: Find errors in CI logs
+   Grep pattern="FAIL|Error:" path=".claude-task-master/pr-{{number}}/ci/" -A 3
+
+   # Then: Find the error in source code
+   Grep pattern="exact error message" path="src/"
+   ```
+
+   **For code issues:**
+   ```
+   # Example: TypeError about missing property
+   Grep pattern="Property 'name' does not exist" path="src/"
+   ```
+
    - This helps you find ALL instances of the same issue, not just one
+   - Prevents context overflow from reading large log files
 
 3. **If you agree** - Make the requested change, run tests, and commit.
 
