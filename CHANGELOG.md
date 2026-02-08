@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.18] - 2026-02-08
+
+### Fixed
+- **More concise CI debugging prompts**: Simplified workflow instructions to prevent agents from reading all log files
+  - Added explicit `ls` step as first action to see file count before searching
+  - Condensed CI debugging section from 20+ lines to 10 lines
+  - Simplified PR review feedback workflow from 6 steps to 5 steps
+  - More direct language emphasizing the correct workflow: ls → Grep → Read specific files
+  - Same safety features and information, 50% less text to parse
+
 ## [0.1.17] - 2026-02-08
 
 ### Fixed
@@ -415,7 +425,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.17...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.18...HEAD
+[0.1.18]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.17...v0.1.18
 [0.1.17]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.16...v0.1.17
 [0.1.16]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.15...v0.1.16
 [0.1.15]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.14...v0.1.15
