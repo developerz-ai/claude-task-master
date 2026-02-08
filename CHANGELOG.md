@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.17] - 2026-02-08
+
+### Fixed
+- **Context overflow from CI logs** (#92): Prevent "Prompt is too long" fatal errors during CI debugging
+  - Changed log splitting from line-based (500/file) to character-based (20KB/file)
+  - Ensures predictable file sizes (~5,000 tokens) instead of unpredictable 30KB+ files
+  - Added explicit warnings in work prompts: "⚠️ DO NOT read all log files at once"
+  - Enhanced prompts with step-by-step Grep instructions and concrete examples
+  - Prevents agents from reading all log files in parallel (which caused 443KB context overflow)
+  - Updated tests for character-based splitting (29/29 pass, 98.26% coverage)
+
 ## [0.1.16] - 2026-02-08
 
 ### Fixed
@@ -404,7 +415,9 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.15...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.17...HEAD
+[0.1.17]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.16...v0.1.17
+[0.1.16]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.15...v0.1.16
 [0.1.15]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.14...v0.1.15
 [0.1.14]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.13...v0.1.14
 [0.1.13]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.12...v0.1.13
