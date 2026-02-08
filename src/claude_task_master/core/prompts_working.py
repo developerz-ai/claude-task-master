@@ -58,6 +58,8 @@ def build_work_prompt(
 
 🎯 **Deliver HIGH QUALITY work. Follow project instructions.**
 
+⚠️ **CRITICAL: For CI logs, ALWAYS use: ls → Grep → Read specific files. NEVER read all logs.**
+
 📋 **Full plan:** `.claude-task-master/plan.md` | **Progress:** `.claude-task-master/progress.md`"""
     )
 
@@ -102,25 +104,21 @@ def build_work_prompt(
         files_list = "\n".join(f"- `{f}`" for f in file_hints[:10])  # Limit to 10
         builder.add_section(
             "Relevant Files",
-            f"""Start by reading these files:
+            f"""⚠️ **CI LOGS: NEVER READ ALL FILES**
+```bash
+# CORRECT: ls → Grep → Read specific files
+ls .claude-task-master/pr-{{number}}/ci/job-name/
+Grep pattern="FAIL|Error:|not ok" path=".claude-task-master/pr-{{number}}/ci/" -A 3
+Read .claude-task-master/pr-{{number}}/ci/job-name/5.log  # Only files with errors
 
-{files_list}
+# WRONG: Do NOT do this
+Read .claude-task-master/pr-{{number}}/ci/job-name/1.log  # ❌ Reading all files
+Read .claude-task-master/pr-{{number}}/ci/job-name/2.log  # ❌ Causes context overflow
+Task "Read all CI log files"  # ❌ NEVER spawn tasks to read all logs
+```
 
-**CI Debugging:** ⚠️ DO NOT read all log files - use this workflow:
-   ```bash
-   # 1. See how many files exist
-   ls .claude-task-master/pr-{{number}}/ci/job-name/
-
-   # 2. Grep for errors (searches WITHOUT loading files)
-   Grep pattern="FAIL|Error:|not ok" path=".claude-task-master/pr-{{number}}/ci/" -A 3
-
-   # 3. Read ONLY the specific file(s) with errors
-   Read file_path=".claude-task-master/pr-{{number}}/ci/job-name/5.log"
-   ```
-
-**Common patterns:** `FAIL`, `Error:`, `AssertionError`, `not ok`, `TypeError`
-
-**Why:** Logs can be 400KB+ across 20+ files. Reading all = context overflow crash.""",
+**Start by reading these files:**
+{files_list}""",
         )
 
     # PR comments to address
