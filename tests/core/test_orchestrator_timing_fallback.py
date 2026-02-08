@@ -1,5 +1,6 @@
 """Tests for orchestrator timing fallback when task_start_time is None."""
 
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -90,8 +91,6 @@ class TestTimingFallback:
         # Save state to file
         state_manager = StateManager(temp_state_dir)
         state_file = state_manager.state_file
-        import json
-
         state_file.write_text(json.dumps(state_dict, indent=2))
 
         # Load state
