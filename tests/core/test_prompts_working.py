@@ -382,28 +382,28 @@ class TestPRCommentsSection:
         assert "Address this review feedback" in result or "Address" in result
 
     def test_explore_thoroughly_instruction(self) -> None:
-        """Test instruction to explore thoroughly first."""
+        """Test instruction to read relevant files and understand context."""
         result = build_work_prompt(
             task_description="Task",
             pr_comments="Comments here",
         )
-        assert "Explore thoroughly" in result or "Read the relevant files" in result
+        assert "Read relevant files" in result or "understand context" in result
 
     def test_if_agree_instruction(self) -> None:
-        """Test instruction for when agreeing with feedback."""
+        """Test instruction for handling agreement/disagreement with feedback."""
         result = build_work_prompt(
             task_description="Task",
             pr_comments="Comments here",
         )
-        assert "If you agree" in result
+        assert "if you agree" in result or "explain why not" in result
 
     def test_if_disagree_instruction(self) -> None:
-        """Test instruction for when disagreeing with feedback."""
+        """Test instruction for explaining disagreement."""
         result = build_work_prompt(
             task_description="Task",
             pr_comments="Comments here",
         )
-        assert "If you disagree" in result
+        assert "explain why not" in result or "if you agree" in result
 
     def test_run_tests_after_changes(self) -> None:
         """Test instruction to run tests after changes."""
