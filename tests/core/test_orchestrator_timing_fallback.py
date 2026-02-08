@@ -41,7 +41,7 @@ class TestTimingFallback:
         assert "[TIMING] Task #1 completed in 2m 0.0s" in content
 
     def test_timing_display_without_task_start_time(self, log_file: Path) -> None:
-        """Test that timing uses session duration as fallback when task_start_time is None."""
+        """Test timing uses session duration fallback when task_start_time is None."""
         logger = TaskLogger(log_file, level=LogLevel.NORMAL, log_format=LogFormat.TEXT)
 
         # Simulate session duration fallback (90 seconds)
@@ -57,7 +57,7 @@ class TestTimingFallback:
     def test_state_without_task_start_time_field(
         self, temp_state_dir: Path, log_file: Path
     ) -> None:
-        """Test that state without task_start_time field (from older version) works correctly."""
+        """Test state without task_start_time field (from older version) works."""
         # Create a state dict without timing fields (simulating old state)
         state_dict = {
             "status": "working",
