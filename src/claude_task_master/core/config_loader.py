@@ -26,6 +26,7 @@ Environment Variable Overrides:
 - CLAUDETM_MODEL_SONNET -> config.models.sonnet
 - CLAUDETM_MODEL_OPUS -> config.models.opus
 - CLAUDETM_MODEL_HAIKU -> config.models.haiku
+- CLAUDETM_MODEL_SONNET_1M -> config.models.sonnet_1m
 - CLAUDETM_TARGET_BRANCH -> config.git.target_branch
 """
 
@@ -61,6 +62,7 @@ ENV_VAR_MAPPINGS: list[tuple[str, tuple[str, ...]]] = [
     ("CLAUDETM_MODEL_SONNET", ("models", "sonnet")),
     ("CLAUDETM_MODEL_OPUS", ("models", "opus")),
     ("CLAUDETM_MODEL_HAIKU", ("models", "haiku")),
+    ("CLAUDETM_MODEL_SONNET_1M", ("models", "sonnet_1m")),
     ("CLAUDETM_TARGET_BRANCH", ("git", "target_branch")),
 ]
 
