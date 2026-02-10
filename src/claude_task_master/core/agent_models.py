@@ -153,7 +153,8 @@ DEFAULT_COMPACT_THRESHOLD_PERCENT = 0.85  # Compact at 85% usage
 def parse_task_complexity(task_description: str) -> tuple[TaskComplexity, str]:
     """Parse task complexity tag from task description.
 
-    Looks for `[coding]`, `[quick]`, `[general]`, or `[debugging-qa]` tags in the task.
+    Looks for [coding], [quick], [general], or [debugging-qa] tags in the task,
+    with or without surrounding backticks.
 
     Args:
         task_description: The task description potentially containing a complexity tag.
@@ -162,8 +163,9 @@ def parse_task_complexity(task_description: str) -> tuple[TaskComplexity, str]:
         Tuple of (TaskComplexity, cleaned_task_description).
         Defaults to CODING if no tag found (prefer smarter model).
     """
-    # Look for complexity tags in backticks: `[coding]`, `[quick]`, `[general]`
-    pattern = r"`\[(coding|quick|general|debugging-qa)\]`"
+    # Look for complexity tags with or without backticks:
+    # `[coding]` (backtick-wrapped) or [coding] (bare)
+    pattern = r"`?\[(coding|quick|general|debugging-qa)\]`?"
     match = re.search(pattern, task_description, re.IGNORECASE)
 
     if match:

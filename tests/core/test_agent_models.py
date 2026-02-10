@@ -369,14 +369,39 @@ class TestParseTaskComplexity:
         assert complexity == TaskComplexity.QUICK
         assert "`config.py`" in cleaned
 
-    def test_parse_tag_without_backticks_not_matched(self):
-        """Test tag without backticks is not matched."""
+    def test_parse_bare_tag_without_backticks(self):
+        """Test tag without backticks is matched (bare [tag] format)."""
         task = "Implement feature [coding] without backticks"
         complexity, cleaned = parse_task_complexity(task)
 
-        # Should default to CODING since no backtick-wrapped tag
         assert complexity == TaskComplexity.CODING
-        assert cleaned == task  # Unchanged
+        assert "Implement feature" in cleaned
+        assert "without backticks" in cleaned
+        assert "[coding]" not in cleaned
+
+    def test_parse_bare_quick_tag(self):
+        """Test bare [quick] tag without backticks."""
+        task = "[quick] Fix typo in config"
+        complexity, cleaned = parse_task_complexity(task)
+
+        assert complexity == TaskComplexity.QUICK
+        assert cleaned == "Fix typo in config"
+
+    def test_parse_bare_general_tag(self):
+        """Test bare [general] tag without backticks."""
+        task = "Update docs [general]"
+        complexity, cleaned = parse_task_complexity(task)
+
+        assert complexity == TaskComplexity.GENERAL
+        assert cleaned == "Update docs"
+
+    def test_parse_bare_debugging_qa_tag(self):
+        """Test bare [debugging-qa] tag without backticks."""
+        task = "[debugging-qa] Investigate CI failure"
+        complexity, cleaned = parse_task_complexity(task)
+
+        assert complexity == TaskComplexity.DEBUGGING_QA
+        assert cleaned == "Investigate CI failure"
 
     def test_parse_multiple_tags_uses_first(self):
         """Test multiple tags uses first match."""
