@@ -260,6 +260,23 @@ class TestParseTaskComplexity:
         assert "in production" in cleaned
         assert "`[debugging-qa]`" not in cleaned
 
+    def test_parse_debugging_qa_uppercase(self):
+        """Test parsing uppercase `[DEBUGGING-QA]` tag (case insensitive)."""
+        task = "Analyze issue `[DEBUGGING-QA]` with crash reports"
+        complexity, cleaned = parse_task_complexity(task)
+
+        assert complexity == TaskComplexity.DEBUGGING_QA
+        assert "Analyze issue" in cleaned
+        assert "`[DEBUGGING-QA]`" not in cleaned
+
+    def test_parse_debugging_qa_hyphen_handling(self):
+        """Test that debugging-qa with hyphen is correctly parsed."""
+        task = "`[debugging-qa]` Investigate production errors"
+        complexity, cleaned = parse_task_complexity(task)
+
+        assert complexity == TaskComplexity.DEBUGGING_QA
+        assert cleaned == "Investigate production errors"
+
     def test_parse_coding_tag(self):
         """Test parsing `[coding]` tag."""
         task = "Implement feature `[coding]` with full tests"
@@ -403,6 +420,7 @@ class TestBackwardCompatibility:
         )
 
         assert ModelType.SONNET.value == "sonnet"
+        assert ModelType.SONNET_1M.value == "sonnet_1m"
         assert TaskComplexity.CODING.value == "coding"
         assert "Read" in ToolConfig.PLANNING.value
         assert MODEL_CONTEXT_WINDOWS[ModelType.SONNET] == 1_000_000

@@ -37,6 +37,14 @@ class TestTaskComplexity:
         assert complexity == TaskComplexity.GENERAL
         assert cleaned == "Add tests for service"
 
+    def test_parse_debugging_qa_complexity(self):
+        """Should parse [debugging-qa] tag."""
+        complexity, cleaned = parse_task_complexity(
+            "`[debugging-qa]` Investigate memory leak in production"
+        )
+        assert complexity == TaskComplexity.DEBUGGING_QA
+        assert cleaned == "Investigate memory leak in production"
+
     def test_parse_no_complexity_defaults_to_coding(self):
         """Should default to CODING when no tag present."""
         complexity, cleaned = parse_task_complexity("Implement feature X")
@@ -51,11 +59,20 @@ class TestTaskComplexity:
         complexity, _ = parse_task_complexity("`[Quick]` Task")
         assert complexity == TaskComplexity.QUICK
 
+        complexity, _ = parse_task_complexity("`[DEBUGGING-QA]` Task")
+        assert complexity == TaskComplexity.DEBUGGING_QA
+
     def test_get_model_for_complexity(self):
         """Should map complexity to correct model name."""
         assert TaskComplexity.get_model_for_complexity(TaskComplexity.CODING) == "opus"
         assert TaskComplexity.get_model_for_complexity(TaskComplexity.QUICK) == "haiku"
         assert TaskComplexity.get_model_for_complexity(TaskComplexity.GENERAL) == "sonnet"
+
+    def test_get_model_for_debugging_qa(self):
+        """Should map DEBUGGING_QA complexity to sonnet_1m."""
+        assert (
+            TaskComplexity.get_model_for_complexity(TaskComplexity.DEBUGGING_QA) == "sonnet_1m"
+        )
 
 
 class TestParseTasksWithGroups:

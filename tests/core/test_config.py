@@ -81,6 +81,7 @@ class TestModelConfig:
         assert config.sonnet == "claude-sonnet-4-5-20250929"
         assert config.opus == "claude-opus-4-6"
         assert config.haiku == "claude-haiku-4-5-20251001"
+        assert config.sonnet_1m == "claude-sonnet-4-5-20250929"
 
     def test_custom_models(self) -> None:
         """Test that ModelConfig accepts custom model names."""
@@ -93,6 +94,11 @@ class TestModelConfig:
         assert config.opus == "anthropic/claude-opus-4-6"
         assert config.haiku == "anthropic/claude-haiku-4-5-20251001"
 
+    def test_custom_sonnet_1m(self) -> None:
+        """Test that ModelConfig accepts custom sonnet_1m model name."""
+        config = ModelConfig(sonnet_1m="anthropic/claude-sonnet-4-5-20250929-1m")
+        assert config.sonnet_1m == "anthropic/claude-sonnet-4-5-20250929-1m"
+
 
 class TestContextWindowsConfig:
     """Tests for ContextWindowsConfig model."""
@@ -103,6 +109,7 @@ class TestContextWindowsConfig:
         assert config.opus == 200_000
         assert config.sonnet == 200_000
         assert config.haiku == 200_000
+        assert config.sonnet_1m == 1_000_000
 
     def test_tier4_context(self) -> None:
         """Test setting 1M context windows for tier 4+ users."""
@@ -298,6 +305,12 @@ class TestUtilityFunctions:
         config = ClaudeTaskMasterConfig()
         assert get_model_name(config, "haiku") == "claude-haiku-4-5-20251001"
         assert get_model_name(config, "HAIKU") == "claude-haiku-4-5-20251001"
+
+    def test_get_model_name_sonnet_1m(self) -> None:
+        """Test get_model_name returns correct model for sonnet_1m."""
+        config = ClaudeTaskMasterConfig()
+        assert get_model_name(config, "sonnet_1m") == "claude-sonnet-4-5-20250929"
+        assert get_model_name(config, "SONNET_1M") == "claude-sonnet-4-5-20250929"
 
     def test_get_model_name_custom_config(self) -> None:
         """Test get_model_name with custom model names."""
@@ -577,6 +590,15 @@ class TestEnvironmentVariableOverrides:
         assert overridden.models.sonnet == "custom-sonnet"
         assert overridden.models.opus == "custom-opus"
         assert overridden.models.haiku == "custom-haiku"
+
+    def test_apply_env_overrides_sonnet_1m(self) -> None:
+        """Test env var overrides sonnet_1m model name."""
+        config = generate_default_config()
+
+        with patch.dict(os.environ, {"CLAUDETM_MODEL_SONNET_1M": "custom-sonnet-1m"}):
+            overridden = apply_env_overrides(config)
+
+        assert overridden.models.sonnet_1m == "custom-sonnet-1m"
 
     def test_apply_env_overrides_target_branch(self) -> None:
         """Test env var overrides target_branch."""
