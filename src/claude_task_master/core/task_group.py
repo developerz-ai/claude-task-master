@@ -71,8 +71,9 @@ def parse_task_complexity(task_description: str) -> tuple[TaskComplexity, str]:
         Tuple of (TaskComplexity, cleaned_task_description).
         Defaults to CODING if no tag found (prefer smarter model).
     """
-    # Look for complexity tags in backticks: `[coding]`, `[quick]`, `[general]`, `[debugging-qa]`
-    pattern = r"`\[(coding|quick|general|debugging-qa)\]`"
+    # Look for complexity tags with or without backticks:
+    # `[coding]` (backtick-wrapped) or [coding] (bare)
+    pattern = r"`?\[(coding|quick|general|debugging-qa)\]`?"
     match = re.search(pattern, task_description, re.IGNORECASE)
 
     if match:
