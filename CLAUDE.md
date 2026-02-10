@@ -102,6 +102,16 @@ uv tool install claude-task-master --force --reinstall
 | VERIFICATION | Read, Glob, Grep, Bash | Run tests/lint to verify success criteria |
 | WORKING | All tools | Implement tasks with full access |
 
+**Task Complexity Levels** (for dynamic model routing):
+| Complexity | Tag | Model | Use Case |
+|------------|-----|-------|----------|
+| CODING | `[coding]` | Opus | Complex implementation tasks, new features, intricate logic |
+| QUICK | `[quick]` | Haiku | Simple fixes, configuration changes, small tweaks |
+| GENERAL | `[general]` | Sonnet | Tests, documentation, moderate refactoring, balanced tasks |
+| DEBUGGING_QA | `[debugging-qa]` | Sonnet 1M | CI failures, bug tracing, visual QA, log analysis (1M context) |
+
+When uncertain, default to `[coding]` (uses Opus, most capable).
+
 **State Directory**:
 ```
 .claude-task-master/
