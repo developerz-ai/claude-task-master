@@ -19,6 +19,7 @@ Environment Variable Mapping:
 | models.sonnet            | CLAUDETM_MODEL_SONNET     |
 | models.opus              | CLAUDETM_MODEL_OPUS       |
 | models.haiku             | CLAUDETM_MODEL_HAIKU      |
+| models.sonnet_1m         | CLAUDETM_MODEL_SONNET_1M  |
 | git.target_branch        | CLAUDETM_TARGET_BRANCH    |
 """
 
@@ -78,6 +79,11 @@ class ModelConfig(BaseModel):
         default="claude-haiku-4-5-20251001",
         description="Model name for 'haiku' (fastest). Overridden by CLAUDETM_MODEL_HAIKU.",
     )
+    sonnet_1m: str = Field(
+        default="claude-sonnet-4-5-20250929",
+        description="Model name for 'sonnet_1m' (debugging/QA, 1M context). "
+        "Overridden by CLAUDETM_MODEL_SONNET_1M.",
+    )
 
 
 class GitConfig(BaseModel):
@@ -118,6 +124,10 @@ class ContextWindowsConfig(BaseModel):
     haiku: int = Field(
         default=200_000,
         description="Haiku context window size in tokens.",
+    )
+    sonnet_1m: int = Field(
+        default=1_000_000,
+        description="Sonnet 1M context window size in tokens. Always 1M.",
     )
 
 
@@ -169,7 +179,8 @@ class ClaudeTaskMasterConfig(BaseModel):
       "models": {
         "sonnet": "claude-sonnet-4-5-20250929",
         "opus": "claude-opus-4-6",
-        "haiku": "claude-haiku-4-5-20251001"
+        "haiku": "claude-haiku-4-5-20251001",
+        "sonnet_1m": "claude-sonnet-4-5-20250929"
       },
       "git": {
         "target_branch": "main",
@@ -178,7 +189,8 @@ class ClaudeTaskMasterConfig(BaseModel):
       "context_windows": {
         "opus": 200000,
         "sonnet": 200000,
-        "haiku": 200000
+        "haiku": 200000,
+        "sonnet_1m": 1000000
       },
       "tools": {
         "planning": ["Read", "Glob", "Grep", "Bash", "WebFetch", "WebSearch"],
@@ -274,6 +286,7 @@ def get_model_name(config: ClaudeTaskMasterConfig, model_key: str) -> str:
         "sonnet": config.models.sonnet,
         "opus": config.models.opus,
         "haiku": config.models.haiku,
+        "sonnet_1m": config.models.sonnet_1m,
     }
     return model_map.get(model_key.lower(), config.models.sonnet)
 

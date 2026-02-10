@@ -32,11 +32,13 @@ class TaskComplexity(Enum):
     - CODING: Complex implementation tasks → Opus (smartest)
     - QUICK: Simple fixes, config changes → Haiku (fastest/cheapest)
     - GENERAL: Moderate complexity → Sonnet (balanced)
+    - DEBUGGING_QA: Debugging/QA tasks → Sonnet 1M (deep context)
     """
 
     CODING = "coding"
     QUICK = "quick"
     GENERAL = "general"
+    DEBUGGING_QA = "debugging-qa"
 
     @classmethod
     def get_model_for_complexity(cls, complexity: TaskComplexity) -> str:
@@ -52,6 +54,7 @@ class TaskComplexity(Enum):
             cls.CODING: "opus",
             cls.QUICK: "haiku",
             cls.GENERAL: "sonnet",
+            cls.DEBUGGING_QA: "sonnet_1m",
         }
         return mapping.get(complexity, "sonnet")
 
@@ -59,7 +62,7 @@ class TaskComplexity(Enum):
 def parse_task_complexity(task_description: str) -> tuple[TaskComplexity, str]:
     """Parse task complexity tag from task description.
 
-    Looks for `[coding]`, `[quick]`, or `[general]` tags in the task.
+    Looks for `[coding]`, `[quick]`, `[general]`, or `[debugging-qa]` tags in the task.
 
     Args:
         task_description: The task description potentially containing a complexity tag.
@@ -68,8 +71,9 @@ def parse_task_complexity(task_description: str) -> tuple[TaskComplexity, str]:
         Tuple of (TaskComplexity, cleaned_task_description).
         Defaults to CODING if no tag found (prefer smarter model).
     """
-    # Look for complexity tags in backticks: `[coding]`, `[quick]`, `[general]`
-    pattern = r"`\[(coding|quick|general)\]`"
+    # Look for complexity tags with or without backticks:
+    # `[coding]` (backtick-wrapped) or [coding] (bare)
+    pattern = r"`?\[(coding|quick|general|debugging-qa)\]`?"
     match = re.search(pattern, task_description, re.IGNORECASE)
 
     if match:
@@ -81,6 +85,7 @@ def parse_task_complexity(task_description: str) -> tuple[TaskComplexity, str]:
             "coding": TaskComplexity.CODING,
             "quick": TaskComplexity.QUICK,
             "general": TaskComplexity.GENERAL,
+            "debugging-qa": TaskComplexity.DEBUGGING_QA,
         }
         return complexity_map.get(complexity_str, TaskComplexity.CODING), cleaned
 

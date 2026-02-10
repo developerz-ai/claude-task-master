@@ -522,6 +522,7 @@ class TestCreateTaskListSection:
         assert "[coding]" in result
         assert "[quick]" in result
         assert "[general]" in result
+        assert "[debugging-qa]" in result
 
     def test_coding_tag_for_opus(self) -> None:
         """Test [coding] tag is for Opus model."""
@@ -541,6 +542,19 @@ class TestCreateTaskListSection:
         result = build_planning_prompt("Any goal")
         assert "[general]" in result
         assert "Sonnet" in result or "balanced" in result.lower()
+
+    def test_debugging_qa_tag_for_sonnet_1m(self) -> None:
+        """Test [debugging-qa] tag is for Sonnet 1M model."""
+        result = build_planning_prompt("Any goal")
+        assert "[debugging-qa]" in result
+        # Should mention Sonnet 1M or deep context or QA
+        assert (
+            "Sonnet 1M" in result
+            or "sonnet_1m" in result
+            or "1M context" in result
+            or "deep context" in result.lower()
+            or "debugging" in result.lower()
+        )
 
     def test_default_tag_advice(self) -> None:
         """Test advice to use [coding] when uncertain."""
@@ -865,6 +879,8 @@ class TestPromptContentValidation:
         assert "[coding]" in result and "Opus" in result
         assert "[quick]" in result and "Haiku" in result
         assert "[general]" in result and "Sonnet" in result
+        # [debugging-qa] should be explained with Sonnet 1M or context reference
+        assert "[debugging-qa]" in result
 
     def test_consistent_formatting(self) -> None:
         """Test formatting is consistent."""

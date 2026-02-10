@@ -179,6 +179,8 @@ class TestPlanUpdatePromptFormat:
 
         # Should mention complexity tags
         assert "[coding]" in prompt or "[quick]" in prompt or "[general]" in prompt
+        # Should also mention [debugging-qa]
+        assert "[debugging-qa]" in prompt
 
     def test_pr_structure_mentioned(self):
         """Test that PR structure is mentioned."""
