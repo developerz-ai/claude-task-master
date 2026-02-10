@@ -40,11 +40,16 @@ class TestModelType:
         """Test HAIKU model value."""
         assert ModelType.HAIKU.value == "haiku"
 
+    def test_sonnet_1m_value(self):
+        """Test SONNET_1M model value."""
+        assert ModelType.SONNET_1M.value == "sonnet_1m"
+
     def test_model_type_from_string(self):
         """Test creating ModelType from string value."""
         assert ModelType("sonnet") == ModelType.SONNET
         assert ModelType("opus") == ModelType.OPUS
         assert ModelType("haiku") == ModelType.HAIKU
+        assert ModelType("sonnet_1m") == ModelType.SONNET_1M
 
     def test_invalid_model_type(self):
         """Test invalid model type raises ValueError."""
@@ -53,7 +58,7 @@ class TestModelType:
 
     def test_all_model_types(self):
         """Test all expected model types exist."""
-        expected = {"SONNET", "OPUS", "HAIKU"}
+        expected = {"SONNET", "OPUS", "HAIKU", "SONNET_1M"}
         actual = {m.name for m in ModelType}
         assert actual == expected
 
@@ -78,11 +83,16 @@ class TestTaskComplexity:
         """Test GENERAL complexity value."""
         assert TaskComplexity.GENERAL.value == "general"
 
+    def test_debugging_qa_value(self):
+        """Test DEBUGGING_QA complexity value."""
+        assert TaskComplexity.DEBUGGING_QA.value == "debugging-qa"
+
     def test_complexity_from_string(self):
         """Test creating TaskComplexity from string value."""
         assert TaskComplexity("coding") == TaskComplexity.CODING
         assert TaskComplexity("quick") == TaskComplexity.QUICK
         assert TaskComplexity("general") == TaskComplexity.GENERAL
+        assert TaskComplexity("debugging-qa") == TaskComplexity.DEBUGGING_QA
 
     def test_invalid_complexity(self):
         """Test invalid complexity raises ValueError."""
@@ -91,7 +101,7 @@ class TestTaskComplexity:
 
     def test_all_complexity_levels(self):
         """Test all expected complexity levels exist."""
-        expected = {"CODING", "QUICK", "GENERAL"}
+        expected = {"CODING", "QUICK", "GENERAL", "DEBUGGING_QA"}
         actual = {c.name for c in TaskComplexity}
         assert actual == expected
 
@@ -109,6 +119,11 @@ class TestTaskComplexity:
         """Test GENERAL complexity maps to SONNET."""
         model = TaskComplexity.get_model_for_complexity(TaskComplexity.GENERAL)
         assert model == ModelType.SONNET
+
+    def test_get_model_for_debugging_qa_complexity(self):
+        """Test DEBUGGING_QA complexity maps to SONNET_1M."""
+        model = TaskComplexity.get_model_for_complexity(TaskComplexity.DEBUGGING_QA)
+        assert model == ModelType.SONNET_1M
 
 
 # =============================================================================
@@ -208,6 +223,14 @@ class TestModelContextWindows:
         """Test Haiku context window is 200K."""
         assert MODEL_CONTEXT_WINDOWS[ModelType.HAIKU] == 200_000
 
+    def test_sonnet_1m_context_window(self):
+        """Test Sonnet 1M context window is always 1M."""
+        assert MODEL_CONTEXT_WINDOWS[ModelType.SONNET_1M] == 1_000_000
+
+    def test_sonnet_1m_standard_context_window(self):
+        """Test Sonnet 1M standard context window is also 1M (always 1M)."""
+        assert MODEL_CONTEXT_WINDOWS_STANDARD[ModelType.SONNET_1M] == 1_000_000
+
     def test_context_windows_are_positive(self):
         """Test all context windows are positive integers."""
         for model in ModelType:
@@ -226,6 +249,16 @@ class TestModelContextWindows:
 
 class TestParseTaskComplexity:
     """Tests for parse_task_complexity function."""
+
+    def test_parse_debugging_qa_tag(self):
+        """Test parsing `[debugging-qa]` tag."""
+        task = "Debug memory leak `[debugging-qa]` in production"
+        complexity, cleaned = parse_task_complexity(task)
+
+        assert complexity == TaskComplexity.DEBUGGING_QA
+        assert "Debug memory leak" in cleaned
+        assert "in production" in cleaned
+        assert "`[debugging-qa]`" not in cleaned
 
     def test_parse_coding_tag(self):
         """Test parsing `[coding]` tag."""

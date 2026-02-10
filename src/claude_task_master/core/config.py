@@ -119,6 +119,10 @@ class ContextWindowsConfig(BaseModel):
         default=200_000,
         description="Haiku context window size in tokens.",
     )
+    sonnet_1m: int = Field(
+        default=1_000_000,
+        description="Sonnet 1M context window size in tokens. Always 1M.",
+    )
 
 
 class ToolsConfig(BaseModel):
