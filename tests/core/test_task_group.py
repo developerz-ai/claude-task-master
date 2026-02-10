@@ -70,9 +70,7 @@ class TestTaskComplexity:
 
     def test_get_model_for_debugging_qa(self):
         """Should map DEBUGGING_QA complexity to sonnet_1m."""
-        assert (
-            TaskComplexity.get_model_for_complexity(TaskComplexity.DEBUGGING_QA) == "sonnet_1m"
-        )
+        assert TaskComplexity.get_model_for_complexity(TaskComplexity.DEBUGGING_QA) == "sonnet_1m"
 
 
 class TestParseTasksWithGroups:
