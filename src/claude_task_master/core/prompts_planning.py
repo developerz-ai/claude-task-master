@@ -146,8 +146,28 @@ Format:
 - `[coding]` → Opus (smartest) - new features, complex logic
 - `[quick]` → Haiku (fastest) - configs, small fixes
 - `[general]` → Sonnet (balanced) - tests, docs, refactoring
+- `[debugging-qa]` → Sonnet 1M (deep context) - CI failures, bug tracing, visual QA
 
 **When uncertain, use `[coding]`.**
+
+**`[debugging-qa]` tasks must include investigation/verification steps:**
+When tagging a task as `[debugging-qa]`, include context sublists that tell the worker:
+- What to read (log files, error traces, CI output)
+- What to run (curl commands, test commands, the app itself)
+- What to check visually (Playwright for web, screenshots for other apps)
+- What to verify after fixing (re-run tests, re-check endpoints, re-screenshot)
+
+The worker has 1M context — load it up with everything relevant.
+
+Example `[debugging-qa]` task:
+```
+- [ ] `[debugging-qa]` Fix login redirect failing on Safari
+  - `src/auth/callback.ts:42` — redirect handler, check URL construction
+  - Use Playwright to open login page on webkit, complete OAuth flow, verify redirect
+  - curl `POST /auth/callback` with test tokens, check response headers
+  - Check browser console for CORS or cookie errors
+  - `logs/auth-errors.log` — recent Safari-related entries
+```
 
 **PR grouping principles:**
 - **Dependencies first**: Schema changes before service changes

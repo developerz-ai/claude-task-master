@@ -110,7 +110,7 @@ You just need to OUTPUT the updated plan as TEXT in your response."""
    - Add sublists to any new tasks
 
 6. **Use Proper Format**:
-   - Keep complexity tags: `[coding]`, `[quick]`, `[general]`
+   - Keep complexity tags: `[coding]`, `[quick]`, `[general]`, `[debugging-qa]`
    - Include file paths and symbols in task descriptions
    - Maintain the success criteria section""",
     )
