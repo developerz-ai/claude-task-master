@@ -50,6 +50,9 @@ dmypy.json
 # Claude Task Master state
 .claude-task-master/
 
+# Claude Code settings (local overrides)
+.claude/settings.local.json
+
 # Test directory
 tmp/
 

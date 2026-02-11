@@ -362,3 +362,4 @@ Messages are processed after each task completes. Multiple messages are merged w
 8. **CI + Comments** - fetched together to handle in one step
 9. **Message priority** - 0=low, 1=normal, 2=high, 3=urgent
 10. **Plan preservation** - completed tasks preserved when plan updates occur
+11. **Hooks disabled** - `.claude/settings.json` disables Claude Code hooks to prevent "Stream closed" errors (known bug in Claude Code v2.1.39)
