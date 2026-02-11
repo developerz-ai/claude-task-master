@@ -75,9 +75,13 @@ You just need to OUTPUT the plan as TEXT in your response.
     # Coding style section if available (generated from codebase analysis)
     if coding_style:
         builder.add_section(
-            "Project Coding Style",
-            f"""The following coding style guide was extracted from this codebase.
+            "Project Coding Style & Test Patterns",
+            f"""The following guide was extracted from this codebase.
 **Tasks you create MUST respect these conventions.**
+
+⚠️ **CRITICAL for `[debugging-qa]` tasks:** The Testing section shows existing test patterns.
+When creating debugging-qa tasks, reference these test locations and patterns so the worker
+knows exactly where to write tests and what style to follow.
 
 {coding_style.strip()}""",
         )
@@ -146,28 +150,58 @@ Format:
 - `[coding]` → Opus (smartest) - new features, complex logic
 - `[quick]` → Haiku (fastest) - configs, small fixes
 - `[general]` → Sonnet (balanced) - tests, docs, refactoring
-- `[debugging-qa]` → Sonnet 1M (deep context) - CI failures, bug tracing, visual QA
+- `[debugging-qa]` → Sonnet 1M (deep context) - **Debug AND fix issues** (CI failures, bug investigation, E2E testing)
 
 **When uncertain, use `[coding]`.**
 
-**`[debugging-qa]` tasks must include investigation/verification steps:**
-When tagging a task as `[debugging-qa]`, include context sublists that tell the worker:
-- What to read (log files, error traces, CI output)
-- What to run (curl commands, test commands, the app itself)
-- What to check visually (Playwright for web, screenshots for other apps)
-- What to verify after fixing (re-run tests, re-check endpoints, re-screenshot)
+**`[debugging-qa]` tasks are for debugging AND fixing with automated tests:**
+These tasks should investigate issues using the 1M context window, fix problems found,
+and **write automated integration/E2E tests** to prevent regressions.
 
-The worker has 1M context — load it up with everything relevant.
+⚠️ **DO BOTH: Manual exploration + Automated tests**
+- **Manual testing first**: Use Playwright/curl/browser to explore, find visual bugs, test edge cases
+- **Then automate it**: Convert successful manual tests into automated test code
+- This gives you **immediate feedback** (manual) + **long-term protection** (automated)
+
+**Every `[debugging-qa]` task should follow this workflow:**
+1. **Manually test to identify problems** (Playwright interactive, curl, browser DevTools, check logs)
+   - Find bugs, edge cases, visual issues, UX problems
+2. **Fix bugs found** (null checks, validation, error handling, visual issues, edge cases)
+3. **Write integration tests for the fixes** (Playwright test files, API integration tests, E2E flows)
+   - Convert your manual tests into automated code
+4. **Verify everything** (run new tests, manual spot-check, check CI passes)
+5. Commit + PR with fixes AND tests
+
+**Why this order?** Manual exploration identifies issues → Fixes solve them → Tests prevent regressions.
+
+**Context sublists for `[debugging-qa]` should include:**
+- What to test (API endpoints, UI flows, edge cases)
+- What to read (source files, log files, error traces, CI output)
+- **Where to add tests** (use test patterns from coding-style.md above!)
+  - Exact test file path: `admin/e2e/auth/login.spec.ts`
+  - Example test to follow: `admin/e2e/auth/signup.spec.ts`
+  - Run command: `pnpm --filter admin test:e2e`
+- Expected fixes (specific bugs to fix, validation to add)
+- What to verify (run test suite, check CI, manual spot-check)
 
 Example `[debugging-qa]` task:
 ```
-- [ ] `[debugging-qa]` Fix login redirect failing on Safari
-  - `src/auth/callback.ts:42` — redirect handler, check URL construction
-  - Use Playwright to open login page on webkit, complete OAuth flow, verify redirect
-  - curl `POST /auth/callback` with test tokens, check response headers
-  - Check browser console for CORS or cookie errors
-  - `logs/auth-errors.log` — recent Safari-related entries
+- [ ] `[debugging-qa]` Debug admin login flow, fix issues, and add E2E tests
+  - **1. Manual test to find issues**: Use Playwright MCP → http://localhost:3002/login
+    - Fill admin@example.com/adminpass, verify redirect to 2FA page
+    - Test edge cases: empty fields, wrong password, network errors
+    - Check browser console for errors, screenshot visual issues
+    - Identify problems: missing validation, broken redirects, poor error messages
+  - **2. Read source and fix bugs**: `admin/src/pages/LoginPage.tsx`, `AdminAuthContext.tsx`
+    - Add null checks, fix redirects, improve error messages, fix CSS issues
+  - **3. Write integration tests for fixes**: `admin/e2e/auth/login.spec.ts`
+    - Test successful login + 2FA flow
+    - Test error cases (wrong password, empty fields)
+    - Follow pattern in existing E2E tests
+  - **4. Verify**: Run `pnpm --filter admin test:e2e`, manual spot-check
 ```
+
+**Workflow: Explore manually → Fix → Automate → Verify. Manual finds issues, tests prevent regressions.**
 
 **PR grouping principles:**
 - **Dependencies first**: Schema changes before service changes

@@ -28,12 +28,16 @@ def build_coding_style_prompt() -> str:
     builder = PromptBuilder(
         intro="""You are analyzing a codebase to extract its coding workflow and style guide.
 
-Your mission: **Create a CONCISE coding guide (under 600 words).**
+Your mission: **Create a CONCISE coding guide (under 800 words).**
 
 Focus on extracting:
 1. **Development workflow** (TDD, test-first, iteration patterns)
 2. **Code conventions** (naming, formatting, imports)
-3. **Project-specific requirements** (from CLAUDE.md)
+3. **Test patterns** (E2E, integration, API tests - locations, commands, examples)
+4. **Project-specific requirements** (from CLAUDE.md)
+
+⚠️ **CRITICAL: Test patterns are ESSENTIAL for debugging-qa tasks.**
+These tasks need to know where tests live and what patterns to follow.
 
 This guide will be injected into every coding task, so keep it SHORT and ACTIONABLE.
 
@@ -69,7 +73,25 @@ Also check these if CLAUDE.md doesn't exist:
     )
 
     builder.add_section(
-        "Step 2: Check Configs",
+        "Step 2: Find Test Patterns (CRITICAL for debugging-qa tasks)",
+        """**Look for existing integration/E2E tests - this is ESSENTIAL.**
+
+Use Glob to find test directories and patterns:
+- E2E tests: `**/e2e/**/*.spec.ts`, `**/tests/e2e/**`, `playwright.config.ts`
+- Integration tests: `**/integration/**`, `**/*.integration.test.ts`, `**/*.test.ts`
+- API tests: `**/*.request.test.ts`, `**/api/tests/**`
+
+For each test type found, note:
+- **Location**: Where test files live (e.g., `admin/e2e/`, `backend/src/**/*.test.ts`)
+- **Naming pattern**: How tests are named (e.g., `*.spec.ts`, `*.test.ts`)
+- **Run command**: How to run tests (check `package.json` scripts, `pyproject.toml`)
+- **Example file**: A good test file to follow as a pattern
+
+If no integration tests exist yet, note that and recommend where they should go.""",
+    )
+
+    builder.add_section(
+        "Step 3: Check Configs",
         """Quickly scan linter/formatter configs for conventions:
 
 - Python: `pyproject.toml` [tool.ruff], `ruff.toml`
@@ -80,7 +102,7 @@ Note line length, quote style, import ordering rules.""",
     )
 
     builder.add_section(
-        "Step 3: Generate Coding Guide",
+        "Step 4: Generate Coding Guide",
         """Create a CONCISE guide with these sections (skip if not applicable):
 
 ```markdown
@@ -99,9 +121,10 @@ Note line length, quote style, import ordering rules.""",
 - [Type annotations required? Strictness level?]
 
 ## Testing
-- [Test file naming, location]
+- [Unit tests: location, naming pattern, run command]
+- [Integration/E2E tests: location, naming, run command, example file to follow]
+- [API tests: location, naming, run command]
 - [Assertion style, mock patterns]
-- [Coverage requirements?]
 
 ## Error Handling
 - [Exception patterns, logging approach]
@@ -112,10 +135,11 @@ Note line length, quote style, import ordering rules.""",
 
 **Rules:**
 - Each section: 2-4 bullet points MAX
-- Be SPECIFIC and ACTIONABLE: "Run `pytest` before commit" not "Test your code"
+- Be SPECIFIC and ACTIONABLE: "Run `pnpm test:e2e` before commit" not "Test your code"
+- **Testing section is CRITICAL**: Include exact paths, file patterns, and commands
 - Capture the WORKFLOW, not just style
 - Include actual commands where relevant
-- Total guide: under 600 words""",
+- Total guide: under 800 words (expanded for test patterns)""",
     )
 
     builder.add_section(

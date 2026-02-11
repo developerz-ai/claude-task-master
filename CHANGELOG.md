@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.22] - 2026-02-11
+
+### Enhanced
+- **Test pattern extraction in coding-style.md**: Coding style generation now discovers and documents test patterns
+  - Finds E2E/integration test locations automatically (`**/e2e/**/*.spec.ts`, `**/*.test.ts`)
+  - Extracts test naming conventions, run commands, and example files to follow
+  - Critical for `[debugging-qa]` tasks - workers now know exactly where to write tests
+  - Increased coding style limit from 600 to 800 words to accommodate test patterns
+  - Planning prompt emphasizes test patterns from coding-style.md for debugging-qa tasks
+
+- **Improved `[debugging-qa]` guidance**: Clarified debugging-qa workflow and emphasize automated tests
+  - Explicit workflow: 1) Manual test to find issues → 2) Fix bugs → 3) Write integration tests → 4) Verify
+  - Emphasizes both manual exploration (finds UX issues) AND automated tests (prevents regressions)
+  - Context sublists now reference test patterns from coding-style.md
+  - Examples show complete flow from manual testing to automated test code
+
 ## [0.1.21] - 2026-02-11
 
 ### Changed
@@ -464,7 +480,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.21...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.22...HEAD
+[0.1.22]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.21...v0.1.22
 [0.1.21]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.20...v0.1.21
 [0.1.20]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.19...v0.1.20
 [0.1.19]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.18...v0.1.19
