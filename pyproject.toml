@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "claude-task-master"
-version = "0.1.20"
+version = "0.1.21"
 description = "Autonomous task orchestration system that keeps Claude working until a goal is achieved"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -24,11 +24,11 @@ classifiers = [
 ]
 
 dependencies = [
-    "claude-agent-sdk>=0.1.27,<0.1.29",
-    "typer>=0.12.0",
-    "pydantic>=2.0.0",
+    "claude-agent-sdk>=0.1.35",
+    "typer>=0.22.0",
+    "pydantic>=2.12.0",
     "rich>=14.3.2",
-    "httpx>=0.27.0",
+    "httpx>=0.28.0",
 ]
 
 [project.urls]
@@ -41,22 +41,22 @@ Changelog = "https://github.com/developerz-ai/claude-task-master/blob/main/CHANG
 [project.optional-dependencies]
 mcp = ["mcp>=1.26.0"]
 api = [
-    "fastapi>=0.128.1",
-    "uvicorn[standard]>=0.24.0",
+    "fastapi>=0.128.7",
+    "uvicorn[standard]>=0.40.0",
     # Note: passlib (last release: 1.7.4, Oct 2020) is unmaintained but has no known CVEs.
     # It's widely used and bcrypt is timing-safe. Consider argon2-cffi as future alternative.
     "passlib[bcrypt]>=1.7.4",
-    "bcrypt>=4.0.0,<4.1.0",  # Pin bcrypt for passlib compatibility
+    "bcrypt>=4.0.0,<5.0.0",  # Pin bcrypt <5 for passlib compatibility
 ]
 dev = [
     "claude-task-master[api]",  # Include API dependencies for testing
-    "pytest>=8.0.0",
-    "pytest-cov>=4.1.0",
-    "pytest-asyncio>=0.23.0",
+    "pytest>=9.0.0",
+    "pytest-cov>=7.0.0",
+    "pytest-asyncio>=1.3.0",
     "pytest-timeout>=2.4.0",
-    "hypothesis>=6.151.5",
+    "hypothesis>=6.151.6",
     "ruff>=0.15.0",
-    "mypy>=1.9.0",
+    "mypy>=1.19.0",
 ]
 all = [
     "claude-task-master[mcp,api,dev]",

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.21] - 2026-02-11
+
+### Changed
+- **Dependency updates**: Updated all dependencies to latest stable versions
+  - claude-agent-sdk: 0.1.28 → 0.1.35
+  - typer: 0.21.1 → 0.22.0
+  - fastapi: 0.128.2 → 0.128.7
+  - hypothesis: 6.151.5 → 6.151.6
+  - bcrypt: relaxed pin from `<4.1.0` to `<5.0.0` (now resolves to 4.3.0)
+  - pydantic: bumped minimum to >=2.12.0
+  - httpx: bumped minimum to >=0.28.0
+  - uvicorn: bumped minimum to >=0.40.0
+  - pytest: bumped minimum to >=9.0.0
+  - pytest-cov: bumped minimum to >=7.0.0
+  - pytest-asyncio: bumped minimum to >=1.3.0
+  - mypy: bumped minimum to >=1.19.0
+- Added `requirements.txt` with pinned versions for reproducible installs
+
 ## [0.1.20] - 2026-02-11
 
 ### Added
@@ -446,7 +464,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.20...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.21...HEAD
+[0.1.21]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.20...v0.1.21
 [0.1.20]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.19...v0.1.20
 [0.1.19]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.18...v0.1.19
 [0.1.18]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.17...v0.1.18
