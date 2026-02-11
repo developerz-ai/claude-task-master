@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.20] - 2026-02-11
+
+### Added
+- **`[debugging-qa]` complexity level** (#93): New task complexity for CI failures, bug tracing, visual QA, and log analysis
+  - Routes to Sonnet with 1M context window for deep analysis of large logs and traces
+  - New `DEBUGGING_QA` enum value in `TaskComplexity`
+  - Updated planning prompts with `[debugging-qa]` tag documentation
+  - Config support for `debugging_qa` model and context window settings
+  - Comprehensive test coverage for new complexity level
+
 ## [0.1.19] - 2026-02-08
 
 ### Fixed
@@ -436,7 +446,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.19...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.20...HEAD
+[0.1.20]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.19...v0.1.20
 [0.1.19]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.18...v0.1.19
 [0.1.18]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.17...v0.1.18
 [0.1.17]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.16...v0.1.17
