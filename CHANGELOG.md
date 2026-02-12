@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.23] - 2026-02-12
+
+### Refactored
+- **Simplified credential manager**: Removed manual token refresh logic - now handled by Claude Agent SDK
+  - Removed `refresh_access_token()` method (84 lines)
+  - Removed `_save_credentials()` method (16 lines)
+  - Removed `httpx` dependency from credentials module
+  - Reduced from 140 to 99 lines (29% reduction)
+  - Credential manager now only loads and validates credentials from disk
+  - Token refresh is fully automated by the Claude SDK/binary
+  - Updated documentation in CLAUDE.md to clarify SDK handles refresh
+  - Removed obsolete test files: `test_credential_manager_refresh.py`, `test_credential_manager_save.py`
+  - Updated integration tests to match new behavior
+  - All 4,634 tests pass with 95.65% coverage on credentials.py
+
 ## [0.1.22] - 2026-02-11
 
 ### Enhanced
@@ -480,7 +495,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.22...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.23...HEAD
+[0.1.23]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.22...v0.1.23
 [0.1.22]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.21...v0.1.22
 [0.1.21]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.20...v0.1.21
 [0.1.20]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.19...v0.1.20
