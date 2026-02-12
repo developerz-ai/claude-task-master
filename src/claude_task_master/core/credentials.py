@@ -1,10 +1,13 @@
-"""Credential Manager - OAuth credential loading, validation, and refresh."""
+"""Credential Manager - OAuth credential loading and validation.
+
+Token refresh is handled automatically by the Claude Agent SDK.
+This module only loads and validates credentials from disk.
+"""
 
 import json
 from datetime import datetime
 from pathlib import Path
 
-import httpx
 from pydantic import BaseModel, ValidationError
 
 # =============================================================================
@@ -138,11 +141,13 @@ class Credentials(BaseModel):
 
 
 class CredentialManager:
-    """Manages OAuth credentials from ~/.claude/.credentials.json."""
+    """Manages OAuth credentials from ~/.claude/.credentials.json.
+
+    Token refresh is handled automatically by the Claude Agent SDK.
+    This class only loads and validates credentials from disk.
+    """
 
     CREDENTIALS_PATH = Path.home() / ".claude" / ".credentials.json"
-    OAUTH_TOKEN_URL = "https://api.anthropic.com/v1/oauth/token"
-    DEFAULT_TIMEOUT = 30.0
 
     def load_credentials(self) -> Credentials:
         """Load credentials from file.
@@ -206,7 +211,10 @@ class CredentialManager:
             ) from e
 
     def is_expired(self, credentials: Credentials) -> bool:
-        """Check if access token is expired.
+        """Check if access token is expired (for informational purposes only).
+
+        NOTE: Token refresh is handled automatically by the Claude Agent SDK.
+        This method is only useful for checking if the token appears expired.
 
         Args:
             credentials: The credentials to check.
@@ -218,123 +226,36 @@ class CredentialManager:
         expires_at = datetime.fromtimestamp(credentials.expiresAt / 1000)
         return datetime.now() >= expires_at
 
-    def refresh_access_token(self, credentials: Credentials) -> Credentials:
-        """Refresh access token using refresh token.
-
-        Args:
-            credentials: The current credentials containing the refresh token.
-
-        Returns:
-            Credentials: New credentials with refreshed access token.
-
-        Raises:
-            NetworkTimeoutError: If the request times out.
-            NetworkConnectionError: If there's a network connection error.
-            TokenRefreshHTTPError: If the server returns an HTTP error.
-            InvalidTokenResponseError: If the response is malformed.
-            CredentialPermissionError: If credentials cannot be saved.
-        """
-        try:
-            response = httpx.post(
-                self.OAUTH_TOKEN_URL,
-                json={
-                    "grant_type": "refresh_token",
-                    "refresh_token": credentials.refreshToken,
-                },
-                timeout=self.DEFAULT_TIMEOUT,
-            )
-        except httpx.TimeoutException as e:
-            raise NetworkTimeoutError(self.OAUTH_TOKEN_URL, self.DEFAULT_TIMEOUT) from e
-        except httpx.ConnectError as e:
-            raise NetworkConnectionError(self.OAUTH_TOKEN_URL, e) from e
-        except httpx.RequestError as e:
-            # Catch any other request-related errors
-            raise NetworkConnectionError(self.OAUTH_TOKEN_URL, e) from e
-
-        # Handle HTTP errors with specific messages
-        if response.status_code >= 400:
-            try:
-                response_body = response.text
-            except Exception:
-                response_body = None
-            raise TokenRefreshHTTPError(response.status_code, response_body)
-
-        # Parse response JSON
-        try:
-            token_data = response.json()
-        except json.JSONDecodeError as e:
-            raise InvalidTokenResponseError(
-                "Token refresh response is not valid JSON",
-                {"raw_response": response.text[:500] if response.text else None},
-            ) from e
-
-        # Validate required fields in response
-        if not isinstance(token_data, dict):
-            raise InvalidTokenResponseError(
-                "Token refresh response is not a JSON object",
-                {"received_type": type(token_data).__name__},
-            )
-
-        if "access_token" not in token_data:
-            raise InvalidTokenResponseError(
-                "Token refresh response missing 'access_token' field",
-                token_data,
-            )
-
-        if "expires_at" not in token_data:
-            raise InvalidTokenResponseError(
-                "Token refresh response missing 'expires_at' field",
-                token_data,
-            )
-
-        try:
-            new_credentials = Credentials(
-                accessToken=token_data["access_token"],
-                refreshToken=token_data.get("refresh_token", credentials.refreshToken),
-                expiresAt=token_data["expires_at"],
-                tokenType=token_data.get("token_type", "Bearer"),
-            )
-        except ValidationError as e:
-            raise InvalidTokenResponseError(
-                "Token refresh response contains invalid data",
-                token_data,
-            ) from e
-
-        self._save_credentials(new_credentials)
-        return new_credentials
-
-    def _save_credentials(self, credentials: Credentials) -> None:
-        """Save updated credentials to file.
-
-        Args:
-            credentials: The credentials to save.
-
-        Raises:
-            CredentialPermissionError: If there are permission issues writing the file.
-        """
-        # Preserve nested structure
-        data = {"claudeAiOauth": credentials.model_dump()}
-        try:
-            with open(self.CREDENTIALS_PATH, "w") as f:
-                json.dump(data, f, indent=2)
-        except PermissionError as e:
-            raise CredentialPermissionError(self.CREDENTIALS_PATH, "writing", e) from e
-
     def get_valid_token(self) -> str:
-        """Get a valid access token, refreshing if necessary.
+        """Get access token from credentials file.
+
+        NOTE: Token refresh is handled automatically by the Claude Agent SDK.
+        This method only loads and returns the current token without refreshing.
 
         Returns:
-            str: A valid access token.
+            str: The current access token.
 
         Raises:
             CredentialNotFoundError: If the credentials file does not exist.
             InvalidCredentialsError: If the credentials are malformed.
             CredentialPermissionError: If there are permission issues.
-            TokenRefreshError: If token refresh fails (and its subclasses).
         """
         credentials = self.load_credentials()
-
-        if self.is_expired(credentials):
-            credentials = self.refresh_access_token(credentials)
-
         return credentials.accessToken
+
+    def verify_credentials(self) -> bool:
+        """Verify that credentials exist and are loadable.
+
+        NOTE: This does NOT validate tokens or check expiration.
+        Token refresh is handled automatically by the Claude Agent SDK.
+
+        Returns:
+            bool: True if credentials can be loaded.
+
+        Raises:
+            CredentialNotFoundError: If the credentials file does not exist.
+            InvalidCredentialsError: If the credentials are malformed.
+            CredentialPermissionError: If there are permission issues.
+        """
+        self.load_credentials()
+        return True

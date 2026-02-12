@@ -1,20 +1,17 @@
 """Tests for CredentialManager get_valid_token functionality.
 
-This module tests the get_valid_token method which combines loading,
-expiration checking, and automatic refresh.
+This module tests the get_valid_token method which loads credentials
+without automatic refresh (handled by Claude Agent SDK).
 """
 
 import json
-from datetime import datetime, timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import httpx
 import pytest
 
 from claude_task_master.core.credentials import (
     CredentialManager,
     CredentialNotFoundError,
-    NetworkConnectionError,
 )
 
 # =============================================================================
@@ -38,29 +35,19 @@ class TestCredentialManagerGetValidToken:
 
         assert token == mock_credentials_data["claudeAiOauth"]["accessToken"]
 
-    def test_get_valid_token_refreshes_when_expired(self, temp_dir, mock_expired_credentials_data):
-        """Test get_valid_token refreshes when token is expired."""
+    def test_get_valid_token_returns_expired_token(self, temp_dir, mock_expired_credentials_data):
+        """Test get_valid_token returns token even when expired (SDK handles refresh)."""
         credentials_path = temp_dir / ".claude" / ".credentials.json"
         credentials_path.parent.mkdir(parents=True, exist_ok=True)
         credentials_path.write_text(json.dumps(mock_expired_credentials_data))
 
-        new_token_data = {
-            "access_token": "refreshed-token",
-            "refresh_token": "new-refresh-token",
-            "expires_at": int((datetime.now() + timedelta(hours=2)).timestamp() * 1000),
-        }
-
-        mock_response = MagicMock()
-        mock_response.json.return_value = new_token_data
-        mock_response.status_code = 200
-
         manager = CredentialManager()
 
         with patch.object(CredentialManager, "CREDENTIALS_PATH", credentials_path):
-            with patch.object(httpx, "post", return_value=mock_response):
-                token = manager.get_valid_token()
+            token = manager.get_valid_token()
 
-        assert token == "refreshed-token"
+        # Should return the token even if expired - SDK handles refresh
+        assert token == mock_expired_credentials_data["claudeAiOauth"]["accessToken"]
 
     def test_get_valid_token_file_not_found(self, temp_dir):
         """Test get_valid_token raises CredentialNotFoundError when file not found."""
@@ -72,15 +59,13 @@ class TestCredentialManagerGetValidToken:
             with pytest.raises(CredentialNotFoundError):
                 manager.get_valid_token()
 
-    def test_get_valid_token_refresh_fails(self, temp_dir, mock_expired_credentials_data):
-        """Test get_valid_token propagates refresh errors."""
+    def test_verify_credentials_success(self, temp_dir, mock_credentials_data):
+        """Test verify_credentials returns True when credentials are valid."""
         credentials_path = temp_dir / ".claude" / ".credentials.json"
         credentials_path.parent.mkdir(parents=True, exist_ok=True)
-        credentials_path.write_text(json.dumps(mock_expired_credentials_data))
+        credentials_path.write_text(json.dumps(mock_credentials_data))
 
         manager = CredentialManager()
 
         with patch.object(CredentialManager, "CREDENTIALS_PATH", credentials_path):
-            with patch.object(httpx, "post", side_effect=httpx.ConnectError("Network error")):
-                with pytest.raises(NetworkConnectionError):
-                    manager.get_valid_token()
+            assert manager.verify_credentials() is True

@@ -5,11 +5,9 @@ handling, including special characters, unicode, and exception hierarchy.
 """
 
 import json
-from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import httpx
 import pytest
 
 from claude_task_master.core.credentials import (
@@ -33,38 +31,32 @@ from claude_task_master.core.credentials import (
 class TestCredentialManagerIntegration:
     """Integration tests for the complete workflow."""
 
-    def test_full_workflow_load_refresh_save(self, temp_dir, mock_expired_credentials_data):
-        """Test complete workflow: load expired credentials, refresh, save."""
+    def test_full_workflow_load_and_verify(self, temp_dir, mock_credentials_data):
+        """Test complete workflow: load credentials and verify (no automatic refresh)."""
         credentials_path = temp_dir / ".claude" / ".credentials.json"
         credentials_path.parent.mkdir(parents=True, exist_ok=True)
-        credentials_path.write_text(json.dumps(mock_expired_credentials_data))
-
-        new_expires_at = int((datetime.now() + timedelta(hours=2)).timestamp() * 1000)
-        new_token_data = {
-            "access_token": "new-access-token",
-            "refresh_token": "new-refresh-token",
-            "expires_at": new_expires_at,
-            "token_type": "Bearer",
-        }
-
-        mock_response = MagicMock()
-        mock_response.json.return_value = new_token_data
-        mock_response.status_code = 200
+        credentials_path.write_text(json.dumps(mock_credentials_data))
 
         manager = CredentialManager()
 
         with patch.object(CredentialManager, "CREDENTIALS_PATH", credentials_path):
-            with patch.object(httpx, "post", return_value=mock_response):
-                # Get valid token (should trigger refresh)
-                token = manager.get_valid_token()
+            # Get valid token (no longer triggers automatic refresh)
+            token = manager.get_valid_token()
+            assert token == mock_credentials_data["claudeAiOauth"]["accessToken"]
 
-        assert token == "new-access-token"
+            # Verify credentials can be loaded
+            assert manager.verify_credentials() is True
 
-        # Verify credentials were saved
+        # Verify credentials file unchanged (no automatic save)
         saved_data = json.loads(credentials_path.read_text())
-        assert saved_data["claudeAiOauth"]["accessToken"] == "new-access-token"
-        assert saved_data["claudeAiOauth"]["refreshToken"] == "new-refresh-token"
-        assert saved_data["claudeAiOauth"]["expiresAt"] == new_expires_at
+        assert (
+            saved_data["claudeAiOauth"]["accessToken"]
+            == mock_credentials_data["claudeAiOauth"]["accessToken"]
+        )
+        assert (
+            saved_data["claudeAiOauth"]["refreshToken"]
+            == mock_credentials_data["claudeAiOauth"]["refreshToken"]
+        )
 
     def test_multiple_load_operations(self, temp_dir, mock_credentials_data):
         """Test that multiple load operations work correctly."""
@@ -88,11 +80,6 @@ class TestCredentialManagerIntegration:
         manager = CredentialManager()
         expected_path = Path.home() / ".claude" / ".credentials.json"
         assert manager.CREDENTIALS_PATH == expected_path
-
-    def test_oauth_url_constant(self):
-        """Test that OAuth URL constant is correct."""
-        manager = CredentialManager()
-        assert manager.OAUTH_TOKEN_URL == "https://api.anthropic.com/v1/oauth/token"
 
 
 # =============================================================================

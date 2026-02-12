@@ -86,7 +86,7 @@ class TestStartCommandIntegration:
     def test_start_with_expired_credentials(
         self, cli_runner, integration_temp_dir, integration_state_dir, monkeypatch
     ):
-        """Test start command handles expired credentials gracefully."""
+        """Test start command works with expired credentials (SDK handles refresh)."""
         from datetime import timedelta
 
         from claude_task_master.core.credentials import CredentialManager
@@ -113,16 +113,17 @@ class TestStartCommandIntegration:
         monkeypatch.setattr(StateManager, "STATE_DIR", integration_state_dir)
         monkeypatch.setattr(CredentialManager, "CREDENTIALS_PATH", creds_file)
 
-        # Mock refresh to fail
-        with patch(
-            "claude_task_master.core.credentials.CredentialManager.refresh_access_token"
-        ) as mock_refresh:
-            mock_refresh.side_effect = Exception("Refresh failed - invalid refresh token")
+        # Token refresh is handled by Claude Agent SDK, not by us
+        # We just load the token and let SDK handle expiration
+        with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+            with patch("claude_task_master.cli_commands.workflow.Planner") as mock_planner:
+                # Configure planner to fail early (we just want to test credential loading)
+                mock_planner.return_value.create_plan.side_effect = Exception("Test stop")
 
-            result = cli_runner.invoke(app, ["start", "Test goal"])
+                result = cli_runner.invoke(app, ["start", "Test goal"])
 
-        assert result.exit_code == 1
-        assert "Refresh failed" in result.output or "Error" in result.output
+        # Should not fail loading credentials, even if expired
+        assert "Loading credentials" in result.output
 
     def test_start_with_missing_credentials_file(
         self, cli_runner, integration_temp_dir, integration_state_dir, monkeypatch
@@ -220,7 +221,7 @@ class TestResumeCommandIntegration:
         pre_planned_state,
         monkeypatch,
     ):
-        """Test resume handles expired credentials."""
+        """Test resume works with expired credentials (SDK handles refresh)."""
         from datetime import timedelta
 
         from claude_task_master.core.credentials import CredentialManager
@@ -245,15 +246,19 @@ class TestResumeCommandIntegration:
         monkeypatch.setattr(StateManager, "STATE_DIR", integration_state_dir)
         monkeypatch.setattr(CredentialManager, "CREDENTIALS_PATH", creds_file)
 
-        with patch(
-            "claude_task_master.core.credentials.CredentialManager.refresh_access_token"
-        ) as mock_refresh:
-            mock_refresh.side_effect = Exception("Refresh failed")
+        # Token refresh is handled by Claude Agent SDK, not by us
+        # We just load the token and let SDK handle expiration
+        with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+            with patch("claude_task_master.cli_commands.workflow.Planner"):
+                with patch(
+                    "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                ) as mock_orch:
+                    mock_orch.return_value.run.return_value = 0
 
-            result = cli_runner.invoke(app, ["resume"])
+                    result = cli_runner.invoke(app, ["resume"])
 
-        assert result.exit_code == 1
-        assert "Error" in result.output
+        # Should not fail loading credentials, even if expired
+        assert "Loading credentials" in result.output
 
     def test_resume_paused_state_with_credentials(
         self, cli_runner, cli_integration_setup, paused_state
@@ -653,42 +658,26 @@ class TestErrorRecovery:
         pre_planned_state,
         monkeypatch,
     ):
-        """Test resuming after fixing credential issues."""
+        """Test resuming after fixing missing credentials."""
         from datetime import timedelta
 
         from claude_task_master.core.credentials import CredentialManager
 
-        # Initially use expired credentials
-        past_timestamp = int((datetime.now() - timedelta(hours=1)).timestamp() * 1000)
-        expired_creds = {
-            "claudeAiOauth": {
-                "accessToken": "expired",
-                "refreshToken": "refresh",
-                "expiresAt": past_timestamp,
-                "tokenType": "Bearer",
-            }
-        }
-
+        # Initially use missing credentials
         claude_dir = integration_temp_dir / ".claude"
         claude_dir.mkdir(exist_ok=True)
         creds_file = claude_dir / ".credentials.json"
-        creds_file.write_text(json.dumps(expired_creds))
 
         monkeypatch.chdir(integration_temp_dir)
         monkeypatch.setattr(StateManager, "STATE_DIR", integration_state_dir)
         monkeypatch.setattr(CredentialManager, "CREDENTIALS_PATH", creds_file)
 
-        # First attempt should fail
-        with patch(
-            "claude_task_master.core.credentials.CredentialManager.refresh_access_token"
-        ) as mock_refresh:
-            mock_refresh.side_effect = Exception("Refresh failed")
-
-            result1 = cli_runner.invoke(app, ["resume"])
-
+        # First attempt should fail (missing credentials file)
+        result1 = cli_runner.invoke(app, ["resume"])
         assert result1.exit_code == 1
+        assert "Credentials not found" in result1.output or "Error" in result1.output
 
-        # Fix credentials
+        # Fix credentials by creating the file
         future_timestamp = int((datetime.now() + timedelta(hours=1)).timestamp() * 1000)
         valid_creds = {
             "claudeAiOauth": {

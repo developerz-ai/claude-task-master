@@ -142,6 +142,8 @@ When uncertain, default to `[coding]` (uses Opus, most capable).
 - File structure: `{"claudeAiOauth": {accessToken, refreshToken, expiresAt, ...}}`
 - `expiresAt` is milliseconds (int), divide by 1000 for datetime
 - Agent SDK auto-uses OAuth from credentials file
+- **Token refresh is handled automatically by Claude Agent SDK/binary** - we don't manually refresh
+- If auth fails, re-run `claude` CLI to re-authenticate
 
 ### Agent SDK Integration
 - Use `query()` with `ClaudeAgentOptions(allowed_tools=[], permission_mode="bypassPermissions")`
