@@ -200,6 +200,7 @@ class ConversationManager:
             setting_sources=["user", "local", "project"],
             hooks=self.hooks,
             agents=agents if agents else None,
+            max_buffer_size=5 * 1024 * 1024,  # 5MB - prevents CLIJSONDecodeError on large files
         )
 
     @asynccontextmanager

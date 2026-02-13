@@ -103,6 +103,40 @@ class TestAgentWrapperInitialization:
         assert agent.query == mock_query
         assert agent.options_class == mock_options_class
 
+    def test_init_hooks_disabled_globally(self):
+        """Test hooks are set to empty dict (not None) to prevent 'Stream closed' errors."""
+        mock_sdk = MagicMock()
+        mock_sdk.query = AsyncMock()
+        mock_sdk.ClaudeAgentOptions = MagicMock()
+
+        with patch.dict("sys.modules", {"claude_agent_sdk": mock_sdk}):
+            agent = AgentWrapper(
+                access_token="test-token",
+                model=ModelType.SONNET,
+            )
+
+        # Hooks must be empty dict (not None) to explicitly override defaults
+        assert agent.hooks == {}
+        assert agent.hooks is not None
+
+    def test_init_hooks_override_user_provided_hooks(self):
+        """Test user-provided hooks are overridden to empty dict for safety."""
+        mock_sdk = MagicMock()
+        mock_sdk.query = AsyncMock()
+        mock_sdk.ClaudeAgentOptions = MagicMock()
+
+        user_hooks = {"PreToolUse": [MagicMock()]}
+
+        with patch.dict("sys.modules", {"claude_agent_sdk": mock_sdk}):
+            agent = AgentWrapper(
+                access_token="test-token",
+                model=ModelType.SONNET,
+                hooks=user_hooks,  # type: ignore[arg-type]
+            )
+
+        # Even user-provided hooks are overridden to prevent Stream closed errors
+        assert agent.hooks == {}
+
     def test_init_with_custom_rate_limit_config(self):
         """Test initialization with custom RateLimitConfig."""
         mock_sdk = MagicMock()

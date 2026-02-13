@@ -343,6 +343,9 @@ class AgentQueryExecutor:
                     setting_sources=["user", "local", "project"],  # Load all settings/skills
                     hooks=self.hooks,  # Compatible HookMatcher
                     agents=agents if agents else None,  # Programmatic subagents
+                    max_buffer_size=5
+                    * 1024
+                    * 1024,  # 5MB - prevents CLIJSONDecodeError on large files
                 )
             except Exception as e:
                 raise SDKInitializationError("ClaudeAgentOptions", e) from e

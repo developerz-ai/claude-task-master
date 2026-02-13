@@ -88,9 +88,11 @@ class AgentWrapper:
         # Import Claude Agent SDK with improved error handling
         self._import_sdk()
 
-        # Initialize default hooks if not provided and safety enabled
-        if self.hooks is None and self.enable_safety_hooks:
-            self._init_default_hooks()
+        # Hooks are disabled globally to prevent "Stream closed" errors
+        # (known bug in Claude Code). Safety is enforced via bypassPermissions
+        # mode with allowed_tools restrictions per phase instead.
+        # Pass empty dict (not None) to explicitly override defaults from settings.
+        self.hooks = {}
 
         # Initialize message processor (delegated for SRP)
         self._message_processor = MessageProcessor(logger=self.logger)

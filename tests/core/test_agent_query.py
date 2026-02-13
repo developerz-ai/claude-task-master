@@ -109,6 +109,29 @@ class TestAgentWrapperRunQuery:
         assert options_calls[0]["permission_mode"] == "bypassPermissions"
 
     @pytest.mark.asyncio
+    async def test_run_query_options_include_max_buffer_size(self, agent, temp_dir):
+        """Test _run_query passes max_buffer_size=5MB to ClaudeAgentOptions."""
+        options_calls = []
+
+        def capture_options(**kwargs):
+            options_calls.append(kwargs)
+            return MagicMock()
+
+        agent.options_class = capture_options
+        agent._query_executor.options_class = capture_options
+
+        async def mock_query_gen(*args, **kwargs):
+            yield MagicMock(content=None)
+
+        agent.query = mock_query_gen
+        agent._query_executor.query = mock_query_gen
+
+        await agent._run_query("test prompt", ["Read"])
+
+        assert len(options_calls) == 1
+        assert options_calls[0]["max_buffer_size"] == 5 * 1024 * 1024
+
+    @pytest.mark.asyncio
     async def test_run_query_handles_text_block(self, agent, temp_dir, capsys):
         """Test _run_query handles TextBlock messages."""
         # Create mock TextBlock

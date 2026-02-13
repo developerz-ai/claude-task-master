@@ -368,6 +368,24 @@ class TestCreateOptions:
         call_kwargs = mock_options_class.call_args.kwargs
         assert call_kwargs["agents"] == mock_agents
 
+    def test_create_options_includes_max_buffer_size(self, temp_dir):
+        """Should pass max_buffer_size=5MB to ClaudeAgentOptions."""
+        manager = ConversationManager(working_dir=str(temp_dir))
+
+        mock_sdk = MagicMock()
+        mock_options_class = MagicMock()
+        mock_sdk.ClaudeSDKClient = MagicMock()
+        mock_sdk.ClaudeAgentOptions = mock_options_class
+
+        with patch.dict("sys.modules", {"claude_agent_sdk": mock_sdk}):
+            with patch(
+                "claude_task_master.core.conversation.get_agents_for_working_dir", return_value=None
+            ):
+                manager._create_options(["Read"])
+
+        call_kwargs = mock_options_class.call_args.kwargs
+        assert call_kwargs["max_buffer_size"] == 5 * 1024 * 1024
+
     def test_create_options_sdk_not_initialized(self, temp_dir):
         """Should raise error if SDK not initialized."""
         manager = ConversationManager(working_dir=str(temp_dir))

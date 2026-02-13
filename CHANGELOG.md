@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.24] - 2026-02-13
+
+### Fixed
+- **Increase SDK buffer size to 5MB**: Added `max_buffer_size=5*1024*1024` to all `ClaudeAgentOptions` calls to prevent `CLIJSONDecodeError` on large files ([SDK issue #98](https://github.com/anthropics/claude-agent-sdk-python/issues/98))
+- **Disable hooks globally**: Set `self.hooks = {}` (empty dict, not None) to prevent "Stream closed" errors from hook callbacks in Claude Code v2.1.39+
+
 ## [0.1.23] - 2026-02-12
 
 ### Refactored
@@ -495,7 +501,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.23...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.24...HEAD
+[0.1.24]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.23...v0.1.24
 [0.1.23]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.22...v0.1.23
 [0.1.22]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.21...v0.1.22
 [0.1.21]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.20...v0.1.21

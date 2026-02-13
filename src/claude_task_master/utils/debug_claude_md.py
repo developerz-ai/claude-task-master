@@ -86,6 +86,8 @@ async def debug_claude_md_detection(working_dir: str | None = None) -> bool:
             model="claude-haiku-4-5-20251001",  # Use Haiku for speed/cost
             cwd=str(target_dir),
             setting_sources=["user", "local", "project"],  # Load CLAUDE.md
+            hooks={},  # Disable hooks to prevent "Stream closed" errors
+            max_buffer_size=5 * 1024 * 1024,  # 5MB buffer
         )
 
         prompt = """You are being tested to verify CLAUDE.md loading.
