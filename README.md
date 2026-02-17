@@ -249,7 +249,7 @@ This creates `.claude-task-master/config.json`:
     "openrouter_base_url": "https://openrouter.ai/api/v1"
   },
   "models": {
-    "sonnet": "claude-sonnet-4-5-20250929",
+    "sonnet": "claude-sonnet-4-6",
     "opus": "claude-opus-4-6",
     "haiku": "claude-haiku-4-5-20251001"
   },

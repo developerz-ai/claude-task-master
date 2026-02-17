@@ -12,14 +12,14 @@ import anthropic
 def llm_call(
     prompt: str,
     system_prompt: str = "",
-    model: str = "claude-sonnet-4-5",
+    model: str = "claude-sonnet-4-6",
 ) -> str:
     """Send a prompt to Claude and return the text response.
 
     Args:
         prompt: The user message to send to Claude.
         system_prompt: Optional system prompt to set context.
-        model: The model ID to use (default: claude-sonnet-4-5).
+        model: The model ID to use (default: claude-sonnet-4-6).
 
     Returns:
         The text content from Claude's response.

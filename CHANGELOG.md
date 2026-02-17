@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.25] - 2026-02-17
+
+### Changed
+- **Upgrade to Claude Sonnet 4.6**: Default sonnet model updated from `claude-sonnet-4-5-20250929` to `claude-sonnet-4-6`
+  - Sonnet 4.5 is no longer available; Sonnet 4.6 is the replacement
+  - 1M token context window now available in beta
+  - Same pricing: $3/$15 per MTok
+- **Bump claude-agent-sdk to >=0.1.36**: Updated to latest SDK version
+
 ## [0.1.24] - 2026-02-13
 
 ### Fixed
@@ -501,7 +510,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.24...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.25...HEAD
+[0.1.25]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.24...v0.1.25
 [0.1.24]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.23...v0.1.24
 [0.1.23]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.22...v0.1.23
 [0.1.22]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.21...v0.1.22

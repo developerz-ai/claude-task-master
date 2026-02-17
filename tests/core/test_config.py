@@ -78,26 +78,26 @@ class TestModelConfig:
     def test_default_values(self) -> None:
         """Test that ModelConfig has correct default values."""
         config = ModelConfig()
-        assert config.sonnet == "claude-sonnet-4-5-20250929"
+        assert config.sonnet == "claude-sonnet-4-6"
         assert config.opus == "claude-opus-4-6"
         assert config.haiku == "claude-haiku-4-5-20251001"
-        assert config.sonnet_1m == "claude-sonnet-4-5-20250929"
+        assert config.sonnet_1m == "claude-sonnet-4-6"
 
     def test_custom_models(self) -> None:
         """Test that ModelConfig accepts custom model names."""
         config = ModelConfig(
-            sonnet="anthropic/claude-sonnet-4-5-20250929",
+            sonnet="anthropic/claude-sonnet-4-6",
             opus="anthropic/claude-opus-4-6",
             haiku="anthropic/claude-haiku-4-5-20251001",
         )
-        assert config.sonnet == "anthropic/claude-sonnet-4-5-20250929"
+        assert config.sonnet == "anthropic/claude-sonnet-4-6"
         assert config.opus == "anthropic/claude-opus-4-6"
         assert config.haiku == "anthropic/claude-haiku-4-5-20251001"
 
     def test_custom_sonnet_1m(self) -> None:
         """Test that ModelConfig accepts custom sonnet_1m model name."""
-        config = ModelConfig(sonnet_1m="anthropic/claude-sonnet-4-5-20250929-1m")
-        assert config.sonnet_1m == "anthropic/claude-sonnet-4-5-20250929-1m"
+        config = ModelConfig(sonnet_1m="anthropic/claude-sonnet-4-6-1m")
+        assert config.sonnet_1m == "anthropic/claude-sonnet-4-6-1m"
 
 
 class TestContextWindowsConfig:
@@ -173,7 +173,7 @@ class TestClaudeTaskMasterConfig:
         """Test that nested configs have correct defaults."""
         config = ClaudeTaskMasterConfig()
         assert config.api.anthropic_api_key is None
-        assert config.models.sonnet == "claude-sonnet-4-5-20250929"
+        assert config.models.sonnet == "claude-sonnet-4-6"
         assert config.git.target_branch == "main"
         assert config.tools.planning == ["Read", "Glob", "Grep", "Bash", "WebFetch", "WebSearch"]
 
@@ -234,7 +234,7 @@ class TestClaudeTaskMasterConfig:
         assert config.api.anthropic_api_key == "test-key"
         # Default values for other fields
         assert config.api.anthropic_base_url == "https://api.anthropic.com"
-        assert config.models.sonnet == "claude-sonnet-4-5-20250929"
+        assert config.models.sonnet == "claude-sonnet-4-6"
         assert config.git.target_branch == "main"
 
     def test_empty_config_uses_all_defaults(self) -> None:
@@ -242,7 +242,7 @@ class TestClaudeTaskMasterConfig:
         config = ClaudeTaskMasterConfig.model_validate({})
         assert config.version == "1.0"
         assert config.api.anthropic_api_key is None
-        assert config.models.sonnet == "claude-sonnet-4-5-20250929"
+        assert config.models.sonnet == "claude-sonnet-4-6"
 
     def test_invalid_field_raises_error(self) -> None:
         """Test that invalid field type raises validation error."""
@@ -291,8 +291,8 @@ class TestUtilityFunctions:
     def test_get_model_name_sonnet(self) -> None:
         """Test get_model_name returns correct model for sonnet."""
         config = ClaudeTaskMasterConfig()
-        assert get_model_name(config, "sonnet") == "claude-sonnet-4-5-20250929"
-        assert get_model_name(config, "SONNET") == "claude-sonnet-4-5-20250929"
+        assert get_model_name(config, "sonnet") == "claude-sonnet-4-6"
+        assert get_model_name(config, "SONNET") == "claude-sonnet-4-6"
 
     def test_get_model_name_opus(self) -> None:
         """Test get_model_name returns correct model for opus."""
@@ -309,8 +309,8 @@ class TestUtilityFunctions:
     def test_get_model_name_sonnet_1m(self) -> None:
         """Test get_model_name returns correct model for sonnet_1m."""
         config = ClaudeTaskMasterConfig()
-        assert get_model_name(config, "sonnet_1m") == "claude-sonnet-4-5-20250929"
-        assert get_model_name(config, "SONNET_1M") == "claude-sonnet-4-5-20250929"
+        assert get_model_name(config, "sonnet_1m") == "claude-sonnet-4-6"
+        assert get_model_name(config, "SONNET_1M") == "claude-sonnet-4-6"
 
     def test_get_model_name_custom_config(self) -> None:
         """Test get_model_name with custom model names."""
@@ -320,8 +320,8 @@ class TestUtilityFunctions:
     def test_get_model_name_unknown_falls_back_to_sonnet(self) -> None:
         """Test get_model_name falls back to sonnet for unknown keys."""
         config = ClaudeTaskMasterConfig()
-        assert get_model_name(config, "unknown") == "claude-sonnet-4-5-20250929"
-        assert get_model_name(config, "invalid") == "claude-sonnet-4-5-20250929"
+        assert get_model_name(config, "unknown") == "claude-sonnet-4-6"
+        assert get_model_name(config, "invalid") == "claude-sonnet-4-6"
 
     def test_get_tools_for_phase_planning(self) -> None:
         """Test get_tools_for_phase returns correct tools for planning."""
