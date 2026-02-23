@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.26] - 2026-02-23
+
+### Changed
+- **Bump claude-agent-sdk to >=0.1.39**: Updated from 0.1.36 to latest SDK version
+
 ## [0.1.25] - 2026-02-17
 
 ### Changed
@@ -510,7 +515,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.25...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.26...HEAD
+[0.1.26]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.25...v0.1.26
 [0.1.25]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.24...v0.1.25
 [0.1.24]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.23...v0.1.24
 [0.1.23]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.22...v0.1.23
