@@ -397,7 +397,7 @@ class TestAgentWrapperRetryLogic:
 
     @pytest.mark.asyncio
     async def test_max_retries_exceeded(self, agent, temp_dir):
-        """Test that ConsecutiveFailuresError is raised after 3 consecutive failures."""
+        """Test that ConsecutiveFailuresError is raised after max_retries + 1 failures."""
         call_count = 0
 
         async def mock_query_gen(*args, **kwargs):
@@ -413,7 +413,7 @@ class TestAgentWrapperRetryLogic:
             with pytest.raises(ConsecutiveFailuresError):
                 await agent._run_query("test prompt", ["Read"])
 
-        # Should be called 3 times (3 consecutive failures)
+        # max_retries=2, so 3 calls (initial + 2 retries)
         assert call_count == 3
 
     @pytest.mark.asyncio
@@ -432,6 +432,119 @@ class TestAgentWrapperRetryLogic:
         await agent._run_query("test prompt", ["Read"])
 
         assert call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_retry_uses_exponential_backoff(self, agent, temp_dir):
+        """Test that retries use exponential backoff from rate_limit_config."""
+        call_count = 0
+        sleep_delays = []
+
+        async def mock_query_gen(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                raise Exception("rate limit exceeded")
+            yield MagicMock(content=None)
+
+        agent.query = mock_query_gen
+        agent._query_executor.query = mock_query_gen
+
+        async def capture_sleep(delay):
+            sleep_delays.append(delay)
+
+        with patch("asyncio.sleep", side_effect=capture_sleep):
+            await agent._run_query("test prompt", ["Read"])
+
+        # rate_limit_config: initial_backoff=0.1, multiplier=2.0
+        # attempt 0: 0.1 * 2^0 = 0.1
+        # attempt 1: 0.1 * 2^1 = 0.2
+        assert len(sleep_delays) == 2
+        assert sleep_delays[0] == pytest.approx(0.1)
+        assert sleep_delays[1] == pytest.approx(0.2)
+
+    @pytest.mark.asyncio
+    async def test_retry_respects_retry_after_for_rate_limits(self, agent, temp_dir):
+        """Test that rate limit errors with retry_after use that value."""
+        call_count = 0
+        sleep_delays = []
+
+        async def mock_query_gen(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # Simulate an error with retry_after
+                raise Exception("rate limit exceeded")
+            yield MagicMock(content=None)
+
+        agent.query = mock_query_gen
+        agent._query_executor.query = mock_query_gen
+
+        # Patch _classify_api_error to return an APIRateLimitError with retry_after
+        original_classify = agent._query_executor._classify_api_error
+
+        def classify_with_retry_after(error):
+            classified = original_classify(error)
+            if isinstance(classified, APIRateLimitError):
+                classified.retry_after = 42.0
+            return classified
+
+        agent._query_executor._classify_api_error = classify_with_retry_after
+
+        async def capture_sleep(delay):
+            sleep_delays.append(delay)
+
+        with patch("asyncio.sleep", side_effect=capture_sleep):
+            await agent._run_query("test prompt", ["Read"])
+
+        # Should use retry_after value instead of exponential backoff
+        assert len(sleep_delays) == 1
+        assert sleep_delays[0] == 42.0
+
+    @pytest.mark.asyncio
+    async def test_max_retries_configurable(self, temp_dir):
+        """Test that max_retries from config controls failure threshold."""
+        from claude_task_master.core.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
+
+        mock_sdk = MagicMock()
+        mock_sdk.query = AsyncMock()
+        mock_sdk.ClaudeAgentOptions = MagicMock()
+
+        with patch.dict("sys.modules", {"claude_agent_sdk": mock_sdk}):
+            rate_limit_config = RateLimitConfig(
+                max_retries=4,  # More retries than default (3+1=4 total attempts)
+                initial_backoff=0.01,
+                max_backoff=0.1,
+            )
+            agent = AgentWrapper(
+                access_token="test-token",
+                model=ModelType.SONNET,
+                working_dir=str(temp_dir),
+                rate_limit_config=rate_limit_config,
+            )
+
+        # Raise circuit breaker threshold so it doesn't interfere
+        agent._query_executor.circuit_breaker = CircuitBreaker(
+            name="test",
+            config=CircuitBreakerConfig(failure_threshold=100),
+        )
+
+        call_count = 0
+
+        async def mock_query_gen(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            raise Exception("rate limit exceeded")
+            yield
+
+        agent.query = mock_query_gen
+        agent._query_executor.query = mock_query_gen
+
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            with pytest.raises(ConsecutiveFailuresError):
+                await agent._run_query("test prompt", ["Read"])
+
+        # max_retries=4, so 5 calls (initial + 4 retries)
+        assert call_count == 5
 
 
 # =============================================================================

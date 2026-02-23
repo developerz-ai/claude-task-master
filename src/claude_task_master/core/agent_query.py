@@ -127,21 +127,30 @@ class AgentQueryExecutor:
     def _record_failure(self, error: Exception) -> None:
         """Record a failure and check if we've exceeded the threshold.
 
-        Tracks consecutive failures within a 1-minute window. If 3 failures
-        occur within this window, raises ConsecutiveFailuresError.
+        Tracks consecutive failures within a time window. The failure threshold
+        is derived from rate_limit_config.max_retries + 1 (to include the
+        initial attempt). The window scales with the max total backoff time
+        to avoid premature stops during long backoff sequences.
 
         Args:
             error: The error that caused the failure.
 
         Raises:
-            ConsecutiveFailuresError: If 3 failures occur within 1 minute.
+            ConsecutiveFailuresError: If too many failures occur within the window.
         """
         current_time = time.time()
+
+        # Scale the failure window based on total possible backoff time,
+        # with a minimum of 60 seconds to handle fast retries
+        effective_window = max(
+            self._failure_window,
+            self.rate_limit_config.get_total_max_time() * 2,
+        )
 
         # Check if we're still within the failure window
         if self._first_failure_time is not None:
             time_since_first = current_time - self._first_failure_time
-            if time_since_first > self._failure_window:
+            if time_since_first > effective_window:
                 # Window expired, reset counter
                 self._consecutive_failures = 0
                 self._first_failure_time = None
@@ -152,19 +161,44 @@ class AgentQueryExecutor:
 
         self._consecutive_failures += 1
 
+        # Threshold: max_retries + 1 (initial attempt + retries)
+        max_failures = self.rate_limit_config.max_retries + 1
+
         # Check if we've hit the threshold
-        if self._consecutive_failures >= 3:
+        if self._consecutive_failures >= max_failures:
             console.newline()
             console.error(
-                "API failed 3 consecutive times within 1 minute - stopping execution",
+                f"API failed {max_failures} consecutive times within "
+                f"{effective_window:.0f}s window - stopping execution",
                 flush=True,
             )
-            raise ConsecutiveFailuresError(3, error)
+            raise ConsecutiveFailuresError(max_failures, error)
 
     def _reset_failures(self) -> None:
         """Reset the failure counter after a successful query."""
         self._consecutive_failures = 0
         self._first_failure_time = None
+
+    def _get_retry_delay(self, error: Exception) -> float:
+        """Calculate the retry delay for a given error and attempt number.
+
+        For rate limit errors, respects the Retry-After value from the API
+        if available. Otherwise, uses exponential backoff from rate_limit_config.
+
+        Args:
+            error: The error that triggered the retry.
+
+        Returns:
+            The delay in seconds before the next retry attempt.
+        """
+        # For rate limit errors, respect Retry-After if the API provided it
+        if isinstance(error, APIRateLimitError) and error.retry_after:
+            return error.retry_after
+
+        # Use exponential backoff from rate_limit_config
+        # attempt is 0-indexed: first retry = attempt 0
+        attempt = self._consecutive_failures - 1
+        return self.rate_limit_config.calculate_backoff(max(0, attempt))
 
     async def _run_query_with_retry(
         self,
@@ -177,9 +211,10 @@ class AgentQueryExecutor:
     ) -> str:
         """Execute query with retry logic for transient errors.
 
-        Uses a fixed 5-second delay between retries. If 3 consecutive errors
-        occur within a 1-minute window, raises ConsecutiveFailuresError to
-        signal the orchestrator to exit with blocked status.
+        Uses exponential backoff from rate_limit_config between retries.
+        For rate limit errors, respects the Retry-After value from the API.
+        If max_retries consecutive errors occur within the failure window,
+        raises ConsecutiveFailuresError to signal the orchestrator to exit.
 
         Args:
             prompt: The prompt to send to the model.
@@ -194,7 +229,7 @@ class AgentQueryExecutor:
 
         Raises:
             WorkingDirectoryError: If working directory cannot be accessed.
-            ConsecutiveFailuresError: If 3 consecutive API errors occur within 1 minute.
+            ConsecutiveFailuresError: If too many consecutive API errors occur.
             CircuitBreakerError: If circuit breaker is open.
         """
         # Check circuit breaker state first
@@ -209,7 +244,7 @@ class AgentQueryExecutor:
                 time_until_retry,
             )
 
-        retry_delay = 5.0  # seconds
+        max_failures = self.rate_limit_config.max_retries + 1  # +1 for initial attempt
 
         while True:
             try:
@@ -234,10 +269,13 @@ class AgentQueryExecutor:
                 # Record failure (may raise ConsecutiveFailuresError)
                 self._record_failure(e)
 
+                # Calculate delay using exponential backoff or Retry-After
+                retry_delay = self._get_retry_delay(e)
+
                 # Still under threshold, retry
                 console.newline()
                 console.warning(
-                    f"API error ({self._consecutive_failures}/3 in window): {e.message}",
+                    f"API error ({self._consecutive_failures}/{max_failures} in window): {e.message}",
                     flush=True,
                 )
                 console.detail(f"Retrying in {retry_delay:.0f} seconds...", flush=True)
@@ -257,10 +295,13 @@ class AgentQueryExecutor:
                 # Unexpected errors count toward consecutive failures
                 self._record_failure(e)
 
+                # Calculate delay using exponential backoff
+                retry_delay = self._get_retry_delay(e)
+
                 # Still under threshold, retry
                 console.newline()
                 console.warning(
-                    f"Unexpected error ({self._consecutive_failures}/3 in window): {type(e).__name__}: {e}",
+                    f"Unexpected error ({self._consecutive_failures}/{max_failures} in window): {type(e).__name__}: {e}",
                     flush=True,
                 )
                 console.detail(f"Retrying in {retry_delay:.0f} seconds...", flush=True)
