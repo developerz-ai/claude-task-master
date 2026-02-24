@@ -7,7 +7,7 @@ These tests verify that:
 """
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from typer.testing import CliRunner
@@ -34,7 +34,22 @@ def mock_cleanup_on_success():
         yield
 
 
-@pytest.mark.timeout(10)
+@pytest.fixture(autouse=True)
+def mock_webhook_http():
+    """Prevent webhook client from making real HTTP calls."""
+    mock_response = AsyncMock()
+    mock_response.status_code = 200
+    mock_response.text = "OK"
+
+    mock_client = AsyncMock()
+    mock_client.post.return_value = mock_response
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("claude_task_master.webhooks.client.httpx.AsyncClient", return_value=mock_client):
+        yield
+
+
 class TestWebhookEnvironmentVariables:
     """Integration tests for webhook environment variable support."""
 
