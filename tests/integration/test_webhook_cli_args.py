@@ -37,16 +37,8 @@ def mock_cleanup_on_success():
 @pytest.fixture(autouse=True)
 def mock_webhook_http():
     """Prevent webhook client from making real HTTP calls."""
-    mock_response = AsyncMock()
-    mock_response.status_code = 200
-    mock_response.text = "OK"
-
-    mock_client = AsyncMock()
-    mock_client.post.return_value = mock_response
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=False)
-
-    with patch("claude_task_master.webhooks.client.httpx.AsyncClient", return_value=mock_client):
+    with patch("claude_task_master.webhooks.client.WebhookClient.send", new_callable=AsyncMock), \
+         patch("claude_task_master.webhooks.client.WebhookClient.send_sync"):
         yield
 
 
