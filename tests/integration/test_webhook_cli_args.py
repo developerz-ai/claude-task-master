@@ -34,6 +34,7 @@ def mock_cleanup_on_success():
         yield
 
 
+@pytest.mark.timeout(10)
 class TestWebhookEnvironmentVariables:
     """Integration tests for webhook environment variable support."""
 
