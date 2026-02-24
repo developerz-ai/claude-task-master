@@ -50,6 +50,7 @@ def mock_webhook_http():
         yield
 
 
+@pytest.mark.timeout(10)
 class TestWebhookEnvironmentVariables:
     """Integration tests for webhook environment variable support."""
 
