@@ -78,12 +78,31 @@ class MessageProcessor:
                         if self.logger:
                             self.logger.log_tool_result(block.tool_use_id, "completed")
 
+        # Handle RateLimitEvent typed messages from SDK v0.1.49+
+        if message_type == "RateLimitEvent":
+            retry_after = getattr(message, "retry_after", None)
+            message_text = getattr(message, "message", "")
+            if retry_after:
+                console.warning(f"Rate limited: {message_text} (retry in {retry_after}s)")
+            else:
+                console.warning(f"Rate limited: {message_text}")
+            if self.logger:
+                self.logger.log_tool_use("RateLimitEvent", {"retry_after": retry_after})
+            return result_text
+
         # Collect final result from ResultMessage
         # Important: Only use message.result if we have no accumulated text,
         # or if message.result contains content not in our accumulated text.
         # This preserves verification markers (VERIFICATION_RESULT: PASS/FAIL)
         # that may be output in earlier TextBlocks.
         if message_type == "ResultMessage":
+            # Log stop_reason for diagnostics (SDK v0.1.46+)
+            stop_reason = getattr(message, "stop_reason", None)
+            if stop_reason and self.logger:
+                self.logger.log_tool_result("ResultMessage", f"stop_reason={stop_reason}")
+            if stop_reason and stop_reason not in ("end_turn", "tool_use"):
+                console.detail(f"Session ended: {stop_reason}")
+
             if hasattr(message, "result") and message.result:
                 # If we have no accumulated text, use the result
                 if not result_text.strip():

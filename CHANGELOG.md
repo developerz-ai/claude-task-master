@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.28] - 2026-03-26
+
+### Added
+- **Effort-based thinking depth**: Task complexity now maps to SDK `effort` field for extended thinking control
+  - `[coding]` → max (deepest reasoning), `[quick]` → low, `[general]` → medium, `[debugging-qa]` → high
+- **Fallback model support**: Auto-fallback when primary model is unavailable (Opus → Sonnet → Haiku)
+  - Uses SDK `fallback_model` option for seamless recovery
+- **Per-session budget cap** (`--budget`): New CLI flag to limit spending per session in USD
+  - `claudetm start "task" --budget 5.00` caps each session at $5
+  - Also available via `CLAUDETM_BUDGET` env var and API
+- **RateLimitEvent handling**: Typed `RateLimitEvent` messages from SDK v0.1.49+ are now properly logged and displayed
+- **stop_reason on ResultMessage**: Session end reasons are now logged for diagnostics (helps debug unexpected stops)
+
+### Changed
+- **Bump claude-agent-sdk to >=0.1.49**: Updated from 0.1.40 to leverage effort, fallback_model, RateLimitEvent, and stop_reason features
+
+### Fixed
+- **CI lint failure**: Fixed ruff format issue in webhook test (backslash continuation → parenthesized context managers)
+
 ## [0.1.27] - 2026-02-24
 
 ### Changed
@@ -520,7 +539,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.27...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.28...HEAD
+[0.1.28]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.27...v0.1.28
 [0.1.27]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.26...v0.1.27
 [0.1.26]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.25...v0.1.26
 [0.1.25]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.24...v0.1.25

@@ -57,6 +57,24 @@ class TaskComplexity(Enum):
         }
         return mapping.get(complexity, ModelType.SONNET)
 
+    @classmethod
+    def get_effort_for_complexity(cls, complexity: TaskComplexity) -> str:
+        """Map task complexity to SDK effort level.
+
+        Controls extended thinking depth:
+        - CODING → "max" (deepest reasoning for complex implementation)
+        - QUICK → "low" (minimal thinking for simple fixes)
+        - GENERAL → "medium" (balanced thinking)
+        - DEBUGGING_QA → "high" (thorough analysis for debugging)
+        """
+        mapping: dict[TaskComplexity, str] = {
+            cls.CODING: "max",
+            cls.QUICK: "low",
+            cls.GENERAL: "medium",
+            cls.DEBUGGING_QA: "high",
+        }
+        return mapping.get(complexity, "medium")
+
 
 class ToolConfig(Enum):
     """Tool configurations for different phases.
@@ -114,6 +132,14 @@ MODEL_CONTEXT_WINDOWS_STANDARD = {
     ModelType.SONNET: 200_000,
     ModelType.HAIKU: 200_000,
     ModelType.SONNET_1M: 1_000_000,  # Always 1M — that's the point
+}
+
+# Fallback model mapping: if primary model unavailable, try fallback
+MODEL_FALLBACK_MAP = {
+    ModelType.OPUS: ModelType.SONNET,  # Opus → Sonnet
+    ModelType.SONNET: ModelType.HAIKU,  # Sonnet → Haiku
+    ModelType.HAIKU: ModelType.SONNET,  # Haiku → Sonnet
+    ModelType.SONNET_1M: ModelType.SONNET,  # Sonnet 1M → Sonnet
 }
 
 

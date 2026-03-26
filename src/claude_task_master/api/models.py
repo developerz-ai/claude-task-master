@@ -414,6 +414,7 @@ class TaskOptionsResponse(BaseModel):
     log_level: str
     log_format: str
     pr_per_task: bool
+    max_budget_usd: float | None = None
 
 
 class TaskProgressInfo(BaseModel):

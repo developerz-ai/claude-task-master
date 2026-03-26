@@ -86,6 +86,7 @@ class TaskOptions(BaseModel):
     pr_per_task: bool = False  # If True, create PR per task; if False, PR per group
     webhook_url: str | None = None  # URL to receive webhook notifications
     webhook_secret: str | None = None  # HMAC secret for signing webhook payloads
+    max_budget_usd: float | None = None  # Per-session spending cap in USD
 
 
 # Status type alias for type checking

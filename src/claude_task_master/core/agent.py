@@ -54,6 +54,7 @@ class AgentWrapper:
         enable_safety_hooks: bool = True,
         logger: "TaskLogger | None" = None,
         circuit_breaker_config: CircuitBreakerConfig | None = None,
+        max_budget_usd: float | None = None,
     ):
         """Initialize agent wrapper.
 
@@ -66,6 +67,7 @@ class AgentWrapper:
             enable_safety_hooks: If True and hooks is None, create default safety hooks.
             logger: Optional TaskLogger for capturing tool usage and responses.
             circuit_breaker_config: Optional circuit breaker config for fault tolerance.
+            max_budget_usd: Optional per-session spending cap in USD.
 
         Raises:
             SDKImportError: If claude-agent-sdk is not installed.
@@ -78,6 +80,7 @@ class AgentWrapper:
         self.hooks = hooks
         self.enable_safety_hooks = enable_safety_hooks
         self.logger = logger
+        self.max_budget_usd = max_budget_usd
 
         # Initialize circuit breaker for API fault tolerance
         self.circuit_breaker = CircuitBreaker(
@@ -107,6 +110,7 @@ class AgentWrapper:
             circuit_breaker=self.circuit_breaker,
             hooks=self.hooks,
             logger=self.logger,
+            max_budget_usd=self.max_budget_usd,
         )
 
         # Initialize phase executor (delegated for SRP)

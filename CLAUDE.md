@@ -48,6 +48,7 @@ cd <project-dir>
 claudetm start "Your task here" --max-sessions 10
 claudetm start "Add feature" --prs 1         # Limit to 1 PR
 claudetm start "Implement API" --prs 3 -n 10 # Max 3 PRs, 10 sessions
+claudetm start "Fix bug" --budget 5.00       # $5 per session cap
 claudetm status           # Check progress
 claudetm plan             # View task list
 claudetm clean -f         # Clean state
@@ -102,15 +103,17 @@ uv tool install claude-task-master --force --reinstall
 | VERIFICATION | Read, Glob, Grep, Bash | Run tests/lint to verify success criteria |
 | WORKING | All tools | Implement tasks with full access |
 
-**Task Complexity Levels** (for dynamic model routing):
-| Complexity | Tag | Model | Use Case |
-|------------|-----|-------|----------|
-| CODING | `[coding]` | Opus | Complex implementation tasks, new features, intricate logic |
-| QUICK | `[quick]` | Haiku | Simple fixes, configuration changes, small tweaks |
-| GENERAL | `[general]` | Sonnet | Tests, documentation, moderate refactoring, balanced tasks |
-| DEBUGGING_QA | `[debugging-qa]` | Sonnet 1M | CI failures, bug tracing, visual QA, log analysis (1M context) |
+**Task Complexity Levels** (for dynamic model routing + effort-based thinking):
+| Complexity | Tag | Model | Effort | Use Case |
+|------------|-----|-------|--------|----------|
+| CODING | `[coding]` | Opus | max | Complex implementation tasks, new features, intricate logic |
+| QUICK | `[quick]` | Haiku | low | Simple fixes, configuration changes, small tweaks |
+| GENERAL | `[general]` | Sonnet | medium | Tests, documentation, moderate refactoring, balanced tasks |
+| DEBUGGING_QA | `[debugging-qa]` | Sonnet 1M | high | CI failures, bug tracing, visual QA, log analysis (1M context) |
 
 When uncertain, default to `[coding]` (uses Opus, most capable).
+
+**Fallback Models**: If primary model is unavailable, auto-fallback: Opus → Sonnet → Haiku.
 
 **State Directory**:
 ```

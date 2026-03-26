@@ -289,6 +289,7 @@ def create_info_router() -> APIRouter:
                     log_level=state.options.log_level,
                     log_format=state.options.log_format,
                     pr_per_task=state.options.pr_per_task,
+                    max_budget_usd=state.options.max_budget_usd,
                 ),
                 created_at=state.created_at,
                 updated_at=state.updated_at,

@@ -61,6 +61,7 @@ class AgentQueryExecutor:
         circuit_breaker: "CircuitBreaker",
         hooks: dict[str, list["HookMatcher"]] | None = None,
         logger: "TaskLogger | None" = None,
+        max_budget_usd: float | None = None,
     ):
         """Initialize the query executor.
 
@@ -73,6 +74,7 @@ class AgentQueryExecutor:
             circuit_breaker: Circuit breaker instance for fault tolerance.
             hooks: Optional hooks dictionary for ClaudeAgentOptions.
             logger: Optional TaskLogger for capturing tool usage.
+            max_budget_usd: Optional per-session spending cap in USD.
         """
         self.query = query_func
         self.options_class = options_class
@@ -82,6 +84,7 @@ class AgentQueryExecutor:
         self.circuit_breaker = circuit_breaker
         self.hooks = hooks
         self.logger = logger
+        self.max_budget_usd = max_budget_usd
 
         # Track consecutive failures within a time window
         self._consecutive_failures = 0
@@ -374,20 +377,51 @@ class AgentQueryExecutor:
             else:
                 agents = None
 
+            # Determine effort level and fallback model based on complexity
+            from .agent_models import MODEL_FALLBACK_MAP, TaskComplexity
+
+            effort_level = None
+            fallback_model_name = None
+
+            # Map the effective model to an effort level via complexity
+            for complexity in TaskComplexity:
+                if TaskComplexity.get_model_for_complexity(complexity) == effective_model:
+                    effort_level = TaskComplexity.get_effort_for_complexity(complexity)
+                    break
+
+            # Get fallback model name
+            fallback_type = MODEL_FALLBACK_MAP.get(effective_model)
+            if fallback_type and get_model_name_func:
+                fallback_model_name = get_model_name_func(fallback_type)
+            elif fallback_type:
+                fallback_model_name = self._default_get_model_name(fallback_type)
+
             # Create options with model specification and subagents
             try:
-                options = self.options_class(
-                    allowed_tools=tools,
-                    permission_mode="bypassPermissions",  # For MVP, bypass permissions
-                    model=model_name,  # Specify the model to use
-                    cwd=str(self.working_dir),  # Project directory for CLAUDE.md
-                    setting_sources=["user", "local", "project"],  # Load all settings/skills
-                    hooks=self.hooks,  # Compatible HookMatcher
-                    agents=agents if agents else None,  # Programmatic subagents
-                    max_buffer_size=5
-                    * 1024
-                    * 1024,  # 5MB - prevents CLIJSONDecodeError on large files
-                )
+                options_kwargs: dict[str, Any] = {
+                    "allowed_tools": tools,
+                    "permission_mode": "bypassPermissions",
+                    "model": model_name,
+                    "cwd": str(self.working_dir),
+                    "setting_sources": ["user", "local", "project"],
+                    "hooks": self.hooks,
+                    "agents": agents if agents else None,
+                    "max_buffer_size": 5 * 1024 * 1024,
+                }
+
+                # Add effort level for extended thinking depth control
+                if effort_level:
+                    options_kwargs["effort"] = effort_level
+
+                # Add fallback model for auto-recovery on model unavailability
+                if fallback_model_name:
+                    options_kwargs["fallback_model"] = fallback_model_name
+
+                # Add per-session budget cap if configured
+                if self.max_budget_usd is not None:
+                    options_kwargs["max_budget_usd"] = self.max_budget_usd
+
+                options = self.options_class(**options_kwargs)
             except Exception as e:
                 raise SDKInitializationError("ClaudeAgentOptions", e) from e
 

@@ -80,6 +80,7 @@ class TestTaskOptions:
             "pr_per_task": False,
             "webhook_url": None,
             "webhook_secret": None,
+            "max_budget_usd": None,
         }
 
 

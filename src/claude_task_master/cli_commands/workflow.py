@@ -40,9 +40,12 @@ def _initialize_components(
     working_dir: Path,
     state_manager: StateManager,
     logger: TaskLogger,
+    max_budget_usd: float | None = None,
 ) -> tuple[AgentWrapper, Planner]:
     """Initialize the agent and planner components."""
-    agent = AgentWrapper(access_token, model_type, str(working_dir), logger=logger)
+    agent = AgentWrapper(
+        access_token, model_type, str(working_dir), logger=logger, max_budget_usd=max_budget_usd
+    )
     planner = Planner(agent, state_manager)
     ContextAccumulator(state_manager)
     return agent, planner
@@ -156,6 +159,12 @@ def start(
         envvar="CLAUDETM_WEBHOOK_SECRET",
         help="HMAC secret for signing webhook payloads (env: CLAUDETM_WEBHOOK_SECRET)",
     ),
+    budget: float | None = typer.Option(
+        None,
+        "--budget",
+        envvar="CLAUDETM_BUDGET",
+        help="Max spending per session in USD (env: CLAUDETM_BUDGET)",
+    ),
 ) -> None:
     """Start a new task with the given goal.
 
@@ -176,6 +185,8 @@ def start(
 
     console.print(f"[bold green]Starting new task:[/bold green] {goal}")
     console.print(f"Model: {model}, Auto-merge: {auto_merge}, Log: {log_level}/{log_format}")
+    if budget is not None:
+        console.print(f"Budget: ${budget:.2f}/session")
 
     # Validate and create webhook client early (before state initialization)
     # to avoid stuck resumes if the URL is invalid
@@ -227,6 +238,7 @@ def start(
             pr_per_task=pr_per_task,
             webhook_url=webhook_url,
             webhook_secret=webhook_secret,
+            max_budget_usd=budget,
         )
         state = state_manager.initialize(goal=goal, model=model, options=options)
 
@@ -235,7 +247,7 @@ def start(
 
         # Initialize components with logger (working_dir already defined above)
         agent, planner = _initialize_components(
-            access_token, model_type, working_dir, state_manager, logger
+            access_token, model_type, working_dir, state_manager, logger, max_budget_usd=budget
         )
 
         # Run planning phase
@@ -388,7 +400,12 @@ def resume(
         # Initialize components (working_dir already defined above)
         logger = _initialize_logger(state_manager, state.run_id, log_level_enum, log_format_enum)
         agent, planner = _initialize_components(
-            access_token, model_type, working_dir, state_manager, logger
+            access_token,
+            model_type,
+            working_dir,
+            state_manager,
+            logger,
+            max_budget_usd=state.options.max_budget_usd,
         )
 
         # Update state to working if it was paused
