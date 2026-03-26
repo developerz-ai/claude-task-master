@@ -361,6 +361,7 @@ claudetm start "Your goal here" [OPTIONS]
 | `--max-sessions` | Limit number of sessions | unlimited |
 | `--prs` | Limit number of PRs to create | unlimited |
 | `--pause-on-pr` | Pause after creating PR | False |
+| `--budget` | Max spending per session in USD | unlimited |
 
 ### Common Workflows
 
@@ -377,6 +378,9 @@ claudetm start "Fix bug in parser" --max-sessions 5
 # Limit number of PRs (forces everything into fewer PRs)
 claudetm start "Add user dashboard" --prs 1
 claudetm start "Implement notifications" --prs 3 --max-sessions 10
+
+# Cap spending per session
+claudetm start "Fix bug in login" --budget 5.00
 
 # Monitor progress
 watch -n 5 'claudetm status'

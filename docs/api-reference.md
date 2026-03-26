@@ -154,7 +154,8 @@ Get comprehensive status information about the current task.
     "enable_checkpointing": false,
     "log_level": "normal",
     "log_format": "text",
-    "pr_per_task": false
+    "pr_per_task": false,
+    "max_budget_usd": null
   },
   "created_at": "2024-01-18T14:30:22Z",
   "updated_at": "2024-01-18T15:45:10Z",
@@ -417,6 +418,7 @@ Update runtime task configuration options.
 - `log_level` (string) - Log level: `quiet`, `normal`, `verbose`
 - `log_format` (string) - Log format: `text`, `json`
 - `pr_per_task` (boolean) - Create PR per task vs per group
+- `max_budget_usd` (float) - Max spending per session in USD (null for unlimited)
 
 **Note:** Only provide the fields you want to update. At least one field is required.
 
@@ -474,6 +476,7 @@ Initialize a new task with the given goal and options.
 - `max_sessions` (optional, integer, 1-1000) - Max sessions before pausing
 - `max_prs` (optional, integer, 1-100) - Max pull requests to create
 - `pause_on_pr` (optional, boolean) - Pause after creating PR (default: `false`)
+- `budget` (optional, float) - Max spending per session in USD (default: unlimited)
 
 **Response:** `TaskInitResponse` (201 Created)
 
