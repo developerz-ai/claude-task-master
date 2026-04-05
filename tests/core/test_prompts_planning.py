@@ -88,10 +88,10 @@ class TestPlanningModeIntro:
         result = build_planning_prompt("Build feature X")
         assert "mission" in result.lower() or "goal" in result.lower()
 
-    def test_high_quality_plan_mentioned(self) -> None:
-        """Test HIGH QUALITY MASTER PLAN is mentioned."""
+    def test_master_plan_mentioned(self) -> None:
+        """Test master plan is mentioned."""
         result = build_planning_prompt("Any goal")
-        assert "HIGH QUALITY" in result or "MASTER PLAN" in result
+        assert "master plan" in result.lower()
 
 
 # =============================================================================
@@ -102,10 +102,10 @@ class TestPlanningModeIntro:
 class TestToolRestrictions:
     """Tests for tool restrictions section."""
 
-    def test_tool_restrictions_section_present(self) -> None:
-        """Test TOOL RESTRICTIONS section exists."""
+    def test_tools_available_mentioned(self) -> None:
+        """Test tools available is mentioned."""
         result = build_planning_prompt("Any goal")
-        assert "TOOL RESTRICTIONS" in result
+        assert "All tools available" in result
 
     def test_allowed_tools_listed(self) -> None:
         """Test allowed tools are listed."""
@@ -113,65 +113,24 @@ class TestToolRestrictions:
         assert "Read" in result
         assert "Glob" in result
         assert "Grep" in result
-        assert "Bash" in result
 
-    def test_forbidden_tools_marked(self) -> None:
-        """Test forbidden tools are marked."""
+    def test_no_code_no_branches_mentioned(self) -> None:
+        """Test no code, no branches is mentioned."""
         result = build_planning_prompt("Any goal")
-        assert "Write" in result
-        assert "Edit" in result
-        # Check for forbidden marking
-        assert "FORBIDDEN" in result or "❌" in result
+        assert "no code" in result.lower()
+        assert "no branches" in result.lower()
 
-    def test_write_tool_forbidden(self) -> None:
-        """Test Write tool is explicitly forbidden."""
+    def test_explore_tools_listed(self) -> None:
+        """Test explore tools are listed in intro."""
         result = build_planning_prompt("Any goal")
-        assert "Write" in result
-        # Should be in forbidden section, not just mentioned
-        assert "Do NOT write" in result or "❌" in result
+        # Tools mentioned in the intro
+        assert "All tools available" in result
 
-    def test_edit_tool_forbidden(self) -> None:
-        """Test Edit tool is explicitly forbidden."""
+    def test_output_plan_instruction(self) -> None:
+        """Test OUTPUT plan instruction is present."""
         result = build_planning_prompt("Any goal")
-        assert "Edit" in result
-        assert "❌" in result or "FORBIDDEN" in result
-
-    def test_task_tool_forbidden(self) -> None:
-        """Test Task tool is explicitly forbidden."""
-        result = build_planning_prompt("Any goal")
-        assert "Task" in result
-
-    def test_todowrite_tool_forbidden(self) -> None:
-        """Test TodoWrite tool is explicitly forbidden."""
-        result = build_planning_prompt("Any goal")
-        assert "TodoWrite" in result
-
-    def test_webfetch_tool_allowed(self) -> None:
-        """Test WebFetch tool is explicitly allowed."""
-        result = build_planning_prompt("Any goal")
-        assert "WebFetch" in result
-        # Should be in ALLOWED section, not FORBIDDEN
-        # Check it appears before the FORBIDDEN section
-        allowed_section_start = result.find("ALLOWED TOOLS")
-        forbidden_section_start = result.find("FORBIDDEN TOOLS")
-        webfetch_position = result.find("WebFetch")
-        assert allowed_section_start < webfetch_position < forbidden_section_start
-
-    def test_websearch_tool_allowed(self) -> None:
-        """Test WebSearch tool is explicitly allowed."""
-        result = build_planning_prompt("Any goal")
-        assert "WebSearch" in result
-        # Should be in ALLOWED section, not FORBIDDEN
-        # Check it appears before the FORBIDDEN section
-        allowed_section_start = result.find("ALLOWED TOOLS")
-        forbidden_section_start = result.find("FORBIDDEN TOOLS")
-        websearch_position = result.find("WebSearch")
-        assert allowed_section_start < websearch_position < forbidden_section_start
-
-    def test_why_explanation_present(self) -> None:
-        """Test WHY explanation is present."""
-        result = build_planning_prompt("Any goal")
-        assert "WHY" in result or "orchestrator" in result.lower()
+        assert "OUTPUT plan as text" in result
+        assert "orchestrator saves" in result
 
 
 # =============================================================================
@@ -185,7 +144,7 @@ class TestPlanningRules:
     def test_no_code_rule(self) -> None:
         """Test rule about not writing code."""
         result = build_planning_prompt("Any goal")
-        assert "Do NOT write code" in result or "not write code" in result.lower()
+        assert "no code" in result.lower()
 
     def test_no_branches_rule(self) -> None:
         """Test rule about not creating branches."""
@@ -350,9 +309,10 @@ class TestExploreCodebaseSection:
         assert "Explore Codebase" in result
 
     def test_read_only_emphasized(self) -> None:
-        """Test READ ONLY is emphasized."""
+        """Test read-only exploration is emphasized."""
         result = build_planning_prompt("Any goal")
-        assert "READ ONLY" in result or "READ-ONLY" in result
+        assert "Read" in result
+        assert "explore only" in result.lower() or "no code" in result.lower()
 
     def test_key_files_mentioned(self) -> None:
         """Test key files are mentioned."""
@@ -400,16 +360,12 @@ class TestClaudeMdGuidance:
         # CLAUDE.md should be mentioned in Step 1
         assert step1_section_start < claude_md_position < step2_section_start
 
-    def test_critical_marker_for_conventions(self) -> None:
-        """Test CRITICAL marker emphasizes reading project conventions."""
+    def test_claude_md_reading_first(self) -> None:
+        """Test CLAUDE.md reading is emphasized as first step."""
         result = build_planning_prompt("Any goal")
-        # Should have CRITICAL marker near CLAUDE.md or conventions
-        assert "CRITICAL" in result
-        # Check that CRITICAL appears near "convention" or "CLAUDE.md"
-        critical_pos = result.find("CRITICAL")
-        claude_md_pos = result.find("CLAUDE.md")
-        # They should be relatively close (within 200 characters)
-        assert abs(critical_pos - claude_md_pos) < 200
+        # CLAUDE.md should be mentioned with "first"
+        assert "CLAUDE.md" in result
+        assert "first" in result.lower()
 
     def test_alternative_convention_files_listed(self) -> None:
         """Test alternative convention file paths are listed."""
@@ -418,15 +374,12 @@ class TestClaudeMdGuidance:
         assert ".claude/instructions.md" in result
         assert "CONTRIBUTING.md" in result
         assert ".cursorrules" in result
-        assert ".github/copilot-instructions.md" in result
 
     def test_coding_requirements_must_be_followed(self) -> None:
-        """Test prompt emphasizes coding requirements MUST be followed."""
+        """Test prompt emphasizes coding requirements must be followed."""
         result = build_planning_prompt("Any goal")
-        # Should emphasize that requirements MUST be respected
-        assert "MUST" in result
-        # Should mention following or respecting requirements/standards
         result_lower = result.lower()
+        # Should mention coding requirements
         assert (
             "coding requirements" in result_lower
             or "coding standards" in result_lower
@@ -436,11 +389,9 @@ class TestClaudeMdGuidance:
     def test_requirements_should_be_in_task_descriptions(self) -> None:
         """Test prompt instructs to include requirements in task descriptions."""
         result = build_planning_prompt("Any goal")
-        # Should mention including requirements in task descriptions
         result_lower = result.lower()
-        assert "task descriptions" in result_lower or "task description" in result_lower
-        # Should mention that working phase should follow standards
-        assert "working phase" in result_lower or "working" in result_lower
+        # Should mention task descriptions and workers following standards
+        assert "task descriptions" in result_lower or "workers follow" in result_lower
 
     def test_architecture_and_coding_standards_both_mentioned(self) -> None:
         """Test prompt mentions understanding both architecture AND coding standards."""
@@ -457,27 +408,20 @@ class TestClaudeMdGuidance:
         """Test reading conventions is positioned before other exploration steps."""
         result = build_planning_prompt("Any goal")
 
-        # Find positions of key elements
-        claude_md_pos = result.find("CLAUDE.md")
-        readme_pos = result.find("README")
-
-        # CLAUDE.md should be mentioned before README
-        assert claude_md_pos < readme_pos
-        # Also check it appears early in the exploration section
+        # CLAUDE.md should be in Step 1
         step1_start = result.find("Step 1")
         step2_start = result.find("Step 2")
-        # Get just Step 1 section
         step1_section = result[step1_start:step2_start]
         # In Step 1, CLAUDE.md should appear before Glob
         step1_claude_md = step1_section.find("CLAUDE.md")
         step1_glob = step1_section.find("Glob")
         assert step1_claude_md < step1_glob
 
-    def test_if_exists_conditional_for_claude_md(self) -> None:
-        """Test CLAUDE.md reading includes 'if exists' conditional."""
+    def test_also_check_alternative_files(self) -> None:
+        """Test prompt mentions checking alternative convention files."""
         result = build_planning_prompt("Any goal")
-        # Should indicate CLAUDE.md might not exist in all projects
-        assert "if exists" in result.lower() or "(if exists)" in result
+        # Should mention checking alternative files
+        assert "Also check" in result or ".claude/instructions.md" in result
 
 
 # =============================================================================
@@ -507,14 +451,14 @@ class TestCreateTaskListSection:
         assert "- [ ]" in result
 
     def test_file_references_emphasized(self) -> None:
-        """Test file references requirement is emphasized via context sublists."""
+        """Test file references requirement is emphasized via file paths."""
         result = build_planning_prompt("Any goal")
-        assert "context sublists" in result.lower() or "referencing relevant files" in result
+        assert "file paths" in result.lower() or "line numbers" in result.lower()
 
-    def test_symbols_emphasized(self) -> None:
-        """Test symbols requirement is emphasized."""
+    def test_implementation_hints_emphasized(self) -> None:
+        """Test implementation hints requirement is emphasized."""
         result = build_planning_prompt("Any goal")
-        assert "Symbols" in result or "symbol" in result.lower()
+        assert "implementation hints" in result.lower() or "hints" in result.lower()
 
     def test_complexity_tags_present(self) -> None:
         """Test complexity tags are present."""
@@ -578,7 +522,7 @@ class TestPRGroupingPrinciples:
     def test_logical_cohesion_principle(self) -> None:
         """Test logical cohesion principle is mentioned."""
         result = build_planning_prompt("Any goal")
-        assert "cohesion" in result.lower() or "Related changes" in result
+        assert "cohesion" in result.lower() or "related changes together" in result.lower()
 
     def test_small_prs_principle(self) -> None:
         """Test small PRs principle is mentioned."""
@@ -653,12 +597,12 @@ class TestSuccessCriteriaSection:
     def test_tests_pass_criterion(self) -> None:
         """Test tests pass is mentioned as criterion."""
         result = build_planning_prompt("Any goal")
-        assert "Tests pass" in result or "pytest" in result
+        assert "tests pass" in result.lower()
 
     def test_linting_criterion(self) -> None:
-        """Test linting clean is mentioned as criterion."""
+        """Test lint clean is mentioned as criterion."""
         result = build_planning_prompt("Any goal")
-        assert "Linting" in result or "ruff" in result or "eslint" in result
+        assert "lint" in result.lower()
 
     def test_ci_green_criterion(self) -> None:
         """Test CI green is mentioned as criterion."""
@@ -732,7 +676,6 @@ class TestBuildPlanningPromptIntegration:
 
         # All major sections should be present
         assert "PLANNING MODE" in result
-        assert "TOOL RESTRICTIONS" in result
         assert "Step 1" in result
         assert "Step 2" in result
         assert "Step 3" in result
@@ -746,14 +689,13 @@ class TestBuildPlanningPromptIntegration:
 
         # Find positions
         intro_pos = result.find("PLANNING MODE")
-        tools_pos = result.find("TOOL RESTRICTIONS")
         step1_pos = result.find("Step 1")
         step2_pos = result.find("Step 2")
         step3_pos = result.find("Step 3")
         stop_pos = result.find("STOP")
 
         # Verify order
-        assert intro_pos < tools_pos < step1_pos < step2_pos < step3_pos < stop_pos
+        assert intro_pos < step1_pos < step2_pos < step3_pos < stop_pos
 
     def test_with_full_context(self) -> None:
         """Test prompt with full context."""
@@ -902,8 +844,7 @@ class TestPromptContentValidation:
         """Test important markers are present."""
         result = build_planning_prompt("Any goal")
 
-        # Critical markers
-        assert "CRITICAL" in result or "IMPORTANT" in result
+        # Key markers
         assert "STOP" in result
         assert "Do NOT" in result
 

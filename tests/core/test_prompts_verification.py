@@ -70,20 +70,20 @@ class TestBuildVerificationPromptBasic:
 class TestVerificationIntroduction:
     """Tests for verification prompt introduction section."""
 
-    def test_claude_task_master_mentioned(self) -> None:
-        """Test Claude Task Master is mentioned."""
+    def test_verify_instruction_present(self) -> None:
+        """Test verify instruction is present."""
         result = build_verification_prompt("Any criteria")
-        assert "Claude Task Master" in result
+        assert "Verify" in result
 
     def test_verifying_keyword_present(self) -> None:
-        """Test verifying/verification context is present."""
+        """Test verification context is present."""
         result = build_verification_prompt("Any criteria")
-        assert "verifying" in result.lower() or "verification" in result.lower()
+        assert "Verify" in result or "verification" in result.lower()
 
-    def test_work_complete_mentioned(self) -> None:
-        """Test work complete is mentioned."""
+    def test_concise_instruction_mentioned(self) -> None:
+        """Test concise instruction is mentioned."""
         result = build_verification_prompt("Any criteria")
-        assert "complete" in result.lower()
+        assert "concise" in result.lower() or "Be concise" in result
 
     def test_success_criteria_mentioned(self) -> None:
         """Test success criteria is mentioned."""
@@ -133,10 +133,10 @@ Task 3: Done"""
 class TestVerificationStepsSection:
     """Tests for verification steps section."""
 
-    def test_verification_steps_present(self) -> None:
-        """Test Verification Steps section exists."""
+    def test_verification_section_present(self) -> None:
+        """Test Verification section exists."""
         result = build_verification_prompt("Any criteria")
-        assert "Verification Steps" in result
+        assert "## Verification" in result
 
     def test_run_tests_step(self) -> None:
         """Test run tests step is present."""
@@ -153,25 +153,25 @@ class TestVerificationStepsSection:
         result = build_verification_prompt("Any criteria")
         assert "PR" in result
 
-    def test_functional_check_step(self) -> None:
-        """Test functional check step is present."""
+    def test_check_prs_step(self) -> None:
+        """Test check PRs step is present."""
         result = build_verification_prompt("Any criteria")
-        assert "Functional" in result or "requirements" in result.lower()
+        assert "PR" in result
 
 
 class TestVerificationReportFormat:
     """Tests for verification report format guidance."""
 
-    def test_passed_format_present(self) -> None:
-        """Test PASSED format is present."""
+    def test_pass_format_present(self) -> None:
+        """Test PASS format is present."""
         result = build_verification_prompt("Any criteria")
-        assert "PASSED" in result
+        assert "PASS" in result
         assert "✓" in result
 
-    def test_failed_format_present(self) -> None:
-        """Test FAILED format is present."""
+    def test_fail_format_present(self) -> None:
+        """Test FAIL format is present."""
         result = build_verification_prompt("Any criteria")
-        assert "FAILED" in result
+        assert "FAIL" in result
         assert "✗" in result
 
     def test_evidence_mentioned(self) -> None:
@@ -203,15 +203,15 @@ class TestVerificationResultMarker:
         result = build_verification_prompt("Any criteria")
         assert "VERIFICATION_RESULT: FAIL" in result
 
-    def test_critical_marker_present(self) -> None:
-        """Test CRITICAL marker is present."""
+    def test_must_be_first_line(self) -> None:
+        """Test first line instruction is present."""
         result = build_verification_prompt("Any criteria")
-        assert "CRITICAL" in result
+        assert "First line" in result or "first line" in result.lower()
 
-    def test_strict_instruction_present(self) -> None:
-        """Test strict instruction is present."""
+    def test_only_pass_if_all_criteria(self) -> None:
+        """Test only pass if ALL criteria instruction is present."""
         result = build_verification_prompt("Any criteria")
-        assert "strict" in result.lower()
+        assert "Only PASS if ALL criteria met" in result
 
 
 # =============================================================================
@@ -254,10 +254,10 @@ class TestBuildTaskCompletionCheckPromptBasic:
         result = build_task_completion_check_prompt("Task", "Output")
         assert "## Session Output" in result
 
-    def test_determination_section_header(self) -> None:
-        """Test Determination section header is present."""
+    def test_answer_exactly_one_instruction(self) -> None:
+        """Test Answer EXACTLY one instruction is present."""
         result = build_task_completion_check_prompt("Task", "Output")
-        assert "## Determination" in result
+        assert "Answer EXACTLY one of" in result
 
 
 class TestTaskCompletionStatusOptions:
@@ -292,30 +292,30 @@ class TestTaskCompletionStatusOptions:
 class TestTaskCompletionStatusDescriptions:
     """Tests for task completion status descriptions."""
 
-    def test_completed_description(self) -> None:
-        """Test COMPLETED has description about fully done."""
+    def test_completed_status_listed(self) -> None:
+        """Test COMPLETED status is listed."""
         result = build_task_completion_check_prompt("Task", "Output")
-        assert "fully done" in result.lower() or "no more work needed" in result.lower()
+        assert "COMPLETED" in result
 
-    def test_in_progress_description(self) -> None:
-        """Test IN_PROGRESS has description about partial progress."""
+    def test_in_progress_status_listed(self) -> None:
+        """Test IN_PROGRESS status is listed."""
         result = build_task_completion_check_prompt("Task", "Output")
-        assert "partial progress" in result.lower() or "more work needed" in result.lower()
+        assert "IN_PROGRESS" in result
 
-    def test_blocked_description(self) -> None:
-        """Test BLOCKED has description about intervention."""
+    def test_blocked_status_listed(self) -> None:
+        """Test BLOCKED status is listed."""
         result = build_task_completion_check_prompt("Task", "Output")
-        assert "intervention" in result.lower()
+        assert "BLOCKED" in result
 
-    def test_failed_description(self) -> None:
-        """Test FAILED has description about error."""
+    def test_failed_status_listed(self) -> None:
+        """Test FAILED status is listed."""
         result = build_task_completion_check_prompt("Task", "Output")
-        assert "error" in result.lower()
+        assert "FAILED" in result
 
-    def test_explain_why_instruction(self) -> None:
-        """Test instruction to explain why."""
+    def test_one_sentence_why_instruction(self) -> None:
+        """Test instruction to give one sentence why."""
         result = build_task_completion_check_prompt("Task", "Output")
-        assert "explain why" in result.lower()
+        assert "one sentence why" in result.lower()
 
 
 class TestTaskCompletionEdgeCases:
@@ -450,10 +450,10 @@ class TestSessionOutputHandling:
 
     def test_output_at_limit_not_truncated(self) -> None:
         """Test output at exactly 5000 chars is not truncated."""
-        output = "MARKER_" + "B" * 4993  # 7 + 4993 = 5000
+        output = "MARKER_" + "X" * 4993  # 7 + 4993 = 5000
         result = build_context_extraction_prompt(output)
-        # All B's should be present since we're at the limit
-        assert result.count("B") == 4993
+        # All X's should be present since we're at the limit
+        assert result.count("X") == 4993
 
     def test_output_under_limit_not_truncated(self) -> None:
         """Test output under 5000 chars is not truncated."""
@@ -489,7 +489,7 @@ class TestExtractionCategories:
     def test_concise_instruction_present(self) -> None:
         """Test concise instruction is present."""
         result = build_context_extraction_prompt("Output")
-        assert "concise" in result.lower() or "500 words" in result
+        assert "300 words" in result or "terse" in result.lower()
 
 
 class TestContextExtractionEdgeCases:
@@ -543,10 +543,10 @@ class TestBuildErrorRecoveryPromptBasic:
         result = build_error_recovery_prompt(error)
         assert error in result
 
-    def test_error_section_present(self) -> None:
-        """Test Error section is present."""
+    def test_error_intro_present(self) -> None:
+        """Test error intro is present."""
         result = build_error_recovery_prompt("Any error")
-        assert "## Error" in result
+        assert "Error occurred" in result
 
     def test_error_in_code_block(self) -> None:
         """Test error message is in code block."""
@@ -643,25 +643,25 @@ class TestAttemptedActionsSection:
 class TestRecoveryStepsSection:
     """Tests for recovery steps section in error recovery prompt."""
 
-    def test_recovery_steps_present(self) -> None:
-        """Test Recovery Steps section is present."""
+    def test_steps_section_present(self) -> None:
+        """Test Steps section is present."""
         result = build_error_recovery_prompt("Any error")
-        assert "Recovery Steps" in result
+        assert "## Steps" in result
 
-    def test_analyze_error_step(self) -> None:
-        """Test analyze error step is present."""
+    def test_root_cause_step(self) -> None:
+        """Test root cause step is present."""
         result = build_error_recovery_prompt("Any error")
-        assert "Analyze" in result and "error" in result.lower()
+        assert "Root cause" in result
 
-    def test_identify_fix_step(self) -> None:
-        """Test identify fix step is present."""
+    def test_minimal_fix_step(self) -> None:
+        """Test minimal fix step is present."""
         result = build_error_recovery_prompt("Any error")
-        assert "Identify" in result or "fix" in result.lower()
+        assert "Minimal fix" in result
 
-    def test_implement_fix_step(self) -> None:
-        """Test implement fix step is present."""
+    def test_verify_step_present(self) -> None:
+        """Test verify step is present."""
         result = build_error_recovery_prompt("Any error")
-        assert "Implement" in result
+        assert "Verify" in result
 
     def test_verify_step(self) -> None:
         """Test verify step is present."""
@@ -686,7 +686,7 @@ class TestErrorRecoveryEdgeCases:
         """Test with empty error message."""
         result = build_error_recovery_prompt("")
         assert isinstance(result, str)
-        assert "## Error" in result
+        assert "Error occurred" in result
 
     def test_multiline_error_message(self) -> None:
         """Test multiline error message."""
@@ -876,10 +876,10 @@ class TestVerificationPromptIntegration:
             criteria="Tests pass\nCI green",
             tasks_summary="Implemented feature",
         )
-        assert "Claude Task Master" in result
+        assert "Verify" in result
         assert "Completed Tasks" in result
         assert "Success Criteria" in result
-        assert "Verification Steps" in result
+        assert "## Verification" in result
         assert "VERIFICATION_RESULT" in result
 
     def test_prompt_length_reasonable(self) -> None:
@@ -915,10 +915,10 @@ class TestErrorRecoveryIntegration:
             task_context="Running tests",
             attempted_actions=["Retried", "Checked logs"],
         )
-        assert "## Error" in result
+        assert "Error occurred" in result
         assert "Task Context" in result
         assert "Already Tried" in result
-        assert "Recovery Steps" in result
+        assert "## Steps" in result
 
     def test_section_order(self) -> None:
         """Test sections appear in logical order."""
@@ -927,10 +927,10 @@ class TestErrorRecoveryIntegration:
             task_context="Context",
             attempted_actions=["Action"],
         )
-        error_pos = result.find("## Error")
+        error_pos = result.find("Error occurred")
         context_pos = result.find("Task Context")
         tried_pos = result.find("Already Tried")
-        steps_pos = result.find("Recovery Steps")
+        steps_pos = result.find("## Steps")
 
-        # Verify order: Error -> Task Context -> Already Tried -> Recovery Steps
+        # Verify order: Error -> Task Context -> Already Tried -> Steps
         assert error_pos < context_pos < tried_pos < steps_pos

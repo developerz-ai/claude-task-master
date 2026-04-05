@@ -134,21 +134,17 @@ class ContextWindowsConfig(BaseModel):
 class ToolsConfig(BaseModel):
     """Tool configurations per execution phase.
 
-    Each phase has a list of allowed tools:
-    - planning: Read-only tools for codebase exploration
-    - verification: Tools for running tests/lint
-    - working: Full tool access for implementation (empty = all tools)
-
-    Note: An empty list means ALL tools are allowed.
+    Each phase has a list of allowed tools.
+    An empty list means ALL tools are allowed.
     """
 
     planning: list[str] = Field(
-        default_factory=lambda: ["Read", "Glob", "Grep", "Bash", "WebFetch", "WebSearch"],
-        description="Tools available during planning phase (read-only + bash for checks + web tools for research).",
+        default_factory=list,
+        description="Tools available during planning phase (empty = all tools).",
     )
     verification: list[str] = Field(
-        default_factory=lambda: ["Read", "Glob", "Grep", "Bash"],
-        description="Tools available during verification phase (tests/lint).",
+        default_factory=list,
+        description="Tools available during verification phase (empty = all tools).",
     )
     working: list[str] = Field(
         default_factory=list,

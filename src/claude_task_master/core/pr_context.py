@@ -369,14 +369,14 @@ class PRContextManager:
 
                 already_resolved_on_github = thread_id in already_resolved
 
-                # Build reply message
-                action_emoji = {
-                    "fixed": "✅",
-                    "explained": "💬",
-                    "skipped": "⏭️",
-                }.get(action, "✅")
+                # Build reply message - keep it short
+                action_prefix = {
+                    "fixed": "Fixed:",
+                    "explained": "Note:",
+                    "skipped": "Skipped:",
+                }.get(action, "Fixed:")
 
-                reply_body = f"{action_emoji} **{action.capitalize()}**: {message}"
+                reply_body = f"{action_prefix} {message}"
 
                 try:
                     self._post_thread_reply(thread_id, reply_body)

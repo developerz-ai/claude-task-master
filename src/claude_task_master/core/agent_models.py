@@ -79,33 +79,13 @@ class TaskComplexity(Enum):
 class ToolConfig(Enum):
     """Tool configurations for different phases.
 
-    Each phase specifies the tools available to Claude:
-    - PLANNING: Read-only tools (Read, Glob, Grep, Bash) for exploring codebase
-    - VERIFICATION: Same as planning (Read, Glob, Grep, Bash) for running tests/lint
-    - WORKING: Empty list [] allows ALL tools for full implementation access
+    Empty list means all tools allowed. Override via config.json.
 
-    Note: An empty list in allowed_tools means "all tools are allowed".
-
-    DEPRECATED: Use `get_tools_for_phase()` function instead, which reads from
-    the global config and supports user customization via config.json.
-    These hardcoded values are kept for backwards compatibility only.
+    DEPRECATED: Use `get_tools_for_phase()` function instead.
     """
 
-    # Planning uses READ-ONLY tools + Bash for checks (git status, tests, etc.)
-    PLANNING = [
-        "Read",
-        "Glob",
-        "Grep",
-        "Bash",
-    ]
-    # Verification uses read tools + Bash for running tests/lint (no write access)
-    VERIFICATION = [
-        "Read",
-        "Glob",
-        "Grep",
-        "Bash",
-    ]
-    # Working phase has full tool access - empty list allows ALL tools
+    PLANNING = list[str]()
+    VERIFICATION = list[str]()
     WORKING = list[str]()
 
 

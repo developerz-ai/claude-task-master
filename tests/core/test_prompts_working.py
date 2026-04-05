@@ -708,21 +708,20 @@ class TestCompletionSection:
     def test_report_requirements(self) -> None:
         """Test report requirements are listed."""
         result = build_work_prompt("Any task")
-        assert "What was completed" in result
-        assert "Tests run" in result
-        assert "Files modified" in result
-        assert "Commit hash" in result
-        assert "blockers" in result.lower()
+        assert "**Changes:**" in result
+        assert "**Tests:**" in result
+        assert "**Commit:**" in result
+        assert "**Blockers:**" in result
 
     def test_commit_hash_required(self) -> None:
         """Test commit hash is marked as required."""
         result = build_work_prompt("Any task")
-        assert "Commit hash (REQUIRED" in result or "commit hash" in result.lower()
+        assert "**Commit:** hash (REQUIRED)" in result or "Commit:" in result
 
-    def test_orchestrator_new_session_mention(self) -> None:
-        """Test mention of orchestrator starting new session."""
+    def test_task_complete_end_marker(self) -> None:
+        """Test TASK COMPLETE end marker instruction."""
         result = build_work_prompt("Any task")
-        assert "orchestrator will start" in result.lower() or "NEW session" in result
+        assert "End with: `TASK COMPLETE`" in result
 
 
 # =============================================================================
@@ -778,9 +777,9 @@ class TestBuildFullWorkflowExecution:
         assert "STOP AFTER PR CREATION" in result
 
     def test_contains_no_merge_instruction(self) -> None:
-        """Test contains instruction to not merge."""
+        """Test contains instruction about not merging (orchestrator handles)."""
         result = _build_full_workflow_execution()
-        assert "Merge the PR" in result
+        assert "orchestrator handles" in result.lower() or "Do not wait" in result
 
 
 class TestBuildCommitOnlyExecution:

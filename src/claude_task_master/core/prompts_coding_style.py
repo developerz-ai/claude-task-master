@@ -26,134 +26,27 @@ def build_coding_style_prompt() -> str:
         Complete coding style generation prompt.
     """
     builder = PromptBuilder(
-        intro="""You are analyzing a codebase to extract its coding workflow and style guide.
+        intro="""Analyze codebase, create concise coding guide (under 600 words). This gets injected into every task, so keep it short and actionable.
 
-Your mission: **Create a CONCISE coding guide (under 800 words).**
-
-Focus on extracting:
-1. **Development workflow** (TDD, test-first, iteration patterns)
-2. **Code conventions** (naming, formatting, imports)
-3. **Test patterns** (E2E, integration, API tests - locations, commands, examples)
-4. **Project-specific requirements** (from CLAUDE.md)
-
-⚠️ **CRITICAL: Test patterns are ESSENTIAL for debugging-qa tasks.**
-These tasks need to know where tests live and what patterns to follow.
-
-This guide will be injected into every coding task, so keep it SHORT and ACTIONABLE.
-
-## TOOL RESTRICTIONS (MANDATORY)
-
-**ALLOWED TOOLS (use ONLY these):**
-- `Read` - Read files to understand patterns
-- `Glob` - Find files by pattern
-- `Grep` - Search for code patterns
-- `Bash` - Run commands (check configs, linters, etc.)
-
-**FORBIDDEN TOOLS (NEVER use):**
-- `Write` - Do NOT write any files
-- `Edit` - Do NOT edit any files
-- `Task` - Do NOT launch any agents"""
+All tools available for exploration. Do NOT write files — OUTPUT guide as text."""
     )
 
     builder.add_section(
-        "Step 1: Read CLAUDE.md (PRIORITY)",
-        """**Start by reading `CLAUDE.md` at the repository root.**
-
-This file contains the project's coding requirements and workflow instructions.
-Extract:
-- Development workflow (TDD, test-driven, iteration patterns)
-- Code quality requirements
-- Testing approach (test first? mock patterns?)
-- Any specific coding rules or constraints
-
-Also check these if CLAUDE.md doesn't exist:
-- `.claude/instructions.md`
-- `CONTRIBUTING.md`
-- `.cursorrules`, `.github/copilot-instructions.md`""",
-    )
-
-    builder.add_section(
-        "Step 2: Find Test Patterns (CRITICAL for debugging-qa tasks)",
-        """**Look for existing integration/E2E tests - this is ESSENTIAL.**
-
-Use Glob to find test directories and patterns:
-- E2E tests: `**/e2e/**/*.spec.ts`, `**/tests/e2e/**`, `playwright.config.ts`
-- Integration tests: `**/integration/**`, `**/*.integration.test.ts`, `**/*.test.ts`
-- API tests: `**/*.request.test.ts`, `**/api/tests/**`
-
-For each test type found, note:
-- **Location**: Where test files live (e.g., `admin/e2e/`, `backend/src/**/*.test.ts`)
-- **Naming pattern**: How tests are named (e.g., `*.spec.ts`, `*.test.ts`)
-- **Run command**: How to run tests (check `package.json` scripts, `pyproject.toml`)
-- **Example file**: A good test file to follow as a pattern
-
-If no integration tests exist yet, note that and recommend where they should go.""",
-    )
-
-    builder.add_section(
-        "Step 3: Check Configs",
-        """Quickly scan linter/formatter configs for conventions:
-
-- Python: `pyproject.toml` [tool.ruff], `ruff.toml`
-- JS/TS: `.eslintrc`, `.prettierrc`, `biome.json`
-- General: `.editorconfig`
-
-Note line length, quote style, import ordering rules.""",
-    )
-
-    builder.add_section(
-        "Step 4: Generate Coding Guide",
-        """Create a CONCISE guide with these sections (skip if not applicable):
-
-```markdown
-# Coding Style
-
-## Workflow
-- [TDD approach? Test-first? Iteration pattern?]
-- [Required checks before commit: tests, lint, types?]
-
-## Code Style
-- [Naming: snake_case, camelCase, etc.]
-- [Formatting: line length, quotes, indentation]
-- [Imports: ordering, grouping]
-
-## Types
-- [Type annotations required? Strictness level?]
-
-## Testing
-- [Unit tests: location, naming pattern, run command]
-- [Integration/E2E tests: location, naming, run command, example file to follow]
-- [API tests: location, naming, run command]
-- [Assertion style, mock patterns]
-
-## Error Handling
-- [Exception patterns, logging approach]
-
-## Project-Specific
-- [Any unique requirements from CLAUDE.md]
-```
-
-**Rules:**
-- Each section: 2-4 bullet points MAX
-- Be SPECIFIC and ACTIONABLE: "Run `pnpm test:e2e` before commit" not "Test your code"
-- **Testing section is CRITICAL**: Include exact paths, file patterns, and commands
-- Capture the WORKFLOW, not just style
-- Include actual commands where relevant
-- Total guide: under 800 words (expanded for test patterns)""",
+        "What to Analyze",
+        """1. Read `CLAUDE.md` (or `.claude/instructions.md`, `CONTRIBUTING.md`, `.cursorrules`) — extract workflow, requirements
+2. Find test patterns: Glob for `**/e2e/**/*.spec.ts`, `**/*.test.ts`, etc. Note locations, naming, run commands, example files
+3. Check configs: `pyproject.toml`, `.eslintrc`, `.prettierrc`, `biome.json` — line length, quotes, imports""",
     )
 
     builder.add_section(
         "Output Format",
-        """Output ONLY the coding guide in markdown format.
+        """Output markdown guide starting with `# Coding Style`. Sections (skip if N/A):
+- **Workflow** — TDD? Required checks before commit?
+- **Code Style** — Naming, formatting, imports (2-4 bullets)
+- **Testing** — CRITICAL: exact paths, naming patterns, run commands, example files
+- **Project-Specific** — unique requirements from CLAUDE.md
 
-Start with `# Coding Style` and include only relevant sections.
-
-Do NOT include explanations or meta-commentary - just the guide itself.
-
-End with:
-```
-CODING_STYLE_COMPLETE
-```""",
+End with: `CODING_STYLE_COMPLETE`""",
     )
 
     return builder.build()

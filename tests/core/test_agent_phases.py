@@ -25,50 +25,11 @@ from claude_task_master.core.config_loader import reset_config
 class TestToolConfig:
     """Tests for ToolConfig enum."""
 
-    def test_planning_tools(self):
-        """Test PLANNING tool configuration - read-only tools for exploration."""
-        expected = [
-            "Read",
-            "Glob",
-            "Grep",
-            "Bash",
-        ]
-        assert ToolConfig.PLANNING.value == expected
-
-    def test_working_tools(self):
-        """Test WORKING tool configuration - empty list allows ALL tools."""
-        # Empty list means all tools are allowed
+    def test_all_phases_allow_all_tools(self):
+        """Test all phases default to all tools allowed (empty list)."""
+        assert ToolConfig.PLANNING.value == []
+        assert ToolConfig.VERIFICATION.value == []
         assert ToolConfig.WORKING.value == []
-
-    def test_verification_tools(self):
-        """Test VERIFICATION tool configuration - read tools + Bash for running tests."""
-        expected = [
-            "Read",
-            "Glob",
-            "Grep",
-            "Bash",
-        ]
-        assert ToolConfig.VERIFICATION.value == expected
-
-    def test_planning_has_subset_of_working_tools(self):
-        """Test planning tools are restricted while working allows all tools."""
-        planning_tools = set(ToolConfig.PLANNING.value)
-        # Working phase uses empty list (all tools allowed)
-        # Planning has specific tools, so it's more restricted
-        assert len(planning_tools) > 0  # Planning has specific restrictions
-        assert len(ToolConfig.WORKING.value) == 0  # Working allows all
-
-    def test_verification_has_subset_of_working_tools(self):
-        """Test verification tools are restricted while working allows all tools."""
-        verification_tools = set(ToolConfig.VERIFICATION.value)
-        # Working phase uses empty list (all tools allowed)
-        # Verification has specific tools, so it's more restricted
-        assert len(verification_tools) > 0  # Verification has specific restrictions
-        assert len(ToolConfig.WORKING.value) == 0  # Working allows all
-        # Verification has Bash but no Write/Edit
-        assert "Bash" in verification_tools
-        assert "Write" not in verification_tools
-        assert "Edit" not in verification_tools
 
 
 # =============================================================================
@@ -97,35 +58,11 @@ class TestAgentWrapperGetToolsForPhase:
                 model=ModelType.SONNET,
             )
 
-    def test_planning_phase_tools(self, agent):
-        """Test get_tools_for_phase returns planning tools including Bash for checks and web tools for research."""
-        tools = agent.get_tools_for_phase("planning")
-        expected = [
-            "Read",
-            "Glob",
-            "Grep",
-            "Bash",
-            "WebFetch",
-            "WebSearch",
-        ]
-        assert tools == expected
-
-    def test_verification_phase_tools(self, agent):
-        """Test get_tools_for_phase returns verification tools (read + Bash)."""
-        tools = agent.get_tools_for_phase("verification")
-        expected = [
-            "Read",
-            "Glob",
-            "Grep",
-            "Bash",
-        ]
-        assert tools == expected
-
-    def test_working_phase_tools(self, agent):
-        """Test get_tools_for_phase returns working tools (empty list = all tools)."""
-        tools = agent.get_tools_for_phase("working")
-        # Empty list means all tools are allowed
-        assert tools == []
+    def test_all_phases_allow_all_tools(self, agent):
+        """Test all phases default to all tools allowed (empty list)."""
+        assert agent.get_tools_for_phase("planning") == []
+        assert agent.get_tools_for_phase("verification") == []
+        assert agent.get_tools_for_phase("working") == []
 
     def test_unknown_phase_returns_working_tools(self, agent):
         """Test unknown phase returns working tools by default (empty list = all tools)."""
@@ -708,12 +645,9 @@ class TestAgentWrapperVerifySuccessCriteria:
         assert result is not None
 
     def test_verify_success_criteria_uses_verification_tools(self, agent_with_mock):
-        """Test verify_success_criteria uses verification tools (read + Bash)."""
-        # The verification phase should use tools that can run tests
+        """Test verify_success_criteria uses verification tools (all tools allowed)."""
         tools = agent_with_mock.get_tools_for_phase("verification")
-        assert "Bash" in tools  # Can run tests
-        assert "Read" in tools  # Can read files
-        assert "Write" not in tools  # Cannot modify files
+        assert tools == []  # Empty = all tools allowed
 
 
 # =============================================================================

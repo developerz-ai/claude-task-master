@@ -14,12 +14,10 @@ class TestBuildPlanUpdatePrompt:
         prompt = build_plan_update_prompt(current_plan, change_request)
 
         # Check required sections exist
-        assert "PLAN UPDATE MODE" in prompt
+        assert "Plan update mode" in prompt
         assert change_request in prompt
-        assert "TOOL RESTRICTIONS" in prompt
         assert "Current Plan" in prompt
-        assert "Update Instructions" in prompt
-        assert "Output Format" in prompt
+        assert "Rules" in prompt
 
     def test_includes_current_plan(self):
         """Test that the current plan is included in the prompt."""
@@ -41,7 +39,7 @@ class TestBuildPlanUpdatePrompt:
         prompt = build_plan_update_prompt(current_plan, change_request)
 
         assert "Add authentication to the API endpoints" in prompt
-        assert "Change Request:" in prompt
+        assert "Change request:" in prompt or "change request" in prompt.lower()
 
     def test_includes_goal_when_provided(self):
         """Test that the goal is included when provided."""
@@ -83,23 +81,16 @@ class TestBuildPlanUpdatePrompt:
 
         assert "Previous Context" not in prompt
 
-    def test_includes_tool_restrictions(self):
-        """Test that tool restrictions are clearly defined."""
+    def test_includes_tool_instructions(self):
+        """Test that tool instructions are present."""
         current_plan = "## Task List\n- [ ] Task 1"
         change_request = "Update plan"
 
         prompt = build_plan_update_prompt(current_plan, change_request)
 
-        # Allowed tools
-        assert "Read" in prompt
-        assert "Glob" in prompt
-        assert "Grep" in prompt
-        assert "Bash" in prompt
-
-        # Forbidden tools
-        assert "Write" in prompt
-        assert "Edit" in prompt
-        assert "FORBIDDEN" in prompt
+        # Should mention tools available and no writing
+        assert "All tools available" in prompt
+        assert "Do NOT write files" in prompt
 
     def test_preserves_completed_tasks_instruction(self):
         """Test that the prompt instructs to preserve completed tasks."""
@@ -147,7 +138,7 @@ class TestBuildPlanUpdatePrompt:
         )
 
         # Check all sections are present
-        assert "PLAN UPDATE MODE" in prompt
+        assert "Plan update mode" in prompt
         assert "Add authentication and rate limiting" in prompt
         assert "Build a secure REST API" in prompt
         assert "Set up project structure" in prompt
@@ -177,10 +168,8 @@ class TestPlanUpdatePromptFormat:
 
         prompt = build_plan_update_prompt(current_plan, change_request)
 
-        # Should mention complexity tags
-        assert "[coding]" in prompt or "[quick]" in prompt or "[general]" in prompt
-        # Should also mention [debugging-qa]
-        assert "[debugging-qa]" in prompt
+        # Should mention keeping complexity tags in rules
+        assert "complexity tags" in prompt.lower()
 
     def test_pr_structure_mentioned(self):
         """Test that PR structure is mentioned."""

@@ -989,11 +989,11 @@ class TestActionEmojiMapping:
     """Tests for action emoji mapping in post_comment_replies."""
 
     @pytest.mark.parametrize(
-        "action,expected_emoji",
+        "action,expected_prefix",
         [
-            ("fixed", "\\u2705"),  # checkmark
-            ("explained", "\\ud83d\\udcac"),  # speech bubble
-            ("skipped", "\\u23ed\\ufe0f"),  # skip forward
+            ("fixed", "Fixed:"),
+            ("explained", "Note:"),
+            ("skipped", "Skipped:"),
         ],
     )
     def test_action_emoji_mapping(
@@ -1001,9 +1001,9 @@ class TestActionEmojiMapping:
         pr_context_manager: PRContextManager,
         state_manager: StateManager,
         action: str,
-        expected_emoji: str,
+        expected_prefix: str,
     ) -> None:
-        """Test that different actions get correct emojis."""
+        """Test that different actions get correct prefixes."""
         pr_dir = state_manager.get_pr_dir(123)
         resolve_file = pr_dir / "resolve-comments.json"
         resolve_file.write_text(
@@ -1041,8 +1041,8 @@ class TestActionEmojiMapping:
             with patch("claude_task_master.core.pr_context.console"):
                 pr_context_manager.post_comment_replies(123)
 
-        # Verify the action was included in reply
-        assert action.capitalize() in (posted_body or "")
+        # Verify the action prefix was included in reply
+        assert expected_prefix in (posted_body or "")
 
 
 # =============================================================================

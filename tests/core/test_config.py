@@ -139,10 +139,10 @@ class TestToolsConfig:
     """Tests for ToolsConfig model."""
 
     def test_default_values(self) -> None:
-        """Test that ToolsConfig has correct default values."""
+        """Test that ToolsConfig defaults to all tools allowed (empty lists)."""
         config = ToolsConfig()
-        assert config.planning == ["Read", "Glob", "Grep", "Bash", "WebFetch", "WebSearch"]
-        assert config.verification == ["Read", "Glob", "Grep", "Bash"]
+        assert config.planning == []
+        assert config.verification == []
         assert config.working == []
 
     def test_custom_tools(self) -> None:
@@ -175,7 +175,7 @@ class TestClaudeTaskMasterConfig:
         assert config.api.anthropic_api_key is None
         assert config.models.sonnet == "claude-sonnet-4-6"
         assert config.git.target_branch == "main"
-        assert config.tools.planning == ["Read", "Glob", "Grep", "Bash", "WebFetch", "WebSearch"]
+        assert config.tools.planning == []
 
     def test_full_custom_config(self) -> None:
         """Test creating a fully custom configuration."""
@@ -327,14 +327,14 @@ class TestUtilityFunctions:
         """Test get_tools_for_phase returns correct tools for planning."""
         config = ClaudeTaskMasterConfig()
         tools = get_tools_for_phase(config, "planning")
-        assert tools == ["Read", "Glob", "Grep", "Bash", "WebFetch", "WebSearch"]
+        assert tools == []  # Empty means all tools allowed
         assert get_tools_for_phase(config, "PLANNING") == tools
 
     def test_get_tools_for_phase_verification(self) -> None:
         """Test get_tools_for_phase returns correct tools for verification."""
         config = ClaudeTaskMasterConfig()
         tools = get_tools_for_phase(config, "verification")
-        assert tools == ["Read", "Glob", "Grep", "Bash"]
+        assert tools == []  # Empty means all tools allowed
 
     def test_get_tools_for_phase_working(self) -> None:
         """Test get_tools_for_phase returns empty list for working."""

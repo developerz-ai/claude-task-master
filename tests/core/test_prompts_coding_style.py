@@ -21,14 +21,10 @@ class TestBuildCodingStylePrompt:
         assert "coding style" in prompt.lower() or "coding guide" in prompt.lower()
         assert "concise" in prompt.lower()
 
-    def test_contains_tool_restrictions(self) -> None:
-        """Prompt should specify tool restrictions."""
+    def test_contains_tool_guidance(self) -> None:
+        """Prompt should mention not writing files."""
         prompt = build_coding_style_prompt()
-        assert "Read" in prompt
-        assert "Glob" in prompt
-        assert "Grep" in prompt
-        assert "Write" in prompt  # Should be forbidden
-        assert "Edit" in prompt  # Should be forbidden
+        assert "Do NOT write files" in prompt
 
     def test_emphasizes_claude_md(self) -> None:
         """Prompt should emphasize reading CLAUDE.md first."""

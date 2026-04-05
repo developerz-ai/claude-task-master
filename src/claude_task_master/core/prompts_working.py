@@ -60,7 +60,16 @@ def build_work_prompt(
 
 ⚠️ **CRITICAL: For CI logs, ALWAYS use: ls → Grep → Read specific files. NEVER read all logs.**
 
-📋 **Full plan:** `.claude-task-master/plan.md` | **Progress:** `.claude-task-master/progress.md`"""
+📋 **Full plan:** `.claude-task-master/plan.md` | **Progress:** `.claude-task-master/progress.md`
+
+## Output Style
+
+terse. no filler, no pleasantries, no narration.
+DO NOT describe what you're about to do — just do it. no "let me read the file" or "I'll now check".
+use → for flow, | for alternatives. fragments ok.
+code/commits/PRs/JSON = proper english + valid syntax.
+status = compressed: "added auth middleware → tests pass → 2 files changed"
+completion report: 3-5 lines max. state what changed, not how you got there."""
     )
 
     # PR Group context - show what's already done in this PR
@@ -158,44 +167,32 @@ Grep pattern="exact error message" path="src/"
     if create_pr:
         completion_content = """**After completing THIS task, STOP.**
 
-**IMPORTANT: You MUST push and create a PR before reporting completion.**
+**You MUST push and create a PR before reporting completion.**
 
-Report (ALL required):
-1. What was completed
-2. Tests run and results
-3. Files modified
-4. Commit hash (REQUIRED)
-5. **PR URL (REQUIRED)** - Work is NOT complete without a PR!
-6. Any blockers
+Report (keep it short):
+- **Changes:** What was done (1-2 sentences)
+- **Tests:** Pass/fail summary
+- **Commit:** hash (REQUIRED)
+- **PR:** URL (REQUIRED)
+- **Blockers:** if any
 
-⚠️ **DO NOT say "TASK COMPLETE" until you have created a PR and have the URL.**
+⚠️ **DO NOT say "TASK COMPLETE" until you have the PR URL.**
 
-End your response with:
-```
-TASK COMPLETE
-```
-
-**The orchestrator will start a NEW session for the next task.**"""
+End with: `TASK COMPLETE`"""
     else:
         completion_content = """**After completing THIS task, STOP.**
 
-**IMPORTANT: Commit your work but DO NOT create a PR yet.**
+**Commit your work but DO NOT create a PR yet.**
 
-Report:
-1. What was completed
-2. Tests run and results
-3. Files modified
-4. Commit hash (REQUIRED - must have committed)
-5. Any blockers
+Report (keep it short):
+- **Changes:** What was done (1-2 sentences)
+- **Tests:** Pass/fail summary
+- **Commit:** hash (REQUIRED)
+- **Blockers:** if any
 
 ⚠️ **DO NOT push or create PR - more tasks remain in this PR group.**
 
-End your response with:
-```
-TASK COMPLETE
-```
-
-**The orchestrator will start a NEW session for the next task.**"""
+End with: `TASK COMPLETE`"""
 
     builder.add_section("On Completion - STOP", completion_content)
 
@@ -289,18 +286,19 @@ gh pr create --title "type: description" --body "..." --label "claudetm"
 ```
 If label doesn't exist, create it and retry.
 
-**PR title format:** `type: Brief description`
+**PR title:** `type: Brief description` (under 70 chars)
 
-⚠️ **CRITICAL: Your work is NOT complete until you have a PR URL!**
-⚠️ **You MUST include the PR URL in your completion report.**
+**PR body:** Keep it concise. 2-4 bullet points of what changed and why. No filler.
+```
+## Summary
+- Added X to handle Y
+- Fixed Z validation
+- Tests: 15 pass, 0 fail
+```
 
-**STOP AFTER PR CREATION - DO NOT:**
-- ❌ Wait for CI (`sleep`, `watch`, polling)
-- ❌ Check CI status (`gh pr checks`, `gh pr view`)
-- ❌ Monitor PR status
-- ❌ Merge the PR
+⚠️ **Your work is NOT complete until you have a PR URL!**
 
-**The orchestrator handles CI/reviews/merge automatically.**
+**STOP AFTER PR CREATION.** Do not wait for CI, check status, or merge. The orchestrator handles that.
 
 **9. Log File Best Practices**
 - For log/progress files, use APPEND mode (don't read entire file)

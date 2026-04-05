@@ -135,61 +135,21 @@ class TestToolConfig:
     """Tests for ToolConfig enum."""
 
     def test_planning_tools(self):
-        """Test PLANNING tool configuration - read-only tools for exploration."""
-        expected = [
-            "Read",
-            "Glob",
-            "Grep",
-            "Bash",
-        ]
-        assert ToolConfig.PLANNING.value == expected
+        """Test PLANNING tool configuration - all tools allowed (empty list)."""
+        assert ToolConfig.PLANNING.value == []
 
     def test_working_tools(self):
         """Test WORKING tool configuration - empty list allows ALL tools."""
-        # Empty list means all tools are allowed (no restrictions)
         assert ToolConfig.WORKING.value == []
-        assert isinstance(ToolConfig.WORKING.value, list)
-        assert len(ToolConfig.WORKING.value) == 0
 
     def test_verification_tools(self):
-        """Test VERIFICATION tool configuration - read tools + Bash for running tests."""
-        expected = [
-            "Read",
-            "Glob",
-            "Grep",
-            "Bash",
-        ]
-        assert ToolConfig.VERIFICATION.value == expected
+        """Test VERIFICATION tool configuration - all tools allowed (empty list)."""
+        assert ToolConfig.VERIFICATION.value == []
 
-    def test_planning_has_subset_of_working_tools(self):
-        """Test planning tools are restricted while working allows all tools."""
-        planning_tools = set(ToolConfig.PLANNING.value)
-        # Working phase uses empty list (all tools allowed)
-        # Planning has specific tools, so it's more restricted
-        assert len(planning_tools) > 0  # Planning has specific restrictions
-        assert len(ToolConfig.WORKING.value) == 0  # Working allows all
-
-    def test_verification_has_subset_of_working_tools(self):
-        """Test verification tools are restricted while working allows all tools."""
-        verification_tools = set(ToolConfig.VERIFICATION.value)
-        # Working phase uses empty list (all tools allowed)
-        # Verification has specific tools, so it's more restricted
-        assert len(verification_tools) > 0  # Verification has specific restrictions
-        assert len(ToolConfig.WORKING.value) == 0  # Working allows all
-        # Verification has Bash but no Write/Edit
-        assert "Bash" in verification_tools
-        assert "Write" not in verification_tools
-        assert "Edit" not in verification_tools
-
-    def test_planning_does_not_have_write_tools(self):
-        """Test planning phase doesn't have write tools."""
-        planning_tools = ToolConfig.PLANNING.value
-        assert "Write" not in planning_tools
-        assert "Edit" not in planning_tools
-
-    def test_working_allows_all_tools(self):
-        """Test working phase allows all tools (empty list)."""
-        # Empty list means ALL tools are allowed, including Write and Edit
+    def test_all_phases_allow_all_tools_by_default(self):
+        """Test all phases default to all tools allowed (empty list)."""
+        assert ToolConfig.PLANNING.value == []
+        assert ToolConfig.VERIFICATION.value == []
         assert ToolConfig.WORKING.value == []
 
 
@@ -430,7 +390,7 @@ class TestBackwardCompatibility:
 
         assert ModelType.SONNET.value == "sonnet"
         assert TaskComplexity.CODING.value == "coding"
-        assert "Read" in ToolConfig.PLANNING.value
+        assert ToolConfig.PLANNING.value == []  # All tools allowed
 
     def test_import_from_core_init(self):
         """Test imports from core.__init__ work."""
@@ -447,7 +407,7 @@ class TestBackwardCompatibility:
         assert ModelType.SONNET.value == "sonnet"
         assert ModelType.SONNET_1M.value == "sonnet_1m"
         assert TaskComplexity.CODING.value == "coding"
-        assert "Read" in ToolConfig.PLANNING.value
+        assert ToolConfig.PLANNING.value == []  # All tools allowed
         assert MODEL_CONTEXT_WINDOWS[ModelType.SONNET] == 1_000_000
         assert MODEL_CONTEXT_WINDOWS_STANDARD[ModelType.SONNET] == 200_000
         assert DEFAULT_COMPACT_THRESHOLD_PERCENT == 0.85

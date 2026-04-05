@@ -558,59 +558,11 @@ class TestPhaseToolRestrictions:
                 working_dir=str(temp_dir),
             )
 
-    def test_planning_phase_no_write_tools(self, agent):
-        """Verify planning phase cannot use Write or Edit."""
-        tools = agent.get_tools_for_phase("planning")
-        write_tools = {"Write", "Edit"}
-        used_write_tools = set(tools) & write_tools
-        assert len(used_write_tools) == 0, f"Planning phase has write tools: {used_write_tools}"
-
-    def test_verification_phase_can_run_commands(self, agent):
-        """Verify verification phase can run Bash commands (for tests)."""
-        tools = agent.get_tools_for_phase("verification")
-        assert "Bash" in tools
-
-    def test_verification_phase_cannot_modify(self, agent):
-        """Verify verification phase cannot modify files."""
-        tools = agent.get_tools_for_phase("verification")
-        modify_tools = {"Write", "Edit"}
-        used_modify_tools = set(tools) & modify_tools
-        assert len(used_modify_tools) == 0
-
-    def test_working_phase_has_all_tools(self, agent):
-        """Verify working phase allows all tools (empty list)."""
-        working_tools = agent.get_tools_for_phase("working")
-        planning_tools = agent.get_tools_for_phase("planning")
-        verification_tools = agent.get_tools_for_phase("verification")
-
-        # Working phase uses empty list = all tools allowed
-        assert working_tools == []
-        # Other phases have specific restrictions
-        assert len(planning_tools) > 0
-        assert len(verification_tools) > 0
-
-    def test_working_phase_exclusive_tools(self, agent):
-        """Verify planning/verification don't have write tools while working allows all."""
-        working_tools = agent.get_tools_for_phase("working")
-        planning_tools = set(agent.get_tools_for_phase("planning"))
-        verification_tools = set(agent.get_tools_for_phase("verification"))
-
-        # Working phase uses empty list = all tools allowed
-        assert working_tools == []
-
-        # These tools should NOT be in planning or verification phases
-        # Note: WebFetch and WebSearch ARE allowed in planning phase for research
-        exclusive_write_tools = {"Write", "Edit", "Task", "TodoWrite", "Skill"}
-
-        for tool in exclusive_write_tools:
-            assert tool not in planning_tools
-            assert tool not in verification_tools
-
-        # WebFetch and WebSearch should be in planning but not verification
-        assert "WebFetch" in planning_tools
-        assert "WebSearch" in planning_tools
-        assert "WebFetch" not in verification_tools
-        assert "WebSearch" not in verification_tools
+    def test_all_phases_allow_all_tools(self, agent):
+        """Verify all phases default to all tools allowed (empty list)."""
+        assert agent.get_tools_for_phase("planning") == []
+        assert agent.get_tools_for_phase("verification") == []
+        assert agent.get_tools_for_phase("working") == []
 
     def test_case_insensitive_phase_matching(self, agent):
         """Test phase matching is case-insensitive for user convenience.
@@ -623,7 +575,5 @@ class TestPhaseToolRestrictions:
         tools_upper = agent.get_tools_for_phase("PLANNING")
         tools_mixed = agent.get_tools_for_phase("Planning")
 
-        # All should return the same planning tools
-        assert tools_upper == tools_lower
-        assert tools_mixed == tools_lower
-        assert "Read" in tools_lower  # Verify planning tools are returned
+        # All should return the same result (empty = all tools)
+        assert tools_upper == tools_lower == tools_mixed == []

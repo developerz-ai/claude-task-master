@@ -26,9 +26,7 @@ def build_verification_prompt(
         Complete verification prompt.
     """
     builder = PromptBuilder(
-        intro="""You are Claude Task Master verifying that all work is complete.
-
-Verify that all success criteria have been met."""
+        intro="""Verify all success criteria are met. Be concise — report results, not process."""
     )
 
     if tasks_summary:
@@ -37,21 +35,17 @@ Verify that all success criteria have been met."""
     builder.add_section("Success Criteria", criteria)
 
     builder.add_section(
-        "Verification Steps",
-        """1. **Run tests** - Execute the project's test suite
-2. **Check lint/types** - Run all static analysis
-3. **Verify PRs** - Check CI status and merge state
-4. **Functional check** - Verify specific requirements work
+        "Verification",
+        """Run tests, lint, type checks. Check PRs merged and CI green.
 
-**Report format:**
-- ✓ Criterion: PASSED (evidence)
-- ✗ Criterion: FAILED (reason)
+Report format:
+- ✓ Criterion: evidence
+- ✗ Criterion: reason
 
-**CRITICAL**: Your response MUST start with one of these two lines:
-- `VERIFICATION_RESULT: PASS` - if ALL criteria are met
-- `VERIFICATION_RESULT: FAIL` - if ANY criterion is not met
+**First line of response MUST be:**
+`VERIFICATION_RESULT: PASS` or `VERIFICATION_RESULT: FAIL`
 
-Be strict - only say PASS if ALL criteria are truly met.""",
+Only PASS if ALL criteria met.""",
     )
 
     return builder.build()
@@ -70,7 +64,7 @@ def build_task_completion_check_prompt(
     Returns:
         Prompt for completion checking.
     """
-    return f"""Determine if this task was completed successfully.
+    return f"""Was this task completed?
 
 ## Task
 {task_description}
@@ -78,14 +72,8 @@ def build_task_completion_check_prompt(
 ## Session Output
 {session_output}
 
-## Determination
-Answer with EXACTLY one of:
-- "COMPLETED" - Task is fully done, no more work needed
-- "IN_PROGRESS" - Partial progress, more work needed
-- "BLOCKED" - Cannot proceed, needs intervention
-- "FAILED" - Encountered error that stops work
-
-Then briefly explain why (1-2 sentences)."""
+Answer EXACTLY one of: COMPLETED, IN_PROGRESS, BLOCKED, FAILED
+Then one sentence why."""
 
 
 def build_context_extraction_prompt(
@@ -102,7 +90,7 @@ def build_context_extraction_prompt(
         Prompt for context extraction.
     """
     builder = PromptBuilder(
-        intro="""Extract key learnings from this session to help future work."""
+        intro="""Extract key learnings from this session. Be terse — bullet points only, under 300 words."""
     )
 
     if existing_context:
@@ -112,13 +100,13 @@ def build_context_extraction_prompt(
 
     builder.add_section(
         "Extract",
-        """Identify and summarize:
-1. **Patterns** - Coding conventions, architecture patterns
-2. **Decisions** - Why certain approaches were chosen
-3. **Issues** - Problems encountered and solutions
-4. **Feedback** - Review comments and how addressed
+        """Bullet points only:
+- **Patterns** found (conventions, architecture)
+- **Decisions** made and why
+- **Issues** hit and solutions
+- **Feedback** received and response
 
-Keep it concise (under 500 words). Focus on what helps future tasks.""",
+Only include what helps future tasks. Skip obvious things.""",
     )
 
     return builder.build()
@@ -140,9 +128,8 @@ def build_error_recovery_prompt(
         Prompt for error recovery.
     """
     builder = PromptBuilder(
-        intro=f"""An error occurred that needs to be resolved.
+        intro=f"""Error occurred. Fix it and resume.
 
-## Error
 ```
 {error_message}
 ```"""
@@ -156,14 +143,13 @@ def build_error_recovery_prompt(
         builder.add_section("Already Tried", actions)
 
     builder.add_section(
-        "Recovery Steps",
-        """1. Analyze the error - understand root cause
-2. Identify fix - what change will resolve it
-3. Implement fix - make minimal changes
-4. Verify - run tests/commands to confirm
-5. Resume - continue with original task
+        "Steps",
+        """1. Root cause the error
+2. Minimal fix
+3. Verify (run tests)
+4. Resume original task
 
-**If unrecoverable**: Explain why and what intervention is needed.""",
+If unrecoverable: explain what intervention is needed.""",
     )
 
     return builder.build()

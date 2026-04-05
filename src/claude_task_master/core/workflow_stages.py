@@ -711,27 +711,15 @@ After verifying, end with: TASK COMPLETE"""
 
         task_description = f"""PR #{state.current_pr} has review comments to address.
 
-**Read the review comments from:** `{comments_path}`
+**Read comments from:** `{comments_path}` (Glob *.txt, then Read each)
 
-Use Glob to find all .txt files, then Read each one to understand the feedback.
+For each comment: fix it or explain why not. Then:
+1. Run tests
+2. Commit with descriptive message
+3. Rebase onto {target_branch}: `git fetch origin {target_branch} && git rebase origin/{target_branch}`
+4. Push: `git push --force-with-lease`
+5. Create resolution file at `{resolve_json_path}`:
 
-Please:
-1. Read ALL comment files in the comments/ directory
-2. For each comment:
-   - Make the requested change, OR
-   - Explain why it's not needed
-3. Run tests to verify
-4. Commit fixes with a descriptive message
-5. **Rebase onto {target_branch} before pushing** (CRITICAL - prevents merge conflicts!):
-   ```bash
-   git fetch origin {target_branch}
-   git rebase origin/{target_branch}
-   ```
-   If conflicts occur: resolve them, `git add`, `git rebase --continue`, run tests again.
-6. Push the fixes: `git push --force-with-lease`
-7. Create a resolution summary file at: `{resolve_json_path}`
-
-**Resolution file format:**
 ```json
 {{
   "pr": {state.current_pr},
@@ -739,19 +727,17 @@ Please:
     {{
       "thread_id": "THREAD_ID_FROM_COMMENT_FILE",
       "action": "fixed|explained|skipped",
-      "message": "Brief explanation of what was done"
+      "message": "Brief explanation (1 sentence)"
     }}
   ]
 }}
 ```
 
-Copy the Thread ID from each comment file into the resolution JSON.
+**Keep resolution messages short and direct.** "Fixed: capped exponent with coerceAtMost(5)" not "I've addressed this by implementing a fix that caps the exponent value using coerceAtMost(5) to prevent overflow."
 
-**IMPORTANT: DO NOT resolve threads directly using GitHub GraphQL mutations.**
-The orchestrator will handle thread resolution automatically after you create the resolution file.
-Your job is to: fix the code, run tests, commit, push, and create the resolution JSON file.
+Copy Thread ID from each comment file. Do NOT resolve threads via GraphQL — orchestrator handles that.
 
-After addressing ALL comments and creating the resolution file, end with: TASK COMPLETE"""
+End with: TASK COMPLETE"""
 
         try:
             context = self.state_manager.load_context()

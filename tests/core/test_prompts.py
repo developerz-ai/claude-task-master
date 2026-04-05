@@ -123,7 +123,6 @@ class TestBuildPlanningPrompt:
         assert "Step 2: Create Task List" in prompt
         assert "Success Criteria" in prompt
         assert "PLANNING MODE" in prompt  # Critical planning-only instruction
-        assert "TOOL RESTRICTIONS" in prompt  # Tool restrictions section
         assert "STOP" in prompt  # Stop instruction
 
     def test_with_context(self) -> None:
@@ -157,9 +156,9 @@ class TestBuildPlanningPrompt:
         """Test STOP instruction is included."""
         prompt = build_planning_prompt("Any goal")
 
-        assert "STOP - Planning Complete" in prompt
+        assert "## STOP" in prompt
         assert "PLANNING COMPLETE" in prompt
-        assert "Start implementing tasks" in prompt  # In "Do NOT:" list
+        assert "start implementing" in prompt  # In stop section
 
 
 # =============================================================================
@@ -231,7 +230,7 @@ class TestBuildWorkPrompt:
         prompt = build_work_prompt("Any task")
 
         assert "On Completion" in prompt
-        assert "What was completed" in prompt
+        assert "Changes:" in prompt  # Report format includes Changes field
 
     def test_includes_git_commands(self) -> None:
         """Test that git commands are included."""
@@ -274,15 +273,15 @@ class TestBuildVerificationPrompt:
         """Test verification steps are included."""
         prompt = build_verification_prompt("Any criteria")
 
-        assert "Verification Steps" in prompt
+        assert "Verification" in prompt
         assert "Run tests" in prompt
 
     def test_includes_report_format(self) -> None:
         """Test report format guidance is included."""
         prompt = build_verification_prompt("Any criteria")
 
-        assert "PASSED" in prompt
-        assert "FAILED" in prompt
+        assert "VERIFICATION_RESULT: PASS" in prompt
+        assert "VERIFICATION_RESULT: FAIL" in prompt
 
 
 # =============================================================================
@@ -379,7 +378,7 @@ class TestBuildErrorRecoveryPrompt:
 
         assert "ModuleNotFoundError: flask" in prompt
         assert "Error" in prompt
-        assert "Recovery Steps" in prompt
+        assert "## Steps" in prompt
 
     def test_with_task_context(self) -> None:
         """Test error recovery with task context."""
@@ -411,6 +410,6 @@ class TestBuildErrorRecoveryPrompt:
         """Test recovery steps are included."""
         prompt = build_error_recovery_prompt("Error")
 
-        assert "Analyze the error" in prompt
-        assert "Implement fix" in prompt
+        assert "Root cause" in prompt
+        assert "Minimal fix" in prompt
         assert "Verify" in prompt

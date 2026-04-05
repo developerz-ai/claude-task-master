@@ -31,41 +31,11 @@ def build_planning_prompt(
 
 Your mission: **{goal}**
 
-🎯 **Create a HIGH QUALITY MASTER PLAN with BIG PICTURE thinking.**
+Create master plan. big picture: architecture → dependencies → testing → integration.
 
-Think strategically about the entire goal. Consider architecture, dependencies,
-testing strategy, and how all pieces fit together. Plan for success.
+All tools available. explore only — no code, no branches. OUTPUT plan as text (orchestrator saves it).
 
-## TOOL RESTRICTIONS (MANDATORY)
-
-**ALLOWED TOOLS (use ONLY these):**
-- `Read` - Read files to understand the codebase
-- `Glob` - Find files by pattern
-- `Grep` - Search for code patterns
-- `Bash` - Run commands (git status, tests, lint checks, etc.)
-- `WebSearch` - Search the web for current information (use FIRST to find URLs)
-- `WebFetch` - Fetch full content from URLs (only URLs from search results or user-provided)
-
-**Web Research Workflow:** Use `WebSearch` first to find relevant documentation/articles,
-then use `WebFetch` to retrieve full content from specific URLs in the search results.
-WebFetch can also retrieve PDFs for technical documentation.
-
-**FORBIDDEN TOOLS (NEVER use during planning):**
-- ❌ `Write` - Do NOT write any files
-- ❌ `Edit` - Do NOT edit any files
-- ❌ `Task` - Do NOT launch any agents
-- ❌ `TodoWrite` - Do NOT use todo tracking
-
-**WHY**: The orchestrator will save your plan to `plan.md` automatically.
-You just need to OUTPUT the plan as TEXT in your response.
-
-## PLANNING RULES
-
-- Do NOT write code or create files
-- Do NOT create git branches
-- Do NOT make changes - only explore
-- Use Bash to check current state (git status, run tests, lint)
-- ONLY explore and OUTPUT your plan as text"""
+terse output. task descriptions = 1 line. sublists = file:line → what to change. no prose in tasks."""
     )
 
     # Context section if available
@@ -88,220 +58,66 @@ knows exactly where to write tests and what style to follow.
 
     # Exploration phase - READ ONLY
     builder.add_section(
-        "Step 1: Explore Codebase (READ ONLY)",
-        """Thoroughly analyze the codebase using READ-ONLY operations:
+        "Step 1: Explore Codebase",
+        """Read `CLAUDE.md` first (coding requirements). Also check `.claude/instructions.md`, `CONTRIBUTING.md`, `.cursorrules`.
 
-**CRITICAL: Read Project Conventions FIRST**
-1. **Read `CLAUDE.md`** (if exists) - Contains coding requirements, project instructions,
-   and conventions that MUST be followed. This file defines how code should be written.
-2. Also check: `.claude/instructions.md`, `CONTRIBUTING.md`, `.cursorrules`, `.github/copilot-instructions.md`
-
-**Then explore the codebase:**
-3. **Read** key files (README, configs, main modules)
-4. **Glob** to find patterns (`**/*.py`, `src/**/*.ts`)
-5. **Grep** for specific code (class definitions, imports)
-6. **Identify** tests, CI config, and existing code patterns
-
-**Remember:** Any coding requirements found in `CLAUDE.md` or similar convention files
-MUST be respected when creating tasks. Include relevant requirements in task descriptions
-so the working phase follows project standards.
-
-Understand the architecture AND coding standards before creating tasks.""",
+Then: Read key files, Glob for patterns, Grep for code, identify tests and CI config.
+Include any coding requirements in task descriptions so workers follow project standards.""",
     )
 
     # Task creation phase - organized by PR
     builder.add_section(
         "Step 2: Create Task List (Organized by PR)",
-        """**CRITICAL: Organize tasks into PRs (Pull Requests).**
+        """Organize tasks into PRs. Tasks in same PR share a conversation (better context).
 
-Each PR groups related tasks that share context. Tasks in the same PR will be
-executed in a continuous conversation, so Claude remembers previous work.
-
-**Format (use ### PR N: Title):**
-
+**Format:**
 ```markdown
-### PR 1: Schema & Model Fixes (Prerequisites)
+### PR 1: Schema & Model Fixes
 
 - [ ] `[coding]` Make `user_id` nullable in Shift model
-  - `rails/db/migrate/` — add new migration file
-  - `rails/app/models/shift.rb:15` — `Shift` class, `belongs_to :user`
-  - `rails/spec/models/shift_spec.rb` — update validation specs
-
-- [ ] `[coding]` Fix `EmployeeDashboardService`
-  - `rails/app/services/dashboards/employee_dashboard_service.rb` — `#shifts_for_week` method
-  - `rails/spec/services/dashboards/` — update service specs
-
-- [ ] `[quick]` Update factory to add `:unassigned` trait
-  - `rails/spec/factories/shifts.rb` — add `trait :unassigned`
+  - `rails/db/migrate/` — new migration
+  - `rails/app/models/shift.rb:15` — update `belongs_to :user`
+  - `rails/spec/models/shift_spec.rb` — update specs
 ```
 
-**IMPORTANT: Add context sublists under each task:**
-Under each task, add an indented sublist referencing relevant files, symbols, and line numbers.
-These are context hints for the worker — NOT subtasks. Include short implementation hints
-(approach, pattern to follow, gotchas) to reduce worker exploration time.
+**Under each task:** add file paths, line numbers, and implementation hints (not subtasks).
 
-Format:
-- [ ] `[coding]` Task description
-  - `path/to/file.py:42` — `ClassName.method_name()`, brief note on what to change
-  - `path/to/other.py` — `CONSTANT_NAME`, follow existing pattern in `similar_file.py`
-  - `tests/test_file.py` — add/update test for X, mirror `TestExisting` style
+**Complexity tags (model routing):**
+- `[coding]` → Opus — new features, complex logic (default when uncertain)
+- `[quick]` → Haiku — configs, small fixes
+- `[general]` → Sonnet — tests, docs, refactoring
+- `[debugging-qa]` → Sonnet 1M — debug + fix + write automated tests
 
-**Complexity tags (for model routing):**
-- `[coding]` → Opus (smartest) - new features, complex logic
-- `[quick]` → Haiku (fastest) - configs, small fixes
-- `[general]` → Sonnet (balanced) - tests, docs, refactoring
-- `[debugging-qa]` → Sonnet 1M (deep context) - **Debug AND fix issues** (CI failures, bug investigation, E2E testing)
+**`[debugging-qa]` workflow:** Manual test → Fix bugs → Write integration tests → Verify.
+Include: what to test, files to read, where to add tests (exact paths + run commands).
 
-**When uncertain, use `[coding]`.**
-
-**`[debugging-qa]` tasks are for debugging AND fixing with automated tests:**
-These tasks should investigate issues using the 1M context window, fix problems found,
-and **write automated integration/E2E tests** to prevent regressions.
-
-⚠️ **DO BOTH: Manual exploration + Automated tests**
-- **Manual testing first**: Use Playwright/curl/browser to explore, find visual bugs, test edge cases
-- **Then automate it**: Convert successful manual tests into automated test code
-- This gives you **immediate feedback** (manual) + **long-term protection** (automated)
-
-**Every `[debugging-qa]` task should follow this workflow:**
-1. **Manually test to identify problems** (Playwright interactive, curl, browser DevTools, check logs)
-   - Find bugs, edge cases, visual issues, UX problems
-2. **Fix bugs found** (null checks, validation, error handling, visual issues, edge cases)
-3. **Write integration tests for the fixes** (Playwright test files, API integration tests, E2E flows)
-   - Convert your manual tests into automated code
-4. **Verify everything** (run new tests, manual spot-check, check CI passes)
-5. Commit + PR with fixes AND tests
-
-**Why this order?** Manual exploration identifies issues → Fixes solve them → Tests prevent regressions.
-
-**Context sublists for `[debugging-qa]` should include:**
-- What to test (API endpoints, UI flows, edge cases)
-- What to read (source files, log files, error traces, CI output)
-- **Where to add tests** (use test patterns from coding-style.md above!)
-  - Exact test file path: `admin/e2e/auth/login.spec.ts`
-  - Example test to follow: `admin/e2e/auth/signup.spec.ts`
-  - Run command: `pnpm --filter admin test:e2e`
-- Expected fixes (specific bugs to fix, validation to add)
-- What to verify (run test suite, check CI, manual spot-check)
-
-Example `[debugging-qa]` task:
-```
-- [ ] `[debugging-qa]` Debug admin login flow, fix issues, and add E2E tests
-  - **1. Manual test to find issues**: Use Playwright MCP → http://localhost:3002/login
-    - Fill admin@example.com/adminpass, verify redirect to 2FA page
-    - Test edge cases: empty fields, wrong password, network errors
-    - Check browser console for errors, screenshot visual issues
-    - Identify problems: missing validation, broken redirects, poor error messages
-  - **2. Read source and fix bugs**: `admin/src/pages/LoginPage.tsx`, `AdminAuthContext.tsx`
-    - Add null checks, fix redirects, improve error messages, fix CSS issues
-  - **3. Write integration tests for fixes**: `admin/e2e/auth/login.spec.ts`
-    - Test successful login + 2FA flow
-    - Test error cases (wrong password, empty fields)
-    - Follow pattern in existing E2E tests
-  - **4. Verify**: Run `pnpm --filter admin test:e2e`, manual spot-check
-```
-
-**Workflow: Explore manually → Fix → Automate → Verify. Manual finds issues, tests prevent regressions.**
-
-**PR grouping principles:**
-- **Dependencies first**: Schema changes before service changes
-- **Logical cohesion**: Related changes in same PR
-- **Small PRs**: 3-6 tasks per PR (easier to review)
-- **Include branch creation**: First task of first PR creates the branch""",
+**PR grouping:** Dependencies first, related changes together, 3-6 tasks per PR.""",
     )
 
-    # PR strategy
+    # PR strategy - minimal, main points only
     builder.add_section(
         "PR Strategy",
-        """**Why PRs matter:**
-- Tasks in same PR share a conversation (faster, better context)
-- Each PR gets its own branch and CI check
-- Small, focused PRs are easier to review and merge
-
-**Example PR breakdown for a feature:**
-
-```markdown
-### PR 1: Database Layer (create feature branch here)
-
-- [ ] `[quick]` Create feature branch: claudetm/feat/your-feature-name
-- [ ] `[coding]` Add migration for new table
-  - `db/migrate/` — create new migration file
-  - `app/models/` — add model class
-- [ ] `[coding]` Create model with validations
-  - `app/models/user.rb` — `User` class, add `validates :email`
-  - `spec/models/user_spec.rb` — add validation specs
-
-### PR 2: Business Logic
-
-- [ ] `[coding]` Implement service class
-  - `app/services/user_service.rb` — new `UserService` class
-  - `spec/services/user_service_spec.rb` — add unit tests
-- [ ] `[general]` Add service tests
-  - `spec/services/` — integration tests
-```
-
-**Each PR should be mergeable independently when possible.**""",
+        """Each PR gets its own branch and CI check. Keep PRs small, focused, independently mergeable.""",
     )
 
     # PR limit constraint (if specified)
     if max_prs:
         builder.add_section(
-            "⚠️ PR LIMIT CONSTRAINT (MANDATORY)",
-            f"""**CRITICAL: You MUST create EXACTLY {max_prs} pull request(s) or fewer. This is MANDATORY.**
-
-🚫 **YOU ARE NOT ALLOWED TO EXCEED {max_prs} PR(s). NO EXCEPTIONS.**
-
-Everything MUST fit within {max_prs} PR(s). Plan accordingly:
-
-{"**For 1 PR: Put EVERYTHING in a single pull request.**" if max_prs == 1 else f"**For {max_prs} PRs: Intelligently group all work into {max_prs} or fewer pull requests.**"}
-
-- Combine ALL related changes together
-- Group tests, docs, and code in the same PR
-- Keep dependencies together (schema + model + service in one PR)
-- Prioritize essential work if needed
-
-**DO NOT CREATE MORE THAN {max_prs} PR(s) under any circumstances.**
-
-Any plan that exceeds {max_prs} PR(s) is INVALID and will be REJECTED.""",
+            "PR Limit",
+            f"""**Maximum {max_prs} PR(s). No exceptions.** Group everything to fit. Any plan exceeding this is invalid.""",
         )
 
     # Success criteria
     builder.add_section(
         "Step 3: Define Success Criteria",
-        """Define 3-5 measurable criteria:
-
-1. Tests pass (`pytest`, `npm test`)
-2. Linting clean (`ruff`, `eslint`, `mypy`)
-3. CI pipeline green
-4. PRs merged
-5. Specific functional requirement
-
-**Be specific and verifiable.**""",
+        """Define 3-5 measurable criteria (tests pass, lint clean, CI green, PRs merged, specific requirements).""",
     )
 
-    # STOP instruction - critical
+    # STOP instruction
     builder.add_section(
-        "STOP - Planning Complete",
-        """**After creating the task list and success criteria, STOP.**
-
-**IMPORTANT: Do NOT use Write tool. Just OUTPUT your plan as text.**
-
-The orchestrator will automatically:
-1. Extract your plan from your response
-2. Save it to `plan.md`
-3. Save criteria to `criteria.txt`
-4. Start a NEW session for each task
-
-**Do NOT:**
-- Write any files (orchestrator handles this)
-- Start implementing tasks
-- Run any bash commands
-- Launch any Task agents
-
-**Just OUTPUT your plan as text and end with:**
-```
-PLANNING COMPLETE
-```""",
+        "STOP",
+        """After task list and criteria, STOP. Do NOT write files or start implementing.
+OUTPUT your plan as text. End with: `PLANNING COMPLETE`""",
     )
 
     return builder.build()
