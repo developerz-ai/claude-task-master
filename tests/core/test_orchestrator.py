@@ -954,6 +954,7 @@ class TestRunMethod:
         assert result == 2
         mock_console.warning.assert_called()
 
+    @patch("subprocess.run")
     @patch("claude_task_master.core.orchestrator.is_cancellation_requested")
     @patch("claude_task_master.core.orchestrator.start_listening")
     @patch("claude_task_master.core.orchestrator.stop_listening")
@@ -970,6 +971,7 @@ class TestRunMethod:
         mock_stop,
         mock_start,
         mock_is_cancelled,
+        mock_subprocess,
         basic_orchestrator,
         state_manager,
         sample_task_options,
@@ -997,6 +999,7 @@ class TestRunMethod:
         mock_console.success.assert_called()
 
     @pytest.mark.timeout(5)  # This test runs the full orchestration loop, needs more time
+    @patch("subprocess.run")
     @patch("claude_task_master.core.orchestrator.is_cancellation_requested")
     @patch("claude_task_master.core.orchestrator.start_listening")
     @patch("claude_task_master.core.orchestrator.stop_listening")
@@ -1013,6 +1016,7 @@ class TestRunMethod:
         mock_stop,
         mock_start,
         mock_is_cancelled,
+        mock_subprocess,
         basic_orchestrator,
         state_manager,
         sample_task_options,
@@ -1173,6 +1177,7 @@ class TestRunMethod:
                 mock_recovery.return_value = recovered_state
 
                 with (
+                    patch("subprocess.run"),
                     patch("claude_task_master.core.orchestrator.start_listening"),
                     patch("claude_task_master.core.orchestrator.stop_listening"),
                     patch("claude_task_master.core.orchestrator.register_handlers"),

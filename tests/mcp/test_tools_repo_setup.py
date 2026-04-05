@@ -200,33 +200,38 @@ class TestCloneRepoTool:
 
     def test_clone_repo_valid_https_url_format(self, temp_dir):
         """Test clone_repo accepts valid HTTPS URL format."""
+        from unittest.mock import MagicMock, patch
+
         from claude_task_master.mcp.tools import clone_repo
 
-        # Use a nonexistent repo to test URL validation passes
-        # but clone will fail for other reasons
         target = temp_dir / "test-repo"
-        result = clone_repo(
-            "https://github.com/nonexistent-user-12345/nonexistent-repo-12345.git",
-            target_dir=str(target),
-        )
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stderr="repo not found")
+            result = clone_repo(
+                "https://github.com/nonexistent-user-12345/nonexistent-repo-12345.git",
+                target_dir=str(target),
+            )
 
         # URL format is valid, but clone should fail (repo doesn't exist)
         assert (
             result["repo_url"]
             == "https://github.com/nonexistent-user-12345/nonexistent-repo-12345.git"
         )
-        # Either success=False due to clone failure or success=True if somehow worked
-        assert "success" in result
+        assert result["success"] is False
 
     def test_clone_repo_valid_ssh_url_format(self, temp_dir):
         """Test clone_repo accepts valid SSH URL format."""
+        from unittest.mock import MagicMock, patch
+
         from claude_task_master.mcp.tools import clone_repo
 
         target = temp_dir / "test-repo"
-        result = clone_repo(
-            "git@github.com:nonexistent-user-12345/nonexistent-repo-12345.git",
-            target_dir=str(target),
-        )
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stderr="repo not found")
+            result = clone_repo(
+                "git@github.com:nonexistent-user-12345/nonexistent-repo-12345.git",
+                target_dir=str(target),
+            )
 
         # URL format is valid
         assert (
@@ -576,15 +581,18 @@ class TestRepoSetupIntegration:
 
     def test_clone_repo_default_target_directory(self):
         """Test clone_repo uses default workspace directory."""
+        from unittest.mock import MagicMock, patch
+
         from claude_task_master.mcp.tools import DEFAULT_WORKSPACE_BASE, clone_repo
 
-        # Test that default path includes workspace base
-        result = clone_repo("https://github.com/user/test-repo.git")
+        expected_target = DEFAULT_WORKSPACE_BASE / "test-default-repo"
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stderr="repo not found")
+            result = clone_repo("https://github.com/user/test-default-repo.git")
 
         # Should fail (repo doesn't exist), but check target_dir structure
-        expected_target = str(DEFAULT_WORKSPACE_BASE / "test-repo")
         if "target_dir" in result:
-            assert result["target_dir"] == expected_target
+            assert result["target_dir"] == str(expected_target)
 
     def test_setup_repo_with_multiple_project_types(self, temp_dir):
         """Test setup_repo handles projects with both Python and Node.js."""
