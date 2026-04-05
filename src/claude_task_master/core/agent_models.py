@@ -119,7 +119,7 @@ MODEL_FALLBACK_MAP = {
     ModelType.OPUS: ModelType.SONNET,  # Opus → Sonnet
     ModelType.SONNET: ModelType.HAIKU,  # Sonnet → Haiku
     ModelType.HAIKU: ModelType.SONNET,  # Haiku → Sonnet
-    ModelType.SONNET_1M: ModelType.SONNET,  # Sonnet 1M → Sonnet
+    ModelType.SONNET_1M: ModelType.HAIKU,  # Sonnet 1M → Haiku (not Sonnet — same model ID)
 }
 
 

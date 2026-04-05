@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.30] - 2026-04-05
+
+### Fixed
+- **Sonnet 1M fallback model**: Changed fallback from Sonnet (same model ID) to Haiku to avoid "Fallback model cannot be the same as main model" SDK error
+- **Upgrade claude-agent-sdk**: 0.1.50 → 0.1.56
+
+### Changed
+- **Compressed communication style**: All prompts use terse output style — no narration, fragments OK, use → for flow. ~75% fewer output tokens per session
+- **All tools unlocked**: Planning and verification phases now allow all tools (empty list = unrestricted)
+- **Concise PR descriptions**: Bullet-point format, no filler
+- **Plain text comment replies**: Replaced emoji prefixes with "Fixed:", "Note:", "Skipped:"
+
 ## [0.1.29] - 2026-04-05
 
 ### Fixed
@@ -545,6 +557,7 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 - N/A
 
 [Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.28...HEAD
+[0.1.30]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.29...v0.1.30
 [0.1.29]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.28...v0.1.29
 [0.1.28]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.27...v0.1.28
 [0.1.27]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.26...v0.1.27
