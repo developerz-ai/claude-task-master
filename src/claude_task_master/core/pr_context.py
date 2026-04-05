@@ -346,6 +346,9 @@ class PRContextManager:
             # Get current thread resolution status from GitHub
             already_resolved = self._get_resolved_thread_ids(pr_number)
 
+            # Get threads we've already replied to (prevents duplicate replies on crash/retry)
+            already_addressed = self.state_manager.get_addressed_threads(pr_number)
+
             console.info(f"Posting replies to {len(resolutions)} comments...")
 
             # Track successfully addressed thread IDs
@@ -357,6 +360,11 @@ class PRContextManager:
                 message = resolution.get("message", "Addressed")
 
                 if not thread_id:
+                    continue
+
+                # Skip threads we've already replied to
+                if thread_id in already_addressed:
+                    console.detail(f"  Thread {thread_id[:20]}... already replied, skipping")
                     continue
 
                 already_resolved_on_github = thread_id in already_resolved
