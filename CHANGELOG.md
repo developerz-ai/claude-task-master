@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.29] - 2026-04-05
+
+### Fixed
+- **Post reply comments even when threads are already resolved**: Previously, if a review thread was already resolved (e.g., by CodeRabbit), `post_comment_replies()` would skip posting the reply entirely. Now replies are always posted so the response is visible, and only the resolve step is skipped for already-resolved threads.
+
 ## [0.1.28] - 2026-03-26
 
 ### Added
@@ -540,6 +545,7 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 - N/A
 
 [Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.28...HEAD
+[0.1.29]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.28...v0.1.29
 [0.1.28]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.27...v0.1.28
 [0.1.27]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.26...v0.1.27
 [0.1.26]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.25...v0.1.26

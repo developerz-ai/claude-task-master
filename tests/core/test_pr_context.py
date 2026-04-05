@@ -569,12 +569,12 @@ class TestPostCommentReplies:
         # Verify GraphQL mutation was called (to post reply)
         assert mock_run.call_count >= 2
 
-    def test_skips_already_resolved_threads(
+    def test_posts_reply_but_skips_resolve_for_already_resolved_threads(
         self,
         pr_context_manager: PRContextManager,
         state_manager: StateManager,
     ) -> None:
-        """Test that already resolved threads are skipped."""
+        """Test that already resolved threads still get a reply but skip resolve."""
         pr_dir = state_manager.get_pr_dir(123)
         resolve_file = pr_dir / "resolve-comments.json"
         resolve_file.write_text(
@@ -599,12 +599,15 @@ class TestPostCommentReplies:
             mock_run.side_effect = [
                 MagicMock(stdout="owner/repo\n"),  # repo info
                 MagicMock(stdout=json.dumps(resolved_response)),  # get resolved
+                MagicMock(stdout="{}"),  # post reply (still posts)
             ]
 
-            with patch("claude_task_master.core.pr_context.console") as mock_console:
+            with patch("claude_task_master.core.pr_context.console"):
                 pr_context_manager.post_comment_replies(123)
-                # Should log that thread is already resolved
-                assert any("already resolved" in str(c) for c in mock_console.detail.call_args_list)
+
+            # Should have 3 calls: repo info, get resolved, post reply
+            # No resolve call since thread is already resolved
+            assert mock_run.call_count == 3
 
     def test_resolves_thread_on_fixed_action(
         self,

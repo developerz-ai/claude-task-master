@@ -359,11 +359,7 @@ class PRContextManager:
                 if not thread_id:
                     continue
 
-                # Skip threads that are already resolved on GitHub
-                if thread_id in already_resolved:
-                    console.detail(f"  Thread {thread_id[:20]}... already resolved, skipping")
-                    addressed_thread_ids.append(thread_id)
-                    continue
+                already_resolved_on_github = thread_id in already_resolved
 
                 # Build reply message
                 action_emoji = {
@@ -381,9 +377,8 @@ class PRContextManager:
                     # Mark this thread as addressed so we don't re-download it
                     addressed_thread_ids.append(thread_id)
 
-                    # Resolve thread if action is "fixed" or "explained"
-                    # Both indicate the comment has been addressed (either by code change or explanation)
-                    if action in ("fixed", "explained"):
+                    # Resolve thread if action is "fixed" or "explained" and not already resolved
+                    if action in ("fixed", "explained") and not already_resolved_on_github:
                         try:
                             self.resolve_thread(thread_id)
                             console.detail(f"  Resolved thread {thread_id[:20]}...")
