@@ -14,6 +14,7 @@ def build_planning_prompt(
     context: str | None = None,
     coding_style: str | None = None,
     max_prs: int | None = None,
+    release_guide: str | None = None,
 ) -> str:
     """Build the planning phase prompt.
 
@@ -22,6 +23,7 @@ def build_planning_prompt(
         context: Optional accumulated context from previous sessions.
         coding_style: Optional coding style guide to inject.
         max_prs: Optional maximum number of PRs to create.
+        release_guide: Optional release guide for post-merge verification.
 
     Returns:
         Complete planning prompt.
@@ -93,6 +95,35 @@ Include: what to test, files to read, where to add tests (exact paths + run comm
 
 **PR grouping:** Dependencies first, related changes together, 3-6 tasks per PR.""",
     )
+
+    # Release guide section - inject if available so planner adds per-PR release checks
+    if release_guide and "no release verification available" not in release_guide.lower():
+        builder.add_section(
+            "Release Verification (Post-Merge Checks)",
+            f"""The following release guide describes this project's deployment infrastructure.
+After each PR is merged, the orchestrator runs release verification automatically.
+
+**For each PR group, add a `**Release checks:**` section** listing what to verify after merge.
+Only include checks that are possible given the accessible surface below.
+
+Example:
+```markdown
+### PR 1: Add User Auth
+
+- [ ] `[coding]` Implement JWT middleware
+- [ ] `[coding]` Add login/register endpoints
+
+**Release checks:**
+- Verify: POST /api/auth/login returns 200
+- Verify: GET /api/protected returns 401 without token
+- DB: Migration adds users table
+- Monitor: No new Sentry errors in auth module
+```
+
+If a PR has no meaningful release checks (e.g., pure refactor, test-only), skip the section.
+
+{release_guide.strip()}""",
+        )
 
     # PR strategy - minimal, main points only
     builder.add_section(

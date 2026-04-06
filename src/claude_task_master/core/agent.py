@@ -182,6 +182,7 @@ class AgentWrapper:
         context: str = "",
         coding_style: str | None = None,
         max_prs: int | None = None,
+        release_guide: str | None = None,
     ) -> dict[str, Any]:
         """Run planning phase with read-only tools.
 
@@ -193,10 +194,13 @@ class AgentWrapper:
             context: Additional context for planning.
             coding_style: Optional coding style guide to inject into prompt.
             max_prs: Optional maximum number of PRs to create.
+            release_guide: Optional release guide for per-PR release checks.
 
         Delegates to AgentPhaseExecutor for implementation.
         """
-        return self._phase_executor.run_planning_phase(goal, context, coding_style, max_prs)
+        return self._phase_executor.run_planning_phase(
+            goal, context, coding_style, max_prs, release_guide
+        )
 
     def generate_coding_style(self) -> dict[str, Any]:
         """Generate a coding style guide by analyzing the codebase.
@@ -210,6 +214,19 @@ class AgentWrapper:
         Delegates to AgentPhaseExecutor for implementation.
         """
         return self._phase_executor.generate_coding_style()
+
+    def generate_release_guide(self) -> dict[str, Any]:
+        """Generate a release guide by probing deploy infrastructure.
+
+        Discovers deploy configs, monitoring, DB access, health endpoints,
+        env vars, and cloud CLIs to map what release verification is possible.
+
+        Returns:
+            Dict with 'release_guide' and 'raw_output' keys.
+
+        Delegates to AgentPhaseExecutor for implementation.
+        """
+        return self._phase_executor.generate_release_guide()
 
     def run_work_session(
         self,

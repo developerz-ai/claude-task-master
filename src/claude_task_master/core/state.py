@@ -103,6 +103,8 @@ WorkflowStageType = Literal[
     "addressing_reviews",
     "ready_to_merge",
     "merged",
+    "releasing",
+    "release_fix",
 ]
 
 
@@ -131,6 +133,8 @@ class TaskState(BaseModel):
     task_start_time: datetime | None = None  # When current task started
     pr_start_time: datetime | None = None  # When current PR was created
     pr_active_work_seconds: float = 0.0  # Accumulated work time for current PR (excluding CI wait)
+    # Release phase fields
+    release_fix_attempts: int = 0  # Number of release fix attempts for current PR
 
 
 # =============================================================================

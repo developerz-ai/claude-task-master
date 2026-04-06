@@ -2,6 +2,7 @@
 
 This module provides structured prompt templates for different agent phases:
 - Coding Style: Generate concise coding style guide from codebase analysis
+- Release: Discover deploy infrastructure and verify releases post-merge
 - Planning: Initial codebase analysis and task creation
 - Plan Update: Modifying existing plans based on change requests
 - Working: Task execution with verification
@@ -14,6 +15,8 @@ This module re-exports all prompt functions for backward compatibility.
 The actual implementations are in:
 - prompts_base.py: PromptSection, PromptBuilder
 - prompts_coding_style.py: build_coding_style_prompt, extract_coding_style
+- prompts_release.py: build_release_discovery_prompt, build_release_check_prompt,
+                       extract_release_guide, parse_release_check_result, extract_pr_release_checks
 - prompts_planning.py: build_planning_prompt
 - prompts_plan_update.py: build_plan_update_prompt
 - prompts_working.py: build_work_prompt
@@ -33,6 +36,15 @@ from .prompts_coding_style import build_coding_style_prompt, extract_coding_styl
 from .prompts_plan_update import build_plan_update_prompt
 from .prompts_planning import build_planning_prompt
 
+# Re-export release prompts
+from .prompts_release import (
+    build_release_check_prompt,
+    build_release_discovery_prompt,
+    extract_pr_release_checks,
+    extract_release_guide,
+    parse_release_check_result,
+)
+
 # Re-export verification prompts
 from .prompts_verification import (
     build_context_extraction_prompt,
@@ -51,6 +63,12 @@ __all__ = [
     # Coding Style
     "build_coding_style_prompt",
     "extract_coding_style",
+    # Release
+    "build_release_discovery_prompt",
+    "build_release_check_prompt",
+    "extract_release_guide",
+    "parse_release_check_result",
+    "extract_pr_release_checks",
     # Planning
     "build_planning_prompt",
     "build_plan_update_prompt",

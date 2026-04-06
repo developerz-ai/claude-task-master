@@ -16,9 +16,11 @@ from .agent_models import ModelType, get_tools_for_phase
 from .prompts import (
     build_coding_style_prompt,
     build_planning_prompt,
+    build_release_discovery_prompt,
     build_verification_prompt,
     build_work_prompt,
     extract_coding_style,
+    extract_release_guide,
 )
 
 if TYPE_CHECKING:
@@ -116,6 +118,7 @@ class AgentPhaseExecutor:
         context: str = "",
         coding_style: str | None = None,
         max_prs: int | None = None,
+        release_guide: str | None = None,
     ) -> dict[str, Any]:
         """Run planning phase with read-only tools.
 
@@ -127,6 +130,7 @@ class AgentPhaseExecutor:
             context: Additional context for planning.
             coding_style: Optional coding style guide to inject into prompt.
             max_prs: Optional maximum number of PRs to create.
+            release_guide: Optional release guide for per-PR release checks.
 
         Returns:
             Dict with 'plan', 'criteria', and 'raw_output' keys.
@@ -137,6 +141,7 @@ class AgentPhaseExecutor:
             context=context if context else None,
             coding_style=coding_style,
             max_prs=max_prs,
+            release_guide=release_guide,
         )
 
         # Always use Opus for planning (smartest model)
@@ -382,5 +387,40 @@ class AgentPhaseExecutor:
 
         return {
             "coding_style": coding_style,
+            "raw_output": result,
+        }
+
+    def generate_release_guide(self) -> dict[str, Any]:
+        """Generate a release guide by probing deploy infrastructure.
+
+        Discovers deploy configs, monitoring, DB access, health endpoints,
+        env vars, and cloud CLIs to map what release verification is possible.
+
+        Uses all tools (including Bash) so the agent can probe env vars,
+        run CLI commands, and check for credentials.
+
+        Returns:
+            Dict with 'release_guide' and 'raw_output' keys.
+        """
+        prompt = build_release_discovery_prompt()
+
+        console.info("Discovering release infrastructure with Sonnet...")
+
+        # Use working tools (all tools including Bash) so agent can probe env/CLIs
+        result = run_async_with_cleanup(
+            self.query_executor.run_query(
+                prompt=prompt,
+                tools=self.get_tools_for_phase("working"),  # All tools for probing
+                model_override=ModelType.SONNET,  # Sonnet for speed
+                get_model_name_func=self.get_model_name_func,
+                get_agents_func=self.get_agents_func,
+                process_message_func=self.process_message_func,
+            )
+        )
+
+        release_guide = extract_release_guide(result)
+
+        return {
+            "release_guide": release_guide,
             "raw_output": result,
         }

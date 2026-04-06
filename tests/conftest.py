@@ -309,6 +309,12 @@ def mock_agent_wrapper(temp_dir: Path):
             "raw_output": "Coding style generation output",
         }
     )
+    mock.generate_release_guide = MagicMock(
+        return_value={
+            "release_guide": "# Release Guide\n\nNo release verification available for this project.\nReason: test environment",
+            "raw_output": "Release guide generation output",
+        }
+    )
 
     return mock
 

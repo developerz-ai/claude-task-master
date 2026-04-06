@@ -43,14 +43,60 @@ class Planner:
         console.warning("Could not generate coding style guide")
         return None
 
+    def ensure_release_guide(self) -> str | None:
+        """Ensure release guide exists, generating it if needed.
+
+        Checks if release.md exists. If not, generates it by probing the
+        project's deploy infrastructure, monitoring, DB access, etc.
+
+        The release guide is optional — if discovery finds nothing to
+        verify, it saves a guide that says so and the release phase
+        becomes a no-op.
+
+        Returns:
+            The release guide content, or None if generation failed.
+        """
+        # Check if release guide already exists
+        release_guide = self.state_manager.load_release_guide()
+        if release_guide:
+            console.info("Using existing release guide")
+            return release_guide
+
+        # Only generate if auto_merge is enabled
+        if self.state_manager.state_file.exists():
+            state = self.state_manager.load_state()
+            if not state.options.auto_merge:
+                console.info("Auto-merge disabled — skipping release guide generation")
+                return None
+
+        # Generate release guide by probing infrastructure
+        console.info("Discovering release infrastructure...")
+        try:
+            result = self.agent.generate_release_guide()
+        except Exception as e:
+            console.warning(f"Could not discover release infrastructure: {e}")
+            return None
+
+        release_content: str = result.get("release_guide", "")
+        if release_content:
+            self.state_manager.save_release_guide(release_content)
+            console.success("Release guide generated and saved")
+            return release_content
+
+        console.warning("Could not generate release guide")
+        return None
+
     def create_plan(self, goal: str) -> dict[str, Any]:
         """Create initial task plan using read-only tools.
 
-        First generates coding style guide if it doesn't exist, then
-        runs planning phase with the coding style injected.
+        First generates coding style and release guides if they don't exist,
+        then runs planning phase with both injected.
         """
         # Ensure coding style exists (generate if needed)
         coding_style = self.ensure_coding_style()
+
+        # Ensure release guide exists (generate if needed, auto_merge only)
+        release_guide = self.ensure_release_guide()
 
         # Load any existing context
         context = self.state_manager.load_context()
@@ -61,9 +107,13 @@ class Planner:
             state = self.state_manager.load_state()
             max_prs = state.options.max_prs
 
-        # Run planning phase with Claude (with coding style and max_prs)
+        # Run planning phase with Claude (with coding style, release guide, and max_prs)
         result = self.agent.run_planning_phase(
-            goal=goal, context=context, coding_style=coding_style, max_prs=max_prs
+            goal=goal,
+            context=context,
+            coding_style=coding_style,
+            max_prs=max_prs,
+            release_guide=release_guide,
         )
 
         # Extract plan and criteria from result

@@ -31,7 +31,9 @@ class WorkflowStageHandler:
     5. waiting_reviews → Wait for reviews
     6. addressing_reviews → Address review feedback
     7. ready_to_merge → Merge PR
-    8. merged → Move to next task
+    8. merged → Move to releasing (if auto_merge) or next task
+    9. releasing → Verify deployment health (optional, auto_merge only)
+    10. release_fix → Quick-fix PR if release verification failed
     """
 
     # CI polling configuration
@@ -898,14 +900,199 @@ End with: TASK COMPLETE"""
 
             console.success(f"Switched to {base_branch}")
 
-        # Move to next task and reset timing fields
+        # Check if we should run release verification (auto_merge + release guide exists)
+        release_guide = self.state_manager.load_release_guide()
+        if state.options.auto_merge and release_guide:
+            # Check if the release guide has actual checks (not just "no verification available")
+            if "no release verification available" not in release_guide.lower():
+                console.info("Starting release verification...")
+                state.workflow_stage = "releasing"
+                state.release_fix_attempts = 0
+                self.state_manager.save_state(state)
+                return None
+
+        # No release phase — move to next task
+        self._advance_to_next_task(state)
+        return None
+
+    def _advance_to_next_task(self, state: TaskState) -> None:
+        """Move to next task and reset timing/release fields."""
         state.current_task_index += 1
         state.current_pr = None
         state.workflow_stage = "working"
-        # Reset timing fields for next task/PR
         state.task_start_time = None
         state.pr_start_time = None
         state.pr_active_work_seconds = 0.0
+        state.release_fix_attempts = 0
         self.state_manager.save_state(state)
 
+    def handle_releasing_stage(self, state: TaskState) -> int | None:
+        """Handle release verification — check deployment health after merge.
+
+        This runs after a PR is merged when auto_merge is enabled.
+        The agent verifies the deployment using whatever access is available
+        (health checks, deploy status, error monitoring, migration status).
+
+        If nothing is checkable, this is a no-op pass-through.
+        If checks fail, transitions to release_fix for a quick-fix PR.
+        Max 2 fix attempts before moving on (don't block the pipeline).
+        """
+        from .prompts_release import (
+            build_release_check_prompt,
+            extract_pr_release_checks,
+            parse_release_check_result,
+        )
+
+        release_guide = self.state_manager.load_release_guide()
+        if not release_guide:
+            console.info("No release guide — skipping release verification")
+            self._advance_to_next_task(state)
+            return None
+
+        # Extract per-PR release checks from plan.md
+        pr_release_checks = None
+        plan = self.state_manager.load_plan()
+        if plan and state.current_pr is not None:
+            # Find the PR group number for the current task
+            from .task_group import parse_tasks_with_groups
+
+            tasks, groups = parse_tasks_with_groups(plan)
+            for group in groups:
+                if state.current_task_index in group.task_indices:
+                    # Extract numeric PR group number (e.g., "pr_1" → 1)
+                    group_num_str = group.id.replace("pr_", "")
+                    try:
+                        pr_group_number = int(group_num_str)
+                        pr_release_checks = extract_pr_release_checks(plan, pr_group_number)
+                    except ValueError:
+                        pass  # Non-numeric group ID (e.g., "default"), skip per-PR checks
+                    break
+
+        # Get PR title for context
+        pr_title = None
+        if state.current_pr is not None:
+            try:
+                pr_status = self.github_client.get_pr_status(state.current_pr)
+                pr_title = pr_status.title if hasattr(pr_status, "title") else None
+            except Exception:
+                pass
+
+        # Build and run release check prompt
+        prompt = build_release_check_prompt(
+            release_guide=release_guide,
+            pr_release_checks=pr_release_checks,
+            pr_number=state.current_pr,
+            pr_title=pr_title,
+        )
+
+        console.info(f"Verifying release for PR #{state.current_pr or '?'}...")
+
+        try:
+            result = self.agent.run_work_session(
+                task_description=prompt,
+                model_override=ModelType.SONNET,  # Sonnet for speed
+            )
+            output = result.get("output", "")
+        except Exception as e:
+            console.warning(f"Release verification error: {e}")
+            console.detail("Skipping release verification and continuing")
+            self._advance_to_next_task(state)
+            return None
+
+        # Parse the result
+        check_result = parse_release_check_result(output)
+
+        if check_result["status"] == "pass":
+            console.success("Release verification passed!")
+            self._advance_to_next_task(state)
+            return None
+        elif check_result["status"] == "skip":
+            console.info("Release verification skipped (nothing to check)")
+            self._advance_to_next_task(state)
+            return None
+        else:
+            # Release check failed
+            max_release_fixes = 2
+            if state.release_fix_attempts >= max_release_fixes:
+                console.warning(
+                    f"Release verification failed after {max_release_fixes} fix attempts — "
+                    "moving on to next task"
+                )
+                self._advance_to_next_task(state)
+                return None
+
+            console.warning("Release verification failed — attempting quick fix")
+            state.workflow_stage = "release_fix"
+            self.state_manager.save_state(state)
+            return None
+
+    def handle_release_fix_stage(self, state: TaskState) -> int | None:
+        """Handle release fix — create a small fix PR for deployment issues.
+
+        This creates a quick-fix PR (capped scope) to address release
+        verification failures. After the fix PR merges, re-runs release
+        verification.
+
+        Max 2 attempts before giving up and moving to next task.
+        """
+        state.release_fix_attempts += 1
+        console.info(
+            f"Release fix attempt {state.release_fix_attempts} for PR #{state.current_pr or '?'}..."
+        )
+
+        release_guide = self.state_manager.load_release_guide()
+
+        task_description = f"""A release verification check FAILED after PR #{state.current_pr or '?'} was merged.
+
+## Release Guide
+{release_guide or 'No release guide available.'}
+
+## Instructions
+
+Create a SMALL fix to resolve the deployment issue. This must be:
+- Under 50 lines changed
+- A targeted fix, not a refactor
+- Committed, pushed, and PR created
+
+Common fixes:
+- Missing env var → add to config
+- Health check failing → fix the endpoint
+- Migration not applied → run migration command
+- New errors in Sentry → fix the bug
+
+Steps:
+1. Diagnose the issue (check deploy status, health endpoints, error logs)
+2. Make a minimal fix
+3. Commit with message: "fix: release fix for PR #{state.current_pr or '?'}"
+4. Push and create PR
+
+End with: TASK COMPLETE"""
+
+        try:
+            context = self.state_manager.load_context()
+        except Exception:
+            context = ""
+
+        try:
+            self.agent.run_work_session(
+                task_description=task_description,
+                context=context,
+                model_override=ModelType.SONNET,  # Sonnet for speed
+            )
+        except Exception as e:
+            console.warning(f"Release fix failed: {e}")
+            console.detail("Moving on to next task")
+            self._advance_to_next_task(state)
+            return None
+
+        # Wait for CI to start on the fix PR
+        console.info("Waiting 30s for CI to start on release fix PR...")
+        if not interruptible_sleep(30):
+            return None
+
+        # Transition to waiting for CI on the fix PR
+        # The fix PR needs to go through the normal PR lifecycle
+        state.workflow_stage = "pr_created"
+        state.session_count += 1
+        self.state_manager.save_state(state)
         return None
