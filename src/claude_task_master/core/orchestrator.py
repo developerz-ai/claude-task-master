@@ -1046,6 +1046,10 @@ class WorkLoopOrchestrator:
                 return self.stage_handler.handle_merged_stage(
                     state, self.task_runner.mark_task_complete
                 )
+            elif stage == "releasing":
+                return self.stage_handler.handle_releasing_stage(state)
+            elif stage == "release_fix":
+                return self.stage_handler.handle_release_fix_stage(state)
             else:
                 console.warning(f"Unknown stage: {stage}, resetting")
                 state.workflow_stage = "working"

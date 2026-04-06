@@ -121,11 +121,12 @@ class BackupRecoveryMixin:
         return self._create_backup(self.state_file)
 
     def cleanup_on_success(self, run_id: str) -> None:
-        """Clean up all state files except logs and coding-style.md on success.
+        """Clean up all state files except logs, coding-style.md, and release.md on success.
 
         Preserves:
         - logs/ directory (keeps last 10 log files)
         - coding-style.md (reusable across runs to save tokens)
+        - release.md (reusable across runs to save tokens)
 
         Args:
             run_id: The run ID (used for identifying which log file belongs to this run).
@@ -134,7 +135,7 @@ class BackupRecoveryMixin:
         self.release_session_lock()
 
         # Files to preserve (besides logs/ directory)
-        preserved_files = {"coding-style.md"}
+        preserved_files = {"coding-style.md", "release.md"}
 
         # Delete all files in state directory except preserved ones and logs/
         for item in self.state_dir.iterdir():

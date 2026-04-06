@@ -158,6 +158,38 @@ class FileOperationsMixin:
             return True
         return False
 
+    def save_release_guide(self, release_guide: str) -> None:
+        """Save release guide to release.md.
+
+        Args:
+            release_guide: The release guide content.
+        """
+        release_file = self.state_dir / "release.md"
+        release_file.write_text(release_guide)
+
+    def load_release_guide(self) -> str | None:
+        """Load release guide from release.md.
+
+        Returns:
+            The release guide content, or None if not found.
+        """
+        release_file = self.state_dir / "release.md"
+        if release_file.exists():
+            return release_file.read_text()
+        return None
+
+    def delete_release_guide(self) -> bool:
+        """Delete release guide file (release.md).
+
+        Returns:
+            True if file was deleted, False if file did not exist.
+        """
+        release_file = self.state_dir / "release.md"
+        if release_file.exists():
+            release_file.unlink()
+            return True
+        return False
+
     def _parse_plan_tasks(self, plan: str) -> list[str]:
         """Parse tasks from plan markdown.
 

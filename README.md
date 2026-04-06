@@ -552,8 +552,10 @@ When using the repo setup workflow, projects are organized as follows:
 │   ├── src/
 │   ├── .claude-task-master/      # State directory (auto-created by claudetm)
 │   │   ├── goal.txt
-│   │   ├── plan.md
+│   │   ├── plan.md              # Task plan with per-PR release checks
 │   │   ├── state.json
+│   │   ├── coding-style.md      # Generated coding conventions
+│   │   ├── release.md           # Generated deploy/release guide
 │   │   └── logs/
 │   └── ...
 ├── another-project/
@@ -814,10 +816,12 @@ For authentication details, see [Authentication Guide](./docs/authentication.md)
 ### Workflow Stages
 
 ```
-working → pr_created → waiting_ci → ci_failed → waiting_reviews → addressing_reviews → ready_to_merge → merged
+working → pr_created → waiting_ci → ci_failed → waiting_reviews → addressing_reviews → ready_to_merge → merged → releasing → release_fix
 ```
 
 Each stage has specific handlers that determine when to transition to the next stage.
+
+**Release phase** (stages `releasing` and `release_fix`) runs automatically after each PR merge when `auto_merge=True`. It verifies the deployment is healthy using whatever access is available (health checks, deploy status, error monitoring, DB migrations). If nothing is checkable, it's a no-op. If verification fails, creates a quick-fix PR (max 5 attempts).
 
 ## State Directory
 
@@ -825,10 +829,12 @@ Each stage has specific handlers that determine when to transition to the next s
 .claude-task-master/
 ├── goal.txt              # Original user goal
 ├── criteria.txt          # Success criteria
-├── plan.md               # Task list with checkboxes
+├── plan.md               # Task list with checkboxes + per-PR release checks
 ├── state.json            # Machine-readable state
 ├── progress.md           # Progress summary
 ├── context.md            # Accumulated learnings
+├── coding-style.md       # Generated coding conventions (preserved across runs)
+├── release.md            # Generated deploy/release guide (preserved across runs)
 ├── mailbox.json          # Pending messages for plan updates
 └── logs/
     └── run-{timestamp}.txt    # Full log (kept on success)
@@ -836,7 +842,7 @@ Each stage has specific handlers that determine when to transition to the next s
 
 ## Exit Codes
 
-- **0 (Success)**: All tasks completed, criteria met. State cleaned up, logs preserved.
+- **0 (Success)**: All tasks completed, criteria met. State cleaned up (logs, coding-style.md, release.md preserved).
 - **1 (Blocked)**: Task cannot proceed, needs human intervention or error occurred.
 - **2 (Interrupted)**: User pressed Ctrl+C, state preserved for resume.
 
