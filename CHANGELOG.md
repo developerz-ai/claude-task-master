@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.31] - 2026-04-06
+
+### Added
+- **Release phase**: Post-merge deployment verification runs automatically when `auto_merge=True`
+- **Two-level release checks**: Project-level `release.md` (generated once by probing deploy infra) + per-PR `**Release checks:**` in `plan.md`
+- **Release discovery**: Agent probes deploy configs, health endpoints, DB migrations, error monitoring, env vars, and cloud CLIs to map accessible verification surface
+- **Quick-fix PRs**: If release verification fails, creates small fix PRs (max 5 attempts, never blocks pipeline)
+- **Graceful degradation**: Release phase skipped when nothing to verify, no automerge, or no release.md
+
 ## [0.1.30] - 2026-04-05
 
 ### Fixed
