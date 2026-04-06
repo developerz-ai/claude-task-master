@@ -243,7 +243,7 @@ All commands check `state_manager.exists()` first:
   - Checks migration status if DB framework detected
   - Queries error monitoring for new errors (if API token available)
 - **Graceful degradation** — if nothing is checkable, skips immediately
-- **Quick-fix PRs** — if verification fails, creates a small fix PR (max 2 attempts)
+- **Quick-fix PRs** — if verification fails, creates a small fix PR (max 5 attempts)
   - Fix PR goes through normal PR lifecycle (CI, reviews, merge)
   - Then re-runs release verification
   - After 2 failed fix attempts, moves on (doesn't block the pipeline)
@@ -380,7 +380,7 @@ Available via IDE integration:
 │              RELEASE PHASE (auto_merge only)                     │
 │  Check deploy status → Health checks → DB migrations            │
 │  → Error monitoring → Smoke tests                                │
-│  Pass: continue │ Fail: quick-fix PR (max 2 attempts)           │
+│  Pass: continue │ Fail: quick-fix PR (max 5 attempts)           │
 │  Skip: nothing to check │ No release.md: skip entirely          │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
@@ -416,4 +416,4 @@ Messages are processed after each task completes. Multiple messages are merged w
 12. **Release phase** - runs after each PR merge when `auto_merge=True`, skipped when disabled or nothing to verify
 13. **Release guide** - `release.md` generated once by probing deploy infra, preserved across runs like `coding-style.md`
 14. **Per-PR release checks** - planner adds `**Release checks:**` sections to plan.md, specific to each PR's changes
-15. **Release fix limit** - max 2 quick-fix PRs per release failure, then moves on (never blocks pipeline)
+15. **Release fix limit** - max 5 quick-fix PRs per release failure, then moves on (never blocks pipeline)

@@ -821,7 +821,7 @@ working → pr_created → waiting_ci → ci_failed → waiting_reviews → addr
 
 Each stage has specific handlers that determine when to transition to the next stage.
 
-**Release phase** (stages `releasing` and `release_fix`) runs automatically after each PR merge when `auto_merge=True`. It verifies the deployment is healthy using whatever access is available (health checks, deploy status, error monitoring, DB migrations). If nothing is checkable, it's a no-op. If verification fails, creates a quick-fix PR (max 2 attempts).
+**Release phase** (stages `releasing` and `release_fix`) runs automatically after each PR merge when `auto_merge=True`. It verifies the deployment is healthy using whatever access is available (health checks, deploy status, error monitoring, DB migrations). If nothing is checkable, it's a no-op. If verification fails, creates a quick-fix PR (max 5 attempts).
 
 ## State Directory
 

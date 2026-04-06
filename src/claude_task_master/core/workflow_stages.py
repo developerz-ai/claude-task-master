@@ -935,7 +935,7 @@ End with: TASK COMPLETE"""
 
         If nothing is checkable, this is a no-op pass-through.
         If checks fail, transitions to release_fix for a quick-fix PR.
-        Max 2 fix attempts before moving on (don't block the pipeline).
+        Max 5 fix attempts before moving on (don't block the pipeline).
         """
         from .prompts_release import (
             build_release_check_prompt,
@@ -1012,7 +1012,7 @@ End with: TASK COMPLETE"""
             return None
         else:
             # Release check failed
-            max_release_fixes = 2
+            max_release_fixes = 5
             if state.release_fix_attempts >= max_release_fixes:
                 console.warning(
                     f"Release verification failed after {max_release_fixes} fix attempts — "
@@ -1033,7 +1033,7 @@ End with: TASK COMPLETE"""
         verification failures. After the fix PR merges, re-runs release
         verification.
 
-        Max 2 attempts before giving up and moving to next task.
+        Max 5 attempts before giving up and moving to next task.
         """
         state.release_fix_attempts += 1
         console.info(
@@ -1090,8 +1090,8 @@ End with: TASK COMPLETE"""
         if not interruptible_sleep(30):
             return None
 
-        # Transition to waiting for CI on the fix PR
-        # The fix PR needs to go through the normal PR lifecycle
+        # Reset current_pr so pr_created re-discovers the new fix PR from the current branch
+        state.current_pr = None
         state.workflow_stage = "pr_created"
         state.session_count += 1
         self.state_manager.save_state(state)

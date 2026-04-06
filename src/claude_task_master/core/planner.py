@@ -43,7 +43,7 @@ class Planner:
         console.warning("Could not generate coding style guide")
         return None
 
-    def ensure_release_guide(self) -> str | None:
+    def ensure_release_guide(self, auto_merge: bool = True) -> str | None:
         """Ensure release guide exists, generating it if needed.
 
         Checks if release.md exists. If not, generates it by probing the
@@ -52,6 +52,9 @@ class Planner:
         The release guide is optional — if discovery finds nothing to
         verify, it saves a guide that says so and the release phase
         becomes a no-op.
+
+        Args:
+            auto_merge: Whether auto-merge is enabled. Skips generation if False.
 
         Returns:
             The release guide content, or None if generation failed.
@@ -63,11 +66,9 @@ class Planner:
             return release_guide
 
         # Only generate if auto_merge is enabled
-        if self.state_manager.state_file.exists():
-            state = self.state_manager.load_state()
-            if not state.options.auto_merge:
-                console.info("Auto-merge disabled — skipping release guide generation")
-                return None
+        if not auto_merge:
+            console.info("Auto-merge disabled — skipping release guide generation")
+            return None
 
         # Generate release guide by probing infrastructure
         console.info("Discovering release infrastructure...")
@@ -95,17 +96,19 @@ class Planner:
         # Ensure coding style exists (generate if needed)
         coding_style = self.ensure_coding_style()
 
-        # Ensure release guide exists (generate if needed, auto_merge only)
-        release_guide = self.ensure_release_guide()
-
-        # Load any existing context
-        context = self.state_manager.load_context()
-
-        # Get max_prs from state options (if state exists)
+        # Load state options if available
+        auto_merge = True
         max_prs = None
         if self.state_manager.state_file.exists():
             state = self.state_manager.load_state()
+            auto_merge = state.options.auto_merge
             max_prs = state.options.max_prs
+
+        # Ensure release guide exists (generate if needed, auto_merge only)
+        release_guide = self.ensure_release_guide(auto_merge=auto_merge)
+
+        # Load any existing context
+        context = self.state_manager.load_context()
 
         # Run planning phase with Claude (with coding style, release guide, and max_prs)
         result = self.agent.run_planning_phase(

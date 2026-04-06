@@ -265,10 +265,7 @@ def extract_pr_release_checks(plan: str, pr_number: int) -> str | None:
         if in_release_checks:
             stripped = line.strip()
             if stripped.startswith("### ") or stripped.startswith("## "):
-                break  # New section
-            if stripped.startswith("- [ ]") or stripped.startswith("- [x]"):
-                # Hit a task line, release checks section is over
-                break
+                break  # New section header
             if stripped:
                 release_lines.append(stripped)
             elif release_lines:
