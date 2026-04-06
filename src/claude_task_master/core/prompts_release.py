@@ -131,7 +131,7 @@ def build_release_check_prompt(
     builder = PromptBuilder(
         intro=f"""You are Claude Task Master in RELEASE VERIFICATION mode.
 
-PR #{pr_number or '?'} ({pr_title or 'unknown'}) was just merged.
+PR #{pr_number or "?"} ({pr_title or "unknown"}) was just merged.
 Verify the deployment is healthy. Use all available tools.
 
 **Rules:**

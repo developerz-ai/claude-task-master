@@ -1042,10 +1042,10 @@ End with: TASK COMPLETE"""
 
         release_guide = self.state_manager.load_release_guide()
 
-        task_description = f"""A release verification check FAILED after PR #{state.current_pr or '?'} was merged.
+        task_description = f"""A release verification check FAILED after PR #{state.current_pr or "?"} was merged.
 
 ## Release Guide
-{release_guide or 'No release guide available.'}
+{release_guide or "No release guide available."}
 
 ## Instructions
 
@@ -1063,7 +1063,7 @@ Common fixes:
 Steps:
 1. Diagnose the issue (check deploy status, health endpoints, error logs)
 2. Make a minimal fix
-3. Commit with message: "fix: release fix for PR #{state.current_pr or '?'}"
+3. Commit with message: "fix: release fix for PR #{state.current_pr or "?"}"
 4. Push and create PR
 
 End with: TASK COMPLETE"""
