@@ -703,7 +703,9 @@ After verifying, end with: TASK COMPLETE"""
         if saved_count == 0:
             resolved = self.pr_context.resolve_addressed_threads(state.current_pr)
             if resolved > 0:
-                console.success(f"Resolved {resolved} previously-addressed threads (no agent needed)")
+                console.success(
+                    f"Resolved {resolved} previously-addressed threads (no agent needed)"
+                )
             else:
                 console.info("No actionable comments and no threads to resolve")
             # Go back to waiting_reviews to re-check

@@ -368,7 +368,9 @@ class PRContextManager:
                     if thread_id not in already_resolved and action in ("fixed", "explained"):
                         try:
                             self.resolve_thread(thread_id)
-                            console.detail(f"  Resolved previously-replied thread {thread_id[:20]}...")
+                            console.detail(
+                                f"  Resolved previously-replied thread {thread_id[:20]}..."
+                            )
                         except Exception as resolve_err:
                             console.warning(f"  Failed to resolve thread: {resolve_err}")
                     else:

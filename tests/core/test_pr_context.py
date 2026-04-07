@@ -864,9 +864,7 @@ class TestResolveAddressedThreads:
         """Test returns 0 when all addressed threads are already resolved."""
         state_manager.mark_threads_addressed(123, ["thread_1"])
 
-        resolved_response = make_graphql_response(
-            [{"id": "thread_1", "isResolved": True}]
-        )
+        resolved_response = make_graphql_response([{"id": "thread_1", "isResolved": True}])
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
@@ -887,9 +885,7 @@ class TestResolveAddressedThreads:
         """Test that resolve failures are handled gracefully."""
         state_manager.mark_threads_addressed(123, ["thread_1"])
 
-        resolved_response = make_graphql_response(
-            [{"id": "thread_1", "isResolved": False}]
-        )
+        resolved_response = make_graphql_response([{"id": "thread_1", "isResolved": False}])
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
@@ -974,9 +970,7 @@ class TestPostCommentRepliesResolvesAlreadyAddressed:
             )
         )
 
-        resolved_response = make_graphql_response(
-            [{"id": "thread_done", "isResolved": True}]
-        )
+        resolved_response = make_graphql_response([{"id": "thread_done", "isResolved": True}])
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
