@@ -366,6 +366,129 @@ class TestHelperFunctions:
         assert "Service: 1/2" in summary
 
 
+class TestReleaseChecks:
+    """Tests for release checks not being counted as tasks."""
+
+    def test_release_checks_with_checkboxes_not_counted(self):
+        """Release checks with checkbox format should not be counted as tasks."""
+        plan = """
+### PR 1: Schema Changes
+
+- [ ] `[coding]` Create migration
+- [ ] `[coding]` Update model
+
+**Release checks:**
+- [ ] DB: Migrations run successfully
+- [ ] Verify: GET /up returns 200
+- [ ] Monitor: No new Sentry errors
+
+### PR 2: Service Layer
+
+- [ ] `[coding]` Fix service
+"""
+        tasks, groups = parse_tasks_with_groups(plan)
+
+        assert len(tasks) == 3
+        assert len(groups[0].task_indices) == 2
+        assert len(groups[1].task_indices) == 1
+
+    def test_release_checks_without_checkboxes_not_counted(self):
+        """Release checks without checkboxes should also be ignored."""
+        plan = """
+### PR 1: Schema Changes
+
+- [ ] `[coding]` Create migration
+
+**Release checks:**
+- DB: Migrations run successfully
+- Verify: GET /up returns 200
+
+### PR 2: Service Layer
+
+- [ ] `[coding]` Fix service
+"""
+        tasks, groups = parse_tasks_with_groups(plan)
+
+        assert len(tasks) == 2
+
+    def test_release_checks_with_completed_checkboxes(self):
+        """Completed release checks should not be counted as tasks."""
+        plan = """
+### PR 1: Schema Changes
+
+- [x] `[coding]` Create migration
+
+**Release checks:**
+- [x] DB: Migrations run successfully
+- [x] Verify: GET /up returns 200
+
+### PR 2: Service Layer
+
+- [ ] `[coding]` Fix service
+"""
+        tasks, groups = parse_tasks_with_groups(plan)
+
+        assert len(tasks) == 2
+
+    def test_release_checks_end_at_blank_line_then_pr_header(self):
+        """Release checks section ends at next PR header."""
+        plan = """
+### PR 1: Schema Changes
+
+- [ ] Task 1
+- [ ] Task 2
+
+**Release checks:**
+- [ ] Check 1
+- [ ] Check 2
+
+---
+
+### PR 2: Services
+
+- [ ] Task 3
+"""
+        tasks, groups = parse_tasks_with_groups(plan)
+
+        assert len(tasks) == 3
+        assert len(groups[0].task_indices) == 2
+        assert len(groups[1].task_indices) == 1
+
+    def test_release_checks_case_insensitive(self):
+        """Release checks header should be case-insensitive."""
+        plan = """
+### PR 1: Test
+
+- [ ] Task 1
+
+**release checks:**
+- [ ] Check 1
+
+### PR 2: Test2
+
+- [ ] Task 2
+"""
+        tasks, _ = parse_tasks_with_groups(plan)
+        assert len(tasks) == 2
+
+    def test_no_release_checks_normal_parsing(self):
+        """Plans without release checks should parse normally."""
+        plan = """
+### PR 1: Schema
+
+- [ ] Task 1
+- [ ] Task 2
+
+### PR 2: Services
+
+- [ ] Task 3
+"""
+        tasks, groups = parse_tasks_with_groups(plan)
+
+        assert len(tasks) == 3
+        assert len(groups) == 2
+
+
 class TestEdgeCases:
     """Tests for edge cases and special inputs."""
 

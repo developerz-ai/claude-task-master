@@ -208,9 +208,13 @@ def parse_tasks_with_groups(plan: str) -> tuple[list[ParsedTask], list[TaskGroup
     # Pattern to match tasks: - [ ] or - [x] followed by description
     task_pattern = re.compile(r"^-\s*\[([ xX])\]\s*(.+)$")
 
+    # Pattern to detect release checks section header
+    release_checks_pattern = re.compile(r"^\*\*Release checks:?\*\*", re.IGNORECASE)
+
     current_group_id = "default"
     current_group_name = "Default"
     task_index = 0
+    in_release_checks = False
 
     for raw_line in plan.split("\n"):
         stripped = raw_line.strip()
@@ -222,11 +226,25 @@ def parse_tasks_with_groups(plan: str) -> tuple[list[ParsedTask], list[TaskGroup
             pr_name = pr_match.group(2).strip()
             current_group_id = f"pr_{pr_num}"
             current_group_name = pr_name
+            in_release_checks = False
 
             # Create new group if not exists
             if not any(g.id == current_group_id for g in groups):
                 groups.append(TaskGroup(id=current_group_id, name=pr_name))
             continue
+
+        # Check for release checks section header
+        if release_checks_pattern.match(stripped):
+            in_release_checks = True
+            continue
+
+        # Exit release checks section on blank line, heading, or horizontal rule
+        if in_release_checks:
+            if not stripped or stripped.startswith("#") or stripped.startswith("---"):
+                in_release_checks = False
+            else:
+                # Skip all lines inside release checks (even if they have checkboxes)
+                continue
 
         # Check for task
         task_match = task_pattern.match(stripped)
