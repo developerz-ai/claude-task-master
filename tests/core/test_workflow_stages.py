@@ -48,8 +48,9 @@ def mock_pr_context():
     """Create a mock PR context manager."""
     context = MagicMock()
     context.save_ci_failures = MagicMock()
-    context.save_pr_comments = MagicMock()
+    context.save_pr_comments = MagicMock(return_value=3)
     context.post_comment_replies = MagicMock()
+    context.resolve_addressed_threads = MagicMock(return_value=0)
     # New methods for combined CI + comments handling
     context.has_ci_failures = MagicMock(return_value=True)
     context.has_pr_comments = MagicMock(return_value=False)
@@ -709,6 +710,31 @@ class TestHandleAddressingReviewsStage:
         mock_pr_context.post_comment_replies.assert_called_once_with(42)
         assert basic_task_state.workflow_stage == "waiting_ci"
         assert basic_task_state.session_count == 2
+
+    @patch("claude_task_master.core.workflow_stages.console")
+    def test_skips_agent_when_no_actionable_comments(
+        self,
+        mock_console,
+        workflow_handler,
+        state_manager,
+        basic_task_state,
+        mock_agent,
+        mock_pr_context,
+    ):
+        """Should skip agent and resolve threads directly when 0 actionable comments."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        basic_task_state.current_pr = 42
+        mock_pr_context.save_pr_comments.return_value = 0
+        mock_pr_context.resolve_addressed_threads.return_value = 1
+
+        result = workflow_handler.handle_addressing_reviews_stage(basic_task_state)
+
+        assert result is None
+        mock_pr_context.save_pr_comments.assert_called_once_with(42)
+        mock_agent.run_work_session.assert_not_called()
+        mock_pr_context.post_comment_replies.assert_not_called()
+        mock_pr_context.resolve_addressed_threads.assert_called_once_with(42)
+        assert basic_task_state.workflow_stage == "waiting_reviews"
 
     @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
     @patch("claude_task_master.core.workflow_stages.console")

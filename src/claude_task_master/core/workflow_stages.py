@@ -698,6 +698,19 @@ After verifying, end with: TASK COMPLETE"""
         saved_count = self.pr_context.save_pr_comments(state.current_pr)
         console.info(f"Saved {saved_count} actionable comment(s) for review")
 
+        # If no actionable comments, just try to resolve already-addressed threads
+        # This prevents infinite loops where threads were replied to but not resolved
+        if saved_count == 0:
+            resolved = self.pr_context.resolve_addressed_threads(state.current_pr)
+            if resolved > 0:
+                console.success(f"Resolved {resolved} previously-addressed threads (no agent needed)")
+            else:
+                console.info("No actionable comments and no threads to resolve")
+            # Go back to waiting_reviews to re-check
+            state.workflow_stage = "waiting_reviews"
+            self.state_manager.save_state(state)
+            return None
+
         # Build fix prompt
         pr_dir = self.state_manager.get_pr_dir(state.current_pr) if state.current_pr else None
         comments_path = f"{pr_dir}/comments/" if pr_dir else ".claude-task-master/debugging/"

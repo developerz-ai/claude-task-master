@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.32] - 2026-04-06
+
+### Fixed
+- **Infinite loop on unresolved review threads**: Threads that were replied to but failed to resolve on GitHub caused a 6-hour retry loop. Now `post_comment_replies` resolves already-addressed threads, and `addressing_reviews` stage skips the agent when there are 0 actionable comments.
+
 ## [0.1.31] - 2026-04-06
 
 ### Added
@@ -565,7 +570,9 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.28...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.32...HEAD
+[0.1.32]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.31...v0.1.32
+[0.1.31]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.30...v0.1.31
 [0.1.30]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.29...v0.1.30
 [0.1.29]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.28...v0.1.29
 [0.1.28]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.27...v0.1.28

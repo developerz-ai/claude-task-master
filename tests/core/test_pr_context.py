@@ -813,6 +813,185 @@ class TestPostThreadReply:
 
 
 # =============================================================================
+# resolve_addressed_threads Tests
+# =============================================================================
+
+
+class TestResolveAddressedThreads:
+    """Tests for resolve_addressed_threads method."""
+
+    def test_returns_zero_for_none_pr(self, pr_context_manager: PRContextManager) -> None:
+        """Test returns 0 when pr_number is None."""
+        assert pr_context_manager.resolve_addressed_threads(None) == 0
+
+    def test_resolves_unresolved_addressed_threads(
+        self,
+        pr_context_manager: PRContextManager,
+        state_manager: StateManager,
+    ) -> None:
+        """Test that addressed but unresolved threads get resolved."""
+        # Mark threads as addressed
+        state_manager.mark_threads_addressed(123, ["thread_1", "thread_2"])
+
+        resolved_response = make_graphql_response(
+            [
+                {"id": "thread_1", "isResolved": True},  # already resolved
+                {"id": "thread_2", "isResolved": False},  # addressed but NOT resolved
+            ]
+        )
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(stdout="owner/repo\n"),  # repo info
+                MagicMock(stdout=json.dumps(resolved_response)),  # get resolved
+                MagicMock(stdout="{}"),  # resolve thread_2
+            ]
+
+            with patch("claude_task_master.core.pr_context.console"):
+                result = pr_context_manager.resolve_addressed_threads(123)
+
+        assert result == 1
+        # Should have called resolve for thread_2 only
+        resolve_call = mock_run.call_args_list[2]
+        assert any("resolveReviewThread" in str(a) for a in resolve_call[0][0])
+        assert any("thread_2" in str(a) for a in resolve_call[0][0])
+
+    def test_returns_zero_when_all_already_resolved(
+        self,
+        pr_context_manager: PRContextManager,
+        state_manager: StateManager,
+    ) -> None:
+        """Test returns 0 when all addressed threads are already resolved."""
+        state_manager.mark_threads_addressed(123, ["thread_1"])
+
+        resolved_response = make_graphql_response(
+            [{"id": "thread_1", "isResolved": True}]
+        )
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(stdout="owner/repo\n"),
+                MagicMock(stdout=json.dumps(resolved_response)),
+            ]
+
+            with patch("claude_task_master.core.pr_context.console"):
+                result = pr_context_manager.resolve_addressed_threads(123)
+
+        assert result == 0
+
+    def test_handles_resolve_failure_gracefully(
+        self,
+        pr_context_manager: PRContextManager,
+        state_manager: StateManager,
+    ) -> None:
+        """Test that resolve failures are handled gracefully."""
+        state_manager.mark_threads_addressed(123, ["thread_1"])
+
+        resolved_response = make_graphql_response(
+            [{"id": "thread_1", "isResolved": False}]
+        )
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(stdout="owner/repo\n"),
+                MagicMock(stdout=json.dumps(resolved_response)),
+                subprocess.CalledProcessError(1, "gh"),  # resolve fails
+            ]
+
+            with patch("claude_task_master.core.pr_context.console"):
+                result = pr_context_manager.resolve_addressed_threads(123)
+
+        assert result == 0
+
+
+class TestPostCommentRepliesResolvesAlreadyAddressed:
+    """Tests for the fix where already-addressed threads still get resolved."""
+
+    def test_resolves_already_addressed_but_unresolved_thread(
+        self,
+        pr_context_manager: PRContextManager,
+        state_manager: StateManager,
+    ) -> None:
+        """Test that threads already replied to but not resolved get resolved."""
+        # Mark thread as addressed
+        state_manager.mark_threads_addressed(123, ["thread_unresolved"])
+
+        pr_dir = state_manager.get_pr_dir(123)
+        resolve_file = pr_dir / "resolve-comments.json"
+        resolve_file.write_text(
+            json.dumps(
+                {
+                    "resolutions": [
+                        {
+                            "thread_id": "thread_unresolved",
+                            "action": "fixed",
+                            "message": "Already fixed",
+                        }
+                    ]
+                }
+            )
+        )
+
+        # thread_unresolved is NOT in resolved set
+        resolved_response = make_graphql_response([])
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(stdout="owner/repo\n"),  # repo info
+                MagicMock(stdout=json.dumps(resolved_response)),  # get resolved (empty)
+                MagicMock(stdout="{}"),  # resolve thread
+            ]
+
+            with patch("claude_task_master.core.pr_context.console"):
+                pr_context_manager.post_comment_replies(123)
+
+        # Should have called resolve (3rd call)
+        assert mock_run.call_count == 3
+        resolve_call = mock_run.call_args_list[2]
+        assert any("resolveReviewThread" in str(a) for a in resolve_call[0][0])
+
+    def test_skips_already_addressed_and_resolved_thread(
+        self,
+        pr_context_manager: PRContextManager,
+        state_manager: StateManager,
+    ) -> None:
+        """Test that threads already replied to AND resolved are fully skipped."""
+        state_manager.mark_threads_addressed(123, ["thread_done"])
+
+        pr_dir = state_manager.get_pr_dir(123)
+        resolve_file = pr_dir / "resolve-comments.json"
+        resolve_file.write_text(
+            json.dumps(
+                {
+                    "resolutions": [
+                        {
+                            "thread_id": "thread_done",
+                            "action": "fixed",
+                            "message": "Done",
+                        }
+                    ]
+                }
+            )
+        )
+
+        resolved_response = make_graphql_response(
+            [{"id": "thread_done", "isResolved": True}]
+        )
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(stdout="owner/repo\n"),
+                MagicMock(stdout=json.dumps(resolved_response)),
+            ]
+
+            with patch("claude_task_master.core.pr_context.console"):
+                pr_context_manager.post_comment_replies(123)
+
+        # Only 2 calls: repo info + get resolved. No reply, no resolve.
+        assert mock_run.call_count == 2
+
+
+# =============================================================================
 # resolve_thread Tests
 # =============================================================================
 

@@ -364,7 +364,15 @@ class PRContextManager:
 
                 # Skip threads we've already replied to
                 if thread_id in already_addressed:
-                    console.detail(f"  Thread {thread_id[:20]}... already replied, skipping")
+                    # Still resolve if not yet resolved on GitHub (prevents infinite loop)
+                    if thread_id not in already_resolved and action in ("fixed", "explained"):
+                        try:
+                            self.resolve_thread(thread_id)
+                            console.detail(f"  Resolved previously-replied thread {thread_id[:20]}...")
+                        except Exception as resolve_err:
+                            console.warning(f"  Failed to resolve thread: {resolve_err}")
+                    else:
+                        console.detail(f"  Thread {thread_id[:20]}... already replied, skipping")
                     continue
 
                 already_resolved_on_github = thread_id in already_resolved
@@ -476,6 +484,47 @@ class PRContextManager:
             capture_output=True,
             text=True,
         )
+
+    def resolve_addressed_threads(self, pr_number: int | None) -> int:
+        """Resolve threads that were already addressed but not yet resolved on GitHub.
+
+        This prevents infinite loops where the system keeps re-running the agent
+        for threads that were replied to but failed to resolve.
+
+        Args:
+            pr_number: The PR number.
+
+        Returns:
+            Number of threads resolved.
+        """
+        if pr_number is None:
+            return 0
+
+        try:
+            already_resolved = self._get_resolved_thread_ids(pr_number)
+            already_addressed = self.state_manager.get_addressed_threads(pr_number)
+
+            # Find threads that were addressed (replied to) but not resolved
+            unresolved_addressed = already_addressed - already_resolved
+            if not unresolved_addressed:
+                return 0
+
+            resolved_count = 0
+            for thread_id in unresolved_addressed:
+                try:
+                    self.resolve_thread(thread_id)
+                    resolved_count += 1
+                    console.detail(f"  Resolved addressed thread {thread_id[:20]}...")
+                except Exception as e:
+                    console.warning(f"  Failed to resolve thread {thread_id[:20]}...: {e}")
+
+            if resolved_count:
+                console.info(f"Resolved {resolved_count} previously-addressed threads")
+            return resolved_count
+
+        except Exception as e:
+            console.warning(f"Could not resolve addressed threads: {e}")
+            return 0
 
     def _get_resolved_thread_ids(self, pr_number: int) -> set[str]:
         """Get IDs of threads that are already resolved on GitHub.
