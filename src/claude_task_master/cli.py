@@ -131,7 +131,7 @@ register_info_commands(app)  # status, plan, logs, context, progress
 register_github_commands(app)  # ci-status, ci-logs, pr-comments, pr-status
 register_config_commands(app)  # config init, config show, config path
 register_control_commands(app)  # pause, stop, config-update
-register_fix_pr_command(app)  # fix-pr
+register_fix_pr_command(app)  # merge-pr (fix-pr is hidden alias)
 register_mailbox_commands(app)  # mailbox, mailbox send, mailbox clear
 
 
