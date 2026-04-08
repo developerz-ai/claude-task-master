@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.34] - 2026-04-08
+
+### Added
+- **`merge-pr` command**: Renamed `fix-pr` to `merge-pr` as the primary command name. Monitors a PR, fixes CI failures/review comments/merge conflicts using Claude, and merges when ready. `fix-pr` kept as hidden alias for backwards compatibility.
+- **Branch validation**: `merge-pr` errors early when run on main/master/develop with no explicit PR argument.
+- **Default 30 iterations**: Increased max fix iterations from 10 to 30 for more resilient PR fixing.
+
 ## [0.1.32] - 2026-04-06
 
 ### Fixed
@@ -571,6 +578,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 - N/A
 
 [Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.32...HEAD
+[0.1.34]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.33...v0.1.34
+[0.1.33]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.32...v0.1.33
 [0.1.32]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.31...v0.1.32
 [0.1.31]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.30...v0.1.31
 [0.1.30]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.29...v0.1.30
