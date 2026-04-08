@@ -61,7 +61,7 @@ def merge_pr(
         None, help="PR number or URL. If not provided, uses current branch's PR."
     ),
     max_iterations: int = typer.Option(
-        10, "--max-iterations", "-m", help="Maximum fix iterations before giving up."
+        30, "--max-iterations", "-m", help="Maximum fix iterations before giving up."
     ),
     no_merge: bool = typer.Option(
         False, "--no-merge", help="Don't merge after fixing, just make it ready."
