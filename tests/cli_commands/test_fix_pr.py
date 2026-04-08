@@ -1,4 +1,4 @@
-"""Tests for fix-pr CLI command."""
+"""Tests for merge-pr CLI command (and fix-pr alias)."""
 
 import re
 from unittest.mock import MagicMock, patch
@@ -9,6 +9,9 @@ from claude_task_master.cli import app
 from claude_task_master.cli_commands.fix_pr import _parse_pr_input
 
 runner = CliRunner()
+
+# Use merge-pr as the primary command in tests
+COMMAND = "merge-pr"
 
 
 def strip_ansi(text: str) -> str:
@@ -47,29 +50,54 @@ class TestParsePRInput:
         assert _parse_pr_input("#abc") is None
 
 
-class TestFixPRCommand:
-    """Tests for fix-pr CLI command."""
+class TestMergePRCommand:
+    """Tests for merge-pr CLI command."""
 
     def test_help(self) -> None:
         """Should display help."""
-        result = runner.invoke(app, ["fix-pr", "--help"])
+        result = runner.invoke(app, [COMMAND, "--help"])
         output = strip_ansi(result.stdout)
         assert result.exit_code == 0
-        assert "Fix a PR by iteratively" in output
+        assert "Monitor a PR" in output
         assert "--max-iterations" in output
         assert "--no-merge" in output
 
+    def test_fix_pr_alias_works(self) -> None:
+        """fix-pr should work as a hidden alias."""
+        result = runner.invoke(app, ["fix-pr", "--help"])
+        assert result.exit_code == 0
+
+    @patch("claude_task_master.cli_commands.fix_pr.get_current_branch", return_value="main")
+    def test_rejects_default_branch(self, mock_branch: MagicMock) -> None:
+        """Should error when on main/master branch with no PR arg."""
+        result = runner.invoke(app, [COMMAND])
+        assert result.exit_code == 1
+        output = strip_ansi(result.stdout)
+        assert "default branch" in output
+
+    @patch("claude_task_master.cli_commands.fix_pr.get_current_branch", return_value="master")
+    def test_rejects_master_branch(self, mock_branch: MagicMock) -> None:
+        """Should error when on master branch with no PR arg."""
+        result = runner.invoke(app, [COMMAND])
+        assert result.exit_code == 1
+        output = strip_ansi(result.stdout)
+        assert "default branch" in output
+
+    @patch("claude_task_master.cli_commands.fix_pr.get_current_branch", return_value="feature/foo")
     @patch("claude_task_master.github.GitHubClient")
-    def test_no_pr_for_branch_fails(self, mock_github_class: MagicMock) -> None:
+    def test_no_pr_for_branch_fails(
+        self, mock_github_class: MagicMock, mock_branch: MagicMock
+    ) -> None:
         """Should fail when no PR found for current branch."""
         mock_github = MagicMock()
         mock_github.get_pr_for_current_branch.return_value = None
         mock_github_class.return_value = mock_github
 
-        result = runner.invoke(app, ["fix-pr"])
+        result = runner.invoke(app, [COMMAND])
         assert result.exit_code == 1
         assert "No PR found" in result.stdout
 
+    @patch("claude_task_master.cli_commands.fix_pr.get_current_branch", return_value="feature/foo")
     @patch("claude_task_master.cli_commands.fix_pr.StateManager")
     @patch("claude_task_master.cli_commands.fix_pr.CredentialManager")
     @patch("claude_task_master.github.GitHubClient")
@@ -78,6 +106,7 @@ class TestFixPRCommand:
         mock_github_class: MagicMock,
         mock_cred_class: MagicMock,
         mock_state_class: MagicMock,
+        mock_branch: MagicMock,
     ) -> None:
         """Should detect PR from current branch."""
         mock_github = MagicMock()
@@ -95,7 +124,7 @@ class TestFixPRCommand:
         mock_state.acquire_session_lock.return_value = True
         mock_state_class.return_value = mock_state
 
-        result = runner.invoke(app, ["fix-pr"])
+        result = runner.invoke(app, [COMMAND])
         # Will fail due to exception, but should have detected PR
         assert "Detected PR #52" in result.stdout
 
@@ -124,7 +153,7 @@ class TestFixPRCommand:
         mock_state.acquire_session_lock.return_value = True
         mock_state_class.return_value = mock_state
 
-        result = runner.invoke(app, ["fix-pr", "123", "-m", "5"])
+        result = runner.invoke(app, [COMMAND, "123", "-m", "5"])
         # Will fail due to exception but should parse the option
         assert result.exit_code != 0
         assert "Max iterations: 5" in result.stdout

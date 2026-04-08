@@ -1,4 +1,4 @@
-"""Fix PR command - Iteratively fix CI failures and address review comments."""
+"""Merge PR command - Wait for CI, fix failures, handle comments, and merge."""
 
 from __future__ import annotations
 
@@ -14,7 +14,18 @@ from ..core.credentials import CredentialManager
 from ..core.pr_context import PRContextManager
 from ..core.state import StateManager
 from .ci_helpers import CI_POLL_INTERVAL, CI_START_WAIT, wait_for_ci_complete
-from .fix_session import run_fix_session
+from .fix_session import get_current_branch, run_fix_session
+
+DEFAULT_BRANCHES = {"main", "master", "develop", "development"}
+
+
+def _validate_not_default_branch() -> None:
+    """Error if currently on a default branch (main, master, etc.)."""
+    branch = get_current_branch()
+    if branch and branch in DEFAULT_BRANCHES:
+        console.error(f"Cannot run merge-pr from default branch '{branch}'.")
+        console.info("Checkout the PR branch first: git checkout <branch>")
+        raise typer.Exit(1)
 
 
 def _parse_pr_input(pr_input: str | None) -> int | None:
@@ -45,7 +56,7 @@ def _parse_pr_input(pr_input: str | None) -> int | None:
     return None
 
 
-def fix_pr(
+def merge_pr(
     pr: str | None = typer.Argument(
         None, help="PR number or URL. If not provided, uses current branch's PR."
     ),
@@ -56,19 +67,25 @@ def fix_pr(
         False, "--no-merge", help="Don't merge after fixing, just make it ready."
     ),
 ) -> None:
-    """Fix a PR by iteratively addressing CI failures and review comments.
+    """Monitor a PR, fix CI failures and review comments, then merge.
 
-    Loops until CI is green and all review comments are resolved.
+    Waits for CI checks, fixes any failures using Claude, addresses review
+    comments, resolves merge conflicts, and merges the PR. Loops until
+    everything is green.
 
     Examples:
-        claudetm fix-pr              # Fix PR for current branch
-        claudetm fix-pr 52           # Fix PR #52
-        claudetm fix-pr https://github.com/owner/repo/pull/52
-        claudetm fix-pr 52 -m 5      # Max 5 fix iterations
-        claudetm fix-pr 52 --no-merge
+        claudetm merge-pr              # Merge PR for current branch
+        claudetm merge-pr 52           # Merge PR #52
+        claudetm merge-pr https://github.com/owner/repo/pull/52
+        claudetm merge-pr 52 -m 5      # Max 5 fix iterations
+        claudetm merge-pr 52 --no-merge # Fix but don't merge
     """
     # Lazy import to avoid circular imports
     from ..github import GitHubClient
+
+    # Validate not on default branch (when no explicit PR given)
+    if pr is None:
+        _validate_not_default_branch()
 
     try:
         # Initialize GitHub client
@@ -80,7 +97,7 @@ def fix_pr(
         # Fail fast if user provided invalid PR input
         if pr is not None and pr_number is None:
             console.error(f"Invalid PR input '{pr}'.")
-            console.info("Use a PR number or PR URL, e.g. claudetm fix-pr 123")
+            console.info("Use a PR number or PR URL, e.g. claudetm merge-pr 123")
             raise typer.Exit(1)
 
         if pr_number is None:
@@ -88,7 +105,7 @@ def fix_pr(
             pr_number = github_client.get_pr_for_current_branch()
             if pr_number is None:
                 console.error("No PR found for current branch.")
-                console.info("Specify a PR number: claudetm fix-pr 123")
+                console.info("Specify a PR number: claudetm merge-pr 123")
                 raise typer.Exit(1)
             console.success(f"Detected PR #{pr_number} for current branch")
 
@@ -123,7 +140,7 @@ def fix_pr(
         # Initialize PR context manager
         pr_context = PRContextManager(state_manager, github_client)
 
-        console.info(f"Starting fix-pr loop for PR #{pr_number}")
+        console.info(f"Starting merge-pr loop for PR #{pr_number}")
         console.info(f"Max iterations: {max_iterations}")
         console.info("-" * 40)
 
@@ -256,5 +273,6 @@ def fix_pr(
 
 
 def register_fix_pr_command(app: typer.Typer) -> None:
-    """Register fix-pr command with the Typer app."""
-    app.command(name="fix-pr")(fix_pr)
+    """Register merge-pr command (and fix-pr alias) with the Typer app."""
+    app.command(name="merge-pr")(merge_pr)
+    app.command(name="fix-pr", hidden=True)(merge_pr)  # backwards compat alias

@@ -178,6 +178,7 @@ All commands check `state_manager.exists()` first:
 - `logs`: Show last N lines from log file
 - `progress`: Display progress.md
 - `context`: Display context.md
+- `merge-pr`: Monitor PR, fix CI/comments/conflicts, then merge (alias: `fix-pr`)
 - `clean`: Remove .claude-task-master/ with confirmation
 - `mailbox`: Show mailbox status
 - `mailbox send "msg"`: Send message to mailbox
