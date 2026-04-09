@@ -165,6 +165,7 @@ After fixing everything, end with: TASK COMPLETE"""
         context="",
         model_override=ModelType.OPUS,
         required_branch=current_branch,
+        create_pr=False,
     )
 
     # Post replies to comments using resolution file (if comments were addressed)

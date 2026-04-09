@@ -144,9 +144,7 @@ def merge_pr(
         console.info(f"Max iterations: {max_iterations}")
         console.info("-" * 40)
 
-        iteration = 0
-        while iteration < max_iterations:
-            iteration += 1
+        for iteration in range(1, max_iterations + 1):
             console.info(f"Iteration {iteration}/{max_iterations}")
 
             # Wait for all CI checks to complete
@@ -169,87 +167,88 @@ def merge_pr(
             if has_conflicts:
                 console.error("Conflicts: merge conflicts detected")
 
-            # If anything needs fixing, download both and run combined session
+            # Nothing needs fixing - ready to merge
+            if not ci_failed and not has_comments and not has_conflicts:
+                break
+
+            # Run agent to fix issues
+            agent_ran = run_fix_session(
+                agent,
+                github_client,
+                state_manager,
+                pr_context,
+                pr_number,
+                ci_failed=ci_failed,
+                comment_count=status.unresolved_threads,
+                has_conflicts=has_conflicts,
+            )
+
+            if not agent_ran and not ci_failed:
+                # No actionable work and CI passed - unresolved threads need manual review
+                console.warning("Exiting: unresolved threads need manual review.")
+                state_manager.release_session_lock()
+                raise typer.Exit(1)
+
+            # Wait for CI to start after push
+            console.info(f"Waiting {CI_START_WAIT}s for CI to start...")
+            time.sleep(CI_START_WAIT)
+        else:
+            # for-loop exhausted without break = max iterations used up
+            # Do one final CI check - the last fix may have resolved everything
+            console.info("Max iterations reached - checking final CI status...")
+            status = wait_for_ci_complete(github_client, pr_number)
+            ci_failed = status.ci_state in ("FAILURE", "ERROR")
+            has_comments = status.unresolved_threads > 0
+            has_conflicts = status.mergeable == "CONFLICTING"
+
             if ci_failed or has_comments or has_conflicts:
-                agent_ran = run_fix_session(
-                    agent,
-                    github_client,
-                    state_manager,
-                    pr_context,
-                    pr_number,
-                    ci_failed=ci_failed,
-                    comment_count=status.unresolved_threads,
-                    has_conflicts=has_conflicts,
-                )
-
-                if not agent_ran and not ci_failed:
-                    # No actionable work and CI passed - unresolved threads need manual review
-                    console.warning("Exiting: unresolved threads need manual review.")
-                    state_manager.release_session_lock()
-                    raise typer.Exit(1)
-
-                # Wait for CI to start after push
-                console.info(f"Waiting {CI_START_WAIT}s for CI to start...")
-                time.sleep(CI_START_WAIT)
-                continue
-
-            # All done!
-            console.success("✓ CI passed and all comments resolved!")
-
-            if no_merge:
-                console.success(f"PR #{pr_number} is ready to merge (--no-merge specified)")
-                state_manager.release_session_lock()
-                raise typer.Exit(0)
-
-            # Wait for mergeable status if UNKNOWN or None (GitHub needs time to compute)
-            merge_attempts = 0
-            max_merge_attempts = 6  # 60 seconds total
-            while (
-                status.mergeable == "UNKNOWN" or status.mergeable is None
-            ) and merge_attempts < max_merge_attempts:
-                merge_attempts += 1
-                console.info(
-                    f"⏳ Waiting for mergeable status... ({merge_attempts}/{max_merge_attempts})"
-                )
-                time.sleep(CI_POLL_INTERVAL)
-                status = github_client.get_pr_status(pr_number)
-
-            # Check if ready to merge
-            if status.mergeable == "MERGEABLE":
-                console.info(f"Merging PR #{pr_number}...")
-                try:
-                    github_client.merge_pr(pr_number)
-                    console.success(f"✓ PR #{pr_number} merged successfully!")
-                except Exception as e:
-                    console.error(f"Merge failed: {e}")
-                    console.info("You can merge manually.")
-                    state_manager.release_session_lock()
-                    raise typer.Exit(1) from None
-            elif status.mergeable == "CONFLICTING":
-                console.warning(f"PR #{pr_number} has merge conflicts - manual resolution required")
-                state_manager.release_session_lock()
-                raise typer.Exit(1)
-            elif status.mergeable is None:
-                console.warning(f"PR #{pr_number} mergeability unknown - please check GitHub")
-                console.info("You can merge manually once GitHub computes the status.")
-                state_manager.release_session_lock()
-                raise typer.Exit(1)
-            else:
-                console.warning(
-                    f"PR #{pr_number} mergeable status: {status.mergeable} after {max_merge_attempts} attempts"
-                )
-                console.info("You can merge manually.")
+                console.error(f"Max iterations ({max_iterations}) reached with issues remaining.")
+                console.info("Check the PR manually for remaining issues.")
                 state_manager.release_session_lock()
                 raise typer.Exit(1)
 
+        # All done - CI passed and comments resolved
+        console.success("CI passed and all comments resolved!")
+
+        if no_merge:
+            console.success(f"PR #{pr_number} is ready to merge (--no-merge specified)")
             state_manager.release_session_lock()
             raise typer.Exit(0)
 
-        # Max iterations reached
-        console.error(f"Max iterations ({max_iterations}) reached without success.")
-        console.info("Check the PR manually for remaining issues.")
+        # Wait for mergeable status if UNKNOWN or None (GitHub needs time to compute)
+        merge_attempts = 0
+        max_merge_attempts = 6  # 60 seconds total
+        while (
+            status.mergeable == "UNKNOWN" or status.mergeable is None
+        ) and merge_attempts < max_merge_attempts:
+            merge_attempts += 1
+            console.info(f"Waiting for mergeable status... ({merge_attempts}/{max_merge_attempts})")
+            time.sleep(CI_POLL_INTERVAL)
+            status = github_client.get_pr_status(pr_number)
+
+        # Merge the PR
+        if status.mergeable == "MERGEABLE":
+            console.info(f"Merging PR #{pr_number}...")
+            try:
+                github_client.merge_pr(pr_number)
+                console.success(f"PR #{pr_number} merged successfully!")
+            except Exception as e:
+                console.error(f"Merge failed: {e}")
+                console.info("You can merge manually.")
+                state_manager.release_session_lock()
+                raise typer.Exit(1) from None
+        elif status.mergeable == "CONFLICTING":
+            console.warning(f"PR #{pr_number} has merge conflicts - manual resolution required")
+            state_manager.release_session_lock()
+            raise typer.Exit(1)
+        else:
+            console.warning(f"PR #{pr_number} mergeable status: {status.mergeable}")
+            console.info("You can merge manually.")
+            state_manager.release_session_lock()
+            raise typer.Exit(1)
+
         state_manager.release_session_lock()
-        raise typer.Exit(1)
+        raise typer.Exit(0)
 
     except KeyboardInterrupt:
         console.warning("Interrupted by user")

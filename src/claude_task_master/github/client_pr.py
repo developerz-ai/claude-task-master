@@ -120,6 +120,14 @@ class PROperationsMixin:
         )
 
         data = json.loads(result.stdout)
+
+        # Check for GraphQL errors
+        if "errors" in data:
+            from .exceptions import GitHubError
+
+            error_msg = data["errors"][0].get("message", "Unknown GraphQL error")
+            raise GitHubError(f"GraphQL error: {error_msg}")
+
         pr_data = data["data"]["repository"]["pullRequest"]
 
         return _parse_pr_status_response(pr_number, pr_data)
@@ -263,7 +271,13 @@ def _get_comment_resolved_map(
         )
 
         data = json.loads(result.stdout)
-        threads = data["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
+
+        # Handle GraphQL errors gracefully
+        if "errors" in data or data.get("data") is None:
+            return {}
+
+        pr = data["data"].get("repository", {}).get("pullRequest", {})
+        threads = pr.get("reviewThreads", {}).get("nodes", [])
 
         resolved_map: dict[int, bool] = {}
         for thread in threads:
@@ -274,7 +288,7 @@ def _get_comment_resolved_map(
                     resolved_map[db_id] = is_resolved
 
         return resolved_map
-    except Exception:
+    except (json.JSONDecodeError, KeyError, subprocess.CalledProcessError):
         return {}
 
 
@@ -346,11 +360,13 @@ def _parse_pr_status_response(pr_number: int, pr_data: dict[str, Any]) -> PRStat
     ci_state = "PENDING"
     check_details: list[dict[str, Any]] = []
 
-    if pr_data["commits"]["nodes"]:
-        commit = pr_data["commits"]["nodes"][0]["commit"]
-        if commit["statusCheckRollup"]:
-            ci_state = commit["statusCheckRollup"]["state"]
-            contexts = commit["statusCheckRollup"]["contexts"]["nodes"]
+    commits = pr_data.get("commits", {}).get("nodes", [])
+    if commits:
+        commit = commits[0].get("commit", {})
+        rollup = commit.get("statusCheckRollup")
+        if rollup:
+            ci_state = rollup.get("state", "PENDING")
+            contexts = rollup.get("contexts", {}).get("nodes", [])
             check_details = _parse_check_contexts(contexts)
 
     # Count review threads

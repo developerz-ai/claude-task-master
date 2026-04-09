@@ -704,20 +704,16 @@ class TestFileCorruption:
         messages = storage.get_messages()
         assert messages == []
 
-    def test_wrong_json_type_raises_error(self, state_dir):
-        """Test that wrong JSON type (array instead of object) raises TypeError.
-
-        Note: The current implementation doesn't handle this case gracefully.
-        This test documents the current behavior.
-        """
+    def test_wrong_json_type_recovers(self, state_dir):
+        """Test that wrong JSON type (array instead of object) recovers gracefully."""
         storage = MailboxStorage(state_dir=state_dir)
 
         storage.storage_path.parent.mkdir(parents=True, exist_ok=True)
         storage.storage_path.write_text("[]")  # Array instead of object
 
-        # Current behavior: raises TypeError (not handled)
-        with pytest.raises(TypeError):
-            storage.get_messages()
+        # Should recover gracefully and return empty list
+        messages = storage.get_messages()
+        assert messages == []
 
     def test_missing_required_fields_recovers(self, state_dir):
         """Test recovery from missing required message fields."""
@@ -745,20 +741,16 @@ class TestFileCorruption:
         assert len(messages) == 1
         assert messages[0].content == "New message"
 
-    def test_binary_file_raises_error(self, state_dir):
-        """Test that binary data in mailbox file raises UnicodeDecodeError.
-
-        Note: The current implementation doesn't handle this case gracefully.
-        This test documents the current behavior.
-        """
+    def test_binary_file_recovers(self, state_dir):
+        """Test that binary data in mailbox file recovers gracefully."""
         storage = MailboxStorage(state_dir=state_dir)
 
         storage.storage_path.parent.mkdir(parents=True, exist_ok=True)
         storage.storage_path.write_bytes(b"\x00\x01\x02\x03\xff\xfe")
 
-        # Current behavior: raises UnicodeDecodeError (not handled)
-        with pytest.raises(UnicodeDecodeError):
-            storage.get_messages()
+        # Should recover gracefully and return empty list
+        messages = storage.get_messages()
+        assert messages == []
 
 
 class TestStateManagement:
