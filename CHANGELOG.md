@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.35] - 2026-04-09
+
+### Fixed
+- **merge-pr CI timeout**: `wait_for_ci_complete` had an infinite `while True` loop — added 90-minute timeout
+- **merge-pr exit on success after max iterations**: Last iteration's fix exited with error without checking CI — refactored to `for/else` with final CI check
+- **merge-pr agent creating new PRs**: `run_fix_session` now passes `create_pr=False` (fixing existing PR, not creating new)
+- **Mailbox crash on corrupt file**: Handle `TypeError` (array JSON) and `UnicodeDecodeError` (binary file) gracefully
+- **Missing SONNET_1M model mapping**: `_default_get_model_name()` fallback now includes SONNET_1M
+- **GraphQL error handling**: `get_pr_status` checks for GraphQL error responses, uses safe `.get()` for commit/rollup parsing
+- **PR cycle missing conflict check**: `wait_for_pr_ready` now checks `mergeable == "CONFLICTING"` and has 90-minute timeout
+
+### Added
+- Tests for `ci_helpers`, `fix_session`, and merge-pr loop (42 new tests)
+
 ## [0.1.34] - 2026-04-08
 
 ### Added
@@ -578,8 +592,10 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 - N/A
 
 [Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.32...HEAD
+[0.1.35]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.34...v0.1.35
 [0.1.34]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.33...v0.1.34
 [0.1.33]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.32...v0.1.33
+
 [0.1.32]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.31...v0.1.32
 [0.1.31]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.30...v0.1.31
 [0.1.30]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.29...v0.1.30
