@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 # Polling intervals
 CI_POLL_INTERVAL = 10  # seconds between CI checks (matches orchestrator)
 CI_START_WAIT = 30  # seconds to wait for CI to start after push
+CI_TIMEOUT = 90 * 60  # max seconds to wait for CI (90 minutes)
 
 
 def is_check_pending(check: dict[str, Any]) -> bool:
@@ -50,7 +51,11 @@ def is_check_pending(check: dict[str, Any]) -> bool:
     return False
 
 
-def wait_for_ci_complete(github_client: GitHubClient, pr_number: int) -> PRStatus:
+def wait_for_ci_complete(
+    github_client: GitHubClient,
+    pr_number: int,
+    timeout: int = CI_TIMEOUT,
+) -> PRStatus:
     """Wait for all CI checks to complete.
 
     Fetches required checks from branch protection and waits for all of them
@@ -59,6 +64,7 @@ def wait_for_ci_complete(github_client: GitHubClient, pr_number: int) -> PRStatu
     Args:
         github_client: GitHub client for API calls.
         pr_number: PR number to check.
+        timeout: Maximum seconds to wait for CI (default: 30 minutes).
 
     Returns:
         Final PRStatus after all checks complete.
@@ -69,7 +75,16 @@ def wait_for_ci_complete(github_client: GitHubClient, pr_number: int) -> PRStatu
     status = github_client.get_pr_status(pr_number)
     required_checks = set(github_client.get_required_status_checks(status.base_branch))
 
+    start_time = time.monotonic()
     while True:
+        # Check timeout
+        elapsed = time.monotonic() - start_time
+        if elapsed > timeout:
+            console.warning(
+                f"CI timeout after {timeout}s — returning current status"
+            )
+            return status
+
         status = github_client.get_pr_status(pr_number)
 
         # Get reported check names
