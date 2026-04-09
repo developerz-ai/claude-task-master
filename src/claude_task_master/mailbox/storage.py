@@ -66,8 +66,8 @@ class MailboxStorage:
             with open(self.storage_path) as f:
                 data = json.load(f)
             return MailboxState(**data)
-        except (json.JSONDecodeError, ValidationError):
-            # Corrupted file - return empty state
+        except (json.JSONDecodeError, ValidationError, TypeError, UnicodeDecodeError):
+            # Corrupted or invalid file - return empty state
             return MailboxState()
 
     def _save_state(self, state: MailboxState) -> None:

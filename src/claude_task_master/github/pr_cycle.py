@@ -6,6 +6,9 @@ from ..core.agent import AgentWrapper
 from ..core.state import StateManager, TaskState
 from .client import GitHubClient, PRStatus
 
+# Max time to wait for CI in wait_for_pr_ready (90 minutes)
+PR_READY_TIMEOUT = 90 * 60
+
 
 class PRCycleManager:
     """Manages the PR lifecycle."""
@@ -41,7 +44,11 @@ class PRCycleManager:
         return pr_number
 
     def wait_for_pr_ready(
-        self, pr_number: int, state: TaskState, poll_interval: int = 30
+        self,
+        pr_number: int,
+        state: TaskState,
+        poll_interval: int = 30,
+        timeout: int = PR_READY_TIMEOUT,
     ) -> tuple[bool, str]:
         """
         Wait for PR to be ready to merge.
@@ -49,7 +56,12 @@ class PRCycleManager:
         Returns:
             (ready: bool, reason: str)
         """
+        start_time = time.monotonic()
         while True:
+            # Check timeout
+            if time.monotonic() - start_time > timeout:
+                return False, "ci_timeout"
+
             status = self.github.get_pr_status(pr_number)
 
             # Check CI status
@@ -58,8 +70,12 @@ class PRCycleManager:
                 time.sleep(poll_interval)
                 continue
 
-            if status.ci_state == "FAILURE" or status.ci_state == "ERROR":
+            if status.ci_state in ("FAILURE", "ERROR"):
                 return False, self._format_ci_failure(status)
+
+            # Check for merge conflicts
+            if status.mergeable == "CONFLICTING":
+                return False, "merge_conflict"
 
             # Check for unresolved comments
             if status.unresolved_threads > 0:
@@ -128,8 +144,9 @@ class PRCycleManager:
         lines = ["ci_failure:"]
 
         for check in status.check_details:
-            if check["conclusion"] in ("FAILURE", "ERROR"):
-                lines.append(f"- {check['name']}: {check['conclusion']}")
+            conclusion = (check.get("conclusion") or "").upper()
+            if conclusion in ("FAILURE", "ERROR"):
+                lines.append(f"- {check.get('name', 'unknown')}: {conclusion}")
                 if check.get("url"):
                     lines.append(f"  URL: {check['url']}")
 

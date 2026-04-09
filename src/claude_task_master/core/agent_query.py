@@ -466,6 +466,7 @@ class AgentQueryExecutor:
             ModelType.SONNET: config.models.sonnet,
             ModelType.OPUS: config.models.opus,
             ModelType.HAIKU: config.models.haiku,
+            ModelType.SONNET_1M: config.models.sonnet_1m,
         }
         return model_map.get(model, config.models.sonnet)
 
