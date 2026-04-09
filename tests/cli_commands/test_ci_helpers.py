@@ -57,12 +57,8 @@ class TestWaitForCIComplete:
         status = MagicMock()
         status.ci_state = ci_state
         status.check_details = checks or []
-        status.checks_passed = sum(
-            1 for c in (checks or []) if c.get("conclusion") == "success"
-        )
-        status.checks_failed = sum(
-            1 for c in (checks or []) if c.get("conclusion") == "failure"
-        )
+        status.checks_passed = sum(1 for c in (checks or []) if c.get("conclusion") == "success")
+        status.checks_failed = sum(1 for c in (checks or []) if c.get("conclusion") == "failure")
         status.mergeable = mergeable
         status.base_branch = "main"
         return status

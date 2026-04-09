@@ -47,8 +47,13 @@ class TestRunFixSession:
         pr_context.save_pr_comments.return_value = 0  # no actionable comments
 
         result = run_fix_session(
-            agent, github_client, state_manager, pr_context,
-            pr_number=123, ci_failed=False, comment_count=3,
+            agent,
+            github_client,
+            state_manager,
+            pr_context,
+            pr_number=123,
+            ci_failed=False,
+            comment_count=3,
         )
         assert result is False
         agent.run_work_session.assert_not_called()
@@ -58,8 +63,13 @@ class TestRunFixSession:
         agent, github_client, state_manager, pr_context = self._make_mocks()
 
         result = run_fix_session(
-            agent, github_client, state_manager, pr_context,
-            pr_number=123, ci_failed=True, comment_count=0,
+            agent,
+            github_client,
+            state_manager,
+            pr_context,
+            pr_number=123,
+            ci_failed=True,
+            comment_count=0,
         )
         assert result is True
         agent.run_work_session.assert_called_once()
@@ -69,8 +79,13 @@ class TestRunFixSession:
         agent, github_client, state_manager, pr_context = self._make_mocks()
 
         run_fix_session(
-            agent, github_client, state_manager, pr_context,
-            pr_number=123, ci_failed=True, comment_count=0,
+            agent,
+            github_client,
+            state_manager,
+            pr_context,
+            pr_number=123,
+            ci_failed=True,
+            comment_count=0,
         )
         pr_context.save_ci_failures.assert_called_once_with(123)
 
@@ -79,8 +94,14 @@ class TestRunFixSession:
         agent, github_client, state_manager, pr_context = self._make_mocks()
 
         result = run_fix_session(
-            agent, github_client, state_manager, pr_context,
-            pr_number=123, ci_failed=False, comment_count=0, has_conflicts=True,
+            agent,
+            github_client,
+            state_manager,
+            pr_context,
+            pr_number=123,
+            ci_failed=False,
+            comment_count=0,
+            has_conflicts=True,
         )
         assert result is True
         agent.run_work_session.assert_called_once()
@@ -91,8 +112,13 @@ class TestRunFixSession:
         pr_context.save_pr_comments.return_value = 2
 
         result = run_fix_session(
-            agent, github_client, state_manager, pr_context,
-            pr_number=123, ci_failed=False, comment_count=2,
+            agent,
+            github_client,
+            state_manager,
+            pr_context,
+            pr_number=123,
+            ci_failed=False,
+            comment_count=2,
         )
         assert result is True
         agent.run_work_session.assert_called_once()
@@ -103,8 +129,13 @@ class TestRunFixSession:
         pr_context.save_pr_comments.return_value = 2
 
         run_fix_session(
-            agent, github_client, state_manager, pr_context,
-            pr_number=123, ci_failed=False, comment_count=2,
+            agent,
+            github_client,
+            state_manager,
+            pr_context,
+            pr_number=123,
+            ci_failed=False,
+            comment_count=2,
         )
         pr_context.post_comment_replies.assert_called_once_with(123)
 
@@ -113,8 +144,13 @@ class TestRunFixSession:
         agent, github_client, state_manager, pr_context = self._make_mocks()
 
         run_fix_session(
-            agent, github_client, state_manager, pr_context,
-            pr_number=123, ci_failed=True, comment_count=0,
+            agent,
+            github_client,
+            state_manager,
+            pr_context,
+            pr_number=123,
+            ci_failed=True,
+            comment_count=0,
         )
         pr_context.post_comment_replies.assert_not_called()
 
@@ -123,8 +159,13 @@ class TestRunFixSession:
         agent, github_client, state_manager, pr_context = self._make_mocks()
 
         run_fix_session(
-            agent, github_client, state_manager, pr_context,
-            pr_number=123, ci_failed=True, comment_count=0,
+            agent,
+            github_client,
+            state_manager,
+            pr_context,
+            pr_number=123,
+            ci_failed=True,
+            comment_count=0,
         )
         call_kwargs = agent.run_work_session.call_args[1]
         assert call_kwargs["create_pr"] is False
@@ -134,8 +175,14 @@ class TestRunFixSession:
         agent, github_client, state_manager, pr_context = self._make_mocks()
 
         result = run_fix_session(
-            agent, github_client, state_manager, pr_context,
-            pr_number=123, ci_failed=False, comment_count=0, has_conflicts=False,
+            agent,
+            github_client,
+            state_manager,
+            pr_context,
+            pr_number=123,
+            ci_failed=False,
+            comment_count=0,
+            has_conflicts=False,
         )
         assert result is False
         agent.run_work_session.assert_not_called()
@@ -146,8 +193,13 @@ class TestRunFixSession:
         pr_context.save_pr_comments.return_value = 1
 
         result = run_fix_session(
-            agent, github_client, state_manager, pr_context,
-            pr_number=123, ci_failed=True, comment_count=1,
+            agent,
+            github_client,
+            state_manager,
+            pr_context,
+            pr_number=123,
+            ci_failed=True,
+            comment_count=1,
         )
         assert result is True
         pr_context.save_ci_failures.assert_called_once()

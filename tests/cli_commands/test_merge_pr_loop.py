@@ -74,9 +74,7 @@ class TestMergePRLoopSuccess:
         mock_wait_ci: MagicMock,
     ) -> None:
         """Should exit 0 when CI passes and PR merges successfully."""
-        mock_github, mock_state = _setup_mocks(
-            mock_github_class, mock_cred_class, mock_state_class
-        )
+        mock_github, mock_state = _setup_mocks(mock_github_class, mock_cred_class, mock_state_class)
         mock_wait_ci.return_value = _make_pr_status()
 
         result = runner.invoke(app, [COMMAND, "123"])
@@ -96,9 +94,7 @@ class TestMergePRLoopSuccess:
         mock_wait_ci: MagicMock,
     ) -> None:
         """Should exit 0 with --no-merge when CI is clean."""
-        mock_github, mock_state = _setup_mocks(
-            mock_github_class, mock_cred_class, mock_state_class
-        )
+        mock_github, mock_state = _setup_mocks(mock_github_class, mock_cred_class, mock_state_class)
         mock_wait_ci.return_value = _make_pr_status()
 
         result = runner.invoke(app, [COMMAND, "123", "--no-merge"])
@@ -123,9 +119,7 @@ class TestMergePRLoopSuccess:
         mock_sleep: MagicMock,
     ) -> None:
         """Should fix CI failure, then merge on next iteration."""
-        mock_github, _ = _setup_mocks(
-            mock_github_class, mock_cred_class, mock_state_class
-        )
+        mock_github, _ = _setup_mocks(mock_github_class, mock_cred_class, mock_state_class)
 
         # First: CI fails. Second: CI passes.
         mock_wait_ci.side_effect = [
@@ -178,9 +172,7 @@ class TestMergePRLoopFailures:
         mock_sleep: MagicMock,
     ) -> None:
         """Should exit 1 when PR has merge conflicts discovered at merge time."""
-        mock_github, _ = _setup_mocks(
-            mock_github_class, mock_cred_class, mock_state_class
-        )
+        mock_github, _ = _setup_mocks(mock_github_class, mock_cred_class, mock_state_class)
         # CI passes with MERGEABLE initially, but get_pr_status returns CONFLICTING
         # during the mergeable wait polling
         mock_wait_ci.return_value = _make_pr_status(mergeable="UNKNOWN")
@@ -203,9 +195,7 @@ class TestMergePRLoopFailures:
         mock_wait_ci: MagicMock,
     ) -> None:
         """Should exit 1 when merge raises an exception."""
-        mock_github, _ = _setup_mocks(
-            mock_github_class, mock_cred_class, mock_state_class
-        )
+        mock_github, _ = _setup_mocks(mock_github_class, mock_cred_class, mock_state_class)
         mock_wait_ci.return_value = _make_pr_status()
         mock_github.merge_pr.side_effect = Exception("branch protection")
 
@@ -234,9 +224,7 @@ class TestMergePRMaxIterations:
         mock_sleep: MagicMock,
     ) -> None:
         """After exhausting iterations, should do a final CI check and merge if clean."""
-        mock_github, _ = _setup_mocks(
-            mock_github_class, mock_cred_class, mock_state_class
-        )
+        mock_github, _ = _setup_mocks(mock_github_class, mock_cred_class, mock_state_class)
 
         # 2 iterations of failure, then final check passes
         mock_wait_ci.side_effect = [
@@ -292,9 +280,7 @@ class TestMergePRLockRelease:
         mock_state_class: MagicMock,
         mock_wait_ci: MagicMock,
     ) -> None:
-        _, mock_state = _setup_mocks(
-            mock_github_class, mock_cred_class, mock_state_class
-        )
+        _, mock_state = _setup_mocks(mock_github_class, mock_cred_class, mock_state_class)
         mock_wait_ci.return_value = _make_pr_status()
 
         runner.invoke(app, [COMMAND, "123"])
@@ -313,9 +299,7 @@ class TestMergePRLockRelease:
         mock_wait_ci: MagicMock,
         mock_fix: MagicMock,
     ) -> None:
-        _, mock_state = _setup_mocks(
-            mock_github_class, mock_cred_class, mock_state_class
-        )
+        _, mock_state = _setup_mocks(mock_github_class, mock_cred_class, mock_state_class)
         mock_wait_ci.return_value = _make_pr_status(unresolved_threads=3)
 
         runner.invoke(app, [COMMAND, "123"])
@@ -332,9 +316,7 @@ class TestMergePRLockRelease:
         mock_state_class: MagicMock,
         mock_wait_ci: MagicMock,
     ) -> None:
-        _, mock_state = _setup_mocks(
-            mock_github_class, mock_cred_class, mock_state_class
-        )
+        _, mock_state = _setup_mocks(mock_github_class, mock_cred_class, mock_state_class)
         mock_wait_ci.side_effect = Exception("network error")
 
         runner.invoke(app, [COMMAND, "123"])

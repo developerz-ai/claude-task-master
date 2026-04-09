@@ -64,7 +64,7 @@ def wait_for_ci_complete(
     Args:
         github_client: GitHub client for API calls.
         pr_number: PR number to check.
-        timeout: Maximum seconds to wait for CI (default: 30 minutes).
+        timeout: Maximum seconds to wait for CI (default: 90 minutes).
 
     Returns:
         Final PRStatus after all checks complete.
@@ -80,9 +80,7 @@ def wait_for_ci_complete(
         # Check timeout
         elapsed = time.monotonic() - start_time
         if elapsed > timeout:
-            console.warning(
-                f"CI timeout after {timeout}s — returning current status"
-            )
+            console.warning(f"CI timeout after {timeout}s — returning current status")
             return status
 
         status = github_client.get_pr_status(pr_number)

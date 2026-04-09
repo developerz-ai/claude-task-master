@@ -202,9 +202,7 @@ def merge_pr(
             has_conflicts = status.mergeable == "CONFLICTING"
 
             if ci_failed or has_comments or has_conflicts:
-                console.error(
-                    f"Max iterations ({max_iterations}) reached with issues remaining."
-                )
+                console.error(f"Max iterations ({max_iterations}) reached with issues remaining.")
                 console.info("Check the PR manually for remaining issues.")
                 state_manager.release_session_lock()
                 raise typer.Exit(1)
@@ -224,9 +222,7 @@ def merge_pr(
             status.mergeable == "UNKNOWN" or status.mergeable is None
         ) and merge_attempts < max_merge_attempts:
             merge_attempts += 1
-            console.info(
-                f"Waiting for mergeable status... ({merge_attempts}/{max_merge_attempts})"
-            )
+            console.info(f"Waiting for mergeable status... ({merge_attempts}/{max_merge_attempts})")
             time.sleep(CI_POLL_INTERVAL)
             status = github_client.get_pr_status(pr_number)
 
@@ -242,15 +238,11 @@ def merge_pr(
                 state_manager.release_session_lock()
                 raise typer.Exit(1) from None
         elif status.mergeable == "CONFLICTING":
-            console.warning(
-                f"PR #{pr_number} has merge conflicts - manual resolution required"
-            )
+            console.warning(f"PR #{pr_number} has merge conflicts - manual resolution required")
             state_manager.release_session_lock()
             raise typer.Exit(1)
         else:
-            console.warning(
-                f"PR #{pr_number} mergeable status: {status.mergeable}"
-            )
+            console.warning(f"PR #{pr_number} mergeable status: {status.mergeable}")
             console.info("You can merge manually.")
             state_manager.release_session_lock()
             raise typer.Exit(1)
