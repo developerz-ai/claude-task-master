@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.36] - 2026-04-10
+
+### Fixed
+- **Orchestrator CI polling hang**: `handle_waiting_ci_stage` had no timeout — polled CI status every 10s indefinitely if checks never completed. Added 10-minute timeout (`CI_POLL_TIMEOUT`) that advances to review stage.
+- **No-CI skip**: When no CI checks are configured (no required checks, no check details, no CI state), skip `waiting_ci` entirely instead of hanging.
+- **waiting_reviews pending checks hang**: Same infinite polling loop in `handle_waiting_reviews_stage` when review bot checks (e.g., CodeRabbit) never complete. Added shared timeout.
+- **CI failure with pending checks timeout**: When CI has failures but some checks are still pending, timeout forces failure handling instead of waiting forever.
+
+### Added
+- `ci_poll_start_time` field on `TaskState` for persistent CI poll timeout tracking across cycles
+- 9 new tests for CI polling timeout, no-CI skip, and review checks timeout
+
 ## [0.1.35] - 2026-04-09
 
 ### Fixed
@@ -591,7 +603,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.32...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.36...HEAD
+[0.1.36]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.35...v0.1.36
 [0.1.35]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.34...v0.1.35
 [0.1.34]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.33...v0.1.34
 [0.1.33]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.32...v0.1.33
