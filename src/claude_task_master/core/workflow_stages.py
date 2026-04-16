@@ -1056,6 +1056,13 @@ End with: TASK COMPLETE"""
             self._advance_to_next_task(state)
             return None
 
+        # Wait for deployments to start/finish before running release checks.
+        # Without this, checks run before the deploy pipeline has picked up the
+        # merge, so there's nothing meaningful to monitor.
+        console.info("Waiting 90s for deployment to start before release checks...")
+        if not interruptible_sleep(90):
+            return None
+
         # Extract per-PR release checks from plan.md
         pr_release_checks = None
         plan = self.state_manager.load_plan()

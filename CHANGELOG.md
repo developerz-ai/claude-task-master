@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.38] - 2026-04-16
+
+### Fixed
+- **Release checks ran before deploy started**: After an auto-merge, `handle_releasing_stage` immediately ran release verification — but GitHub Actions / deploy pipelines hadn't picked up the merge yet, so there was nothing meaningful to monitor. Added a 90s wait at the start of the release stage so deployments can start (or finish) before checks run.
+
 ## [0.1.37] - 2026-04-16
 
 ### Changed
@@ -609,7 +614,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.37...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.38...HEAD
+[0.1.38]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.37...v0.1.38
 [0.1.37]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.36...v0.1.37
 [0.1.36]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.35...v0.1.36
 [0.1.35]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.34...v0.1.35
