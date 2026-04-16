@@ -95,12 +95,12 @@ class ToolConfig(Enum):
 
 # Model context window sizes (tokens) for auto-compact threshold calculation.
 # These are defaults; users can override via config.json "context_windows" section.
-# Opus 4.6 and Sonnet 4.5 support 1M context (beta, tier 4+ users).
+# Opus 4.7 and Sonnet 4.6 support 1M context (beta, tier 4+ users).
 # Note: The Agent SDK handles the `context-1m-2025-08-07` beta header internally.
 # These values are only used to calculate when to trigger context compaction.
 # See: https://platform.claude.com/docs/en/build-with-claude/context-windows
 MODEL_CONTEXT_WINDOWS = {
-    ModelType.OPUS: 1_000_000,  # Claude Opus 4.6: 1M context (beta, tier 4+)
+    ModelType.OPUS: 1_000_000,  # Claude Opus 4.7: 1M context (beta, tier 4+)
     ModelType.SONNET: 1_000_000,  # Claude Sonnet 4.5: 1M context (beta, tier 4+)
     ModelType.HAIKU: 200_000,  # Claude Haiku 4.5: 200K context
     ModelType.SONNET_1M: 1_000_000,  # Sonnet with 1M context (always 1M)

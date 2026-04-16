@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.37] - 2026-04-16
+
+### Changed
+- **Upgrade to Claude Opus 4.7**: Default opus model updated from `claude-opus-4-6` to `claude-opus-4-7`. Docstrings and sample configs updated accordingly.
+- **Upgrade claude-agent-sdk**: `>=0.1.49` → `>=0.1.60`. Brings in subagent transcript helpers, distributed tracing support, cascading session deletion, auto permission mode, session forking, `task_budget`, `get_context_usage()`, and several bug fixes (thinking config, empty setting sources, string-prompt deadlock, MCP large tool results). Bundled Claude CLI updated to 2.1.111.
+
 ## [0.1.36] - 2026-04-10
 
 ### Fixed
@@ -603,7 +609,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.36...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.37...HEAD
+[0.1.37]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.36...v0.1.37
 [0.1.36]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.35...v0.1.36
 [0.1.35]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.34...v0.1.35
 [0.1.34]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.33...v0.1.34
