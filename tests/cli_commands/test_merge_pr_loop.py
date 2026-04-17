@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from unittest.mock import MagicMock, patch
 
+import pytest
 from typer.testing import CliRunner
 
 from claude_task_master.cli import app
@@ -15,6 +16,17 @@ COMMAND = "merge-pr"
 # Common patch paths
 FIX_PR = "claude_task_master.cli_commands.fix_pr"
 GITHUB = "claude_task_master.github.GitHubClient"
+
+
+@pytest.fixture(autouse=True)
+def _mock_post_merge_git():
+    """Stub out post-merge git helpers so tests don't shell out to real git."""
+    with (
+        patch(f"{FIX_PR}._checkout_and_pull", return_value=True),
+        patch(f"{FIX_PR}._delete_local_branch"),
+        patch(f"{FIX_PR}.get_current_branch", return_value="feature-branch"),
+    ):
+        yield
 
 
 def strip_ansi(text: str) -> str:

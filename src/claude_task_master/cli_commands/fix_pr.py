@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import time
 from pathlib import Path
 
@@ -17,6 +18,26 @@ from .ci_helpers import CI_POLL_INTERVAL, CI_START_WAIT, wait_for_ci_complete
 from .fix_session import get_current_branch, run_fix_session
 
 DEFAULT_BRANCHES = {"main", "master", "develop", "development"}
+
+
+def _checkout_and_pull(branch: str) -> bool:
+    """Checkout a branch and pull latest changes. Returns True on success."""
+    try:
+        subprocess.run(["git", "checkout", branch], check=True, capture_output=True, text=True)
+        subprocess.run(["git", "pull"], check=True, capture_output=True, text=True)
+        return True
+    except subprocess.CalledProcessError as e:
+        console.warning(f"Could not checkout/pull {branch}: {e.stderr.strip() or e}")
+        return False
+
+
+def _delete_local_branch(branch: str) -> None:
+    """Delete a local branch (best effort)."""
+    try:
+        subprocess.run(["git", "branch", "-D", branch], check=True, capture_output=True, text=True)
+        console.success(f"Deleted local branch {branch}")
+    except subprocess.CalledProcessError as e:
+        console.warning(f"Could not delete local branch {branch}: {e.stderr.strip() or e}")
 
 
 def _validate_not_default_branch() -> None:
@@ -229,6 +250,7 @@ def merge_pr(
         # Merge the PR
         if status.mergeable == "MERGEABLE":
             console.info(f"Merging PR #{pr_number}...")
+            merged_branch = get_current_branch()
             try:
                 github_client.merge_pr(pr_number)
                 console.success(f"PR #{pr_number} merged successfully!")
@@ -237,6 +259,14 @@ def merge_pr(
                 console.info("You can merge manually.")
                 state_manager.release_session_lock()
                 raise typer.Exit(1) from None
+
+            # Switch back to base branch, pull, and delete the merged local branch
+            base_branch = status.base_branch or "main"
+            console.info(f"Checking out to {base_branch}...")
+            if _checkout_and_pull(base_branch):
+                console.success(f"Switched to {base_branch}")
+                if merged_branch and merged_branch != base_branch:
+                    _delete_local_branch(merged_branch)
         elif status.mergeable == "CONFLICTING":
             console.warning(f"PR #{pr_number} has merge conflicts - manual resolution required")
             state_manager.release_session_lock()

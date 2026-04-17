@@ -132,6 +132,20 @@ class WorkflowStageHandler:
                 console.warning(f"Failed to checkout {branch} after recovery: {recovery_error}")
                 return False
 
+    @staticmethod
+    def _delete_local_branch(branch: str) -> None:
+        """Delete a local branch (best effort)."""
+        try:
+            subprocess.run(
+                ["git", "branch", "-D", branch],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            console.success(f"Deleted local branch {branch}")
+        except subprocess.CalledProcessError as e:
+            console.warning(f"Could not delete local branch {branch}: {e.stderr.strip() or e}")
+
     def __init__(
         self,
         agent: AgentWrapper,
@@ -979,6 +993,9 @@ End with: TASK COMPLETE"""
 
         # Clear PR context files and checkout to base branch (only if PR was merged)
         if state.current_pr is not None:
+            # Capture the PR branch before we switch away so we can delete it
+            merged_branch = self._get_current_branch()
+
             base_branch = "main"
             try:
                 # Get base branch from PR before clearing
@@ -1005,6 +1022,10 @@ End with: TASK COMPLETE"""
                 return 1
 
             console.success(f"Switched to {base_branch}")
+
+            # Delete the merged local branch (best effort, skip if same as base)
+            if merged_branch and merged_branch != base_branch:
+                self._delete_local_branch(merged_branch)
 
         # Check if we should run release verification (auto_merge + release guide exists)
         release_guide = self.state_manager.load_release_guide()

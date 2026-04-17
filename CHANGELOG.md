@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.39] - 2026-04-17
+
+### Added
+- **Post-merge branch cleanup**: After a PR merges, both `claudetm merge-pr` and the orchestrator (when `auto_merge=True`) now checkout the PR's base branch, `git pull`, and delete the merged local branch. Previously `merge-pr` left you stranded on the merged branch; the orchestrator checked out base but kept the stale local branch around.
+
 ## [0.1.38] - 2026-04-16
 
 ### Fixed
@@ -614,7 +619,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.38...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.39...HEAD
+[0.1.39]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.38...v0.1.39
 [0.1.38]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.37...v0.1.38
 [0.1.37]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.36...v0.1.37
 [0.1.36]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.35...v0.1.36
