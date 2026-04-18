@@ -77,7 +77,7 @@ This PR has merge conflicts that need to be resolved.
     # Always download CI failures if CI failed
     if ci_failed:
         console.error("CI Failed - Downloading failure logs...")
-        pr_context.save_ci_failures(pr_number)
+        pr_context.save_ci_failures(pr_number, _also_save_comments=False)
         ci_path = f"{pr_dir}/ci/"
         task_sections.append(f"""## CI Failures
 
@@ -97,7 +97,7 @@ Your job is to keep CI green. Pre-existing issues, flaky tests, lint errors - fi
     saved_comment_count = 0
     if comment_count > 0:
         console.warning(f"{comment_count} unresolved comment(s) - Downloading...")
-        saved_comment_count = pr_context.save_pr_comments(pr_number)
+        saved_comment_count = pr_context.save_pr_comments(pr_number, _also_save_ci=False)
         console.detail(f"Saved {saved_comment_count} actionable comment(s) for review")
 
         if saved_comment_count > 0:

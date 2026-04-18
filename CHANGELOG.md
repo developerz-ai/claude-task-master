@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.40] - 2026-04-17
+
+### Fixed
+- **Duplicate CI log + PR comment downloads in `merge-pr`**: `run_fix_session` called both `save_ci_failures` and `save_pr_comments` explicitly, but each method cross-called the other by default (`_also_save_comments=True` / `_also_save_ci=True`). Since each method wipes its directory with `shutil.rmtree` before downloading, the CI logs and comments were being deleted and re-downloaded. Pass `_also_save_comments=False` / `_also_save_ci=False` when called explicitly by `fix_session` to prevent the duplicate round-trip.
+
 ## [0.1.39] - 2026-04-17
 
 ### Added
@@ -619,7 +624,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.39...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.40...HEAD
+[0.1.40]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.39...v0.1.40
 [0.1.39]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.38...v0.1.39
 [0.1.38]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.37...v0.1.38
 [0.1.37]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.36...v0.1.37
