@@ -87,7 +87,7 @@ class TestRunFixSession:
             ci_failed=True,
             comment_count=0,
         )
-        pr_context.save_ci_failures.assert_called_once_with(123)
+        pr_context.save_ci_failures.assert_called_once_with(123, _also_save_comments=False)
 
     def test_returns_true_when_has_conflicts(self) -> None:
         """Should run agent when there are merge conflicts."""
@@ -202,8 +202,9 @@ class TestRunFixSession:
             comment_count=1,
         )
         assert result is True
-        pr_context.save_ci_failures.assert_called_once()
-        pr_context.save_pr_comments.assert_called_once()
+        # Must disable cross-calls so CI logs/comments aren't downloaded twice
+        pr_context.save_ci_failures.assert_called_once_with(123, _also_save_comments=False)
+        pr_context.save_pr_comments.assert_called_once_with(123, _also_save_ci=False)
         agent.run_work_session.assert_called_once()
         # Task description should mention both CI and comments
         call_kwargs = agent.run_work_session.call_args[1]
