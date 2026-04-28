@@ -16,6 +16,7 @@ def build_work_prompt(
     file_hints: list[str] | None = None,
     required_branch: str | None = None,
     create_pr: bool = True,
+    push_only: bool = False,
     pr_group_info: dict | None = None,
     target_branch: str = "main",
     coding_style: str | None = None,
@@ -29,6 +30,8 @@ def build_work_prompt(
         file_hints: Optional list of relevant files to check.
         required_branch: Optional branch name the agent should be on.
         create_pr: If True, instruct agent to create PR. If False, commit only.
+        push_only: If True, push the commit but do NOT create a PR — for fixing
+            an existing PR. Overrides create_pr.
         pr_group_info: Optional dict with PR group context:
             - name: PR group name
             - completed_tasks: List of completed task descriptions in this group
@@ -155,16 +158,37 @@ Grep pattern="exact error message" path="src/"
 ```""",
         )
 
-    # Execution guidelines - conditional based on create_pr flag
-    if create_pr:
+    # Execution guidelines - three modes:
+    #   push_only: fix an existing PR (commit + push, no `gh pr create`)
+    #   create_pr: full workflow (commit + push + create PR)
+    #   else:     commit-only (more tasks remain in PR group)
+    if push_only:
+        execution_content = _build_push_only_execution(target_branch=target_branch)
+    elif create_pr:
         execution_content = _build_full_workflow_execution(target_branch=target_branch)
     else:
         execution_content = _build_commit_only_execution()
 
     builder.add_section("Execution", execution_content)
 
-    # Completion summary - different requirements based on whether PR is needed
-    if create_pr:
+    # Completion summary - different requirements based on workflow mode
+    if push_only:
+        completion_content = """**After completing THIS task, STOP.**
+
+**You MUST commit AND push to update the existing PR (CI re-runs on push).**
+
+Report (keep it short):
+- **Changes:** What was done (1-2 sentences)
+- **Tests:** Pass/fail summary
+- **Commit:** hash (REQUIRED)
+- **Pushed:** confirm `git push` succeeded (REQUIRED)
+- **Blockers:** if any
+
+⚠️ **PR already exists — DO NOT run `gh pr create`. But you MUST push.**
+⚠️ **DO NOT say "TASK COMPLETE" until the push has succeeded.**
+
+End with: `TASK COMPLETE`"""
+    elif create_pr:
         completion_content = """**After completing THIS task, STOP.**
 
 **You MUST push and create a PR before reporting completion.**
@@ -301,6 +325,87 @@ If label doesn't exist, create it and retry.
 **STOP AFTER PR CREATION.** Do not wait for CI, check status, or merge. The orchestrator handles that.
 
 **9. Log File Best Practices**
+- For log/progress files, use APPEND mode (don't read entire file)
+- Example: `echo "message" >> progress.md` instead of Read + Write
+- This avoids context bloat from reading large log files"""
+
+
+def _build_push_only_execution(target_branch: str = "main") -> str:
+    """Build execution instructions for fixing an existing PR (commit + push, no PR create).
+
+    Args:
+        target_branch: The target branch name (for context only — we do NOT rebase
+            during a fix session because rebasing would rewrite already-reviewed
+            commits and disrupt the PR's review threads).
+    """
+    return f"""**1. Check git status first**
+```bash
+git status
+```
+- You should already be on the PR's feature branch (NOT {target_branch}/master/develop).
+- If on a default branch, STOP — something is wrong with the workflow.
+- If on the feature branch, continue.
+
+**2. Understand the task**
+- Read the CI logs and/or PR comments referenced above
+- Read files before modifying
+- Identify tests/lint commands to run
+
+**3. Read project conventions FIRST**
+- Check for `CLAUDE.md` at the repository root - it contains coding requirements
+- Also check: `.claude/instructions.md`, `CONTRIBUTING.md`, `.cursorrules`
+- These files define project-specific coding standards you MUST follow
+
+**4. Make changes**
+- Edit existing files, Write new files
+- Follow project coding style from `CLAUDE.md` and conventions files
+- Stay focused on fixing the issues raised
+- Match existing patterns and code style in the codebase
+
+**5. Verify work**
+```bash
+# Common verification commands
+pytest                    # Python tests
+npm test                  # JS tests
+ruff check . && mypy .   # Python lint/types
+eslint . && tsc          # JS lint/types
+```
+
+**6. Commit properly**
+```bash
+git add -A && git commit -m "$(cat <<'EOF'
+fix: Brief description (50 chars)
+
+- What changed
+- Why needed
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+EOF
+)"
+```
+
+**Note:** The `.claude-task-master/` directory is automatically gitignored - it contains
+orchestrator state files that should never be committed.
+
+**7. Push to update the existing PR** (REQUIRED — DO NOT SKIP!)
+```bash
+git push origin HEAD
+```
+
+⚠️ **CI re-runs on push. Without push, the fix sits unread on your local branch.**
+⚠️ **DO NOT run `gh pr create` — the PR already exists, that command will fail.**
+⚠️ **DO NOT rebase onto {target_branch} during a fix session.** Rebasing rewrites
+already-reviewed commits and disrupts the PR's review threads. Just push.
+
+**If push is rejected** (remote has newer commits, e.g., from a co-reviewer):
+1. `git pull --rebase origin HEAD` to incorporate remote changes
+2. Resolve any conflicts (look for `<<<<<<<`, `=======`, `>>>>>>>` markers)
+3. Run tests again to verify nothing broke
+4. `git push origin HEAD`
+
+**STOP AFTER PUSH.** Do not wait for CI, check status, or merge. The orchestrator handles that.
+
+**8. Log File Best Practices**
 - For log/progress files, use APPEND mode (don't read entire file)
 - Example: `echo "message" >> progress.md` instead of Read + Write
 - This avoids context bloat from reading large log files"""

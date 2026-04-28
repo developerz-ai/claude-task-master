@@ -495,8 +495,8 @@ class WorkflowStageHandler:
         )
 
         # Wait for CI to start after push
-        console.info("Waiting 30s for CI to start...")
-        if not interruptible_sleep(30):
+        console.info("Waiting 60s for CI to start...")
+        if not interruptible_sleep(60):
             return None
 
         state.workflow_stage = "waiting_ci"
@@ -878,8 +878,8 @@ End with: TASK COMPLETE"""
         self.pr_context.post_comment_replies(state.current_pr)
 
         # Wait for CI to start after push
-        console.info("Waiting 30s for CI to start...")
-        if not interruptible_sleep(30):
+        console.info("Waiting 60s for CI to start...")
+        if not interruptible_sleep(60):
             return None
 
         state.workflow_stage = "waiting_ci"
@@ -1221,8 +1221,8 @@ End with: TASK COMPLETE"""
             return None
 
         # Wait for CI to start on the fix PR
-        console.info("Waiting 30s for CI to start on release fix PR...")
-        if not interruptible_sleep(30):
+        console.info("Waiting 60s for CI to start on release fix PR...")
+        if not interruptible_sleep(60):
             return None
 
         # Reset current_pr so pr_created re-discovers the new fix PR from the current branch

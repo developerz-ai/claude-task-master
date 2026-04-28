@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.41] - 2026-04-28
+
+### Fixed
+- **`merge-pr` fix sessions never pushed**: `run_fix_session` called `agent.run_work_session(create_pr=False)`, which selected the commit-only execution prompt. That prompt explicitly tells the agent **"DO NOT push or create PR — more tasks remain in this PR group."** So fixes were committed locally and never pushed, CI re-ran on the unchanged remote, the loop hit the same failure forever. Added a third `push_only=True` mode that commits + pushes (no `gh pr create`, no rebase onto target) so the existing PR's CI re-runs on the fix.
+
+### Changed
+- **CI start wait: 30s → 60s**: `cli_commands/ci_helpers.CI_START_WAIT`, plus the four inline waits in `core/workflow_stages.py` and `core/orchestrator.py`. GitHub Actions sometimes took >30s to register a push and start the new run, so the orchestrator/`merge-pr` would poll the *previous* run's still-failing checks and immediately re-enter the fix loop. 60s gives the new run time to start.
+
 ## [0.1.40] - 2026-04-17
 
 ### Fixed
@@ -624,7 +632,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.40...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.41...HEAD
+[0.1.41]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.40...v0.1.41
 [0.1.40]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.39...v0.1.40
 [0.1.39]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.38...v0.1.39
 [0.1.38]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.37...v0.1.38

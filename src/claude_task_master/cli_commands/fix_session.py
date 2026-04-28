@@ -64,14 +64,7 @@ def run_fix_session(
     if has_conflicts:
         console.error("Merge Conflicts - Agent will resolve...")
         task_sections.append("""## Merge Conflicts
-
-This PR has merge conflicts that need to be resolved.
-
-1. Run `git fetch origin` to get latest changes
-2. Run `git merge origin/main` (or the base branch)
-3. Resolve any conflicts in the affected files
-4. Run tests to verify the merge didn't break anything
-5. Commit the merge resolution""")
+`git fetch origin` → `git merge origin/main` → resolve conflicts → run tests → commit.""")
         has_actionable_work = True
 
     # Always download CI failures if CI failed
@@ -80,17 +73,8 @@ This PR has merge conflicts that need to be resolved.
         pr_context.save_ci_failures(pr_number, _also_save_comments=False)
         ci_path = f"{pr_dir}/ci/"
         task_sections.append(f"""## CI Failures
-
-**Read the CI failure logs from:** `{ci_path}`
-
-Use Glob to find all .txt files, then Read each one to understand the errors.
-
-**IMPORTANT:** Fix ALL CI failures, even if they seem unrelated to your current work.
-Your job is to keep CI green. Pre-existing issues, flaky tests, lint errors - fix them all.
-
-- Read ALL files in the ci/ directory
-- Understand ALL error messages (lint, tests, types, etc.)
-- Fix everything that's failing - don't skip anything""")
+Logs: `{ci_path}` (Glob `*.txt`, Read only failing files).
+Fix ALL failures — tests, lint, types. Pre-existing issues count too.""")
         has_actionable_work = True
 
     # Always download comments if there are unresolved threads
@@ -104,35 +88,16 @@ Your job is to keep CI green. Pre-existing issues, flaky tests, lint errors - fi
             comments_path = f"{pr_dir}/comments/"
             resolve_json_path = f"{pr_dir}/resolve-comments.json"
             task_sections.append(f"""## Review Comments
+Comments: `{comments_path}` (Glob `*.txt`, Read each).
+For each: fix it OR explain why not.
 
-**Read the review comments from:** `{comments_path}`
-
-Use Glob to find all .txt files, then Read each one to understand the feedback.
-
-For each comment:
-- Make the requested change, OR
-- Explain why it's not needed
-
-After addressing comments, create a resolution summary file at: `{resolve_json_path}`
-
-**Resolution file format:**
+Write resolution file: `{resolve_json_path}`
 ```json
-{{
-  "pr": {pr_number},
-  "resolutions": [
-    {{
-      "thread_id": "THREAD_ID_FROM_COMMENT_FILE",
-      "action": "fixed|explained|skipped",
-      "message": "Brief explanation of what was done"
-    }}
-  ]
-}}
+{{"pr": {pr_number}, "resolutions": [
+  {{"thread_id": "FROM_COMMENT_FILE", "action": "fixed|explained|skipped", "message": "..."}}
+]}}
 ```
-
-Copy the Thread ID from each comment file into the resolution JSON.
-
-**IMPORTANT: DO NOT resolve threads directly using GitHub GraphQL mutations.**
-The orchestrator will handle thread resolution automatically after you create the resolution file.""")
+DO NOT resolve threads via GraphQL — orchestrator handles that from the JSON.""")
             has_actionable_work = True
 
     # Guard against loops when nothing actionable
@@ -149,14 +114,7 @@ The orchestrator will handle thread resolution automatically after you create th
 
 {chr(10).join(task_sections)}
 
-## Instructions
-
-1. Read ALL relevant files (CI logs and/or comments)
-2. Fix ALL issues found
-3. Run tests/lint locally to verify everything passes
-4. Commit and push the fixes
-
-After fixing everything, end with: TASK COMPLETE"""
+Read → fix all → test/lint → commit → push. End with: TASK COMPLETE"""
 
     console.info("Running agent to fix all issues...")
     current_branch = get_current_branch()
@@ -166,6 +124,7 @@ After fixing everything, end with: TASK COMPLETE"""
         model_override=ModelType.OPUS,
         required_branch=current_branch,
         create_pr=False,
+        push_only=True,
     )
 
     # Post replies to comments using resolution file (if comments were addressed)

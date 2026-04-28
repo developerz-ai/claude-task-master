@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 # Polling intervals
 CI_POLL_INTERVAL = 10  # seconds between CI checks (matches orchestrator)
-CI_START_WAIT = 30  # seconds to wait for CI to start after push
+CI_START_WAIT = 60  # seconds to wait for CI to start after push
 CI_TIMEOUT = 90 * 60  # max seconds to wait for CI (90 minutes)
 
 

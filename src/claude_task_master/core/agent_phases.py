@@ -174,6 +174,7 @@ class AgentPhaseExecutor:
         model_override: ModelType | None = None,
         required_branch: str | None = None,
         create_pr: bool = True,
+        push_only: bool = False,
         pr_group_info: dict | None = None,
         target_branch: str = "main",
         coding_style: str | None = None,
@@ -188,6 +189,8 @@ class AgentPhaseExecutor:
                            Used for dynamic model routing based on task complexity.
             required_branch: Optional branch name the agent should be on.
             create_pr: If True, instruct agent to create PR. If False, commit only.
+            push_only: If True, push the commit but do NOT create a PR (for fixing
+                an existing PR). Overrides create_pr.
             pr_group_info: Optional dict with PR group context (name, completed_tasks, etc).
             target_branch: The target branch for rebasing (default: "main").
             coding_style: Optional coding style guide to inject into prompt.
@@ -202,6 +205,7 @@ class AgentPhaseExecutor:
             pr_comments=pr_comments,
             required_branch=required_branch,
             create_pr=create_pr,
+            push_only=push_only,
             pr_group_info=pr_group_info,
             target_branch=target_branch,
             coding_style=coding_style,

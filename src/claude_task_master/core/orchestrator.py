@@ -1456,8 +1456,8 @@ After completing your fixes, end with: TASK COMPLETE"""
                     return False
 
                 # Wait for CI to restart after push
-                console.info("Waiting 30s for CI to restart...")
-                if not interruptible_sleep(30):
+                console.info("Waiting 60s for CI to restart...")
+                if not interruptible_sleep(60):
                     return False
             else:
                 # Interrupted or timed out
