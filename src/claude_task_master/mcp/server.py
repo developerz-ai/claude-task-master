@@ -225,6 +225,7 @@ def create_server(
         goal: str,
         model: str = "opus",
         auto_merge: bool = True,
+        enable_release: bool = False,
         max_sessions: int | None = None,
         max_prs: int | None = None,
         pause_on_pr: bool = False,
@@ -248,7 +249,15 @@ def create_server(
             Dictionary indicating success with run_id or failure.
         """
         return tools.initialize_task(
-            work_dir, goal, model, auto_merge, max_sessions, max_prs, pause_on_pr, state_dir
+            work_dir,
+            goal,
+            model,
+            auto_merge,
+            max_sessions,
+            max_prs,
+            pause_on_pr,
+            state_dir,
+            enable_release=enable_release,
         )
 
     @mcp.tool()
@@ -337,6 +346,7 @@ def create_server(
     @mcp.tool()
     def update_config(
         auto_merge: bool | None = None,
+        enable_release: bool | None = None,
         max_sessions: int | None = None,
         max_prs: int | None = None,
         pause_on_pr: bool | None = None,
@@ -368,6 +378,7 @@ def create_server(
         return tools.update_config(
             work_dir,
             auto_merge=auto_merge,
+            enable_release=enable_release,
             max_sessions=max_sessions,
             max_prs=max_prs,
             pause_on_pr=pause_on_pr,

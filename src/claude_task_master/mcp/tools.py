@@ -527,6 +527,8 @@ def initialize_task(
     max_prs: int | None = None,
     pause_on_pr: bool = False,
     state_dir: str | None = None,
+    *,
+    enable_release: bool = False,
 ) -> dict[str, Any]:
     """Initialize a new task with the given goal.
 
@@ -555,6 +557,7 @@ def initialize_task(
     try:
         options = TaskOptions(
             auto_merge=auto_merge,
+            enable_release=enable_release,
             max_sessions=max_sessions,
             max_prs=max_prs,
             pause_on_pr=pause_on_pr,
@@ -837,6 +840,8 @@ def update_config(
     log_format: str | None = None,
     pr_per_task: bool | None = None,
     state_dir: str | None = None,
+    *,
+    enable_release: bool | None = None,
 ) -> dict[str, Any]:
     """Update task configuration options at runtime.
 
@@ -866,6 +871,8 @@ def update_config(
     kwargs: dict[str, bool | int | str | None] = {}
     if auto_merge is not None:
         kwargs["auto_merge"] = auto_merge
+    if enable_release is not None:
+        kwargs["enable_release"] = enable_release
     if max_sessions is not None:
         kwargs["max_sessions"] = max_sessions
     if max_prs is not None:

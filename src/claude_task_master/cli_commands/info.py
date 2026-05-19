@@ -49,6 +49,7 @@ def status() -> None:
 
         console.print("\n[cyan]Options:[/cyan]")
         console.print(f"  Auto-merge: {state.options.auto_merge}")
+        console.print(f"  Release phase: {state.options.enable_release}")
         console.print(f"  Max sessions: {state.options.max_sessions or 'unlimited'}")
         console.print(f"  Pause on PR: {state.options.pause_on_pr}")
         console.print(f"  Log level: {state.options.log_level}")

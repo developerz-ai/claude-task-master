@@ -110,6 +110,11 @@ def start(
         "--auto-merge/--no-auto-merge",
         help="Automatically merge PRs when CI passes and approved",
     ),
+    enable_release: bool = typer.Option(
+        False,
+        "--release/--no-release",
+        help="Run post-merge release verification (deploy/health/migration/error checks)",
+    ),
     max_sessions: int | None = typer.Option(
         None,
         "--max-sessions",
@@ -229,6 +234,7 @@ def start(
         console.print("Initializing task state...")
         options = TaskOptions(
             auto_merge=auto_merge,
+            enable_release=enable_release,
             max_sessions=max_sessions,
             max_prs=max_prs,
             pause_on_pr=pause_on_pr,

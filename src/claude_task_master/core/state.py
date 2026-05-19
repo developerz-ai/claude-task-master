@@ -77,6 +77,7 @@ class TaskOptions(BaseModel):
     """Options for task execution."""
 
     auto_merge: bool = True
+    enable_release: bool = False
     max_sessions: int | None = None
     max_prs: int | None = None
     pause_on_pr: bool = False

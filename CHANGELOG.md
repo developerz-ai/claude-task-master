@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.42] - 2026-05-19
+
+### Changed
+- **Release phase is now opt-in (default off)**: `TaskOptions.enable_release` defaults to `False`. The post-merge release-verification flow (deploy/health/migration/error checks) no longer runs unless explicitly enabled. Previously, any `auto_merge=True` run would trigger `release.md` discovery during planning and a 90s+ release-verification stage after each merge — often a no-op but always paid the cost. Use `--release` to opt in.
+- **`Planner.ensure_release_guide(auto_merge=...)` → `ensure_release_guide(enable_release=...)`**: signature change. The release guide is only generated when the release phase is enabled (no more guide generation just because `auto_merge=True`).
+
+### Added
+- **`--release/--no-release` CLI flag** on `claudetm start` and `claudetm config-update`. Off by default. Mirrored in API (`TaskInitRequest.enable_release`, `ConfigUpdateRequest.enable_release`) and MCP (`initialize_task`, `update_config`).
+- **`enable_release` field on `TaskOptions`** (default `False`). Surfaced in `claudetm status` output as "Release phase: …".
+
+### Dependencies
+- Upgraded all dependencies: `claude-agent-sdk` 0.1.60 → 0.2.82, `fastapi` 0.128.7 → 0.136.1, `mcp` 1.26.0 → 1.27.1, `pydantic` 2.12.5 → 2.13.4, `typer` 0.22.0 → 0.25.1, `rich` 14.3.2 → 15.0.0, `starlette` 0.50.0 → 1.0.0, `mypy` 1.19.1 → 2.1.0, `ruff` 0.15.0 → 0.15.13, plus transitive updates.
+
 ## [0.1.41] - 2026-04-28
 
 ### Fixed
@@ -632,7 +645,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.41...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.42...HEAD
+[0.1.42]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.41...v0.1.42
 [0.1.41]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.40...v0.1.41
 [0.1.40]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.39...v0.1.40
 [0.1.39]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.38...v0.1.39

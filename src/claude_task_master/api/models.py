@@ -171,6 +171,10 @@ class ConfigUpdateRequest(BaseModel):
         default=None,
         description="Whether to auto-merge PRs when approved",
     )
+    enable_release: bool | None = Field(
+        default=None,
+        description="Whether to run post-merge release verification",
+    )
     max_sessions: int | None = Field(
         default=None,
         ge=1,
@@ -254,6 +258,10 @@ class TaskInitRequest(BaseModel):
     auto_merge: bool = Field(
         default=True,
         description="Whether to auto-merge PRs when approved",
+    )
+    enable_release: bool = Field(
+        default=False,
+        description="Whether to run post-merge release verification",
     )
     max_sessions: int | None = Field(
         default=None,
@@ -407,6 +415,7 @@ class TaskOptionsResponse(BaseModel):
     """
 
     auto_merge: bool
+    enable_release: bool = False
     max_sessions: int | None
     max_prs: int | None
     pause_on_pr: bool

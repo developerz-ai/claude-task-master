@@ -43,7 +43,7 @@ class Planner:
         console.warning("Could not generate coding style guide")
         return None
 
-    def ensure_release_guide(self, auto_merge: bool = True) -> str | None:
+    def ensure_release_guide(self, enable_release: bool = False) -> str | None:
         """Ensure release guide exists, generating it if needed.
 
         Checks if release.md exists. If not, generates it by probing the
@@ -54,7 +54,8 @@ class Planner:
         becomes a no-op.
 
         Args:
-            auto_merge: Whether auto-merge is enabled. Skips generation if False.
+            enable_release: Whether the release phase is enabled. Skips
+                generation if False (the default).
 
         Returns:
             The release guide content, or None if generation failed.
@@ -65,9 +66,9 @@ class Planner:
             console.info("Using existing release guide")
             return release_guide
 
-        # Only generate if auto_merge is enabled
-        if not auto_merge:
-            console.info("Auto-merge disabled — skipping release guide generation")
+        # Only generate if the release phase is enabled
+        if not enable_release:
+            console.info("Release phase disabled — skipping release guide generation")
             return None
 
         # Generate release guide by probing infrastructure
@@ -97,15 +98,15 @@ class Planner:
         coding_style = self.ensure_coding_style()
 
         # Load state options if available
-        auto_merge = True
+        enable_release = False
         max_prs = None
         if self.state_manager.state_file.exists():
             state = self.state_manager.load_state()
-            auto_merge = state.options.auto_merge
+            enable_release = state.options.enable_release
             max_prs = state.options.max_prs
 
-        # Ensure release guide exists (generate if needed, auto_merge only)
-        release_guide = self.ensure_release_guide(auto_merge=auto_merge)
+        # Ensure release guide exists (generate if needed, only when release enabled)
+        release_guide = self.ensure_release_guide(enable_release=enable_release)
 
         # Load any existing context
         context = self.state_manager.load_context()

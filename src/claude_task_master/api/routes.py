@@ -282,6 +282,7 @@ def create_info_router() -> APIRouter:
                 workflow_stage=workflow_stage_enum,
                 options=TaskOptionsResponse(
                     auto_merge=state.options.auto_merge,
+                    enable_release=state.options.enable_release,
                     max_sessions=state.options.max_sessions,
                     max_prs=state.options.max_prs,
                     pause_on_pr=state.options.pause_on_pr,
@@ -1065,6 +1066,7 @@ def create_task_router() -> APIRouter:
             logger.info(f"Initializing new task: {task_init.goal}")
             options = TaskOptions(
                 auto_merge=task_init.auto_merge,
+                enable_release=task_init.enable_release,
                 max_sessions=task_init.max_sessions,
                 max_prs=task_init.max_prs,
                 pause_on_pr=task_init.pause_on_pr,

@@ -71,6 +71,7 @@ class TestTaskOptions:
         dump = options.model_dump()
         assert dump == {
             "auto_merge": False,
+            "enable_release": False,
             "max_sessions": 3,
             "max_prs": 2,
             "pause_on_pr": False,

@@ -1027,9 +1027,10 @@ End with: TASK COMPLETE"""
             if merged_branch and merged_branch != base_branch:
                 self._delete_local_branch(merged_branch)
 
-        # Check if we should run release verification (auto_merge + release guide exists)
+        # Check if we should run release verification
+        # (auto_merge + enable_release + release guide exists)
         release_guide = self.state_manager.load_release_guide()
-        if state.options.auto_merge and release_guide:
+        if state.options.auto_merge and state.options.enable_release and release_guide:
             # Check if the release guide has actual checks (not just "no verification available")
             if "no release verification available" not in release_guide.lower():
                 console.info("Starting release verification...")
