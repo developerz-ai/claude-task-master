@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.43] - 2026-05-19
+
+### Fixed
+- **Hung sessions when SDK stream stalls**: `AgentQueryExecutor._execute_query` consumed `query()` via a bare `async for` with no idle timeout. When the upstream transport silently half-opened or the server never sent the final `ResultMessage` (observed after long agent responses), the iterator parked on `__anext__()` forever — no error raised, no retry triggered, no progress. A real session sat idle for 53 minutes after the agent had already printed `TASK COMPLETE`, until SIGINT broke it. The watchdog now raises `APITimeoutError` after `CLAUDETM_STREAM_IDLE_TIMEOUT_SEC` (default 600s = 10min) of message-gap silence, which feeds the existing retry path. A separate hard cap of 2 stream-idle-timeouts per query (the windowed counter would reset between them and could otherwise loop forever) raises `ConsecutiveFailuresError` to bail cleanly. The SDK iterator's `aclose()` is now always invoked in a `finally` to release transport resources.
+
 ## [0.1.42] - 2026-05-19
 
 ### Changed
@@ -645,7 +650,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.42...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.43...HEAD
+[0.1.43]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.42...v0.1.43
 [0.1.42]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.41...v0.1.42
 [0.1.41]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.40...v0.1.41
 [0.1.40]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.39...v0.1.40

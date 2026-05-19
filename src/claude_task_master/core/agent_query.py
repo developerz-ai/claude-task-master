@@ -43,6 +43,16 @@ if TYPE_CHECKING:
     from .rate_limit import RateLimitConfig
 
 
+# Maximum gap (seconds) between consecutive messages from the SDK stream before
+# we treat the stream as stalled. The SDK's `async for` over `query()` has no
+# built-in idle timeout: if the upstream connection silently half-opens or the
+# server never sends a final ResultMessage, the iterator parks on __anext__()
+# forever. 10 minutes is long enough that genuine long-running tool calls
+# (which still emit ToolResultBlock traffic) don't trip it, but short enough
+# that a hung session is caught quickly. Override via env var.
+STREAM_IDLE_TIMEOUT_SEC = float(os.environ.get("CLAUDETM_STREAM_IDLE_TIMEOUT_SEC", "600"))
+
+
 class AgentQueryExecutor:
     """Handles query execution with retry logic and circuit breaker.
 
@@ -90,6 +100,13 @@ class AgentQueryExecutor:
         self._consecutive_failures = 0
         self._first_failure_time: float | None = None
         self._failure_window = 60.0  # 1 minute window
+
+        # Separate counter for stream idle-timeouts. The windowed counter above
+        # would reset between timeouts (since each timeout exceeds the window),
+        # so we need a hard cap to prevent infinite retry loops on persistently
+        # broken upstream streams.
+        self._stream_idle_timeouts = 0
+        self._stream_idle_timeout_cap = 2
 
     async def run_query(
         self,
@@ -181,6 +198,7 @@ class AgentQueryExecutor:
         """Reset the failure counter after a successful query."""
         self._consecutive_failures = 0
         self._first_failure_time = None
+        self._stream_idle_timeouts = 0
 
     def _get_retry_delay(self, error: Exception) -> float:
         """Calculate the retry delay for a given error and attempt number.
@@ -269,6 +287,18 @@ class AgentQueryExecutor:
                 console.warning("Circuit breaker opened due to repeated failures")
                 raise
             except TRANSIENT_ERRORS as e:
+                # Stream idle-timeouts have their own hard cap (each one
+                # takes ~10min, so the windowed counter would never trip).
+                if isinstance(e, APITimeoutError) and e.timeout == STREAM_IDLE_TIMEOUT_SEC:
+                    self._stream_idle_timeouts += 1
+                    if self._stream_idle_timeouts >= self._stream_idle_timeout_cap:
+                        console.error(
+                            f"Stream stalled {self._stream_idle_timeouts} times - "
+                            "giving up to avoid infinite retry loop",
+                            flush=True,
+                        )
+                        raise ConsecutiveFailuresError(self._stream_idle_timeouts, e) from e
+
                 # Record failure (may raise ConsecutiveFailuresError)
                 self._record_failure(e)
 
@@ -425,16 +455,43 @@ class AgentQueryExecutor:
             except Exception as e:
                 raise SDKInitializationError("ClaudeAgentOptions", e) from e
 
-            # Execute query
+            # Execute query with per-message idle-timeout watchdog.
+            # See STREAM_IDLE_TIMEOUT_SEC for rationale.
+            stream = self.query(prompt=prompt, options=options)
             try:
-                async for message in self.query(prompt=prompt, options=options):
+                while True:
+                    try:
+                        message = await asyncio.wait_for(
+                            stream.__anext__(),
+                            timeout=STREAM_IDLE_TIMEOUT_SEC,
+                        )
+                    except StopAsyncIteration:
+                        break
+                    except TimeoutError as e:
+                        console.newline()
+                        console.warning(
+                            f"Stream idle for {STREAM_IDLE_TIMEOUT_SEC:.0f}s - "
+                            "treating as upstream stall",
+                            flush=True,
+                        )
+                        raise APITimeoutError(STREAM_IDLE_TIMEOUT_SEC, e) from e
+                    except APITimeoutError:
+                        raise
+                    except Exception as e:
+                        raise self._classify_api_error(e) from e
+
                     if process_message_func:
                         result_text = process_message_func(message, result_text)
                     else:
                         result_text = self._default_process_message(message, result_text)
-            except Exception as e:
-                # Classify the error
-                raise self._classify_api_error(e) from e
+            finally:
+                # Release SDK transport resources (HTTP connection, subprocess).
+                aclose = getattr(stream, "aclose", None)
+                if aclose is not None:
+                    try:
+                        await aclose()
+                    except Exception:
+                        pass
 
         finally:
             # Always restore original directory
