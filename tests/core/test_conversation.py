@@ -639,6 +639,47 @@ class TestQueryTask:
 
         assert "Connection failed" in str(exc_info.value)
 
+    @pytest.mark.asyncio
+    async def test_query_task_stalled_stream_raises_timeout(self, temp_dir):
+        """A stalled receive_response() stream must raise QueryExecutionError
+        instead of hanging forever — same upstream bug as agent_query.py
+        (issue #30333). We patch STREAM_IDLE_TIMEOUT_SEC to a tiny value
+        and use a never-resolving Future so the test runs instantly."""
+        import asyncio as _asyncio
+
+        manager = ConversationManager(working_dir=str(temp_dir))
+        mock_client = MagicMock()
+        mock_client.query = AsyncMock()
+
+        class StallingIter:
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                await _asyncio.Future()  # never resolves
+                raise StopAsyncIteration  # unreachable
+
+        mock_client.receive_response = MagicMock(return_value=StallingIter())
+
+        session = ConversationSession(
+            client=mock_client, manager=manager, group_id="test-group"
+        )
+
+        with (
+            patch(
+                "claude_task_master.core.conversation.STREAM_IDLE_TIMEOUT_SEC", 0.001
+            ),
+            patch("claude_task_master.core.conversation.console"),
+        ):
+            with pytest.raises(QueryExecutionError) as exc_info:
+                await session.query_task("Query")
+
+        # The inner QueryExecutionError ("stream stalled") gets re-wrapped
+        # by the outer except handler — check for either layer's message.
+        assert "stalled" in str(exc_info.value).lower() or "stream" in str(
+            exc_info.value
+        ).lower()
+
 
 # =============================================================================
 # Test Message Processing

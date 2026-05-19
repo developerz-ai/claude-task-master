@@ -6,12 +6,14 @@ context across multiple tasks within the same group.
 
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
 from . import console
+from .agent_query import STREAM_IDLE_TIMEOUT_SEC
 from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 from .config_loader import get_config
 from .rate_limit import RateLimitConfig
@@ -344,8 +346,26 @@ class ConversationSession:
             # Send query (conversation context is maintained by the client)
             await self.client.query(prompt)
 
-            # Process response
-            async for message in self.client.receive_response():
+            # Process response with idle-timeout watchdog. Same upstream bug as
+            # agent_query.py: receive_response() has no built-in stall timeout.
+            stream = self.client.receive_response().__aiter__()
+            while True:
+                try:
+                    message = await asyncio.wait_for(
+                        stream.__anext__(),
+                        timeout=STREAM_IDLE_TIMEOUT_SEC,
+                    )
+                except StopAsyncIteration:
+                    break
+                except TimeoutError as e:
+                    console.error(
+                        f"Conversation stream idle for {STREAM_IDLE_TIMEOUT_SEC:.0f}s "
+                        "- treating as upstream stall"
+                    )
+                    raise QueryExecutionError(
+                        f"Conversation stream stalled after {STREAM_IDLE_TIMEOUT_SEC:.0f}s",
+                        e,
+                    ) from e
                 result_text = self._process_message(message, result_text)
 
         except Exception as e:

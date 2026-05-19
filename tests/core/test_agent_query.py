@@ -548,6 +548,235 @@ class TestAgentWrapperRetryLogic:
 
 
 # =============================================================================
+# Stream Idle-Timeout Watchdog Tests
+# =============================================================================
+
+
+class TestStreamIdleTimeoutWatchdog:
+    """Tests for the stream idle-timeout watchdog.
+
+    Background: the upstream Claude Agent SDK's query() iterator has no built-in
+    idle timeout (see query.py:809 in the SDK source). Under bug
+    https://github.com/anthropics/claude-code/issues/30333 the CLI can drop the
+    final ResultMessage on long sessions and the iterator parks forever. Our
+    watchdog wraps __anext__() with asyncio.wait_for(timeout=N) and raises
+    APITimeoutError on stall, which feeds the existing retry path. After 2
+    stalls we raise ConsecutiveFailuresError to avoid infinite loops (the
+    windowed counter would otherwise reset between long timeouts).
+
+    All tests stub asyncio.sleep and patch STREAM_IDLE_TIMEOUT_SEC to keep
+    runtime instant.
+    """
+
+    @pytest.fixture
+    def agent(self, temp_dir):
+        """Create an AgentWrapper instance for testing."""
+        mock_sdk = MagicMock()
+        mock_sdk.query = AsyncMock()
+        mock_sdk.ClaudeAgentOptions = MagicMock()
+
+        with patch.dict("sys.modules", {"claude_agent_sdk": mock_sdk}):
+            agent = AgentWrapper(
+                access_token="test-token",
+                model=ModelType.SONNET,
+                working_dir=str(temp_dir),
+            )
+        return agent
+
+    @pytest.mark.asyncio
+    async def test_stalled_stream_raises_timeout_then_retries(self, agent):
+        """A stream that never yields a message must raise APITimeoutError,
+        which feeds the existing retry path (so the prompt is re-attempted).
+
+        We can't simulate a stall via asyncio.sleep because the retry-backoff
+        path patches asyncio.sleep to be instant — that would also short-circuit
+        our stalling generator. Use a never-resolving Future, which the patches
+        don't touch.
+        """
+        import asyncio as _asyncio
+
+        attempts = 0
+
+        async def stalling_then_succeeding(*args, **kwargs):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                # First attempt: never resolve. wait_for(0.001s) will cancel
+                # this and raise TimeoutError → APITimeoutError → retry.
+                await _asyncio.Future()
+                yield  # unreachable
+            else:
+                msg = MagicMock()
+                type(msg).__name__ = "ResultMessage"
+                msg.result = "ok"
+                yield msg
+
+        agent._query_executor.query = stalling_then_succeeding
+
+        with (
+            patch(
+                "claude_task_master.core.agent_query.STREAM_IDLE_TIMEOUT_SEC", 0.001
+            ),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            result = await agent._run_query("test prompt", ["Read"])
+
+        assert attempts == 2
+        assert result == "ok"
+
+    @pytest.mark.asyncio
+    async def test_two_stream_stalls_raises_consecutive_failures(self, agent):
+        """If the stream stalls twice in a row, we must NOT retry forever —
+        the per-query stream-idle-timeout cap (2) raises
+        ConsecutiveFailuresError. This is critical: each idle timeout exceeds
+        the windowed failure counter, which would otherwise reset between
+        stalls and let the loop run indefinitely."""
+        import asyncio as _asyncio
+
+        async def always_stalls(*args, **kwargs):
+            await _asyncio.Future()
+            yield  # unreachable
+
+        agent._query_executor.query = always_stalls
+
+        with (
+            patch(
+                "claude_task_master.core.agent_query.STREAM_IDLE_TIMEOUT_SEC", 0.001
+            ),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            with pytest.raises(ConsecutiveFailuresError):
+                await agent._run_query("test prompt", ["Read"])
+
+    @pytest.mark.asyncio
+    async def test_aclose_called_on_stream(self, agent):
+        """The iterator's aclose() must always be called so the SDK transport
+        (subprocess, HTTP) is released. Without this, a long-running orchestrator
+        would leak subprocess handles."""
+        aclose_called = []
+
+        class TrackingGen:
+            def __init__(self):
+                self._yielded = False
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                if self._yielded:
+                    raise StopAsyncIteration
+                self._yielded = True
+                msg = MagicMock()
+                type(msg).__name__ = "ResultMessage"
+                msg.result = "done"
+                return msg
+
+            async def aclose(self):
+                aclose_called.append(True)
+
+        def make_stream(*args, **kwargs):
+            return TrackingGen()
+
+        agent._query_executor.query = make_stream
+
+        await agent._run_query("test prompt", ["Read"])
+        assert aclose_called == [True]
+
+    @pytest.mark.asyncio
+    async def test_aclose_called_even_when_stream_raises(self, agent):
+        """aclose() must run even if the stream errors mid-flight."""
+        aclose_called = []
+
+        class FailingGen:
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                raise RuntimeError("boom")
+
+            async def aclose(self):
+                aclose_called.append(True)
+
+        def make_stream(*args, **kwargs):
+            return FailingGen()
+
+        agent._query_executor.query = make_stream
+
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            with pytest.raises((QueryExecutionError, ConsecutiveFailuresError)):
+                await agent._run_query("test prompt", ["Read"])
+
+        # aclose called at least once (per retry attempt)
+        assert len(aclose_called) >= 1
+
+    @pytest.mark.asyncio
+    async def test_options_include_cli_stall_env_vars(self, agent):
+        """Belt-and-suspenders: the CLI subprocess gets stall timeout env vars
+        via ClaudeAgentOptions.env so it can fail-fast on internal stalls
+        before our watchdog has to step in."""
+        options_calls = []
+
+        def capture_options(**kwargs):
+            options_calls.append(kwargs)
+            return MagicMock()
+
+        agent._query_executor.options_class = capture_options
+
+        async def mock_query_gen(*args, **kwargs):
+            yield MagicMock(content=None)
+
+        agent._query_executor.query = mock_query_gen
+
+        await agent._run_query("test prompt", ["Read"])
+
+        assert len(options_calls) == 1
+        env = options_calls[0].get("env", {})
+        assert "CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS" in env
+        assert "API_TIMEOUT_MS" in env
+        # Should match STREAM_IDLE_TIMEOUT_SEC * 1000 (ms)
+        from claude_task_master.core.agent_query import STREAM_IDLE_TIMEOUT_SEC
+
+        expected_ms = str(int(STREAM_IDLE_TIMEOUT_SEC * 1000))
+        assert env["CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS"] == expected_ms
+        assert env["API_TIMEOUT_MS"] == expected_ms
+
+    @pytest.mark.asyncio
+    async def test_successful_query_resets_stream_timeout_counter(self, agent):
+        """A successful query must reset the stream-timeout counter so a later
+        independent stall doesn't unfairly count against a fresh run."""
+
+        # First query: 1 stall then success. After this, counter must be 0.
+        import asyncio as _asyncio
+
+        attempts = 0
+
+        async def stall_once_then_succeed(*args, **kwargs):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                await _asyncio.Future()
+                yield  # unreachable
+            else:
+                msg = MagicMock()
+                type(msg).__name__ = "ResultMessage"
+                msg.result = "first"
+                yield msg
+
+        agent._query_executor.query = stall_once_then_succeed
+
+        with (
+            patch(
+                "claude_task_master.core.agent_query.STREAM_IDLE_TIMEOUT_SEC", 0.001
+            ),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            await agent._run_query("first", ["Read"])
+
+        # Counter must be reset after success
+        assert agent._query_executor._stream_idle_timeouts == 0
+
+
+# =============================================================================
 # AgentWrapper Error Classification Tests
 # =============================================================================
 

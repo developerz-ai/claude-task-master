@@ -44,13 +44,14 @@ if TYPE_CHECKING:
 
 
 # Maximum gap (seconds) between consecutive messages from the SDK stream before
-# we treat the stream as stalled. The SDK's `async for` over `query()` has no
-# built-in idle timeout: if the upstream connection silently half-opens or the
-# server never sends a final ResultMessage, the iterator parks on __anext__()
-# forever. 10 minutes is long enough that genuine long-running tool calls
-# (which still emit ToolResultBlock traffic) don't trip it, but short enough
-# that a hung session is caught quickly. Override via env var.
-STREAM_IDLE_TIMEOUT_SEC = float(os.environ.get("CLAUDETM_STREAM_IDLE_TIMEOUT_SEC", "600"))
+# we treat the stream as stalled. The SDK's wait_for_result_and_end_input
+# (query.py:809) deliberately applies NO timeout; under known bug
+# https://github.com/anthropics/claude-code/issues/30333 the CLI subprocess can
+# drop the final result line on long sessions and the iterator parks forever.
+# 30 minutes accommodates legitimate slow tool calls (full pytest, gh run watch
+# on slow CI, long builds) while still catching real hangs well before infinite.
+# Override via env var.
+STREAM_IDLE_TIMEOUT_SEC = float(os.environ.get("CLAUDETM_STREAM_IDLE_TIMEOUT_SEC", "1800"))
 
 
 class AgentQueryExecutor:
@@ -426,6 +427,16 @@ class AgentQueryExecutor:
             elif fallback_type:
                 fallback_model_name = self._default_get_model_name(fallback_type)
 
+            # Pass stall-timeout env vars to the underlying CLI subprocess.
+            # The Python SDK ignores these, but the bundled CLI binary respects
+            # them and will fail-fast on internal stalls before our watchdog
+            # has to step in. Belt-and-suspenders for issue #30333.
+            stall_timeout_ms = str(int(STREAM_IDLE_TIMEOUT_SEC * 1000))
+            cli_env = {
+                "CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS": stall_timeout_ms,
+                "API_TIMEOUT_MS": stall_timeout_ms,
+            }
+
             # Create options with model specification and subagents
             try:
                 options_kwargs: dict[str, Any] = {
@@ -437,6 +448,7 @@ class AgentQueryExecutor:
                     "hooks": self.hooks,
                     "agents": agents if agents else None,
                     "max_buffer_size": 5 * 1024 * 1024,
+                    "env": cli_env,
                 }
 
                 # Add effort level for extended thinking depth control

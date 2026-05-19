@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.44] - 2026-05-19
+
+### Changed
+- **Stream idle-timeout default 10min → 30min**: `CLAUDETM_STREAM_IDLE_TIMEOUT_SEC` raised from 600s to 1800s. claudetm agents legitimately run long-blocking single tools (full `pytest`, `gh run watch` on slow CI, big builds). The original 10min matched Anthropic's general-SDK convention but false-triggered on these. 30min still catches the real hang (observed at 53min) well before infinite while leaving headroom for real work. Override via env var.
+
+### Added
+- **CLI subprocess stall timeout via `ClaudeAgentOptions.env`**: `agent_query.py` now passes `CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS` and `API_TIMEOUT_MS` (both = `STREAM_IDLE_TIMEOUT_SEC * 1000`) to the bundled CLI binary. Belt-and-suspenders: the CLI's own stall detection (if it works) fires first; our Python-side watchdog catches anything it misses. Defends against upstream issue #30333 from two layers.
+- **Idle-timeout watchdog for conversation mode** (`conversation.py:348`): the multi-turn `ConversationSession.query_task` had the same `async for` over `client.receive_response()` with no timeout. Latent code path (not yet wired up via `TaskRunner`) — patched preemptively so it can't reintroduce the hang when enabled.
+- **Test coverage**: 7 new tests covering stalled stream → APITimeoutError, two stalls → ConsecutiveFailuresError, aclose() lifecycle (success + error paths), CLI env vars in options, counter reset after success, plus a ConversationSession stall test. All use `asyncio.Future()` (not `asyncio.sleep`) to simulate stalls so they aren't broken by the existing `asyncio.sleep` patches used for retry-backoff. Tests run in <1s total.
+
+### Investigation
+- **Root cause confirmed in SDK source**: `claude_agent_sdk/_internal/query.py:809` (`wait_for_result_and_end_input`) explicitly applies *no timeout* on the result-message event. The docstring claims the event is "guaranteed to fire" but the failure mode described in [anthropics/claude-code#30333](https://github.com/anthropics/claude-code/issues/30333) breaks that guarantee: CLI subprocess emits the final agent text, then neither emits the final result line nor exits. Iterator parks on `__anext__()` forever. We're a downstream victim — the SDK has zero defense.
+
 ## [0.1.43] - 2026-05-19
 
 ### Fixed
@@ -650,7 +663,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.43...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.44...HEAD
+[0.1.44]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.43...v0.1.44
 [0.1.43]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.42...v0.1.43
 [0.1.42]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.41...v0.1.42
 [0.1.41]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.40...v0.1.41
