@@ -175,6 +175,10 @@ class ConfigUpdateRequest(BaseModel):
         default=None,
         description="Whether to run post-merge release verification",
     )
+    enable_verification: bool | None = Field(
+        default=None,
+        description="Whether to run final success-criteria verification + fix loop after all tasks complete",
+    )
     max_sessions: int | None = Field(
         default=None,
         ge=1,
@@ -262,6 +266,10 @@ class TaskInitRequest(BaseModel):
     enable_release: bool = Field(
         default=False,
         description="Whether to run post-merge release verification",
+    )
+    enable_verification: bool = Field(
+        default=False,
+        description="Whether to run final success-criteria verification + fix loop after all tasks complete",
     )
     max_sessions: int | None = Field(
         default=None,
@@ -416,6 +424,7 @@ class TaskOptionsResponse(BaseModel):
 
     auto_merge: bool
     enable_release: bool = False
+    enable_verification: bool = False
     max_sessions: int | None
     max_prs: int | None
     pause_on_pr: bool

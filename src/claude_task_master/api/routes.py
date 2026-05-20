@@ -283,6 +283,7 @@ def create_info_router() -> APIRouter:
                 options=TaskOptionsResponse(
                     auto_merge=state.options.auto_merge,
                     enable_release=state.options.enable_release,
+                    enable_verification=state.options.enable_verification,
                     max_sessions=state.options.max_sessions,
                     max_prs=state.options.max_prs,
                     pause_on_pr=state.options.pause_on_pr,
@@ -1067,6 +1068,7 @@ def create_task_router() -> APIRouter:
             options = TaskOptions(
                 auto_merge=task_init.auto_merge,
                 enable_release=task_init.enable_release,
+                enable_verification=task_init.enable_verification,
                 max_sessions=task_init.max_sessions,
                 max_prs=task_init.max_prs,
                 pause_on_pr=task_init.pause_on_pr,

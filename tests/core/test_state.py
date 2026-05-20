@@ -72,6 +72,7 @@ class TestTaskOptions:
         assert dump == {
             "auto_merge": False,
             "enable_release": False,
+            "enable_verification": False,
             "max_sessions": 3,
             "max_prs": 2,
             "pause_on_pr": False,

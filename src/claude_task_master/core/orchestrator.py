@@ -883,6 +883,30 @@ class WorkLoopOrchestrator:
             stop_listening()
             unregister_handlers()
 
+            # Final verification is opt-in (off by default). Each task already
+            # verifies itself (tests + lint) and PRs go through CI + reviews,
+            # so the post-all-tasks success-criteria verification + fix loop is
+            # often redundant and can hang in long sessions (re-verify cycles).
+            # Enable with --verify or TaskOptions.enable_verification=True.
+            if not state.options.enable_verification:
+                self._checkout_to_main()
+                previous_status = state.status
+                state.status = "success"
+                self._emit_status_changed(
+                    previous_status,
+                    "success",
+                    state,
+                    "All tasks completed (final verification disabled)",
+                )
+                self.state_manager.save_state(state)
+                self.state_manager.cleanup_on_success(state.run_id)
+                console.success(
+                    "All tasks completed! (Final verification skipped — pass --verify to enable.)"
+                )
+                console.info(self.tracker.get_cost_report())
+                self._emit_run_completed(state, 0, "success", run_start_time)
+                return 0
+
             # Allow up to 3 fix attempts
             max_fix_attempts = 3
             fix_attempt = 0

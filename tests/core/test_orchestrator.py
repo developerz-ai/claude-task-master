@@ -998,6 +998,56 @@ class TestRunMethod:
         assert result == 0
         mock_console.success.assert_called()
 
+    @pytest.mark.timeout(5)
+    @patch("subprocess.run")
+    @patch("claude_task_master.core.orchestrator.is_cancellation_requested")
+    @patch("claude_task_master.core.orchestrator.start_listening")
+    @patch("claude_task_master.core.orchestrator.stop_listening")
+    @patch("claude_task_master.core.orchestrator.register_handlers")
+    @patch("claude_task_master.core.orchestrator.unregister_handlers")
+    @patch("claude_task_master.core.orchestrator.reset_shutdown")
+    @patch("claude_task_master.core.orchestrator.console")
+    def test_run_verification_skipped_by_default(
+        self,
+        mock_console,
+        mock_reset_shutdown,
+        mock_unregister,
+        mock_register,
+        mock_stop,
+        mock_start,
+        mock_is_cancelled,
+        mock_subprocess,
+        basic_orchestrator,
+        state_manager,
+        sample_task_options,
+        mock_agent,
+    ):
+        """When enable_verification=False (default), the final verification
+        loop is skipped entirely — the run completes successfully without
+        calling verify_success_criteria, even if criteria exist."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        options = TaskOptions(**sample_task_options)  # enable_verification defaults to False
+        state_manager.initialize(goal="Test", model="sonnet", options=options)
+        state_manager.save_plan("- [x] Task 1")  # Already complete
+        state_manager.save_criteria("All tests pass")
+
+        state = state_manager.load_state()
+        state.status = "working"
+        state.current_task_index = 1
+        state_manager.save_state(state)
+
+        mock_is_cancelled.return_value = False
+        # If verification were called, this would make it fail — but we expect
+        # the orchestrator to skip it entirely.
+        mock_agent.verify_success_criteria.return_value = {"success": False}
+
+        result = basic_orchestrator.run()
+
+        assert result == 0
+        # verify_success_criteria must NOT be called when verification disabled
+        mock_agent.verify_success_criteria.assert_not_called()
+        mock_console.success.assert_called()
+
     @pytest.mark.timeout(5)  # This test runs the full orchestration loop, needs more time
     @patch("subprocess.run")
     @patch("claude_task_master.core.orchestrator.is_cancellation_requested")
@@ -1022,9 +1072,12 @@ class TestRunMethod:
         sample_task_options,
         mock_agent,
     ):
-        """Should return 1 when verification fails."""
+        """Should return 1 when verification fails (with --verify enabled)."""
         state_manager.state_dir.mkdir(exist_ok=True)
-        options = TaskOptions(**sample_task_options)
+        # Final verification is opt-in (default off) — explicitly enable for
+        # this test, which exercises the verification-failure branch.
+        opts_kwargs = {**sample_task_options, "enable_verification": True}
+        options = TaskOptions(**opts_kwargs)
         state_manager.initialize(goal="Test", model="sonnet", options=options)
         state_manager.save_plan("- [x] Task 1")  # Already complete
         state_manager.save_criteria("All tests pass")

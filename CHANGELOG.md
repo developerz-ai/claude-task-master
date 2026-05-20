@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.46] - 2026-05-20
+
+### Changed
+- **Final success-criteria verification is now opt-in (default off)**: `TaskOptions.enable_verification` defaults to `False`. After all task groups are done the orchestrator no longer runs `_verify_success` → fix-PR → re-verify loop unless explicitly enabled. Each task already verifies itself (tests + lint) and each PR goes through CI + reviews, so the post-all-tasks verification is often redundant — and in long runs the verify/fix/re-verify cycle has been observed to hang. Use `--verify` to opt in.
+
+### Added
+- **`--verify/--no-verify` CLI flag** on `claudetm start` and `claudetm config-update`. Off by default. Mirrored in REST API (`TaskInitRequest.enable_verification`, `ConfigUpdateRequest.enable_verification`, `TaskOptionsResponse.enable_verification`) and MCP (`initialize_task`, `update_config`).
+- **`enable_verification` field on `TaskOptions`** (default `False`). Surfaced in `claudetm status` output and `config-update` confirmation as "Final verification: …".
+- **2 new tests**: default-off path skips `verify_success_criteria` entirely and completes successfully even when criteria exist; enabled path still exercises the failure branch.
+
+### Note
+- **PR review comments are unaffected** — the existing `waiting_reviews` / `addressing_reviews` per-PR flow continues to run as before. This change only gates the **final** verification phase that runs *after all task groups* are complete.
+
 ## [0.1.45] - 2026-05-20
 
 ### Added
@@ -675,7 +688,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.45...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.46...HEAD
+[0.1.46]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.45...v0.1.46
 [0.1.45]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.44...v0.1.45
 [0.1.44]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.43...v0.1.44
 [0.1.43]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.42...v0.1.43

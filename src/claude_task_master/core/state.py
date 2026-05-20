@@ -78,6 +78,7 @@ class TaskOptions(BaseModel):
 
     auto_merge: bool = True
     enable_release: bool = False
+    enable_verification: bool = False
     max_sessions: int | None = None
     max_prs: int | None = None
     pause_on_pr: bool = False

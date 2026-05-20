@@ -529,6 +529,7 @@ def initialize_task(
     state_dir: str | None = None,
     *,
     enable_release: bool = False,
+    enable_verification: bool = False,
 ) -> dict[str, Any]:
     """Initialize a new task with the given goal.
 
@@ -558,6 +559,7 @@ def initialize_task(
         options = TaskOptions(
             auto_merge=auto_merge,
             enable_release=enable_release,
+            enable_verification=enable_verification,
             max_sessions=max_sessions,
             max_prs=max_prs,
             pause_on_pr=pause_on_pr,
@@ -842,6 +844,7 @@ def update_config(
     state_dir: str | None = None,
     *,
     enable_release: bool | None = None,
+    enable_verification: bool | None = None,
 ) -> dict[str, Any]:
     """Update task configuration options at runtime.
 
@@ -873,6 +876,8 @@ def update_config(
         kwargs["auto_merge"] = auto_merge
     if enable_release is not None:
         kwargs["enable_release"] = enable_release
+    if enable_verification is not None:
+        kwargs["enable_verification"] = enable_verification
     if max_sessions is not None:
         kwargs["max_sessions"] = max_sessions
     if max_prs is not None:

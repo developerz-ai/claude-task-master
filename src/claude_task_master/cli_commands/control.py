@@ -126,6 +126,11 @@ def config_update(
     enable_release: bool | None = typer.Option(
         None, "--release/--no-release", help="Toggle post-merge release verification"
     ),
+    enable_verification: bool | None = typer.Option(
+        None,
+        "--verify/--no-verify",
+        help="Toggle final success-criteria verification + fix loop after all tasks complete",
+    ),
     max_sessions: int | None = typer.Option(None, "--max-sessions", "-n", help="Set max sessions"),
     pause_on_pr: bool | None = typer.Option(
         None, "--pause-on-pr/--no-pause-on-pr", help="Set pause on PR"
@@ -148,7 +153,10 @@ def config_update(
         raise typer.Exit(1)
 
     # Check if any options were provided
-    if all(v is None for v in [auto_merge, enable_release, max_sessions, pause_on_pr]):
+    if all(
+        v is None
+        for v in [auto_merge, enable_release, enable_verification, max_sessions, pause_on_pr]
+    ):
         console.print("[yellow]No configuration options specified.[/yellow]")
         console.print("Use --help to see available options.")
         raise typer.Exit(1)
@@ -162,6 +170,8 @@ def config_update(
             kwargs["auto_merge"] = auto_merge
         if enable_release is not None:
             kwargs["enable_release"] = enable_release
+        if enable_verification is not None:
+            kwargs["enable_verification"] = enable_verification
         if max_sessions is not None:
             kwargs["max_sessions"] = max_sessions
         if pause_on_pr is not None:
@@ -178,6 +188,7 @@ def config_update(
             console.print("\n[cyan]Current Configuration:[/cyan]")
             console.print(f"  Auto-merge: {current.get('auto_merge')}")
             console.print(f"  Release phase: {current.get('enable_release')}")
+            console.print(f"  Final verification: {current.get('enable_verification')}")
             console.print(f"  Max sessions: {current.get('max_sessions') or 'unlimited'}")
             console.print(f"  Pause on PR: {current.get('pause_on_pr')}")
 

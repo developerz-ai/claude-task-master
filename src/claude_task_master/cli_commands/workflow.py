@@ -115,6 +115,11 @@ def start(
         "--release/--no-release",
         help="Run post-merge release verification (deploy/health/migration/error checks)",
     ),
+    enable_verification: bool = typer.Option(
+        False,
+        "--verify/--no-verify",
+        help="Run final success-criteria verification + fix loop after all tasks complete",
+    ),
     max_sessions: int | None = typer.Option(
         None,
         "--max-sessions",
@@ -235,6 +240,7 @@ def start(
         options = TaskOptions(
             auto_merge=auto_merge,
             enable_release=enable_release,
+            enable_verification=enable_verification,
             max_sessions=max_sessions,
             max_prs=max_prs,
             pause_on_pr=pause_on_pr,
