@@ -741,6 +741,101 @@ class TestStreamIdleTimeoutWatchdog:
         assert env["API_TIMEOUT_MS"] == expected_ms
 
     @pytest.mark.asyncio
+    async def test_post_completion_missing_result_returns_gracefully(self, agent):
+        """When the agent has signaled end_turn with no pending tool_use, a
+        missing ResultMessage must NOT trigger a retry (the task is done —
+        retrying would re-run completed work and risk duplicate PRs).
+        Instead we exit the loop and return accumulated text as success."""
+        import asyncio as _asyncio
+
+        attempts = 0
+
+        async def emit_end_turn_then_hang(*args, **kwargs):
+            nonlocal attempts
+            attempts += 1
+
+            # Emit a text block first so result_text has content.
+            text_block = MagicMock()
+            type(text_block).__name__ = "TextBlock"
+            text_block.text = "TASK COMPLETE"
+            text_msg = MagicMock()
+            type(text_msg).__name__ = "AssistantMessage"
+            text_msg.content = [text_block]
+            # No stop_reason yet — agent might still call a tool.
+            text_msg.stop_reason = None
+            yield text_msg
+
+            # Then emit the end_turn AssistantMessage with NO tool_use.
+            final_msg = MagicMock()
+            type(final_msg).__name__ = "AssistantMessage"
+            final_msg.content = []  # no ToolUseBlock
+            final_msg.stop_reason = "end_turn"
+            yield final_msg
+
+            # Simulate SDK bug #30333: ResultMessage never comes.
+            await _asyncio.Future()
+
+        agent._query_executor.query = emit_end_turn_then_hang
+
+        with (
+            patch(
+                "claude_task_master.core.agent_query.POST_COMPLETION_IDLE_TIMEOUT_SEC",
+                0.001,
+            ),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            result = await agent._run_query("test prompt", ["Read"])
+
+        # Single attempt — no retry on graceful post-completion timeout.
+        assert attempts == 1
+        # Accumulated text returned as success.
+        assert "TASK COMPLETE" in result
+
+    @pytest.mark.asyncio
+    async def test_tool_use_keeps_long_timeout(self, agent):
+        """An AssistantMessage with ToolUseBlock means the agent is still
+        working — we must NOT switch to the short post-completion timeout
+        (would false-trigger during real tool execution)."""
+        import asyncio as _asyncio
+
+        async def emit_tool_then_hang(*args, **kwargs):
+            tool_block = MagicMock()
+            type(tool_block).__name__ = "ToolUseBlock"
+            tool_block.name = "Bash"
+            tool_msg = MagicMock()
+            type(tool_msg).__name__ = "AssistantMessage"
+            tool_msg.content = [tool_block]
+            # end_turn AFTER tool_use is normal — the agent will continue.
+            tool_msg.stop_reason = "end_turn"
+            yield tool_msg
+
+            # Hang here. With the short timeout patched, if the watchdog
+            # incorrectly switched to short mode this would false-trigger;
+            # the long timeout (also patched short for test speed but
+            # distinct) is what should apply.
+            await _asyncio.Future()
+
+        agent._query_executor.query = emit_tool_then_hang
+
+        # POST_COMPLETION timeout patched to a value that would resolve
+        # INSTANTLY if (incorrectly) used; STREAM_IDLE timeout patched to
+        # a value that resolves slowly so we can tell which applied.
+        with (
+            patch(
+                "claude_task_master.core.agent_query.POST_COMPLETION_IDLE_TIMEOUT_SEC",
+                0.001,
+            ),
+            patch(
+                "claude_task_master.core.agent_query.STREAM_IDLE_TIMEOUT_SEC", 0.05
+            ),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            # Should hit STREAM_IDLE_TIMEOUT (0.05s), raise APITimeoutError,
+            # eventually ConsecutiveFailuresError after the stream-timeout cap.
+            with pytest.raises(ConsecutiveFailuresError):
+                await agent._run_query("test prompt", ["Read"])
+
+    @pytest.mark.asyncio
     async def test_successful_query_resets_stream_timeout_counter(self, agent):
         """A successful query must reset the stream-timeout counter so a later
         independent stall doesn't unfairly count against a fresh run."""

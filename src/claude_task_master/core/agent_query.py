@@ -53,6 +53,18 @@ if TYPE_CHECKING:
 # Override via env var.
 STREAM_IDLE_TIMEOUT_SEC = float(os.environ.get("CLAUDETM_STREAM_IDLE_TIMEOUT_SEC", "1800"))
 
+# Shorter timeout that kicks in AFTER the agent has signaled end-of-turn with
+# no tool calls pending. In that state the only remaining message is the
+# ResultMessage — which is exactly what #30333 loses. Real-world freezes after
+# "TASK COMPLETE" have been observed at 17min+ silence; a 2-min ceiling here
+# catches them fast without false-triggering during real work (where messages
+# flow steadily). On timeout in this state we return the accumulated text
+# gracefully instead of retrying — the work IS done, retrying would re-run a
+# completed task and risk duplicate PRs.
+POST_COMPLETION_IDLE_TIMEOUT_SEC = float(
+    os.environ.get("CLAUDETM_POST_COMPLETION_IDLE_TIMEOUT_SEC", "120")
+)
+
 
 class AgentQueryExecutor:
     """Handles query execution with retry logic and circuit breaker.
@@ -468,29 +480,67 @@ class AgentQueryExecutor:
                 raise SDKInitializationError("ClaudeAgentOptions", e) from e
 
             # Execute query with per-message idle-timeout watchdog.
-            # See STREAM_IDLE_TIMEOUT_SEC for rationale.
+            # Two timeout regimes (see constants above):
+            #   - STREAM_IDLE_TIMEOUT_SEC: the agent may be mid-tool, mid-think,
+            #     etc. Long ceiling to accommodate real long-running tools.
+            #   - POST_COMPLETION_IDLE_TIMEOUT_SEC: the agent just signaled
+            #     end_turn with no pending tool_use. The only remaining message
+            #     is ResultMessage; if it doesn't arrive shortly, the SDK lost
+            #     it (#30333). Treat as success with accumulated text.
             stream = self.query(prompt=prompt, options=options)
+            agent_completed = False
             try:
                 while True:
+                    current_timeout = (
+                        POST_COMPLETION_IDLE_TIMEOUT_SEC
+                        if agent_completed
+                        else STREAM_IDLE_TIMEOUT_SEC
+                    )
                     try:
                         message = await asyncio.wait_for(
                             stream.__anext__(),
-                            timeout=STREAM_IDLE_TIMEOUT_SEC,
+                            timeout=current_timeout,
                         )
                     except StopAsyncIteration:
                         break
                     except TimeoutError as e:
+                        if agent_completed:
+                            # Agent finished; SDK swallowed ResultMessage. Don't
+                            # retry — the work succeeded, retrying would re-run
+                            # a completed task.
+                            console.newline()
+                            console.warning(
+                                f"ResultMessage missing after end_turn "
+                                f"({current_timeout:.0f}s) - SDK bug #30333, "
+                                "treating accumulated text as success",
+                                flush=True,
+                            )
+                            break
                         console.newline()
                         console.warning(
-                            f"Stream idle for {STREAM_IDLE_TIMEOUT_SEC:.0f}s - "
-                            "treating as upstream stall",
+                            f"Stream idle for {current_timeout:.0f}s - treating as upstream stall",
                             flush=True,
                         )
-                        raise APITimeoutError(STREAM_IDLE_TIMEOUT_SEC, e) from e
+                        raise APITimeoutError(current_timeout, e) from e
                     except APITimeoutError:
                         raise
                     except Exception as e:
                         raise self._classify_api_error(e) from e
+
+                    # Detect "agent has nothing more to do" — used to switch to
+                    # the post-completion short timeout. We can't import the
+                    # SDK types directly without circular issues, so check by
+                    # class name. An AssistantMessage with stop_reason=end_turn
+                    # and no ToolUseBlock means: no more turns, ResultMessage
+                    # is the only thing left.
+                    if type(message).__name__ == "AssistantMessage":
+                        content = getattr(message, "content", None) or []
+                        has_tool_use = any(type(b).__name__ == "ToolUseBlock" for b in content)
+                        stop_reason = getattr(message, "stop_reason", None)
+                        if has_tool_use:
+                            agent_completed = False
+                        elif stop_reason == "end_turn":
+                            agent_completed = True
 
                     if process_message_func:
                         result_text = process_message_func(message, result_text)

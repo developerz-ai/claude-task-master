@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.45] - 2026-05-20
+
+### Added
+- **Post-completion short timeout (2-min default)**: dedicated stall path for the specific failure mode of SDK bug #30333 — the agent finishes (`AssistantMessage` with `stop_reason="end_turn"` and no `ToolUseBlock`) but the `ResultMessage` is never emitted. After detecting this state, we switch to `POST_COMPLETION_IDLE_TIMEOUT_SEC` (default 120s, override via env). On timeout in that state we log a warning and return the accumulated text as success — we do NOT retry, because the work *is* done and retrying would re-run a completed task (risking duplicate PRs).
+- **Two-regime timeout**: while the agent is mid-turn / mid-tool, the long `STREAM_IDLE_TIMEOUT_SEC` (30min) still applies — real long-running tools like `gh run watch` or full `pytest` aren't affected. The short timeout only kicks in after the agent has explicitly signaled end-of-turn with no pending tool work, which is precisely the #30333 failure mode.
+
+### Fixed
+- **17-min freezes after "TASK COMPLETE" no longer require manual SIGINT**. Observed in production: agent prints final message, SDK swallows the `ResultMessage`, orchestrator stuck. v0.1.44's 30-min generic timeout was too coarse — eventually catches the hang but wastes time and triggers retry on already-done work. The post-completion path catches it in 2 minutes and returns success.
+
+### Tests
+- 2 new tests: post-completion timeout returns accumulated text gracefully (no retry); `ToolUseBlock` keeps the long timeout active (no false-trigger during real tool execution).
+
 ## [0.1.44] - 2026-05-19
 
 ### Changed
@@ -663,7 +675,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.44...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.45...HEAD
+[0.1.45]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.44...v0.1.45
 [0.1.44]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.43...v0.1.44
 [0.1.43]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.42...v0.1.43
 [0.1.42]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.41...v0.1.42
