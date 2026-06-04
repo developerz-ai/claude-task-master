@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.47] - 2026-06-03
+
+### Changed
+- **Upgrade to Claude Opus 4.8**: Default `opus` model updated from `claude-opus-4-7` to `claude-opus-4-8`. Sample configs, docstrings, and README updated accordingly.
+- **Upgrade claude-agent-sdk**: pin `>=0.1.60` → `>=0.2.89` (latest). Picks up the 0.2.x line bug fixes and bundled CLI updates.
+
+### Fixed
+- **CI Lint (ruff format)**: reformatted `tests/core/test_agent_query.py` and `tests/core/test_conversation.py` so `ruff format --check` passes again.
+
 ## [0.1.46] - 2026-05-20
 
 ### Changed

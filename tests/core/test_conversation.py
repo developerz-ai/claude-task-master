@@ -661,14 +661,10 @@ class TestQueryTask:
 
         mock_client.receive_response = MagicMock(return_value=StallingIter())
 
-        session = ConversationSession(
-            client=mock_client, manager=manager, group_id="test-group"
-        )
+        session = ConversationSession(client=mock_client, manager=manager, group_id="test-group")
 
         with (
-            patch(
-                "claude_task_master.core.conversation.STREAM_IDLE_TIMEOUT_SEC", 0.001
-            ),
+            patch("claude_task_master.core.conversation.STREAM_IDLE_TIMEOUT_SEC", 0.001),
             patch("claude_task_master.core.conversation.console"),
         ):
             with pytest.raises(QueryExecutionError) as exc_info:
@@ -676,9 +672,7 @@ class TestQueryTask:
 
         # The inner QueryExecutionError ("stream stalled") gets re-wrapped
         # by the outer except handler — check for either layer's message.
-        assert "stalled" in str(exc_info.value).lower() or "stream" in str(
-            exc_info.value
-        ).lower()
+        assert "stalled" in str(exc_info.value).lower() or "stream" in str(exc_info.value).lower()
 
 
 # =============================================================================

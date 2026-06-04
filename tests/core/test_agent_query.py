@@ -614,9 +614,7 @@ class TestStreamIdleTimeoutWatchdog:
         agent._query_executor.query = stalling_then_succeeding
 
         with (
-            patch(
-                "claude_task_master.core.agent_query.STREAM_IDLE_TIMEOUT_SEC", 0.001
-            ),
+            patch("claude_task_master.core.agent_query.STREAM_IDLE_TIMEOUT_SEC", 0.001),
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):
             result = await agent._run_query("test prompt", ["Read"])
@@ -640,9 +638,7 @@ class TestStreamIdleTimeoutWatchdog:
         agent._query_executor.query = always_stalls
 
         with (
-            patch(
-                "claude_task_master.core.agent_query.STREAM_IDLE_TIMEOUT_SEC", 0.001
-            ),
+            patch("claude_task_master.core.agent_query.STREAM_IDLE_TIMEOUT_SEC", 0.001),
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):
             with pytest.raises(ConsecutiveFailuresError):
@@ -825,9 +821,7 @@ class TestStreamIdleTimeoutWatchdog:
                 "claude_task_master.core.agent_query.POST_COMPLETION_IDLE_TIMEOUT_SEC",
                 0.001,
             ),
-            patch(
-                "claude_task_master.core.agent_query.STREAM_IDLE_TIMEOUT_SEC", 0.05
-            ),
+            patch("claude_task_master.core.agent_query.STREAM_IDLE_TIMEOUT_SEC", 0.05),
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):
             # Should hit STREAM_IDLE_TIMEOUT (0.05s), raise APITimeoutError,
@@ -860,9 +854,7 @@ class TestStreamIdleTimeoutWatchdog:
         agent._query_executor.query = stall_once_then_succeed
 
         with (
-            patch(
-                "claude_task_master.core.agent_query.STREAM_IDLE_TIMEOUT_SEC", 0.001
-            ),
+            patch("claude_task_master.core.agent_query.STREAM_IDLE_TIMEOUT_SEC", 0.001),
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):
             await agent._run_query("first", ["Read"])

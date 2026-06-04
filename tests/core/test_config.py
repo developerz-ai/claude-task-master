@@ -79,7 +79,7 @@ class TestModelConfig:
         """Test that ModelConfig has correct default values."""
         config = ModelConfig()
         assert config.sonnet == "claude-sonnet-4-6"
-        assert config.opus == "claude-opus-4-7"
+        assert config.opus == "claude-opus-4-8"
         assert config.haiku == "claude-haiku-4-5-20251001"
         assert config.sonnet_1m == "claude-sonnet-4-6"
 
@@ -297,8 +297,8 @@ class TestUtilityFunctions:
     def test_get_model_name_opus(self) -> None:
         """Test get_model_name returns correct model for opus."""
         config = ClaudeTaskMasterConfig()
-        assert get_model_name(config, "opus") == "claude-opus-4-7"
-        assert get_model_name(config, "OPUS") == "claude-opus-4-7"
+        assert get_model_name(config, "opus") == "claude-opus-4-8"
+        assert get_model_name(config, "OPUS") == "claude-opus-4-8"
 
     def test_get_model_name_haiku(self) -> None:
         """Test get_model_name returns correct model for haiku."""
