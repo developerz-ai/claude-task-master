@@ -660,15 +660,15 @@ class TestMailboxHelperFunctions:
         mailbox_task_options: TaskOptions,
         isolated_filesystem: Path,
     ) -> None:
-        """Test mailbox_status function raises Exit (typer.Exit raises click.Exit)."""
-        from click.exceptions import Exit
+        """Test mailbox_status function raises typer.Exit with code 0."""
+        import typer
 
         mailbox_state_manager.initialize(
             goal="Test task", model="opus", options=mailbox_task_options
         )
 
         with _use_state_dir(mailbox_state_dir):
-            with pytest.raises(Exit) as exc_info:
+            with pytest.raises(typer.Exit) as exc_info:
                 mailbox_module.mailbox_status()
             assert exc_info.value.exit_code == 0
 
@@ -679,15 +679,15 @@ class TestMailboxHelperFunctions:
         mailbox_task_options: TaskOptions,
         isolated_filesystem: Path,
     ) -> None:
-        """Test mailbox_send function raises Exit (typer.Exit raises click.Exit)."""
-        from click.exceptions import Exit
+        """Test mailbox_send function raises typer.Exit with code 0."""
+        import typer
 
         mailbox_state_manager.initialize(
             goal="Test task", model="opus", options=mailbox_task_options
         )
 
         with _use_state_dir(mailbox_state_dir):
-            with pytest.raises(Exit) as exc_info:
+            with pytest.raises(typer.Exit) as exc_info:
                 mailbox_module.mailbox_send("Test message", "test", 1)
             assert exc_info.value.exit_code == 0
 
@@ -698,15 +698,15 @@ class TestMailboxHelperFunctions:
         mailbox_task_options: TaskOptions,
         isolated_filesystem: Path,
     ) -> None:
-        """Test mailbox_clear function with empty mailbox raises Exit."""
-        from click.exceptions import Exit
+        """Test mailbox_clear function with empty mailbox raises typer.Exit."""
+        import typer
 
         mailbox_state_manager.initialize(
             goal="Test task", model="opus", options=mailbox_task_options
         )
 
         with _use_state_dir(mailbox_state_dir):
-            with pytest.raises(Exit) as exc_info:
+            with pytest.raises(typer.Exit) as exc_info:
                 mailbox_module.mailbox_clear(force=False)
             assert exc_info.value.exit_code == 0
 
