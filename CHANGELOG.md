@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.48] - 2026-06-09
+
+### Changed
+- **Smartest tier now defaults to Claude Fable 5** (`claude-fable-5`) — Anthropic's most capable GA model, included free on Pro/Max/Team/Enterprise subscription plans through 2026-06-22 ([announcement](https://www.anthropic.com/news/claude-fable-5-mythos-5)). The default is **date-gated** via `default_smartest_model()` in `core/config.py`: before 2026-06-23 the `opus` tier resolves to `claude-fable-5`, from 2026-06-23 it automatically falls back to `claude-opus-4-8`. Marked with `TODO(remove after 2026-06-23)` for cleanup once the promo ends.
+- **Generated config files no longer pin the smartest model**: `generate_default_config_dict()`/`generate_default_config_json()` (and the bundled `bin/claudetm` config generator) omit the `models.opus` key so the date gate resolves on every load instead of being frozen at init time. Pin explicitly via an `"opus"` key in `config.json` or `CLAUDETM_MODEL_OPUS`.
+- Docs updated (README, CLAUDE.md, planning prompt) to reflect Fable 5 routing for `[coding]` tasks.
+
 ## [0.1.47] - 2026-06-03
 
 ### Changed
@@ -697,7 +704,9 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.46...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.48...HEAD
+[0.1.48]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.47...v0.1.48
+[0.1.47]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.46...v0.1.47
 [0.1.46]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.45...v0.1.46
 [0.1.45]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.44...v0.1.45
 [0.1.44]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.43...v0.1.44

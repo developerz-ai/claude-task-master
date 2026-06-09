@@ -237,7 +237,7 @@ claudetm --init-config
 claudetm --show-config
 ```
 
-This creates `.claude-task-master/config.json`:
+This creates `.claude-task-master/config.json`. The smartest tier (`opus`) is intentionally omitted from the generated file — it resolves dynamically at load time: **Claude Fable 5** (`claude-fable-5`) while it is included free on subscription plans (before 2026-06-23), then **Claude Opus 4.8** (`claude-opus-4-8`). Pin it explicitly by adding an `"opus"` key or setting `CLAUDETM_MODEL_OPUS`.
 
 ```json
 {
@@ -250,7 +250,6 @@ This creates `.claude-task-master/config.json`:
   },
   "models": {
     "sonnet": "claude-sonnet-4-6",
-    "opus": "claude-opus-4-8",
     "haiku": "claude-haiku-4-5-20251001"
   },
   "context_windows": {

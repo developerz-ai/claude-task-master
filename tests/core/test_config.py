@@ -11,6 +11,7 @@ Tests for:
 
 import json
 import os
+from datetime import date
 from unittest.mock import patch
 
 import pytest
@@ -23,6 +24,7 @@ from claude_task_master.core.config import (
     GitConfig,
     ModelConfig,
     ToolsConfig,
+    default_smartest_model,
     generate_default_config,
     generate_default_config_dict,
     generate_default_config_json,
@@ -79,9 +81,20 @@ class TestModelConfig:
         """Test that ModelConfig has correct default values."""
         config = ModelConfig()
         assert config.sonnet == "claude-sonnet-4-6"
-        assert config.opus == "claude-opus-4-8"
+        assert config.opus == default_smartest_model()
         assert config.haiku == "claude-haiku-4-5-20251001"
         assert config.sonnet_1m == "claude-sonnet-4-6"
+
+    # TODO(remove after 2026-06-23): tests for the Fable 5 promo gate.
+    def test_smartest_model_is_fable_before_promo_end(self) -> None:
+        """Test that the smartest tier defaults to Fable 5 before 2026-06-23."""
+        assert default_smartest_model(date(2026, 6, 9)) == "claude-fable-5"
+        assert default_smartest_model(date(2026, 6, 22)) == "claude-fable-5"
+
+    def test_smartest_model_is_opus_after_promo_end(self) -> None:
+        """Test that the smartest tier falls back to Opus 4.8 from 2026-06-23."""
+        assert default_smartest_model(date(2026, 6, 23)) == "claude-opus-4-8"
+        assert default_smartest_model(date(2026, 7, 1)) == "claude-opus-4-8"
 
     def test_custom_models(self) -> None:
         """Test that ModelConfig accepts custom model names."""
@@ -297,8 +310,8 @@ class TestUtilityFunctions:
     def test_get_model_name_opus(self) -> None:
         """Test get_model_name returns correct model for opus."""
         config = ClaudeTaskMasterConfig()
-        assert get_model_name(config, "opus") == "claude-opus-4-8"
-        assert get_model_name(config, "OPUS") == "claude-opus-4-8"
+        assert get_model_name(config, "opus") == default_smartest_model()
+        assert get_model_name(config, "OPUS") == default_smartest_model()
 
     def test_get_model_name_haiku(self) -> None:
         """Test get_model_name returns correct model for haiku."""

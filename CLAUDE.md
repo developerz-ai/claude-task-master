@@ -106,14 +106,14 @@ uv tool install claude-task-master --force --reinstall
 **Task Complexity Levels** (for dynamic model routing + effort-based thinking):
 | Complexity | Tag | Model | Effort | Use Case |
 |------------|-----|-------|--------|----------|
-| CODING | `[coding]` | Opus | max | Complex implementation tasks, new features, intricate logic |
+| CODING | `[coding]` | Fable 5 (Opus 4.8 from 2026-06-23) | max | Complex implementation tasks, new features, intricate logic |
 | QUICK | `[quick]` | Haiku | low | Simple fixes, configuration changes, small tweaks |
 | GENERAL | `[general]` | Sonnet | medium | Tests, documentation, moderate refactoring, balanced tasks |
 | DEBUGGING_QA | `[debugging-qa]` | Sonnet 1M | high | CI failures, bug tracing, visual QA, log analysis (1M context) |
 
-When uncertain, default to `[coding]` (uses Opus, most capable).
+When uncertain, default to `[coding]` (uses the smartest model). The smartest tier is date-gated: **Claude Fable 5** (`claude-fable-5`) while it is included free on subscription plans (before 2026-06-23), then **Claude Opus 4.8** — see `default_smartest_model()` in `core/config.py` (marked TODO for removal after the promo ends).
 
-**Fallback Models**: If primary model is unavailable, auto-fallback: Opus → Sonnet → Haiku.
+**Fallback Models**: If primary model is unavailable, auto-fallback: Fable/Opus → Sonnet → Haiku.
 
 **State Directory**:
 ```

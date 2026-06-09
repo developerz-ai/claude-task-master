@@ -287,9 +287,11 @@ default_config = {
         "openrouter_api_key": None,
         "openrouter_base_url": "https://openrouter.ai/api/v1"
     },
+    # NOTE: "opus" (smartest tier) is intentionally omitted — it is resolved
+    # dynamically at load time (Fable 5 before 2026-06-23, Opus 4.8 after).
+    # TODO(remove after 2026-06-23): pin the preferred model here again.
     "models": {
         "sonnet": "claude-sonnet-4-6",
-        "opus": "claude-opus-4-8",
         "haiku": "claude-haiku-4-5-20251001"
     },
     "context_windows": {
