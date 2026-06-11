@@ -418,3 +418,7 @@ Messages are processed after each task completes. Multiple messages are merged w
 13. **Release guide** - `release.md` generated once by probing deploy infra, preserved across runs like `coding-style.md`
 14. **Per-PR release checks** - planner adds `**Release checks:**` sections to plan.md, specific to each PR's changes
 15. **Release fix limit** - max 5 quick-fix PRs per release failure, then moves on (never blocks pipeline)
+
+## CI standard
+
+- CI runs on Blacksmith (`blacksmith-2vcpu-ubuntu-2404`; `publish-test` on 4vcpu — deliberate). Every workflow declares a `concurrency` group with cancel-in-progress, and every job sets `timeout-minutes`. Publish workflows (PyPI / TestPyPI / Docker tag) are hard `cancel-in-progress: false` — publishes are irreversible.

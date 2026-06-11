@@ -8,6 +8,10 @@ on:
         required: false
         type: string
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
   id-token: write  # For trusted publishing to TestPyPI
@@ -16,6 +20,7 @@ jobs:
   build-and-publish:
     name: Build and Publish to TestPyPI
     runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
     environment: test-release  # Optional: add environment protection
 
     steps:

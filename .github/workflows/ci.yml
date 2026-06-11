@@ -18,6 +18,7 @@ jobs:
   lint:
     name: Lint
     runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
 
@@ -47,6 +48,7 @@ jobs:
   test-unit:
     name: Unit Tests
     runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
 
@@ -94,6 +96,7 @@ jobs:
   test-integration:
     name: Integration Tests
     runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
 
@@ -139,6 +142,7 @@ jobs:
   test-property:
     name: Property-based Tests (Hypothesis)
     runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
 
@@ -185,6 +189,7 @@ jobs:
   coverage:
     name: Coverage Report
     runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 15
     needs: [test-unit, test-integration, test-property]
     steps:
       - uses: actions/checkout@v6
@@ -223,6 +228,7 @@ jobs:
   build:
     name: Build Package
     runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 15
     needs: [lint, test-unit, test-integration, test-property]
     # Only run on PRs to verify build works, not on main pushes
     if: github.event_name == 'pull_request'
@@ -252,6 +258,7 @@ jobs:
   cli-test:
     name: CLI Integration Test
     runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 15
     needs: [lint, test-unit, test-integration, test-property]
     # Only run on PRs to verify CLI works, not on main pushes
     if: github.event_name == 'pull_request'
