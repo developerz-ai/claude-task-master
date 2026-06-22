@@ -85,7 +85,7 @@ Include any coding requirements in task descriptions so workers follow project s
 **Under each task:** add file paths, line numbers, and implementation hints (not subtasks).
 
 **Complexity tags (model routing):**
-- `[coding]` → smartest model (Fable 5 / Opus) — new features, complex logic (default when uncertain)
+- `[coding]` → smartest model (Opus 4.8) — new features, complex logic (default when uncertain)
 - `[quick]` → Haiku — configs, small fixes
 - `[general]` → Sonnet — tests, docs, refactoring
 - `[debugging-qa]` → Sonnet 1M — debug + fix + write automated tests

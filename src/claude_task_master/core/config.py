@@ -26,38 +26,9 @@ Environment Variable Mapping:
 from __future__ import annotations
 
 import json
-from datetime import UTC, date, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
-
-# =============================================================================
-# Temporary: Fable 5 promo gate
-# =============================================================================
-
-# TODO(remove after 2026-06-23): Claude Fable 5 is included free on
-# Pro/Max/Team/Enterprise subscription plans only through 2026-06-22
-# (https://www.anthropic.com/news/claude-fable-5-mythos-5). Until then the
-# smartest tier defaults to Fable 5; from 2026-06-23 it falls back to Opus 4.8.
-# Once the promo ends, delete this gate and hardcode the preferred default.
-FABLE_5_FREE_UNTIL = date(2026, 6, 23)
-
-
-def default_smartest_model(today: date | None = None) -> str:
-    """Return the default model for the smartest ('opus') tier.
-
-    Date-gated: Fable 5 while it is included free on subscription plans
-    (before 2026-06-23), Opus 4.8 afterwards.
-
-    Args:
-        today: Override for the current date (used in tests).
-    """
-    if today is None:
-        today = datetime.now(UTC).date()
-    if today < FABLE_5_FREE_UNTIL:
-        return "claude-fable-5"
-    return "claude-opus-4-8"
-
 
 # =============================================================================
 # Configuration Sub-Models
@@ -102,9 +73,8 @@ class ModelConfig(BaseModel):
         description="Model name for 'sonnet' (balanced). Overridden by CLAUDETM_MODEL_SONNET.",
     )
     opus: str = Field(
-        default_factory=default_smartest_model,
-        description="Model name for 'opus' (smartest). Defaults to Fable 5 before "
-        "2026-06-23, Opus 4.8 after. Overridden by CLAUDETM_MODEL_OPUS.",
+        default="claude-opus-4-8",
+        description="Model name for 'opus' (smartest). Overridden by CLAUDETM_MODEL_OPUS.",
     )
     haiku: str = Field(
         default="claude-haiku-4-5-20251001",
@@ -205,7 +175,7 @@ class ClaudeTaskMasterConfig(BaseModel):
       },
       "models": {
         "sonnet": "claude-sonnet-4-6",
-        "opus": "claude-fable-5",
+        "opus": "claude-opus-4-8",
         "haiku": "claude-haiku-4-5-20251001",
         "sonnet_1m": "claude-sonnet-4-6"
       },
@@ -277,14 +247,7 @@ def generate_default_config_dict() -> dict[str, Any]:
         Dictionary representation of the default configuration.
     """
     config = generate_default_config()
-    data = config.model_dump()
-    # TODO(remove after 2026-06-23): don't pin the date-gated smartest model
-    # into generated config files. Leaving the "opus" key out lets
-    # default_smartest_model() resolve on every load, so the
-    # Fable 5 → Opus 4.8 switch happens automatically when the promo ends.
-    # Users can still pin a model by adding the key or via CLAUDETM_MODEL_OPUS.
-    del data["models"]["opus"]
-    return data
+    return config.model_dump()
 
 
 def generate_default_config_json(indent: int = 2) -> str:

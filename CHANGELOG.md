@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.49] - 2026-06-21
+
+### Changed
+- **Smartest tier hardcoded to Claude Opus 4.8** (`claude-opus-4-8`). Removed the temporary Fable 5 promo date-gate entirely: deleted `default_smartest_model()` / `FABLE_5_FREE_UNTIL` from `core/config.py`, the `ModelConfig.opus` field now defaults to a plain `"claude-opus-4-8"`, and generated config files pin `models.opus` like the other tiers (no more load-time date resolution). Override via the `"opus"` config key or `CLAUDETM_MODEL_OPUS`.
+- **Upgrade claude-agent-sdk**: pin `>=0.2.89` → `>=0.2.106` (latest). Picks up bundled Claude CLI updates through v2.1.185 and the additive `TaskUpdatedMessage` lifecycle event type (0.2.101); no breaking changes.
+- Docs updated (README, CLAUDE.md, planning prompt, `bin/claudetm` config generator) to drop all Fable 5 references and reflect Opus 4.8 as the smartest tier.
+
 ## [0.1.48] - 2026-06-09
 
 ### Changed
@@ -704,7 +711,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.48...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.49...HEAD
+[0.1.49]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.48...v0.1.49
 [0.1.48]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.47...v0.1.48
 [0.1.47]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.46...v0.1.47
 [0.1.46]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.45...v0.1.46
