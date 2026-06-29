@@ -53,23 +53,28 @@ def profile_add(
     profile_type: str = typer.Option(
         "oauth", "--type", "-t", help="Profile type: 'oauth' or 'api-key'"
     ),
-    api_key: str | None = typer.Option(
-        None, "--api-key", help="API key (required for api-key profiles)"
-    ),
     base_url: str | None = typer.Option(
         None, "--base-url", help="Anthropic-compatible base URL (api-key profiles)"
     ),
 ) -> None:
     """➕ Add a new profile.
 
+    For api-key profiles the key is read from the CLAUDETM_API_KEY environment
+    variable, or prompted for securely (never passed as a CLI flag, which would
+    leak it into shell history and process listings).
+
     Examples:
-        claudetm profile add work                      # oauth (Claude sub)
+        claudetm profile add work                       # oauth (Claude sub)
         claudetm profile add zai --type api-key \\
-            --api-key sk-... --base-url https://api.z.ai/api/anthropic
+            --base-url https://api.z.ai/api/anthropic   # prompts for the key
     """
     if profile_type not in ("oauth", "api-key"):
         console.print(f"[red]Invalid --type '{profile_type}'. Use 'oauth' or 'api-key'.[/red]")
         raise typer.Exit(1)
+
+    api_key: str | None = None
+    if profile_type == "api-key":
+        api_key = os.environ.get("CLAUDETM_API_KEY") or typer.prompt("API key", hide_input=True)
 
     manager = ProfileManager()
     try:

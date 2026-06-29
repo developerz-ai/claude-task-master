@@ -167,14 +167,14 @@ class CredentialManager:
         self._config_dir = config_dir
         self._profile = None
         if config_dir is None:
-            # Resolve an active profile lazily and defensively: profile
-            # tooling must never break the default credential path.
-            try:
-                from .profiles import ProfileManager
+            # Resolve the active profile. A selected-but-missing profile or a
+            # corrupt registry raises (ProfileError) rather than silently
+            # falling back to the global ~/.claude credentials, which could
+            # green-light the wrong account. No profile selected -> None, and
+            # we keep the default path.
+            from .profiles import ProfileManager
 
-                profile = ProfileManager().resolve_active(os.environ.get("CLAUDETM_PROFILE"))
-            except Exception:
-                profile = None
+            profile = ProfileManager().resolve_active(os.environ.get("CLAUDETM_PROFILE"))
             if profile is not None:
                 self._profile = profile
                 if profile.type == "oauth" and profile.config_dir:

@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -38,6 +39,10 @@ ProfileType = Literal["oauth", "api-key"]
 PROFILE_ENV_VAR = "CLAUDETM_PROFILE"
 # Environment variable that relocates the base directory (mainly for tests).
 HOME_ENV_VAR = "CLAUDETM_HOME"
+
+# Profile names become filesystem paths (the oauth config dir), so restrict them
+# to a safe charset and reject path-traversal / separators / dot segments.
+_VALID_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 class ProfileError(Exception):
@@ -142,20 +147,22 @@ def resolve_runtime_env() -> dict[str, str]:
     """Resolve env overrides for the currently active profile.
 
     Reads the ``CLAUDETM_PROFILE`` override or the persisted active profile.
-    Deliberately defensive: any failure (missing/corrupt registry) returns an
-    empty dict so the default ``~/.claude`` behavior is preserved.
+    Returns an empty dict ONLY when no profile is selected, so the default
+    ``~/.claude`` behavior is preserved. An explicitly selected-but-missing
+    profile, or a corrupt registry, fails fast (raises) rather than silently
+    falling back to ambient credentials and running under the wrong account.
 
     Returns:
-        Environment overrides for the SDK subprocess, or empty dict.
+        Environment overrides for the SDK subprocess, or empty dict when no
+        profile is active.
+
+    Raises:
+        ProfileError: If a selected profile cannot be resolved.
     """
-    try:
-        manager = ProfileManager()
-        profile = manager.resolve_active(os.environ.get(PROFILE_ENV_VAR))
-        if profile is None:
-            return {}
-        return env_for_profile(profile)
-    except Exception:
+    profile = ProfileManager().resolve_active(os.environ.get(PROFILE_ENV_VAR))
+    if profile is None:
         return {}
+    return env_for_profile(profile)
 
 
 # =============================================================================
@@ -169,6 +176,35 @@ def _default_base_dir() -> Path:
     if override:
         return Path(override).expanduser()
     return Path.home() / ".claudetm"
+
+
+def _chmod_private_dir(path: Path) -> None:
+    """Restrict a directory to owner-only access (0o700), best-effort.
+
+    ``mkdir(mode=...)`` is masked by the process umask, so chmod explicitly.
+    Silently ignored on platforms without POSIX permissions.
+    """
+    try:
+        path.chmod(0o700)
+    except (OSError, NotImplementedError):
+        pass
+
+
+def _validate_name(name: str) -> None:
+    """Reject profile names that are unsafe as a directory segment.
+
+    Args:
+        name: The candidate profile name.
+
+    Raises:
+        ProfileValidationError: If the name is empty, contains path separators
+            or dot segments, or otherwise falls outside the safe charset.
+    """
+    if not name or not _VALID_NAME_RE.match(name) or name in (".", ".."):
+        raise ProfileValidationError(
+            f"Invalid profile name '{name}'. Use letters, digits, '.', '_', '-' "
+            "(no path separators or dot segments)."
+        )
 
 
 class ProfileManager:
@@ -200,10 +236,16 @@ class ProfileManager:
         return ProfileRegistry.model_validate(data)
 
     def save(self, registry: ProfileRegistry) -> None:
-        """Persist the registry atomically (temp file + rename)."""
+        """Persist the registry atomically (temp file + rename).
+
+        The registry stores raw API keys, so the directory and file are locked
+        down to owner-only access rather than relying on the process umask.
+        """
         self.base_dir.mkdir(parents=True, exist_ok=True)
+        _chmod_private_dir(self.base_dir)
         tmp = self.registry_path.with_suffix(".json.tmp")
         tmp.write_text(registry.model_dump_json(indent=2) + "\n", encoding="utf-8")
+        tmp.chmod(0o600)
         tmp.replace(self.registry_path)
 
     # -- queries -----------------------------------------------------------
@@ -236,15 +278,22 @@ class ProfileManager:
             override: Explicit profile name (e.g. from ``CLAUDETM_PROFILE``).
 
         Returns:
-            The resolved Profile, or None when nothing is active / found. A
-            missing override resolves to None so callers fall back to default
-            credentials rather than erroring in the hot path.
+            The resolved Profile, or None when no profile is selected at all
+            (no override and no persisted active pointer).
+
+        Raises:
+            ProfileNotFoundError: If a profile IS selected (via override or the
+                persisted active pointer) but does not exist. Failing fast here
+                prevents silently running under the wrong (ambient) credentials.
         """
         registry = self.load()
         name = override or registry.active
         if not name:
             return None
-        return registry.profiles.get(name)
+        profile = registry.profiles.get(name)
+        if profile is None:
+            raise ProfileNotFoundError(name)
+        return profile
 
     # -- mutations ---------------------------------------------------------
 
@@ -272,8 +321,10 @@ class ProfileManager:
 
         Raises:
             ProfileExistsError: If the name is already taken.
-            ProfileValidationError: If required fields for the type are missing.
+            ProfileValidationError: If the name is unsafe or required fields for
+                the type are missing.
         """
+        _validate_name(name)
         registry = self.load()
         if name in registry.profiles:
             raise ProfileExistsError(name)
@@ -281,7 +332,12 @@ class ProfileManager:
         config_dir: str | None = None
         if profile_type == "oauth":
             profile_home = (self.profiles_dir / name).resolve()
+            # Defense in depth: the validated name should already keep this
+            # under profiles_dir, but verify the resolved path cannot escape.
+            if profile_home.parent != self.profiles_dir.resolve():
+                raise ProfileValidationError(f"Invalid profile name '{name}'.")
             profile_home.mkdir(parents=True, exist_ok=True)
+            _chmod_private_dir(profile_home)
             config_dir = str(profile_home)
 
         profile = Profile(

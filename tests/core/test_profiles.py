@@ -162,9 +162,48 @@ class TestResolveRuntimeEnv:
         env = resolve_runtime_env()
         assert env == {"ANTHROPIC_API_KEY": "sk-override"}
 
-    def test_unknown_override_falls_back_to_default(self, tmp_path: Path, monkeypatch) -> None:
+    def test_unknown_override_raises(self, tmp_path: Path, monkeypatch) -> None:
+        # An explicitly-selected but missing profile must fail fast, not
+        # silently fall back to ambient ~/.claude credentials.
         base = tmp_path / ".claudetm"
         ProfileManager(base_dir=base).add("work", "oauth")
         monkeypatch.setenv("CLAUDETM_HOME", str(base))
         monkeypatch.setenv(PROFILE_ENV_VAR, "ghost")
-        assert resolve_runtime_env() == {}
+        with pytest.raises(ProfileNotFoundError):
+            resolve_runtime_env()
+
+
+# =============================================================================
+# safety: name validation & permissions
+# =============================================================================
+
+
+class TestNameValidation:
+    @pytest.mark.parametrize(
+        "bad",
+        ["../escape", "a/b", "..", ".", "", "/abs", "with space", ".hidden"],
+    )
+    def test_unsafe_names_rejected(self, manager: ProfileManager, bad: str) -> None:
+        with pytest.raises(ProfileValidationError):
+            manager.add(bad, "oauth")
+
+    def test_traversal_name_does_not_create_dir_outside(self, manager: ProfileManager) -> None:
+        with pytest.raises(ProfileValidationError):
+            manager.add("../pwned", "oauth")
+        assert not (manager.profiles_dir.parent / "pwned").exists()
+
+
+class TestPermissions:
+    def test_registry_is_owner_only(self, manager: ProfileManager) -> None:
+        manager.add("zai", "api-key", api_key="sk-secret")
+        mode = manager.registry_path.stat().st_mode & 0o777
+        assert mode == 0o600
+
+    def test_base_dir_is_owner_only(self, manager: ProfileManager) -> None:
+        manager.add("work", "oauth")
+        assert manager.base_dir.stat().st_mode & 0o777 == 0o700
+
+    def test_oauth_profile_home_is_owner_only(self, manager: ProfileManager) -> None:
+        profile = manager.add("work", "oauth")
+        assert profile.config_dir is not None
+        assert Path(profile.config_dir).stat().st_mode & 0o777 == 0o700

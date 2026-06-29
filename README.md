@@ -74,9 +74,10 @@ There are two profile types:
 claudetm profile add work
 claudetm profile login work          # run /login inside, then exit
 
-# Create an api-key profile (e.g. z.ai)
-claudetm profile add zai --type api-key \
-    --api-key sk-... --base-url https://api.z.ai/api/anthropic
+# Create an api-key profile (e.g. z.ai). The key is read from the
+# CLAUDETM_API_KEY env var or prompted for securely — never a CLI flag.
+CLAUDETM_API_KEY=sk-... claudetm profile add zai --type api-key \
+    --base-url https://api.z.ai/api/anthropic
 
 # Manage profiles
 claudetm profile list                # active profile is marked with →
