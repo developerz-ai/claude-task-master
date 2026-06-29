@@ -52,6 +52,7 @@ class TestActiveProfileResolution:
         profile = mgr.add("work", "oauth")
         monkeypatch.setenv("CLAUDETM_HOME", str(base))
 
+        assert profile.config_dir is not None
         cred = CredentialManager()
         assert cred.credentials_path == Path(profile.config_dir) / ".credentials.json"
 
