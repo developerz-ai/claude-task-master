@@ -60,6 +60,43 @@ claudetm doctor
 
 **For Docker users:** Ensure your `~/.claude/.credentials.json` exists before running the container, as Claude Task Master needs OAuth credentials to function.
 
+### Profiles (multiple accounts / custom endpoints)
+
+By default claudetm uses the global `~/.claude/.credentials.json` session. **Profiles** let you run under isolated credentials so you can switch between Claude subscriptions — or a custom Anthropic-compatible endpoint — and even run several in parallel.
+
+There are two profile types:
+
+- **`oauth`** — an isolated Claude Code config home. Each profile gets its own credentials directory under `~/.claudetm/profiles/<name>/`, so two subscriptions never clobber each other.
+- **`api-key`** — a direct API key + base URL (e.g. z.ai / GLM via an Anthropic-compatible endpoint), injected as `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`.
+
+```bash
+# Create an oauth profile and log into it (opens claude in its isolated dir)
+claudetm profile add work
+claudetm profile login work          # run /login inside, then exit
+
+# Create an api-key profile (e.g. z.ai)
+claudetm profile add zai --type api-key \
+    --api-key sk-... --base-url https://api.z.ai/api/anthropic
+
+# Manage profiles
+claudetm profile list                # active profile is marked with →
+claudetm profile use work            # set the active profile
+claudetm profile show                # show active profile (secrets masked)
+claudetm profile remove zai
+```
+
+The active profile applies to subsequent runs. Override it for a single run with the `CLAUDETM_PROFILE` environment variable:
+
+```bash
+# Run two subscriptions in parallel from two checkouts
+CLAUDETM_PROFILE=accountA claudetm start "..."   # in repo-a/
+CLAUDETM_PROFILE=accountB claudetm start "..."   # in repo-b/
+```
+
+Because each profile has its own credentials directory and run state is per-project, **different subscriptions run in parallel without colliding**. Storage location is overridable with `CLAUDETM_HOME` (defaults to `~/.claudetm`).
+
+> **Note:** Parallel isolation is between *different accounts*. Running two copies of the *same* subscription in parallel can still trigger OAuth refresh-token rotation that invalidates the other session — use a distinct account (profile) per concurrent run.
+
 ### Upgrading
 
 **With uv:**

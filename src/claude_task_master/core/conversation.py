@@ -194,6 +194,12 @@ class ConversationManager:
         # Load subagents from .claude/agents/ directory
         agents = get_agents_for_working_dir(self.working_dir)
 
+        # Inject the active profile's auth context so conversations honor the
+        # same isolated credentials as single-turn queries. No-op when unset.
+        from .profiles import resolve_runtime_env
+
+        profile_env = resolve_runtime_env()
+
         return self._options_class(
             allowed_tools=tools,
             permission_mode="bypassPermissions",
@@ -203,6 +209,7 @@ class ConversationManager:
             hooks=self.hooks,
             agents=agents if agents else None,
             max_buffer_size=5 * 1024 * 1024,  # 5MB - prevents CLIJSONDecodeError on large files
+            env=profile_env,
         )
 
     @asynccontextmanager

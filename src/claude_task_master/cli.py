@@ -14,6 +14,7 @@ from .cli_commands.fix_pr import register_fix_pr_command
 from .cli_commands.github import register_github_commands
 from .cli_commands.info import register_info_commands
 from .cli_commands.mailbox import register_mailbox_commands
+from .cli_commands.profile import register_profile_commands
 from .cli_commands.workflow import register_workflow_commands
 from .core.state import StateManager
 from .utils.debug_claude_md import debug_claude_md_detection
@@ -133,6 +134,7 @@ register_config_commands(app)  # config init, config show, config path
 register_control_commands(app)  # pause, stop, config-update
 register_fix_pr_command(app)  # merge-pr (fix-pr is hidden alias)
 register_mailbox_commands(app)  # mailbox, mailbox send, mailbox clear
+register_profile_commands(app)  # profile add/list/use/show/remove/login
 
 
 @app.command()

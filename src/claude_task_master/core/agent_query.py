@@ -448,6 +448,12 @@ class AgentQueryExecutor:
                 "CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS": stall_timeout_ms,
                 "API_TIMEOUT_MS": stall_timeout_ms,
             }
+            # Inject the active profile's auth context (isolated CLAUDE_CONFIG_DIR
+            # for oauth profiles, or ANTHROPIC_API_KEY/BASE_URL for api-key
+            # profiles). No-op when no profile is active.
+            from .profiles import resolve_runtime_env
+
+            cli_env.update(resolve_runtime_env())
 
             # Create options with model specification and subagents
             try:

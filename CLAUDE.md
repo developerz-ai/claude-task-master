@@ -183,6 +183,14 @@ All commands check `state_manager.exists()` first:
 - `mailbox`: Show mailbox status
 - `mailbox send "msg"`: Send message to mailbox
 - `mailbox clear`: Clear pending messages
+- `profile`: Manage auth profiles (`add`/`list`/`use`/`show`/`remove`/`login`)
+
+### Profiles (Multi-Account / Custom Endpoints)
+- Profiles isolate credentials so multiple Claude subscriptions (or a custom Anthropic-compatible endpoint) can be used without colliding on the global `~/.claude/.credentials.json`
+- Two types: `oauth` (isolated `CLAUDE_CONFIG_DIR` per profile under `~/.claudetm/profiles/<name>/`) and `api-key` (injects `ANTHROPIC_API_KEY`/`ANTHROPIC_BASE_URL`, e.g. z.ai/GLM)
+- Registry at `~/.claudetm/profiles.json` (override base dir with `CLAUDETM_HOME`); active profile is a single pointer, overridable per-run via `CLAUDETM_PROFILE`
+- The active profile's env is injected at the SDK subprocess boundary (`core/agent_query.py`, `core/conversation.py`); `CredentialManager` reads the active oauth profile's config dir, and short-circuits the OAuth file check for `api-key` profiles
+- Different accounts run in parallel safely (per-profile creds dir + per-project state); running the *same* subscription twice can trigger OAuth refresh-token rotation — use a distinct profile per concurrent run
 
 ### Mailbox System
 - Messages stored in `.claude-task-master/mailbox.json`
