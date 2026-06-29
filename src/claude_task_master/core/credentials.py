@@ -5,6 +5,7 @@ This module only loads and validates credentials from disk.
 """
 
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -141,13 +142,51 @@ class Credentials(BaseModel):
 
 
 class CredentialManager:
-    """Manages OAuth credentials from ~/.claude/.credentials.json.
+    """Manages OAuth credentials from a Claude Code config directory.
+
+    By default reads ``~/.claude/.credentials.json``. When a profile is active
+    (see ``core.profiles``) credentials are read from that profile's isolated
+    config directory instead, so multiple subscriptions never collide.
 
     Token refresh is handled automatically by the Claude Agent SDK.
     This class only loads and validates credentials from disk.
     """
 
+    # Default location. Kept as a class attribute for backwards compatibility
+    # (tests and callers patch this). Per-instance overrides take precedence.
     CREDENTIALS_PATH = Path.home() / ".claude" / ".credentials.json"
+
+    def __init__(self, config_dir: Path | None = None):
+        """Initialize the credential manager.
+
+        Args:
+            config_dir: Explicit Claude Code config directory to read
+                credentials from. When None, an active oauth profile's config
+                directory is used if one exists, otherwise ``CREDENTIALS_PATH``.
+        """
+        self._config_dir = config_dir
+        self._profile = None
+        if config_dir is None:
+            # Resolve the active profile. A selected-but-missing profile or a
+            # corrupt registry raises (ProfileError) rather than silently
+            # falling back to the global ~/.claude credentials, which could
+            # green-light the wrong account. No profile selected -> None, and
+            # we keep the default path.
+            from .profiles import ProfileManager
+
+            profile = ProfileManager().resolve_active(os.environ.get("CLAUDETM_PROFILE"))
+            if profile is not None:
+                self._profile = profile
+                if profile.type == "oauth" and profile.config_dir:
+                    self._config_dir = Path(profile.config_dir)
+
+    @property
+    def credentials_path(self) -> Path:
+        """Path to the credentials file for this manager's config directory."""
+        if self._config_dir is not None:
+            return self._config_dir / ".credentials.json"
+        # Fall back to the (patchable) class attribute.
+        return self.CREDENTIALS_PATH
 
     def load_credentials(self) -> Credentials:
         """Load credentials from file.
@@ -160,11 +199,12 @@ class CredentialManager:
             InvalidCredentialsError: If the credentials file is malformed or invalid.
             CredentialPermissionError: If there are permission issues reading the file.
         """
-        if not self.CREDENTIALS_PATH.exists():
-            raise CredentialNotFoundError(self.CREDENTIALS_PATH)
+        credentials_path = self.credentials_path
+        if not credentials_path.exists():
+            raise CredentialNotFoundError(credentials_path)
 
         try:
-            with open(self.CREDENTIALS_PATH) as f:
+            with open(credentials_path) as f:
                 try:
                     data = json.load(f)
                 except json.JSONDecodeError as e:
@@ -173,7 +213,7 @@ class CredentialManager:
                         f"JSON parse error at line {e.lineno}, column {e.colno}: {e.msg}",
                     ) from e
         except PermissionError as e:
-            raise CredentialPermissionError(self.CREDENTIALS_PATH, "reading", e) from e
+            raise CredentialPermissionError(credentials_path, "reading", e) from e
 
         # Handle empty JSON object
         if not data:
@@ -240,6 +280,11 @@ class CredentialManager:
             InvalidCredentialsError: If the credentials are malformed.
             CredentialPermissionError: If there are permission issues.
         """
+        # api-key profiles authenticate via ANTHROPIC_API_KEY (injected into the
+        # SDK subprocess), not an OAuth credentials file. The returned value is
+        # only used as a pre-flight "are we configured?" gate.
+        if self._profile is not None and self._profile.type == "api-key":
+            return self._profile.api_key or ""
         credentials = self.load_credentials()
         return credentials.accessToken
 
@@ -257,5 +302,8 @@ class CredentialManager:
             InvalidCredentialsError: If the credentials are malformed.
             CredentialPermissionError: If there are permission issues.
         """
+        # api-key profiles have no OAuth credentials file to verify.
+        if self._profile is not None and self._profile.type == "api-key":
+            return bool(self._profile.api_key)
         self.load_credentials()
         return True
