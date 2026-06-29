@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.50] - 2026-06-29
+
+### Added
+- **Authentication profiles** for multi-account isolation. Run under isolated credentials instead of the single global `~/.claude/.credentials.json`, so multiple Claude subscriptions — or a custom Anthropic-compatible endpoint (e.g. z.ai/GLM) — can be used side by side and even in parallel. Two profile types: `oauth` (each profile gets its own `CLAUDE_CONFIG_DIR` under `~/.claudetm/profiles/<name>/`) and `api-key` (injects `ANTHROPIC_API_KEY`/`ANTHROPIC_BASE_URL`). New CLI: `claudetm profile add/list/use/show/remove/login`. Active profile is set globally or overridden per-run via `CLAUDETM_PROFILE`; storage base dir overridable via `CLAUDETM_HOME`. The active profile's env is injected at the SDK subprocess boundary, and `CredentialManager` reads the active oauth profile's config dir (api-key profiles bypass the OAuth file check). Profile resolution fails fast on an unknown/missing selection rather than silently using ambient credentials; `profiles.json` and profile dirs are stored owner-only (`0o600`/`0o700`); API keys are gathered via `CLAUDETM_API_KEY`/hidden prompt, never a CLI flag.
+
 ## [0.1.49] - 2026-06-21
 
 ### Changed
@@ -711,7 +716,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.49...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.50...HEAD
+[0.1.50]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.49...v0.1.50
 [0.1.49]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.48...v0.1.49
 [0.1.48]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.47...v0.1.48
 [0.1.47]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.46...v0.1.47
