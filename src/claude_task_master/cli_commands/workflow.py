@@ -21,6 +21,21 @@ from ..webhooks import WebhookClient
 console = Console()
 
 
+def auto_merge_notice(auto_merge: bool) -> str | None:
+    """Banner text shown before a run when auto-merge is active.
+
+    claudetm merges its own PRs via a ``gh`` subprocess, outside Claude Code's tool
+    boundary, so a host repo's git-guard hook cannot intercept it. Make the default
+    explicit and point at the off switch. Returns None when auto-merge is off.
+    """
+    if not auto_merge:
+        return None
+    return (
+        "auto-merge is ON — every PR will be merged automatically when CI passes.\n"
+        "  Pass --no-auto-merge to open PRs without merging."
+    )
+
+
 def _initialize_logger(
     state_manager: StateManager,
     run_id: str,
@@ -195,6 +210,9 @@ def start(
 
     console.print(f"[bold green]Starting new task:[/bold green] {goal}")
     console.print(f"Model: {model}, Auto-merge: {auto_merge}, Log: {log_level}/{log_format}")
+    notice = auto_merge_notice(auto_merge)
+    if notice:
+        console.print(f"[yellow]⚠ {notice}[/yellow]")
     if budget is not None:
         console.print(f"Budget: ${budget:.2f}/session")
 

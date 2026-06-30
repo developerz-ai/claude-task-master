@@ -5,6 +5,7 @@ from unittest.mock import patch
 from typer.testing import CliRunner
 
 from claude_task_master.cli import app
+from claude_task_master.cli_commands.workflow import auto_merge_notice
 from claude_task_master.core.state import StateManager
 
 # =============================================================================
@@ -43,6 +44,44 @@ class TestStartCommand:
 
         # Should print the goal (even though it fails later)
         assert "My test goal" in result.output
+
+    def test_auto_merge_notice_helper(self):
+        """auto_merge_notice returns a banner when on, None when off."""
+        on = auto_merge_notice(True)
+        assert on is not None
+        assert "auto-merge is ON" in on
+        assert "--no-auto-merge" in on
+        assert auto_merge_notice(False) is None
+
+    def test_start_shows_auto_merge_banner_by_default(self, cli_runner: CliRunner, temp_dir):
+        """start prints the auto-merge banner when auto-merge is on (the default)."""
+        with patch.object(StateManager, "STATE_DIR", temp_dir / ".claude-task-master"):
+            with patch(
+                "claude_task_master.cli_commands.workflow.CredentialManager"
+            ) as mock_cred_manager:
+                mock_cred_manager.return_value.get_valid_token.return_value = "test-token"
+                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                    with patch("claude_task_master.cli_commands.workflow.Planner") as mock_planner:
+                        mock_planner.return_value.create_plan.side_effect = Exception("Test stop")
+
+                        result = cli_runner.invoke(app, ["start", "Test goal"])
+
+        assert "auto-merge is ON" in result.output
+
+    def test_start_no_auto_merge_suppresses_banner(self, cli_runner: CliRunner, temp_dir):
+        """--no-auto-merge suppresses the auto-merge banner."""
+        with patch.object(StateManager, "STATE_DIR", temp_dir / ".claude-task-master"):
+            with patch(
+                "claude_task_master.cli_commands.workflow.CredentialManager"
+            ) as mock_cred_manager:
+                mock_cred_manager.return_value.get_valid_token.return_value = "test-token"
+                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                    with patch("claude_task_master.cli_commands.workflow.Planner") as mock_planner:
+                        mock_planner.return_value.create_plan.side_effect = Exception("Test stop")
+
+                        result = cli_runner.invoke(app, ["start", "Test goal", "--no-auto-merge"])
+
+        assert "auto-merge is ON" not in result.output
 
     def test_start_default_model(self, cli_runner: CliRunner, temp_dir):
         """Test start uses default model."""
