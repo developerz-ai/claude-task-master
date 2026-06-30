@@ -16,6 +16,12 @@ This guide covers deploying Claude Task Master using Docker, including the unifi
 
 ## Quick Start
 
+> [!WARNING]
+> These examples mount your personal `~/.claude` credentials into the container — fine for running
+> locally on your own machine, but **not** for shared, unattended, or multi-tenant hosts, where it
+> leaks a human's billable OAuth token. See [Claude Credentials](#1-claude-credentials-claude) and
+> [Authentication direction](#authentication-direction).
+
 The fastest way to get started with Claude Task Master in Docker:
 
 ```bash
@@ -148,6 +154,18 @@ Claude Task Master requires several volume mounts to function properly. Understa
 
 #### 1. Claude Credentials (`~/.claude`)
 
+> [!WARNING]
+> **Mounting a human operator's `~/.claude` shares their personal OAuth bearer token with the
+> container.** The agent then runs as — and bills — that person's Claude account, and anything that
+> reads the container filesystem can read the token. This is acceptable only for a **single operator
+> running locally on their own machine**.
+>
+> **Do not** use this mount for shared, unattended, multi-tenant, or CI deployments: a human's
+> subscription token is not a per-consumer credential and cannot be scoped or rotated independently.
+> The intended direction for unattended deployments is to authenticate through a central Claude proxy
+> with a **scoped, rotatable credential issued per consumer** — never a human's subscription token.
+> See [Authentication direction](#authentication-direction) below.
+
 **Purpose:** OAuth tokens for Claude Code subscription
 
 **Mount:** `~/.claude:/home/claudetm/.claude:ro`
@@ -213,7 +231,22 @@ Before running the Docker container, you must have a Claude Code subscription an
 - Ensure you have an active Claude Code subscription
 - The Docker container will fail to start if credentials are missing or invalid
 
-**Security Note:** The credentials file contains sensitive OAuth tokens. Always mount as read-only (`:ro`) and never commit to version control.
+**Security Note:** The credentials file contains sensitive OAuth tokens. Always mount as read-only (`:ro`) and never commit to version control. For local single-operator use only — see the warning at the top of this section and [Authentication direction](#authentication-direction).
+
+#### Authentication direction
+
+The `~/.claude` bind-mount is a **local-development stopgap**, not the model for shared or unattended
+deployments. Mounting a human's `~/.claude/.credentials.json` means:
+
+- The container authenticates as whoever owns that token and **bills their account**.
+- The token cannot be scoped to least privilege or rotated without disrupting that person's own Claude
+  login.
+
+The target for unattended/multi-consumer deployments is to authenticate the agent through a **central
+Claude proxy** with a **scoped, rotatable credential issued per consumer** — never a human's
+subscription token. Under that model the container mounts and reads **no** human's
+`~/.claude/.credentials.json`; the agent's credential can be revoked or rotated independently. Until
+that path is wired up, treat the bind-mount as local-only and keep it off shared hosts.
 
 **Credentials File Format:**
 ```json
