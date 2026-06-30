@@ -32,7 +32,10 @@ def auto_merge_notice(auto_merge: bool) -> str | None:
         return None
     return (
         "auto-merge is ON — every PR will be merged automatically when CI passes.\n"
-        "  Pass --no-auto-merge to open PRs without merging."
+        "  PR merges run via `gh`, outside Claude Code's tool boundary, so host "
+        "git-guard hooks cannot intercept them.\n"
+        "  Pass --no-auto-merge for this run, or `claudetm config-update --no-auto-merge` "
+        "to disable it by default."
     )
 
 

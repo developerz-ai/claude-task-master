@@ -46,11 +46,16 @@ class TestStartCommand:
         assert "My test goal" in result.output
 
     def test_auto_merge_notice_helper(self):
-        """auto_merge_notice returns a banner when on, None when off."""
+        """auto_merge_notice returns the full warning when on, None when off."""
         on = auto_merge_notice(True)
         assert on is not None
         assert "auto-merge is ON" in on
+        # The core surprise: merges run via gh, outside the tool boundary, bypassing git-guard.
+        assert "gh" in on
+        assert "git-guard" in on
+        # Both the per-run flag and the persistent disable are offered.
         assert "--no-auto-merge" in on
+        assert "config-update --no-auto-merge" in on
         assert auto_merge_notice(False) is None
 
     def test_start_shows_auto_merge_banner_by_default(self, cli_runner: CliRunner, temp_dir):
