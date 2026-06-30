@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.51] - 2026-06-30
+
+### Added
+- **Auto-merge banner** at the start of a run. When auto-merge is on (the default), `claudetm start` now prints a prominent notice that every PR will be merged automatically once CI passes — and, crucially, that those merges run via a `gh` subprocess **outside Claude Code's tool boundary**, so a host repo's git-guard hook cannot intercept them. The banner points at both the per-run flag (`--no-auto-merge`) and the persistent switch (`claudetm config-update --no-auto-merge`).
+
 ## [0.1.50] - 2026-06-29
 
 ### Added
@@ -716,7 +721,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.50...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.51...HEAD
+[0.1.51]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.50...v0.1.51
 [0.1.50]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.49...v0.1.50
 [0.1.49]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.48...v0.1.49
 [0.1.48]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.47...v0.1.48
