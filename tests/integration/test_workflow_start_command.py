@@ -174,3 +174,47 @@ class TestStartCommandWorkflow:
             assert state_data["options"]["auto_merge"] is False
             assert state_data["options"]["max_sessions"] == 5
             assert state_data["options"]["pause_on_pr"] is True
+
+    def test_start_with_branch_override(
+        self,
+        runner,
+        integration_temp_dir: Path,
+        integration_state_dir: Path,
+        mock_credentials_file: Path,
+        patched_sdk,
+        monkeypatch,
+    ):
+        """--branch is persisted as branch_override in state."""
+        monkeypatch.chdir(integration_temp_dir)
+        monkeypatch.setattr(StateManager, "STATE_DIR", integration_state_dir)
+        monkeypatch.setattr(CredentialManager, "CREDENTIALS_PATH", mock_credentials_file)
+
+        patched_sdk.set_planning_response("""## Task List
+- [ ] Task 1
+
+## Success Criteria
+1. Done
+""")
+        runner.invoke(app, ["start", "Task", "--branch", "run/alpha"])
+
+        state_file = integration_state_dir / "state.json"
+        if state_file.exists():
+            state_data = json.loads(state_file.read_text())
+            assert state_data["options"]["branch_override"] == "run/alpha"
+
+    def test_start_rejects_invalid_branch(
+        self,
+        runner,
+        integration_temp_dir: Path,
+        integration_state_dir: Path,
+        mock_credentials_file: Path,
+        monkeypatch,
+    ):
+        """An invalid --branch value exits non-zero before any state is written."""
+        monkeypatch.chdir(integration_temp_dir)
+        monkeypatch.setattr(StateManager, "STATE_DIR", integration_state_dir)
+        monkeypatch.setattr(CredentialManager, "CREDENTIALS_PATH", mock_credentials_file)
+
+        result = runner.invoke(app, ["start", "Task", "--branch", "bad name"])
+        assert result.exit_code == 1
+        assert not (integration_state_dir / "state.json").exists()

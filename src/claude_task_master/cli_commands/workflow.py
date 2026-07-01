@@ -11,6 +11,7 @@ from ..core.agent import AgentWrapper, ModelType
 from ..core.config_loader import initialize_config
 from ..core.context_accumulator import ContextAccumulator
 from ..core.credentials import CredentialManager
+from ..core.git_branch import is_valid_branch_name
 from ..core.logger import LogFormat, LogLevel, TaskLogger
 from ..core.orchestrator import WorkLoopOrchestrator
 from ..core.plan_updater import PlanUpdater
@@ -175,6 +176,13 @@ def start(
         "--pr-per-task",
         help="Create a PR for each task (default: one PR per PR group in plan)",
     ),
+    branch: str | None = typer.Option(
+        None,
+        "--branch",
+        "-b",
+        help="Explicit branch name for this run (default: agent-chosen). Use distinct "
+        "names for concurrent runs of the same task to avoid PR collisions.",
+    ),
     webhook_url: str | None = typer.Option(
         None,
         "--webhook-url",
@@ -210,6 +218,12 @@ def start(
         CLAUDETM_WEBHOOK_SECRET: Set webhook secret (overridden by --webhook-secret argument)
     """
     log_level_enum, log_format_enum = _validate_log_options(log_level, log_format)
+
+    if branch is not None and not is_valid_branch_name(branch):
+        console.print(
+            f"[red]Invalid --branch value: {branch!r} is not a valid git branch name.[/red]"
+        )
+        raise typer.Exit(1)
 
     console.print(f"[bold green]Starting new task:[/bold green] {goal}")
     console.print(f"Model: {model}, Auto-merge: {auto_merge}, Log: {log_level}/{log_format}")
@@ -269,6 +283,7 @@ def start(
             log_level=log_level.lower(),
             log_format=log_format.lower(),
             pr_per_task=pr_per_task,
+            branch_override=branch,
             webhook_url=webhook_url,
             webhook_secret=webhook_secret,
             max_budget_usd=budget,

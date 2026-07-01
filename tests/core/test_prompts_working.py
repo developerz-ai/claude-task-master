@@ -158,6 +158,37 @@ class TestBranchInfoSection:
             or "If on main/master" in branch_section
         )
 
+    def test_mandated_branch_directive_in_pr_group(self) -> None:
+        """A mandated branch (from --branch) yields an authoritative directive."""
+        result = build_work_prompt(
+            task_description="Task",
+            pr_group_info={
+                "name": "Core",
+                "branch": "run/alpha",
+                "branch_mandated": True,
+                "completed_tasks": [],
+                "remaining_tasks": 0,
+            },
+        )
+        assert "**Branch (required):**" in result
+        assert "`run/alpha`" in result
+        assert "Do NOT invent a different branch name" in result
+
+    def test_unmandated_branch_stays_informational(self) -> None:
+        """Without a mandate the PR-group branch is shown informationally, not required."""
+        result = build_work_prompt(
+            task_description="Task",
+            pr_group_info={
+                "name": "Core",
+                "branch": "some/current",
+                "branch_mandated": False,
+                "completed_tasks": [],
+                "remaining_tasks": 0,
+            },
+        )
+        assert "**Branch (required):**" not in result
+        assert "**Branch:** `some/current`" in result
+
 
 # =============================================================================
 # Context Section Tests
