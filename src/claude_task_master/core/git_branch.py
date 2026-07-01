@@ -31,6 +31,5 @@ def is_valid_branch_name(name: str) -> bool:
     # Every slash-separated component: non-empty, not starting with a dot (e.g. `foo/.bar`),
     # and not ending in `.lock` (git reserves that suffix even on nested components).
     return all(
-        comp and not comp.startswith(".") and not comp.endswith(".lock")
-        for comp in name.split("/")
+        comp and not comp.startswith(".") and not comp.endswith(".lock") for comp in name.split("/")
     )
