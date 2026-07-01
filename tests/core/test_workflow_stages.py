@@ -40,6 +40,8 @@ def mock_github_client():
     client.get_pr_for_current_branch = MagicMock(return_value=None)
     client.get_pr_status = MagicMock()
     client.merge_pr = MagicMock()
+    client.get_pr_body = MagicMock(return_value="")
+    client.update_pr_body = MagicMock()
     return client
 
 
@@ -271,6 +273,35 @@ class TestHandlePRCreatedStage:
         assert result == 1  # Blocked
         assert basic_task_state.status == "blocked"
         mock_console.warning.assert_called()
+
+    @patch("claude_task_master.core.workflow_stages.console")
+    def test_sanitizes_pr_body_on_detection(
+        self, mock_console, workflow_handler, state_manager, basic_task_state, mock_github_client
+    ):
+        """A newly detected PR whose body has decorative glyphs is rewritten clean."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        mock_github_client.get_pr_for_current_branch.return_value = 42
+        mock_github_client.get_pr_body.return_value = "## Verification\n- ✓ tests pass"
+
+        workflow_handler.handle_pr_created_stage(basic_task_state)
+
+        mock_github_client.update_pr_body.assert_called_once()
+        _, cleaned = mock_github_client.update_pr_body.call_args[0]
+        assert "✓" not in cleaned
+        assert "tests pass" in cleaned
+
+    @patch("claude_task_master.core.workflow_stages.console")
+    def test_clean_pr_body_not_rewritten(
+        self, mock_console, workflow_handler, state_manager, basic_task_state, mock_github_client
+    ):
+        """A glyph-free PR body is left untouched (no needless edit call)."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        mock_github_client.get_pr_for_current_branch.return_value = 42
+        mock_github_client.get_pr_body.return_value = "## Summary\nplain body"
+
+        workflow_handler.handle_pr_created_stage(basic_task_state)
+
+        mock_github_client.update_pr_body.assert_not_called()
 
     @patch("claude_task_master.core.workflow_stages.console")
     def test_existing_pr_moves_to_ci(

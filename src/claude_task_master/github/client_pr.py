@@ -82,6 +82,33 @@ class PROperationsMixin:
 
         return pr_number
 
+    def get_pr_body(self: GitHubClientProtocol, pr_number: int) -> str:
+        """Return the body/description text of a PR.
+
+        Args:
+            pr_number: The PR number to read.
+
+        Returns:
+            The PR body as text (empty string if the PR has no body).
+        """
+        result = self._run_gh_command(
+            ["gh", "pr", "view", str(pr_number), "--json", "body", "-q", ".body"],
+            timeout=30,
+        )
+        return result.stdout.rstrip("\n")
+
+    def update_pr_body(self: GitHubClientProtocol, pr_number: int, body: str) -> None:
+        """Overwrite a PR's body/description.
+
+        Args:
+            pr_number: The PR number to edit.
+            body: The new body text.
+        """
+        self._run_gh_command(
+            ["gh", "pr", "edit", str(pr_number), "--body", body],
+            timeout=60,
+        )
+
     def get_pr_status(self: GitHubClientProtocol, pr_number: int) -> PRStatus:
         """Get PR status including CI checks and review comments.
 
