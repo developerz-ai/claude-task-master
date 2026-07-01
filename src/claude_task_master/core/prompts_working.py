@@ -81,9 +81,17 @@ completion report: 3-5 lines max. state what changed, not how you got there."""
         completed = pr_group_info.get("completed_tasks", [])
         remaining = pr_group_info.get("remaining_tasks", 0)
         branch = pr_group_info.get("branch")
+        branch_mandated = pr_group_info.get("branch_mandated", False)
 
         group_lines = [f"**PR Group:** {pr_name}"]
-        if branch:
+        if branch and branch_mandated:
+            group_lines.append(
+                f"**Branch (required):** use `{branch}` for all work in this run. "
+                f"If it does not exist yet, create it (`git checkout -b {branch}`). "
+                f"Do NOT invent a different branch name. For an additional PR in this run, "
+                f"suffix it (e.g. `{branch}-2`) so PRs never collide."
+            )
+        elif branch:
             group_lines.append(f"**Branch:** `{branch}`")
 
         if completed:

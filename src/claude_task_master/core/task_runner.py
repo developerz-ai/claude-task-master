@@ -315,13 +315,17 @@ Please complete this task."""
         if self.logger:
             self.logger.log_prompt(task_description)
 
-        # Get current branch to pass to agent
+        # Get current branch to pass to agent. An explicit --branch override takes
+        # precedence and is marked mandated, so the work prompt instructs the agent to
+        # use that exact name instead of inventing one (prevents same-task PR collisions).
+        branch_override = state.options.branch_override
         current_branch = get_current_branch()
 
         # Build PR group info for agent context (always provide for better task execution)
         pr_group_info = {
             "name": pr_name,
-            "branch": current_branch,
+            "branch": branch_override or current_branch,
+            "branch_mandated": branch_override is not None,
             "completed_tasks": completed_in_group,
             "remaining_tasks": remaining_in_group,
         }
@@ -352,7 +356,9 @@ Please complete this task."""
                 task_description=task_description,
                 context=context,
                 model_override=model_type,
-                required_branch=current_branch,
+                # With an override, point required_branch at it too so the prompt is consistent
+                # (no "you're on main → create a branch" line fighting the mandated branch).
+                required_branch=branch_override or current_branch,
                 create_pr=should_create_pr,
                 pr_group_info=pr_group_info,
                 target_branch=target_branch,
