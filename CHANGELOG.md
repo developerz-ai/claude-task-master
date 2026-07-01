@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.52] - 2026-07-01
+
+### Added
+- **`--branch` override for `claudetm start`** to prevent same-task branch collisions on shared repos. The feature branch is normally chosen by the agent, so two runs of the same task pick the same name and the second run attaches to the first run's PR — fusing both implementations. `--branch <name>` (validated as a git ref) is now passed to the work prompt as an authoritative directive ("use this branch; do not invent another; suffix for additional PRs"), so distinct per-run names never collide. Default (agent-chosen) behavior is unchanged.
+
+### Fixed
+- **Decorative glyphs stripped from PR bodies.** Because the PR body is authored by the agent (`gh pr create`), a no-emoji repo still saw stray check/cross marks (`✓`) leak in. A deterministic post-creation pass now removes a curated set of decorative marks — in both bare (`✓`) and variation-selector (`✓️`) form — and rewrites the body via `gh pr edit` only if it changed. Best-effort and wrapped so it never blocks the workflow.
+
 ## [0.1.51] - 2026-06-30
 
 ### Added
@@ -721,7 +729,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.51...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.52...HEAD
+[0.1.52]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.51...v0.1.52
 [0.1.51]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.50...v0.1.51
 [0.1.50]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.49...v0.1.50
 [0.1.49]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.48...v0.1.49
