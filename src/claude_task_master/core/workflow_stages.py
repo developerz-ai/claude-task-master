@@ -7,6 +7,7 @@ import subprocess
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from ..github.pr_body_sanitizer import strip_decorative_glyphs
 from . import console
 from .agent import ModelType
 from .config_loader import get_config
@@ -232,6 +233,7 @@ class WorkflowStageHandler:
                     if state.pr_start_time is None:
                         state.pr_start_time = datetime.now()
                     self.state_manager.save_state(state)
+                    self._sanitize_pr_body(pr_number)
                 else:
                     # No PR found - agent failed to create one
                     console.error("No PR found for current branch!")
@@ -258,6 +260,20 @@ class WorkflowStageHandler:
             state.ci_poll_start_time = datetime.now()
         self.state_manager.save_state(state)
         return None
+
+    def _sanitize_pr_body(self, pr_number: int) -> None:
+        """Strip decorative glyphs (e.g. ✓) the agent may have left in the PR body.
+
+        Best-effort: any failure is logged and swallowed so it never blocks the workflow.
+        """
+        try:
+            body = self.github_client.get_pr_body(pr_number)
+            cleaned = strip_decorative_glyphs(body)
+            if cleaned != body:
+                self.github_client.update_pr_body(pr_number, cleaned)
+                console.detail("Stripped decorative glyphs from PR body")
+        except Exception as e:
+            console.warning(f"Could not sanitize PR body: {e}")
 
     def _is_ci_poll_timed_out(self, state: TaskState) -> bool:
         """Check if CI polling has exceeded the timeout."""

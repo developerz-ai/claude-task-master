@@ -301,6 +301,38 @@ All tests pass"""
 
 
 # =============================================================================
+# GitHubClient.get_pr_body / update_pr_body Tests
+# =============================================================================
+
+
+class TestGitHubClientPRBody:
+    """Tests for reading and rewriting a PR body."""
+
+    def test_get_pr_body_uses_null_safe_jq(self, github_client):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="Body text\n", stderr="")
+            body = github_client.get_pr_body(7)
+            assert body == "Body text"
+            # `.body // ""` avoids the literal "null" gh -q prints for a body-less PR.
+            assert mock_run.call_args[0][0] == [
+                "gh",
+                "pr",
+                "view",
+                "7",
+                "--json",
+                "body",
+                "-q",
+                '.body // ""',
+            ]
+
+    def test_update_pr_body(self, github_client):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            github_client.update_pr_body(7, "New body")
+            assert mock_run.call_args[0][0] == ["gh", "pr", "edit", "7", "--body", "New body"]
+
+
+# =============================================================================
 # GitHubClient.get_pr_status Tests
 # =============================================================================
 
