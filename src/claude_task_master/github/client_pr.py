@@ -91,8 +91,10 @@ class PROperationsMixin:
         Returns:
             The PR body as text (empty string if the PR has no body).
         """
+        # `.body // ""` guards a null body: gh's -q applies jq raw output, which prints the
+        # literal string "null" for a JSON null, so map it to an empty string instead.
         result = self._run_gh_command(
-            ["gh", "pr", "view", str(pr_number), "--json", "body", "-q", ".body"],
+            ["gh", "pr", "view", str(pr_number), "--json", "body", "-q", '.body // ""'],
             timeout=30,
         )
         return result.stdout.rstrip("\n")

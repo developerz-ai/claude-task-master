@@ -15,6 +15,12 @@ def test_strips_variation_selector_form() -> None:
     assert strip_decorative_glyphs("✔️ ok") == "ok"
 
 
+def test_strips_variation_selector_on_bare_check() -> None:
+    # ✓ followed by U+FE0F must be fully removed, leaving no stray selector.
+    assert strip_decorative_glyphs("✓️ done") == "done"
+    assert "️" not in strip_decorative_glyphs("status ✓️")
+
+
 def test_strips_multiple_mark_types() -> None:
     body = "## Verification\n- ✓ tests pass\n- ❌ lint fails\n- ✅ built"
     cleaned = strip_decorative_glyphs(body)

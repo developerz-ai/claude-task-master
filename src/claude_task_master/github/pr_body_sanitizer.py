@@ -7,29 +7,23 @@ leaving normal ASCII / markdown untouched. It intentionally targets only these m
 all emoji, to avoid mangling legitimate content.
 """
 
-# Ordered longest-first so variation-selector forms (e.g. "✔️") are removed before "✔".
-_DECORATIVE_GLYPHS = [
-    "✅",
-    "✔️",
-    "✔",
-    "✓",
-    "❌",
-    "❎",
-    "✗",
-    "✘",
-    "☑️",
-    "☑",
-    "☒",
-]
+# Variation selector U+FE0F requests emoji presentation; any of the marks below can appear
+# either bare (`✓`) or with it (`✓️`), so both forms are stripped.
+_VS16 = "️"
+
+# Bare decorative check/cross marks.
+_BARE_MARKS = ["✅", "✔", "✓", "❌", "❎", "✗", "✘", "☑", "☒"]
 
 
 def strip_decorative_glyphs(text: str) -> str:
     """Return `text` with decorative check/cross glyphs removed.
 
-    Each glyph is dropped along with a single following space, so `"✓ done"` becomes
-    `"done"` and a bare `"✓"` becomes `""`. Content without these glyphs is returned
-    unchanged.
+    Each mark is dropped in both its bare (`✓`) and variation-selector (`✓️`) form, along
+    with a single following space, so `"✓ done"` becomes `"done"` and a bare `"✓"` becomes
+    `""`. Content without these marks is returned unchanged.
     """
-    for glyph in _DECORATIVE_GLYPHS:
-        text = text.replace(f"{glyph} ", "").replace(glyph, "")
+    for mark in _BARE_MARKS:
+        # VS16 form first so the trailing selector never survives a bare-form strip.
+        for glyph in (mark + _VS16, mark):
+            text = text.replace(f"{glyph} ", "").replace(glyph, "")
     return text
