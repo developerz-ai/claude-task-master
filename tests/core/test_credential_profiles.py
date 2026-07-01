@@ -80,6 +80,13 @@ def _oauth_creds(access: str, refresh: str) -> str:
     )
 
 
+def _write_account(creds_path: Path, uuid: str) -> None:
+    """Write the account-identity metadata (.claude.json) next to a credentials file."""
+    (creds_path.parent / ".claude.json").write_text(
+        json.dumps({"oauthAccount": {"accountUuid": uuid}})
+    )
+
+
 class TestResyncFromLive:
     def _oauth_manager(self, tmp_path: Path, monkeypatch):
         base = tmp_path / "claudetm"
@@ -91,28 +98,43 @@ class TestResyncFromLive:
         assert profile.config_dir is not None
         return CredentialManager(), Path(profile.config_dir) / ".credentials.json", live
 
-    def test_reseeds_when_refresh_token_differs(self, tmp_path: Path, monkeypatch) -> None:
+    def test_reseeds_same_account_when_refresh_token_differs(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
         cred, profile_creds, live = self._oauth_manager(tmp_path, monkeypatch)
         live.write_text(_oauth_creds("new-access", "ref-NEW"))
         profile_creds.write_text(_oauth_creds("old-access", "ref-OLD"))
+        _write_account(live, "acct-1")
+        _write_account(profile_creds, "acct-1")  # same account → rotated token
         assert cred.resync_from_live() is True
         assert profile_creds.read_text() == live.read_text()
 
-    def test_noop_when_refresh_tokens_match(self, tmp_path: Path, monkeypatch) -> None:
+    def test_noop_when_accounts_differ(self, tmp_path: Path, monkeypatch) -> None:
         cred, profile_creds, live = self._oauth_manager(tmp_path, monkeypatch)
-        live.write_text(_oauth_creds("live-access", "ref-SAME"))
-        # Same refresh token, different (already-refreshed) access token → no reseed.
-        profile_creds.write_text(_oauth_creds("profile-access", "ref-SAME"))
+        live.write_text(_oauth_creds("new-access", "ref-NEW"))
+        profile_creds.write_text(_oauth_creds("old-access", "ref-OLD"))
+        _write_account(live, "acct-LIVE")
+        _write_account(profile_creds, "acct-OTHER")  # different account → must NOT clobber
         before = profile_creds.read_text()
         assert cred.resync_from_live() is False
         assert profile_creds.read_text() == before
 
-    def test_seeds_when_profile_creds_missing(self, tmp_path: Path, monkeypatch) -> None:
+    def test_noop_when_account_identity_unknown(self, tmp_path: Path, monkeypatch) -> None:
         cred, profile_creds, live = self._oauth_manager(tmp_path, monkeypatch)
-        live.write_text(_oauth_creds("a", "ref-live"))
-        assert not profile_creds.exists()
-        assert cred.resync_from_live() is True
-        assert profile_creds.read_text() == live.read_text()
+        live.write_text(_oauth_creds("new-access", "ref-NEW"))
+        profile_creds.write_text(_oauth_creds("old-access", "ref-OLD"))
+        # No .claude.json anywhere → identity can't be verified → refuse.
+        assert cred.resync_from_live() is False
+
+    def test_noop_when_refresh_tokens_match(self, tmp_path: Path, monkeypatch) -> None:
+        cred, profile_creds, live = self._oauth_manager(tmp_path, monkeypatch)
+        live.write_text(_oauth_creds("live-access", "ref-SAME"))
+        profile_creds.write_text(_oauth_creds("profile-access", "ref-SAME"))
+        _write_account(live, "acct-1")
+        _write_account(profile_creds, "acct-1")
+        before = profile_creds.read_text()
+        assert cred.resync_from_live() is False  # same refresh token → not stale
+        assert profile_creds.read_text() == before
 
     def test_noop_when_live_missing(self, tmp_path: Path, monkeypatch) -> None:
         cred, profile_creds, live = self._oauth_manager(tmp_path, monkeypatch)
