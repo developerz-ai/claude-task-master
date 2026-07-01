@@ -188,6 +188,89 @@ class CredentialManager:
         # Fall back to the (patchable) class attribute.
         return self.CREDENTIALS_PATH
 
+    def resync_from_live(self) -> bool:
+        """Re-seed a stale oauth-profile credentials file from the live ``~/.claude`` one.
+
+        An oauth profile keeps its own copy of ``.credentials.json``. When the upstream
+        refresh token rotates (one-time use), the copy goes stale and an unattended run fails
+        first-try with "Not logged in". If the active profile's refresh token differs from the
+        live ``~/.claude/.credentials.json`` **and both belong to the same account**, copy the
+        live file into the profile so the run starts from a valid token.
+
+        The same-account check (via the ``oauthAccount.accountUuid`` in the sibling
+        ``.claude.json``) is essential: without it, a different ``~/.claude`` login would look
+        like a rotated token and clobber the profile with the wrong account, breaking isolation.
+        When the account can't be verified on either side, it does nothing.
+
+        Best-effort: returns ``False`` and changes nothing when no oauth profile is active, the
+        accounts don't match/can't be verified, or on any error; returns ``True`` when it
+        re-seeded the profile.
+        """
+        try:
+            if self._profile is None or self._profile.type != "oauth" or self._config_dir is None:
+                return False
+            live_path = self.CREDENTIALS_PATH
+            profile_path = self.credentials_path
+            if live_path == profile_path or not live_path.exists():
+                return False
+            live_token = self._refresh_token_at(live_path)
+            if live_token is None:
+                return False
+            profile_token = self._refresh_token_at(profile_path) if profile_path.exists() else None
+            if profile_token == live_token:
+                return False
+            # Only reseed within the SAME account, else a different login would clobber the
+            # profile. Refuse when either side's account identity is unknown.
+            live_account = self._account_id_for(live_path)
+            profile_account = self._account_id_for(profile_path)
+            if live_account is None or profile_account is None or live_account != profile_account:
+                return False
+            # Atomic replace: write a private temp file then rename, so a crash can't leave a
+            # half-written credentials file.
+            profile_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = profile_path.with_name(f"{profile_path.name}.tmp")
+            tmp_path.write_text(live_path.read_text())
+            tmp_path.chmod(0o600)
+            os.replace(tmp_path, profile_path)
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _refresh_token_at(path: Path) -> str | None:
+        """Read the OAuth refreshToken from a credentials file, or None if unreadable."""
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            return None
+        if isinstance(data, dict) and "claudeAiOauth" in data:
+            data = data["claudeAiOauth"]
+        token = data.get("refreshToken") if isinstance(data, dict) else None
+        return token if isinstance(token, str) else None
+
+    @staticmethod
+    def _account_id_for(creds_path: Path) -> str | None:
+        """Best-effort account UUID for a credentials file.
+
+        Claude Code records account identity (``oauthAccount.accountUuid``) in a ``.claude.json``
+        that lives either next to the credentials file or one directory up (the live layout keeps
+        creds in ``~/.claude/`` but identity in ``~/.claude.json``). Returns the first UUID found,
+        or None when no identity metadata is present.
+        """
+        for meta in (
+            creds_path.parent / ".claude.json",
+            creds_path.parent.parent / ".claude.json",
+        ):
+            try:
+                data = json.loads(meta.read_text())
+            except (OSError, json.JSONDecodeError):
+                continue
+            account = data.get("oauthAccount") if isinstance(data, dict) else None
+            uuid = account.get("accountUuid") if isinstance(account, dict) else None
+            if isinstance(uuid, str) and uuid:
+                return uuid
+        return None
+
     def load_credentials(self) -> Credentials:
         """Load credentials from file.
 

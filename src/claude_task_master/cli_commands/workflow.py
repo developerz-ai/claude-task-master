@@ -265,6 +265,10 @@ def start(
         # Load credentials
         console.print("Loading credentials...")
         cred_manager = CredentialManager()
+        # Heal a stale oauth-profile copy before use: if the profile's refresh token was rotated
+        # out from under it (a common unattended-run failure), re-seed from live ~/.claude.
+        if cred_manager.resync_from_live():
+            console.print("[dim]Re-seeded stale profile credentials from ~/.claude[/dim]")
         access_token = cred_manager.get_valid_token()
 
         # Parse model type
@@ -436,6 +440,10 @@ def resume(
         # Load credentials
         console.print("\nLoading credentials...")
         cred_manager = CredentialManager()
+        # Heal a stale oauth-profile copy before use (see start): re-seed from live ~/.claude when
+        # the profile's refresh token was rotated out, so an unattended resume doesn't fail first-try.
+        if cred_manager.resync_from_live():
+            console.print("[dim]Re-seeded stale profile credentials from ~/.claude[/dim]")
         access_token = cred_manager.get_valid_token()
 
         # Parse model type
