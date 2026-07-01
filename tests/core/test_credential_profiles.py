@@ -65,3 +65,73 @@ class TestActiveProfileResolution:
         # No OAuth file exists, but api-key profiles authenticate via env.
         assert cred.get_valid_token() == "sk-zai"
         assert cred.verify_credentials() is True
+
+
+def _oauth_creds(access: str, refresh: str) -> str:
+    return json.dumps(
+        {
+            "claudeAiOauth": {
+                "accessToken": access,
+                "refreshToken": refresh,
+                "expiresAt": 9999999999000,
+                "tokenType": "Bearer",
+            }
+        }
+    )
+
+
+class TestResyncFromLive:
+    def _oauth_manager(self, tmp_path: Path, monkeypatch):
+        base = tmp_path / "claudetm"
+        profile = ProfileManager(base_dir=base).add("work", "oauth")
+        monkeypatch.setenv("CLAUDETM_HOME", str(base))
+        live = tmp_path / "live" / ".credentials.json"
+        live.parent.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(CredentialManager, "CREDENTIALS_PATH", live)
+        assert profile.config_dir is not None
+        return CredentialManager(), Path(profile.config_dir) / ".credentials.json", live
+
+    def test_reseeds_when_refresh_token_differs(self, tmp_path: Path, monkeypatch) -> None:
+        cred, profile_creds, live = self._oauth_manager(tmp_path, monkeypatch)
+        live.write_text(_oauth_creds("new-access", "ref-NEW"))
+        profile_creds.write_text(_oauth_creds("old-access", "ref-OLD"))
+        assert cred.resync_from_live() is True
+        assert profile_creds.read_text() == live.read_text()
+
+    def test_noop_when_refresh_tokens_match(self, tmp_path: Path, monkeypatch) -> None:
+        cred, profile_creds, live = self._oauth_manager(tmp_path, monkeypatch)
+        live.write_text(_oauth_creds("live-access", "ref-SAME"))
+        # Same refresh token, different (already-refreshed) access token → no reseed.
+        profile_creds.write_text(_oauth_creds("profile-access", "ref-SAME"))
+        before = profile_creds.read_text()
+        assert cred.resync_from_live() is False
+        assert profile_creds.read_text() == before
+
+    def test_seeds_when_profile_creds_missing(self, tmp_path: Path, monkeypatch) -> None:
+        cred, profile_creds, live = self._oauth_manager(tmp_path, monkeypatch)
+        live.write_text(_oauth_creds("a", "ref-live"))
+        assert not profile_creds.exists()
+        assert cred.resync_from_live() is True
+        assert profile_creds.read_text() == live.read_text()
+
+    def test_noop_when_live_missing(self, tmp_path: Path, monkeypatch) -> None:
+        cred, profile_creds, live = self._oauth_manager(tmp_path, monkeypatch)
+        profile_creds.write_text(_oauth_creds("a", "ref-OLD"))
+        assert not live.exists()
+        assert cred.resync_from_live() is False
+
+    def test_noop_without_active_profile(self, tmp_path: Path, monkeypatch) -> None:
+        live = tmp_path / "live.json"
+        live.write_text(_oauth_creds("a", "ref"))
+        monkeypatch.setattr(CredentialManager, "CREDENTIALS_PATH", live)
+        # isolated_home clears CLAUDETM_PROFILE and points at an empty store → no active profile.
+        assert CredentialManager().resync_from_live() is False
+
+    def test_noop_for_api_key_profile(self, tmp_path: Path, monkeypatch) -> None:
+        base = tmp_path / "claudetm"
+        ProfileManager(base_dir=base).add("zai", "api-key", api_key="sk-zai")
+        monkeypatch.setenv("CLAUDETM_HOME", str(base))
+        live = tmp_path / "live.json"
+        live.write_text(_oauth_creds("a", "ref"))
+        monkeypatch.setattr(CredentialManager, "CREDENTIALS_PATH", live)
+        assert CredentialManager().resync_from_live() is False

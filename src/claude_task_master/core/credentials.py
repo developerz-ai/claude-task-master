@@ -188,6 +188,50 @@ class CredentialManager:
         # Fall back to the (patchable) class attribute.
         return self.CREDENTIALS_PATH
 
+    def resync_from_live(self) -> bool:
+        """Re-seed a stale oauth-profile credentials file from the live ``~/.claude`` one.
+
+        An oauth profile keeps its own copy of ``.credentials.json``. When the upstream
+        refresh token rotates (one-time use), the copy goes stale and an unattended run fails
+        first-try with "Not logged in". If the active profile's refresh token differs from the
+        live ``~/.claude/.credentials.json``, copy the live file into the profile so the run
+        starts from a valid token.
+
+        Best-effort: returns ``False`` and changes nothing when no oauth profile is active or
+        on any error; returns ``True`` when it re-seeded the profile.
+        """
+        try:
+            if self._profile is None or self._profile.type != "oauth" or self._config_dir is None:
+                return False
+            live_path = self.CREDENTIALS_PATH
+            profile_path = self.credentials_path
+            if live_path == profile_path or not live_path.exists():
+                return False
+            live_token = self._refresh_token_at(live_path)
+            if live_token is None:
+                return False
+            profile_token = self._refresh_token_at(profile_path) if profile_path.exists() else None
+            if profile_token == live_token:
+                return False
+            profile_path.parent.mkdir(parents=True, exist_ok=True)
+            profile_path.write_text(live_path.read_text())
+            profile_path.chmod(0o600)
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _refresh_token_at(path: Path) -> str | None:
+        """Read the OAuth refreshToken from a credentials file, or None if unreadable."""
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            return None
+        if isinstance(data, dict) and "claudeAiOauth" in data:
+            data = data["claudeAiOauth"]
+        token = data.get("refreshToken") if isinstance(data, dict) else None
+        return token if isinstance(token, str) else None
+
     def load_credentials(self) -> Credentials:
         """Load credentials from file.
 
