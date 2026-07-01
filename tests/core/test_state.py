@@ -80,6 +80,7 @@ class TestTaskOptions:
             "log_level": "normal",
             "log_format": "text",
             "pr_per_task": False,
+            "branch_override": None,
             "webhook_url": None,
             "webhook_secret": None,
             "max_budget_usd": None,
