@@ -20,7 +20,7 @@ def is_valid_branch_name(name: str) -> bool:
         return False
     if name.startswith("-") or name.startswith("/") or name.endswith("/"):
         return False
-    if name.endswith(".") or name.endswith(".lock"):
+    if name.endswith("."):
         return False
     if ".." in name or "@{" in name or "//" in name:
         return False
@@ -28,5 +28,9 @@ def is_valid_branch_name(name: str) -> bool:
         return False
     if any(ch in _FORBIDDEN for ch in name):
         return False
-    # No path component may start with a dot (e.g. `foo/.bar`) or end with `.lock`.
-    return all(comp and not comp.startswith(".") for comp in name.split("/"))
+    # Every slash-separated component: non-empty, not starting with a dot (e.g. `foo/.bar`),
+    # and not ending in `.lock` (git reserves that suffix even on nested components).
+    return all(
+        comp and not comp.startswith(".") and not comp.endswith(".lock")
+        for comp in name.split("/")
+    )

@@ -356,7 +356,9 @@ Please complete this task."""
                 task_description=task_description,
                 context=context,
                 model_override=model_type,
-                required_branch=current_branch,
+                # With an override, point required_branch at it too so the prompt is consistent
+                # (no "you're on main → create a branch" line fighting the mandated branch).
+                required_branch=branch_override or current_branch,
                 create_pr=should_create_pr,
                 pr_group_info=pr_group_info,
                 target_branch=target_branch,

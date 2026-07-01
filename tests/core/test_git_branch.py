@@ -30,6 +30,8 @@ def test_valid_names(name: str) -> None:
         "trailing-slash/",
         "trailing-dot.",
         "feature.lock",
+        "foo.lock/bar",  # nested component ending in .lock
+        "a/b.lock",
         "has..dotdot",
         "has space",
         "has\ttab",
