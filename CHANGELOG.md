@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.53] - 2026-07-01
+
+### Fixed
+- **Stale Max-OAuth profile healed before a run.** An oauth profile keeps its own copy of `.credentials.json`; when the upstream refresh token rotates (one-time use), the copy goes stale and an unattended run/resume fails first-try with "Not logged in" (a non-retryable error). Before loading credentials, `start`/`resume` now re-seed a stale profile from the live `~/.claude/.credentials.json` — but only when both sides belong to the **same account** (verified via `oauthAccount.accountUuid`), so a different login never clobbers the profile. Best-effort and account-safe; the write is atomic.
+
 ## [0.1.52] - 2026-07-01
 
 ### Added
@@ -729,7 +734,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.52...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.53...HEAD
+[0.1.53]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.52...v0.1.53
 [0.1.52]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.51...v0.1.52
 [0.1.51]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.50...v0.1.51
 [0.1.50]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.49...v0.1.50
