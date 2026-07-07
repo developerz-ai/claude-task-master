@@ -14,7 +14,12 @@ from ..core.agent import AgentWrapper, ModelType
 from ..core.credentials import CredentialManager
 from ..core.pr_context import PRContextManager
 from ..core.state import StateManager
-from .ci_helpers import CI_POLL_INTERVAL, CI_START_WAIT, wait_for_ci_complete
+from .ci_helpers import (
+    CI_POLL_INTERVAL,
+    CI_START_WAIT,
+    REVIEW_COMMENTS_GRACE,
+    wait_for_ci_complete,
+)
 from .fix_session import get_current_branch, run_fix_session
 
 DEFAULT_BRANCHES = {"main", "master", "develop", "development"}
@@ -165,6 +170,8 @@ def merge_pr(
         console.info(f"Max iterations: {max_iterations}")
         console.info("-" * 40)
 
+        review_grace_done = False
+
         for iteration in range(1, max_iterations + 1):
             console.info(f"Iteration {iteration}/{max_iterations}")
 
@@ -173,6 +180,19 @@ def merge_pr(
 
             # Determine what needs fixing
             ci_failed = status.ci_state in ("FAILURE", "ERROR")
+
+            # Review bots (CodeRabbit) post their comments a little *after* CI completes rather than
+            # as a blocking status check. The first time CI comes back green, give them a grace
+            # window to land, then loop to re-poll — otherwise we'd trust a premature "no comments"
+            # verdict and merge ahead of the review.
+            if not ci_failed and not review_grace_done:
+                review_grace_done = True
+                console.info(
+                    f"Waiting {REVIEW_COMMENTS_GRACE}s for review bots "
+                    "(CodeRabbit) to post comments..."
+                )
+                time.sleep(REVIEW_COMMENTS_GRACE)
+                continue
             has_comments = status.unresolved_threads > 0
             has_conflicts = status.mergeable == "CONFLICTING"
 

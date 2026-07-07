@@ -29,6 +29,13 @@ def _mock_post_merge_git():
         yield
 
 
+@pytest.fixture(autouse=True)
+def _fast_sleep():
+    """Neutralize real sleeps (CI_START_WAIT + the CodeRabbit review grace) so tests don't block."""
+    with patch(f"{FIX_PR}.time.sleep"):
+        yield
+
+
 def strip_ansi(text: str) -> str:
     return re.compile(r"\x1b\[[0-9;]*m").sub("", text)
 
@@ -133,9 +140,11 @@ class TestMergePRLoopSuccess:
         """Should fix CI failure, then merge on next iteration."""
         mock_github, _ = _setup_mocks(mock_github_class, mock_cred_class, mock_state_class)
 
-        # First: CI fails. Second: CI passes.
+        # First: CI fails. Second: CI passes (triggers the one-time review grace + re-poll).
+        # Third: CI still green after the grace → merge.
         mock_wait_ci.side_effect = [
             _make_pr_status(ci_state="FAILURE", checks_failed=1),
+            _make_pr_status(),
             _make_pr_status(),
         ]
 

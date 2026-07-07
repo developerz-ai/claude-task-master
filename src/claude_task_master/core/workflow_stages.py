@@ -41,7 +41,10 @@ class WorkflowStageHandler:
     CI_POLL_INTERVAL = 10  # seconds between CI status checks
     CI_POLL_TIMEOUT = 600  # seconds (10 min) before giving up on CI and advancing
     REVIEW_POLL_TIMEOUT = 300  # seconds (5 min) before giving up on pending checks in reviews
-    REVIEW_DELAY = 5  # seconds to wait after CI passes before checking reviews
+    # Grace period after CI passes before checking reviews. Review bots (CodeRabbit) post their
+    # review comments a little *after* CI completes, not as a blocking status check — so a short
+    # delay would race the merge ahead of the comments. 120s gives them time to land.
+    REVIEW_DELAY = 120  # seconds to wait after CI passes before checking reviews
 
     @staticmethod
     def _get_check_name(check: dict) -> str:

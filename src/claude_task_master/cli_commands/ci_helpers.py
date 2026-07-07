@@ -15,6 +15,10 @@ if TYPE_CHECKING:
 CI_POLL_INTERVAL = 10  # seconds between CI checks (matches orchestrator)
 CI_START_WAIT = 60  # seconds to wait for CI to start after push
 CI_TIMEOUT = 90 * 60  # max seconds to wait for CI (90 minutes)
+# Grace period after CI passes before trusting the "no comments" verdict. Review bots (CodeRabbit)
+# post their review comments a little *after* CI completes rather than as a blocking status check,
+# so without this wait merge-pr races ahead and merges before the comments land.
+REVIEW_COMMENTS_GRACE = 120  # seconds to wait for review bots to post comments after CI passes
 
 
 def is_check_pending(check: dict[str, Any]) -> bool:
