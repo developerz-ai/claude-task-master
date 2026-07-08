@@ -77,6 +77,7 @@ class TaskOptions(BaseModel):
     """Options for task execution."""
 
     auto_merge: bool = True
+    admin_merge: bool = False  # Use `gh pr merge --admin` to override base-branch policy
     enable_release: bool = False
     enable_verification: bool = False
     max_sessions: int | None = None

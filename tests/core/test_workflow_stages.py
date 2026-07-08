@@ -832,7 +832,7 @@ class TestHandleReadyToMergeStage:
         result = workflow_handler.handle_ready_to_merge_stage(basic_task_state)
 
         assert result is None
-        mock_github_client.merge_pr.assert_called_once_with(42)
+        mock_github_client.merge_pr.assert_called_once_with(42, admin=False)
         assert basic_task_state.workflow_stage == "merged"
         mock_console.success.assert_called()
 
@@ -943,7 +943,7 @@ class TestHandleReadyToMergeStage:
         workflow_handler.handle_ready_to_merge_stage(basic_task_state)
 
         # Should attempt merge anyway
-        mock_github_client.merge_pr.assert_called_once_with(42)
+        mock_github_client.merge_pr.assert_called_once_with(42, admin=False)
 
 
 # =============================================================================

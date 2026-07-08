@@ -291,7 +291,7 @@ class TestPRCycleIntegration:
         )
 
         assert result is True
-        mock_github_client.merge_pr.assert_called_once_with(123)
+        mock_github_client.merge_pr.assert_called_once_with(123, admin=False)
         assert sample_task_state.current_pr is None
 
     def test_full_pr_lifecycle_with_review(

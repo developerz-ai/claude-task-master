@@ -162,7 +162,7 @@ class GitHubClient(PROperationsMixin, CIOperationsMixin):
         )
         return result.stdout.strip()
 
-    def merge_pr(self, pr_number: int, use_auto: bool = True) -> None:
+    def merge_pr(self, pr_number: int, use_auto: bool = True, admin: bool = False) -> None:
         """Merge a pull request using squash strategy.
 
         This method attempts to merge the specified PR. If use_auto is True,
@@ -175,12 +175,22 @@ class GitHubClient(PROperationsMixin, CIOperationsMixin):
             use_auto: If True, try --auto first (enable auto-merge).
                       If that fails, fall back to direct merge.
                       Default is True.
+            admin: If True, pass ``--admin`` to override the base-branch
+                   protection policy (requires admin privileges on the repo).
+                   Auto-merge is skipped in this mode because an admin merge is
+                   an immediate, direct override. Default is False.
 
         Raises:
             GitHubMergeError: If merge fails after all attempts.
             GitHubTimeoutError: If merge command times out.
         """
         pr_str = str(pr_number)
+
+        # Admin override: skip --auto and force an immediate direct merge that
+        # bypasses base-branch policy (e.g. "base branch policy prohibits the merge").
+        if admin:
+            self._direct_merge(pr_str, pr_number, admin=True)
+            return
 
         if use_auto:
             # First try with --auto (enables auto-merge when checks pass)
@@ -217,19 +227,23 @@ class GitHubClient(PROperationsMixin, CIOperationsMixin):
             # Some other error, still return False to try direct merge
             return False
 
-    def _direct_merge(self, pr_str: str, pr_number: int) -> None:
+    def _direct_merge(self, pr_str: str, pr_number: int, admin: bool = False) -> None:
         """Perform direct merge of a PR.
 
         Args:
             pr_str: The PR number as a string.
             pr_number: The PR number as an integer (for error messages).
+            admin: If True, append ``--admin`` to override base-branch policy.
 
         Raises:
             GitHubMergeError: If merge fails.
         """
+        cmd = ["gh", "pr", "merge", pr_str, "--squash", "--delete-branch"]
+        if admin:
+            cmd.append("--admin")
         try:
             self._run_gh_command(
-                ["gh", "pr", "merge", pr_str, "--squash", "--delete-branch"],
+                cmd,
                 timeout=30,
             )
         except GitHubTimeoutError as e:

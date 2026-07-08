@@ -92,6 +92,11 @@ def merge_pr(
     no_merge: bool = typer.Option(
         False, "--no-merge", help="Don't merge after fixing, just make it ready."
     ),
+    admin: bool = typer.Option(
+        False,
+        "--admin",
+        help="Use 'gh pr merge --admin' to override base-branch policy when merging.",
+    ),
 ) -> None:
     """Monitor a PR, fix CI failures and review comments, then merge.
 
@@ -105,6 +110,7 @@ def merge_pr(
         claudetm merge-pr https://github.com/owner/repo/pull/52
         claudetm merge-pr 52 -m 5      # Max 5 fix iterations
         claudetm merge-pr 52 --no-merge # Fix but don't merge
+        claudetm merge-pr 52 --admin   # Force-merge past base-branch policy
     """
     # Lazy import to avoid circular imports
     from ..github import GitHubClient
@@ -272,7 +278,7 @@ def merge_pr(
             console.info(f"Merging PR #{pr_number}...")
             merged_branch = get_current_branch()
             try:
-                github_client.merge_pr(pr_number)
+                github_client.merge_pr(pr_number, admin=admin)
                 console.success(f"PR #{pr_number} merged successfully!")
             except Exception as e:
                 console.error(f"Merge failed: {e}")

@@ -114,7 +114,7 @@ class TestHandlePRCycle:
         )
 
         assert result is True
-        mock_github_client.merge_pr.assert_called_once_with(123)
+        mock_github_client.merge_pr.assert_called_once_with(123, admin=False)
         # Verify PR was cleared from state
         assert sample_task_state.current_pr is None
         mock_state_manager.save_state.assert_called_once_with(sample_task_state)

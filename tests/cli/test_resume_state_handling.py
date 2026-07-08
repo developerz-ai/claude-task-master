@@ -96,6 +96,72 @@ class TestResumeFromPausedState:
         assert "paused" in result.output.lower()
 
 
+class TestResumeAdminMerge:
+    """Tests for the resume --admin / --no-admin toggle."""
+
+    def _paused_state(self, admin_merge: bool) -> dict:
+        timestamp = datetime.now().isoformat()
+        return {
+            "status": "paused",
+            "current_task_index": 1,
+            "session_count": 2,
+            "current_pr": None,
+            "created_at": timestamp,
+            "updated_at": timestamp,
+            "run_id": "20250115-120000",
+            "model": "sonnet",
+            "options": {
+                "auto_merge": True,
+                "admin_merge": admin_merge,
+                "max_sessions": None,
+                "pause_on_pr": False,
+            },
+        }
+
+    def _invoke(self, cli_runner, mock_state_dir, args):
+        (mock_state_dir / "logs").mkdir(parents=True, exist_ok=True)
+        with patch.object(StateManager, "STATE_DIR", mock_state_dir):
+            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+                mock_cred.return_value.get_valid_token.return_value = "test-token"
+                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                    with patch(
+                        "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                    ) as mock_orch:
+                        mock_orch.return_value.run.return_value = 0
+                        result = cli_runner.invoke(app, ["resume", *args])
+            state = StateManager().load_state()
+        return result, state
+
+    def test_resume_admin_enables_and_persists(
+        self, cli_runner, temp_dir, mock_state_dir, mock_goal_file, mock_plan_file
+    ):
+        """resume --admin persists admin_merge=True."""
+        (mock_state_dir / "state.json").write_text(json.dumps(self._paused_state(False)))
+        result, state = self._invoke(cli_runner, mock_state_dir, ["--admin"])
+        assert result.exit_code == 0
+        assert state.options.admin_merge is True
+        assert "Admin force-merge enabled" in result.output
+
+    def test_resume_no_admin_clears_persisted_flag(
+        self, cli_runner, temp_dir, mock_state_dir, mock_goal_file, mock_plan_file
+    ):
+        """resume --no-admin turns a previously-enabled admin_merge back off."""
+        (mock_state_dir / "state.json").write_text(json.dumps(self._paused_state(True)))
+        result, state = self._invoke(cli_runner, mock_state_dir, ["--no-admin"])
+        assert result.exit_code == 0
+        assert state.options.admin_merge is False
+        assert "Admin force-merge disabled" in result.output
+
+    def test_resume_without_admin_flag_leaves_flag_untouched(
+        self, cli_runner, temp_dir, mock_state_dir, mock_goal_file, mock_plan_file
+    ):
+        """Omitting the flag preserves an existing admin_merge=True (no accidental reset)."""
+        (mock_state_dir / "state.json").write_text(json.dumps(self._paused_state(True)))
+        result, state = self._invoke(cli_runner, mock_state_dir, [])
+        assert result.exit_code == 0
+        assert state.options.admin_merge is True
+
+
 class TestResumeFromBlockedState:
     """Tests for resuming from blocked state."""
 

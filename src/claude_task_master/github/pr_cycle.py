@@ -97,7 +97,7 @@ class PRCycleManager:
             if ready:
                 # Try to merge
                 if state.options.auto_merge:
-                    self.github.merge_pr(pr_number)
+                    self.github.merge_pr(pr_number, admin=state.options.admin_merge)
                     state.current_pr = None
                     self.state_manager.save_state(state)
                     return True

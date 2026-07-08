@@ -951,7 +951,7 @@ End with: TASK COMPLETE"""
         if state.options.auto_merge:
             console.info(f"Merging PR #{state.current_pr}...")
             try:
-                self.github_client.merge_pr(state.current_pr)
+                self.github_client.merge_pr(state.current_pr, admin=state.options.admin_merge)
                 console.success(f"PR #{state.current_pr} merged!")
                 state.workflow_stage = "merged"
                 self.state_manager.save_state(state)

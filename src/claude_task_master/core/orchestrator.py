@@ -1491,7 +1491,7 @@ After completing your fixes, end with: TASK COMPLETE"""
         if state.options.auto_merge:
             try:
                 console.info(f"Merging fix PR #{pr_number}...")
-                self.github_client.merge_pr(pr_number)
+                self.github_client.merge_pr(pr_number, admin=state.options.admin_merge)
                 console.success(f"Fix PR #{pr_number} merged!")
 
                 # Checkout back to target branch

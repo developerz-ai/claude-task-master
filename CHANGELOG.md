@@ -7,7 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.54] - 2026-07-07
+## [0.1.55] - 2026-07-08
+
+### Added
+- **`--admin` force-merge to override base-branch protection.** When a base-branch policy blocks a merge (`gh` reports "the base branch policy prohibits the merge"), the run would go `blocked` with no way through short of a manual merge. `claudetm resume --admin` and `claudetm merge-pr --admin` (plus `claudetm start --admin`) now merge via `gh pr merge --squash --admin`, which uses admin privileges to override the policy. Threaded through every merge site (auto-merge, fix-PR merge, PR-cycle merge). Off by default. On `resume` the flag is a **persisted toggle** — it stays on across the blocked-merge retry loop so every subsequent PR in the task is force-merged, and `claudetm resume --no-admin` turns it back off. `--admin` only acts on the merge path (gated by auto-merge); combining it with `--no-auto-merge` prints a warning that it has no effect.
 
 ### Fixed
 - **Wait for review bots (CodeRabbit) before merging.** CodeRabbit posts its review comments a little *after* CI completes — not as a blocking status check — so both `claudetm start` and `claudetm merge-pr` could see "no unresolved comments" and merge a PR moments before the review landed (e.g. a `CHANGES_REQUESTED` review arriving seconds after the merge). A grace window now sits between "CI passed" and "check reviews": the orchestrator's `REVIEW_DELAY` is raised from 5s to 120s, and `merge-pr` waits 120s once on the first green CI, then re-polls, before trusting the "no comments" verdict. The wait fires exactly once per PR and never blocks a CI-failure or comment-fix iteration.
@@ -739,7 +742,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.54...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.55...HEAD
+[0.1.55]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.54...v0.1.55
 [0.1.54]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.53...v0.1.54
 [0.1.53]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.52...v0.1.53
 [0.1.52]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.51...v0.1.52

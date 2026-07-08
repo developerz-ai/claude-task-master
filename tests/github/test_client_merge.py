@@ -97,6 +97,43 @@ class TestGitHubClientMergePR:
             assert "--auto" not in call_args
             assert "--delete-branch" in call_args
 
+    def test_merge_pr_admin_skips_auto_and_forces_direct(self, github_client):
+        """admin=True skips --auto and does a single direct merge with --admin."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            github_client.merge_pr(123, admin=True)
+
+            # Only one call - no --auto attempt first
+            assert mock_run.call_count == 1
+            call_args = mock_run.call_args[0][0]
+            assert call_args == [
+                "gh",
+                "pr",
+                "merge",
+                "123",
+                "--squash",
+                "--delete-branch",
+                "--admin",
+            ]
+
+    def test_merge_pr_admin_overrides_base_branch_policy(self, github_client):
+        """admin=True is the path used to bypass 'base branch policy prohibits the merge'."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            github_client.merge_pr(332, admin=True)
+
+            call_args = mock_run.call_args[0][0]
+            assert "--admin" in call_args
+
+    def test_merge_pr_without_admin_has_no_admin_flag(self, github_client):
+        """Default (admin=False) never passes --admin."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            github_client.merge_pr(123, use_auto=False)
+
+            call_args = mock_run.call_args[0][0]
+            assert "--admin" not in call_args
+
     def test_merge_pr_with_various_pr_numbers(self, github_client):
         """Test merge with various PR number formats."""
         test_cases = [1, 100, 9999, 123456]

@@ -88,6 +88,58 @@ class TestStartCommand:
 
         assert "auto-merge is ON" not in result.output
 
+    def test_start_admin_persists_option(self, cli_runner: CliRunner, temp_dir):
+        """--admin persists admin_merge=True in the initialized state."""
+        state_dir = temp_dir / ".claude-task-master"
+        with patch.object(StateManager, "STATE_DIR", state_dir):
+            with patch(
+                "claude_task_master.cli_commands.workflow.CredentialManager"
+            ) as mock_cred_manager:
+                mock_cred_manager.return_value.get_valid_token.return_value = "test-token"
+                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                    with patch("claude_task_master.cli_commands.workflow.Planner") as mock_planner:
+                        mock_planner.return_value.create_plan.side_effect = Exception("Test stop")
+
+                        cli_runner.invoke(app, ["start", "Test goal", "--admin"])
+
+            # State is initialized (with options) before planning runs, so it persists.
+            state = StateManager().load_state()
+        assert state.options.admin_merge is True
+
+    def test_start_admin_default_off(self, cli_runner: CliRunner, temp_dir):
+        """Without --admin, admin_merge defaults to False."""
+        state_dir = temp_dir / ".claude-task-master"
+        with patch.object(StateManager, "STATE_DIR", state_dir):
+            with patch(
+                "claude_task_master.cli_commands.workflow.CredentialManager"
+            ) as mock_cred_manager:
+                mock_cred_manager.return_value.get_valid_token.return_value = "test-token"
+                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                    with patch("claude_task_master.cli_commands.workflow.Planner") as mock_planner:
+                        mock_planner.return_value.create_plan.side_effect = Exception("Test stop")
+
+                        cli_runner.invoke(app, ["start", "Test goal"])
+
+            state = StateManager().load_state()
+        assert state.options.admin_merge is False
+
+    def test_start_admin_warns_when_auto_merge_disabled(self, cli_runner: CliRunner, temp_dir):
+        """--admin with --no-auto-merge warns that --admin has no effect."""
+        with patch.object(StateManager, "STATE_DIR", temp_dir / ".claude-task-master"):
+            with patch(
+                "claude_task_master.cli_commands.workflow.CredentialManager"
+            ) as mock_cred_manager:
+                mock_cred_manager.return_value.get_valid_token.return_value = "test-token"
+                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                    with patch("claude_task_master.cli_commands.workflow.Planner") as mock_planner:
+                        mock_planner.return_value.create_plan.side_effect = Exception("Test stop")
+
+                        result = cli_runner.invoke(
+                            app, ["start", "Test goal", "--admin", "--no-auto-merge"]
+                        )
+
+        assert "no effect" in result.output
+
     def test_start_default_model(self, cli_runner: CliRunner, temp_dir):
         """Test start uses default model."""
         with patch.object(StateManager, "STATE_DIR", temp_dir / ".claude-task-master"):

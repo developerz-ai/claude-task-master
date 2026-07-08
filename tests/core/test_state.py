@@ -71,6 +71,7 @@ class TestTaskOptions:
         dump = options.model_dump()
         assert dump == {
             "auto_merge": False,
+            "admin_merge": False,
             "enable_release": False,
             "enable_verification": False,
             "max_sessions": 3,

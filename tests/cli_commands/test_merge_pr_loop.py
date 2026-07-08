@@ -98,8 +98,27 @@ class TestMergePRLoopSuccess:
 
         result = runner.invoke(app, [COMMAND, "123"])
         assert result.exit_code == 0
-        mock_github.merge_pr.assert_called_once_with(123)
+        mock_github.merge_pr.assert_called_once_with(123, admin=False)
         mock_state.release_session_lock.assert_called()
+
+    @patch(f"{FIX_PR}.wait_for_ci_complete")
+    @patch(f"{FIX_PR}.StateManager")
+    @patch(f"{FIX_PR}.CredentialManager")
+    @patch(GITHUB)
+    def test_admin_flag_forces_admin_merge(
+        self,
+        mock_github_class: MagicMock,
+        mock_cred_class: MagicMock,
+        mock_state_class: MagicMock,
+        mock_wait_ci: MagicMock,
+    ) -> None:
+        """--admin forwards admin=True so the merge overrides base-branch policy."""
+        mock_github, mock_state = _setup_mocks(mock_github_class, mock_cred_class, mock_state_class)
+        mock_wait_ci.return_value = _make_pr_status()
+
+        result = runner.invoke(app, [COMMAND, "123", "--admin"])
+        assert result.exit_code == 0
+        mock_github.merge_pr.assert_called_once_with(123, admin=True)
 
     @patch(f"{FIX_PR}.wait_for_ci_complete")
     @patch(f"{FIX_PR}.StateManager")

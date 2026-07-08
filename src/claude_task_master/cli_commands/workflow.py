@@ -129,6 +129,11 @@ def start(
         "--auto-merge/--no-auto-merge",
         help="Automatically merge PRs when CI passes and approved",
     ),
+    admin: bool = typer.Option(
+        False,
+        "--admin",
+        help="Use 'gh pr merge --admin' to override base-branch policy when merging",
+    ),
     enable_release: bool = typer.Option(
         False,
         "--release/--no-release",
@@ -274,10 +279,19 @@ def start(
         # Parse model type
         model_type = ModelType(model)
 
+        # --admin only takes effect on the merge path, which is gated by auto_merge. Warn rather
+        # than silently ignore the flag when merging is disabled.
+        if admin and not auto_merge:
+            console.print(
+                "[yellow]Warning: --admin has no effect with --no-auto-merge "
+                "(nothing is merged automatically).[/yellow]"
+            )
+
         # Initialize state
         console.print("Initializing task state...")
         options = TaskOptions(
             auto_merge=auto_merge,
+            admin_merge=admin,
             enable_release=enable_release,
             enable_verification=enable_verification,
             max_sessions=max_sessions,
@@ -359,6 +373,14 @@ def resume(
         bool,
         typer.Option("--force", "-f", help="Force resume from failed/blocked state"),
     ] = False,
+    admin: Annotated[
+        bool | None,
+        typer.Option(
+            "--admin/--no-admin",
+            help="Force-merge past base-branch policy with 'gh pr merge --admin'. "
+            "Persists for the task; pass --no-admin to turn it back off.",
+        ),
+    ] = None,
 ) -> None:
     """Resume a paused or interrupted task.
 
@@ -370,11 +392,13 @@ def resume(
     Optionally provide a message to update the plan before resuming.
     This is useful when requirements change mid-task.
 
-    Use --force to recover from a failed state.
+    Use --force to recover from a failed state. Use --admin to force-merge a PR
+    that a base-branch protection policy would otherwise block.
 
     Examples:
         claudetm resume
         claudetm resume --force  # Recover from failed state
+        claudetm resume --admin -f  # Force-merge past base-branch policy
         claudetm resume "Add authentication to the API"
         claudetm resume "Fix the bug in the login form instead"
     """
@@ -429,6 +453,26 @@ def resume(
                 if e.details:
                     console.print(f"[dim]{e.details}[/dim]")
                 raise typer.Exit(1) from None
+
+        # Toggle admin force-merge. It is persisted so the retry loop (each blocked-merge
+        # cycle re-enters the merge stage and re-reads state) keeps the override active, but
+        # because it applies to *every* later PR in the task, --no-admin is offered as an
+        # explicit off switch. Only write when the user passed the flag (admin is not None).
+        if admin is not None and admin != state.options.admin_merge:
+            state.options.admin_merge = admin
+            state_manager.save_state(state, validate_transition=False)
+            if admin:
+                console.print(
+                    "[yellow]Admin force-merge enabled (overrides base-branch policy for all "
+                    "PRs until --no-admin)[/yellow]"
+                )
+                if not state.options.auto_merge:
+                    console.print(
+                        "[yellow]Note: auto-merge is disabled, so --admin has no effect until "
+                        "merging is re-enabled.[/yellow]"
+                    )
+            else:
+                console.print("[cyan]Admin force-merge disabled[/cyan]")
 
         # Display current status
         goal = state_manager.load_goal()
