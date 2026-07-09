@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.56] - 2026-07-08
+
+### Changed
+- **Leaner work-session prompt.** claudetm runs on the Claude Agent SDK, so the model already knows git, testing, and PR mechanics — the prompt only needs to *steer*. Stripped the tutorial-grade content the model doesn't need: the ~20-line rebase/conflict-marker walkthrough collapses to a one-line tip (`rebase before push`; `never rebase during a fix — it rewrites reviewed commits and breaks review threads`), the CI-log "ls → Grep → Read" and Grep-example code blocks become single direction lines, and decorative emoji/blanket bold are gone. CI-log guidance moved out of the always-on intro (where a literal `pr-{number}` placeholder was unresolvable) into the `Relevant Files` / `PR Review Feedback` sections that only appear during a fix and list the concrete paths. A default work prompt is ~40% smaller; every behavioral instruction and the code/model seam (`STOP AFTER PR CREATION`, push-required) are preserved. Principle: the code is guardrails + direction; the prompt carries only the judgment the code can't encode.
+
 ## [0.1.55] - 2026-07-08
 
 ### Added
@@ -742,7 +747,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.55...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.56...HEAD
+[0.1.56]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.55...v0.1.56
 [0.1.55]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.54...v0.1.55
 [0.1.54]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.53...v0.1.54
 [0.1.53]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.52...v0.1.53

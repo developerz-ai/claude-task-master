@@ -47,7 +47,7 @@ def build_work_prompt(
         branch_info = f"\n\n**Current Branch:** `{required_branch}`"
         if required_branch in ("main", "master"):
             branch_info += (
-                "\n⚠️ You are on main/master - create a feature branch before making changes!"
+                "\nYou are on main/master — create a feature branch before making changes."
             )
 
     builder = PromptBuilder(
@@ -57,22 +57,17 @@ def build_work_prompt(
 
 {task_description}{branch_info}
 
-**Focus on THIS task only. Do not work ahead to other tasks.**
+Focus on THIS task only — don't work ahead. Deliver HIGH QUALITY work; follow project instructions.
 
-🎯 **Deliver HIGH QUALITY work. Follow project instructions.**
-
-⚠️ **CRITICAL: For CI logs, ALWAYS use: ls → Grep → Read specific files. NEVER read all logs.**
-
-📋 **Full plan:** `.claude-task-master/plan.md` | **Progress:** `.claude-task-master/progress.md`
+Refs: plan `.claude-task-master/plan.md` · progress `.claude-task-master/progress.md`
 
 ## Output Style
 
-terse. no filler, no pleasantries, no narration.
-DO NOT describe what you're about to do — just do it. no "let me read the file" or "I'll now check".
-use → for flow, | for alternatives. fragments ok.
-code/commits/PRs/JSON = proper english + valid syntax.
-status = compressed: "added auth middleware → tests pass → 2 files changed"
-completion report: 3-5 lines max. state what changed, not how you got there."""
+Terse. No filler, pleasantries, or narration. Don't announce actions — take them.
+→ for flow, | for alternatives. Fragments fine.
+Code, commits, PRs, JSON: proper syntax.
+Status compressed: "added auth middleware → tests pass → 2 files changed".
+Completion report: 3-5 lines. What changed, not how."""
     )
 
     # PR Group context - show what's already done in this PR
@@ -124,21 +119,11 @@ completion report: 3-5 lines max. state what changed, not how you got there."""
         files_list = "\n".join(f"- `{f}`" for f in file_hints[:10])  # Limit to 10
         builder.add_section(
             "Relevant Files",
-            f"""⚠️ **CI LOGS: NEVER READ ALL FILES**
-```bash
-# CORRECT: ls → Grep → Read specific files
-ls .claude-task-master/pr-{{number}}/ci/job-name/
-Grep pattern="FAIL|Error:|not ok" path=".claude-task-master/pr-{{number}}/ci/" -A 3
-Read .claude-task-master/pr-{{number}}/ci/job-name/5.log  # Only files with errors
+            f"""Start by reading these files:
+{files_list}
 
-# WRONG: Do NOT do this
-Read .claude-task-master/pr-{{number}}/ci/job-name/1.log  # ❌ Reading all files
-Read .claude-task-master/pr-{{number}}/ci/job-name/2.log  # ❌ Causes context overflow
-Task "Read all CI log files"  # ❌ NEVER spawn tasks to read all logs
-```
-
-**Start by reading these files:**
-{files_list}""",
+For CI logs: Grep for `FAIL|Error:` first, then read only the matching files — never read a whole
+job's logs, it overflows context.""",
         )
 
     # PR comments to address
@@ -149,21 +134,8 @@ Task "Read all CI log files"  # ❌ NEVER spawn tasks to read all logs
 
 {pr_comments}
 
-**Workflow:**
-1. Use Grep to find error locations (finds ALL instances, prevents reading huge files)
-2. Read relevant files to understand context
-3. Make changes if you agree, or explain why not
-4. Run tests
-5. Commit
-
-**Grep examples:**
-```bash
-# Find CI errors
-Grep pattern="FAIL|Error:" path=".claude-task-master/pr-{{number}}/ci/" -A 3
-
-# Find code errors
-Grep pattern="exact error message" path="src/"
-```""",
+Grep for locations → Read relevant files to understand context → make changes if you agree, or
+explain why not → run tests → commit.""",
         )
 
     # Execution guidelines - three modes:
@@ -192,8 +164,7 @@ Report (keep it short):
 - **Pushed:** confirm `git push` succeeded (REQUIRED)
 - **Blockers:** if any
 
-⚠️ **PR already exists — DO NOT run `gh pr create`. But you MUST push.**
-⚠️ **DO NOT say "TASK COMPLETE" until the push has succeeded.**
+PR already exists — do NOT run `gh pr create`, but you MUST push. Don't say "TASK COMPLETE" until the push has succeeded.
 
 End with: `TASK COMPLETE`"""
     elif create_pr:
@@ -208,7 +179,7 @@ Report (keep it short):
 - **PR:** URL (REQUIRED)
 - **Blockers:** if any
 
-⚠️ **DO NOT say "TASK COMPLETE" until you have the PR URL.**
+Don't say "TASK COMPLETE" until you have the PR URL.
 
 End with: `TASK COMPLETE`"""
     else:
@@ -222,7 +193,7 @@ Report (keep it short):
 - **Commit:** hash (REQUIRED)
 - **Blockers:** if any
 
-⚠️ **DO NOT push or create PR - more tasks remain in this PR group.**
+Do NOT push or create a PR — more tasks remain in this PR group.
 
 End with: `TASK COMPLETE`"""
 
@@ -237,105 +208,49 @@ def _build_full_workflow_execution(target_branch: str = "main") -> str:
     Args:
         target_branch: The target branch to rebase onto (e.g., main, master, develop).
     """
-    return f"""**1. Check git status first**
+    return f"""**1. Check git status first** — `git status`. On main/master, create a feature branch; on a feature branch, continue there.
+
+**2. Understand the task** — Read files before modifying. Check existing patterns; identify which tests to run.
+
+**3. Read project conventions FIRST** — Check the repository root for `CLAUDE.md` (coding standards you MUST follow); also `.claude/instructions.md`, `CONTRIBUTING.md`, `.cursorrules`.
+
+**4. Make changes** — Edit/Write files. Follow the coding style from `CLAUDE.md`. Match existing patterns. Stay focused on this task.
+
+**5. Verify work** — run the repo's tests + lint (whatever it uses):
 ```bash
-git status
-```
-- Know where you are before making changes
-- If on main/master, create a feature branch first
-- If already on a feature branch, continue working there
-
-**2. Understand the task**
-- Read files before modifying
-- Check existing patterns
-- Identify tests to run
-
-**3. Read project conventions FIRST**
-- Check for `CLAUDE.md` at the repository root - it contains coding requirements
-- Also check: `.claude/instructions.md`, `CONTRIBUTING.md`, `.cursorrules`
-- These files define project-specific coding standards you MUST follow
-
-**4. Make changes**
-- Edit existing files, Write new files
-- Follow project coding style from `CLAUDE.md` and conventions files
-- Stay focused on current task
-- Match existing patterns and code style in the codebase
-
-**5. Verify work**
-```bash
-# Common verification commands
-pytest                    # Python tests
-npm test                  # JS tests
+pytest                   # Python
+npm test                 # JS
 ruff check . && mypy .   # Python lint/types
 eslint . && tsc          # JS lint/types
 ```
 
-**6. Commit properly**
+**6. Commit** —
 ```bash
 git add -A && git commit -m "$(cat <<'EOF'
-type: Brief description (50 chars)
+type: Brief description (≤50 chars)
 
-- What changed
-- Why needed
+- What changed / why
 
 Co-Authored-By: Claude <noreply@anthropic.com>
 EOF
 )"
 ```
+`.claude-task-master/` is auto-gitignored (orchestrator state) — never commit it.
 
-**Note:** The `.claude-task-master/` directory is automatically gitignored - it contains
-orchestrator state files that should never be committed.
+**7. Rebase onto {target_branch} before pushing** — `git fetch origin {target_branch} && git rebase origin/{target_branch}`. Other PRs may have merged; rebasing now prevents conflicts in the PR. Resolve any conflicts keeping both sides' intent, then re-run tests.
 
-**7. Rebase onto {target_branch} BEFORE pushing** (CRITICAL!)
-```bash
-git fetch origin {target_branch}
-git rebase origin/{target_branch}
-```
-
-⚠️ **This step prevents merge conflicts in the PR!** Other PRs may have been merged
-while you were working. You MUST rebase before pushing.
-
-**If rebase has conflicts:**
-1. Check which files have conflicts: `git status`
-2. For each conflicted file:
-   - Open the file and look for conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`)
-   - Resolve by keeping the correct code (often you need BOTH changes)
-   - Remove the conflict markers
-   - `git add <file>`
-3. Continue the rebase: `git rebase --continue`
-4. If you get stuck, you can abort and retry: `git rebase --abort` then try again
-5. After resolving all conflicts, run tests again to verify nothing broke
-
-**Common conflict resolution patterns:**
-- **mod.rs / index.ts imports**: Keep BOTH the new import from {target_branch} AND your import
-- **Package versions**: Usually take the newer version from {target_branch}
-- **Config files**: Merge both sets of changes carefully
-
-**8. Push and Create PR** (REQUIRED - DO NOT SKIP!)
+**8. Push and Create PR** (REQUIRED) —
 ```bash
 git push -u origin HEAD
-gh pr create --title "type: description" --body "..." --label "claudetm"
+gh pr create --title "type: description (≤70 chars)" --body "..." --label "claudetm"
 ```
-If label doesn't exist, create it and retry.
+If the label doesn't exist, create it and retry. PR body = 2-4 bullets of what/why, no filler.
 
-**PR title:** `type: Brief description` (under 70 chars)
+Your work is NOT complete until you have a PR URL.
 
-**PR body:** Keep it concise. 2-4 bullet points of what changed and why. No filler.
-```
-## Summary
-- Added X to handle Y
-- Fixed Z validation
-- Tests: 15 pass, 0 fail
-```
+**STOP AFTER PR CREATION.** Do not wait for CI, check status, or merge — the orchestrator handles that.
 
-⚠️ **Your work is NOT complete until you have a PR URL!**
-
-**STOP AFTER PR CREATION.** Do not wait for CI, check status, or merge. The orchestrator handles that.
-
-**9. Log File Best Practices**
-- For log/progress files, use APPEND mode (don't read entire file)
-- Example: `echo "message" >> progress.md` instead of Read + Write
-- This avoids context bloat from reading large log files"""
+**9. Log File Best Practices** — append (`echo "msg" >> progress.md`), don't Read+rewrite. Avoids context bloat."""
 
 
 def _build_push_only_execution(target_branch: str = "main") -> str:
@@ -346,137 +261,73 @@ def _build_push_only_execution(target_branch: str = "main") -> str:
             during a fix session because rebasing would rewrite already-reviewed
             commits and disrupt the PR's review threads).
     """
-    return f"""**1. Check git status first**
+    return f"""**1. Check git status first** — `git status`. You should be on the PR's feature branch (not {target_branch}/master/develop). If on a default branch, STOP — the workflow is wrong.
+
+**2. Understand the task** — Read the CI logs / PR comments referenced above and the relevant files before modifying. Identify tests/lint to run.
+
+**3. Read project conventions FIRST** — Check the repository root for `CLAUDE.md` (coding standards you MUST follow); also `.claude/instructions.md`, `CONTRIBUTING.md`, `.cursorrules`.
+
+**4. Make changes** — Edit/Write files. Follow the coding style from `CLAUDE.md`. Match existing patterns. Stay focused on the issues raised.
+
+**5. Verify work** — run the repo's tests + lint:
 ```bash
-git status
-```
-- You should already be on the PR's feature branch (NOT {target_branch}/master/develop).
-- If on a default branch, STOP — something is wrong with the workflow.
-- If on the feature branch, continue.
-
-**2. Understand the task**
-- Read the CI logs and/or PR comments referenced above
-- Read files before modifying
-- Identify tests/lint commands to run
-
-**3. Read project conventions FIRST**
-- Check for `CLAUDE.md` at the repository root - it contains coding requirements
-- Also check: `.claude/instructions.md`, `CONTRIBUTING.md`, `.cursorrules`
-- These files define project-specific coding standards you MUST follow
-
-**4. Make changes**
-- Edit existing files, Write new files
-- Follow project coding style from `CLAUDE.md` and conventions files
-- Stay focused on fixing the issues raised
-- Match existing patterns and code style in the codebase
-
-**5. Verify work**
-```bash
-# Common verification commands
-pytest                    # Python tests
-npm test                  # JS tests
+pytest                   # Python
+npm test                 # JS
 ruff check . && mypy .   # Python lint/types
 eslint . && tsc          # JS lint/types
 ```
 
-**6. Commit properly**
+**6. Commit** —
 ```bash
 git add -A && git commit -m "$(cat <<'EOF'
-fix: Brief description (50 chars)
+fix: Brief description (≤50 chars)
 
-- What changed
-- Why needed
+- What changed / why
 
 Co-Authored-By: Claude <noreply@anthropic.com>
 EOF
 )"
 ```
+`.claude-task-master/` is auto-gitignored — never commit it.
 
-**Note:** The `.claude-task-master/` directory is automatically gitignored - it contains
-orchestrator state files that should never be committed.
+**7. Push to update the existing PR** (REQUIRED) — `git push origin HEAD`. CI re-runs on push. Do NOT run `gh pr create` (the PR already exists). NEVER rebase onto {target_branch} during a fix — it rewrites already-reviewed commits and breaks the PR's review threads. If push is rejected: `git pull --rebase origin HEAD`, resolve conflicts, re-test, push.
 
-**7. Push to update the existing PR** (REQUIRED — DO NOT SKIP!)
-```bash
-git push origin HEAD
-```
+**STOP AFTER PUSH.** Do not wait for CI, check status, or merge — the orchestrator handles that.
 
-⚠️ **CI re-runs on push. Without push, the fix sits unread on your local branch.**
-⚠️ **DO NOT run `gh pr create` — the PR already exists, that command will fail.**
-⚠️ **DO NOT rebase onto {target_branch} during a fix session.** Rebasing rewrites
-already-reviewed commits and disrupts the PR's review threads. Just push.
-
-**If push is rejected** (remote has newer commits, e.g., from a co-reviewer):
-1. `git pull --rebase origin HEAD` to incorporate remote changes
-2. Resolve any conflicts (look for `<<<<<<<`, `=======`, `>>>>>>>` markers)
-3. Run tests again to verify nothing broke
-4. `git push origin HEAD`
-
-**STOP AFTER PUSH.** Do not wait for CI, check status, or merge. The orchestrator handles that.
-
-**8. Log File Best Practices**
-- For log/progress files, use APPEND mode (don't read entire file)
-- Example: `echo "message" >> progress.md` instead of Read + Write
-- This avoids context bloat from reading large log files"""
+**8. Log File Best Practices** — append (`echo "msg" >> progress.md`), don't Read+rewrite. Avoids context bloat."""
 
 
 def _build_commit_only_execution() -> str:
     """Build execution instructions for commit-only workflow (more tasks in group)."""
-    return """**1. Check git status first**
+    return """**1. Check git status first** — `git status`. On main/master, create a feature branch; on a feature branch, continue there.
+
+**2. Understand the task** — Read files before modifying. Check existing patterns; identify which tests to run.
+
+**3. Read project conventions FIRST** — Check the repository root for `CLAUDE.md` (coding standards you MUST follow); also `.claude/instructions.md`, `CONTRIBUTING.md`, `.cursorrules`.
+
+**4. Make changes** — Edit/Write files. Follow the coding style from `CLAUDE.md`. Match existing patterns. Stay focused on this task.
+
+**5. Verify work** — run the repo's tests + lint:
 ```bash
-git status
-```
-- Know where you are before making changes
-- If on main/master, create a feature branch first
-- If already on a feature branch, continue working there
-
-**2. Understand the task**
-- Read files before modifying
-- Check existing patterns
-- Identify tests to run
-
-**3. Read project conventions FIRST**
-- Check for `CLAUDE.md` at the repository root - it contains coding requirements
-- Also check: `.claude/instructions.md`, `CONTRIBUTING.md`, `.cursorrules`
-- These files define project-specific coding standards you MUST follow
-
-**4. Make changes**
-- Edit existing files, Write new files
-- Follow project coding style from `CLAUDE.md` and conventions files
-- Stay focused on current task
-- Match existing patterns and code style in the codebase
-
-**5. Verify work**
-```bash
-# Common verification commands
-pytest                    # Python tests
-npm test                  # JS tests
+pytest                   # Python
+npm test                 # JS
 ruff check . && mypy .   # Python lint/types
 eslint . && tsc          # JS lint/types
 ```
 
-**6. Commit properly**
+**6. Commit** —
 ```bash
 git add -A && git commit -m "$(cat <<'EOF'
-type: Brief description (50 chars)
+type: Brief description (≤50 chars)
 
-- What changed
-- Why needed
+- What changed / why
 
 Co-Authored-By: Claude <noreply@anthropic.com>
 EOF
 )"
 ```
+`.claude-task-master/` is auto-gitignored — never commit it.
 
-**Note:** The `.claude-task-master/` directory is automatically gitignored - it contains
-orchestrator state files that should never be committed.
+**7. DO NOT create PR yet** — More tasks remain in this PR group. Just commit; do NOT push or create a PR. The orchestrator will tell you when to open the PR (after all tasks in the group are done).
 
-**7. DO NOT create PR yet**
-
-⚠️ **More tasks remain in this PR group. Just commit, do NOT push or create PR.**
-
-The orchestrator will tell you when to create the PR (after all tasks in this group are done).
-
-**8. Log File Best Practices**
-- For log/progress files, use APPEND mode (don't read entire file)
-- Example: `echo "message" >> progress.md` instead of Read + Write
-- This avoids context bloat from reading large log files"""
+**8. Log File Best Practices** — append (`echo "msg" >> progress.md`), don't Read+rewrite. Avoids context bloat."""
