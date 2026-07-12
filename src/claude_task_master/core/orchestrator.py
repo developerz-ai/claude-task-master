@@ -1516,7 +1516,7 @@ After completing your fixes, end with: TASK COMPLETE"""
         Returns:
             "success" if CI passed, "failure" if CI failed, "interrupted" if cancelled.
         """
-        max_wait = 600  # 10 minutes max
+        max_wait = 7200  # 120 minutes max (big CIs can run long)
         poll_interval = 10
         waited = 0
 

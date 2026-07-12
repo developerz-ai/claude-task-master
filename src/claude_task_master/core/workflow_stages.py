@@ -39,7 +39,9 @@ class WorkflowStageHandler:
 
     # CI polling configuration
     CI_POLL_INTERVAL = 10  # seconds between CI status checks
-    CI_POLL_TIMEOUT = 600  # seconds (10 min) before giving up on CI and advancing
+    CI_POLL_TIMEOUT = 7200  # seconds (120 min) before giving up on CI. Big CIs can run for
+    # a long time; on timeout we block (error out) rather than merge a PR whose CI never
+    # finished — unless --admin is set, which force-advances. See _ci_timeout_action.
     REVIEW_POLL_TIMEOUT = 300  # seconds (5 min) before giving up on pending checks in reviews
     # Grace period after CI passes before checking reviews. Review bots (CodeRabbit) post their
     # review comments a little *after* CI completes, not as a blocking status check — so a short
@@ -291,6 +293,26 @@ class WorkflowStageHandler:
         """Clear CI poll timer (called when leaving CI polling stages)."""
         state.ci_poll_start_time = None
 
+    def _ci_timeout_action(self, state: TaskState, reason: str) -> int | None:
+        """Decide what to do when CI polling times out.
+
+        Merging a PR whose CI never completed is unsafe, so by default we block
+        (error out) and let a human intervene. Admin runs (--admin) force-advance
+        to the review stage, treating the timeout as a policy override.
+
+        Returns 1 to block the run, or None to keep the loop going after advancing.
+        """
+        self._clear_ci_poll_timer(state)
+        if state.options.admin_merge:
+            console.warning(f"{reason} - advancing anyway (--admin override)")
+            state.workflow_stage = "waiting_reviews"
+            self.state_manager.save_state(state)
+            return None
+        console.error(f"{reason} - blocking (re-run with --admin to advance anyway)")
+        state.status = "blocked"
+        self.state_manager.save_state(state)
+        return 1
+
     def handle_waiting_ci_stage(self, state: TaskState) -> int | None:
         """Handle waiting for CI - poll CI status."""
         if state.current_pr is None:
@@ -350,15 +372,11 @@ class WorkflowStageHandler:
             # If required checks haven't reported yet, keep waiting (with timeout)
             if missing_required:
                 if self._is_ci_poll_timed_out(state):
-                    console.warning(
+                    return self._ci_timeout_action(
+                        state,
                         f"CI polling timed out after {self.CI_POLL_TIMEOUT}s - "
-                        f"required checks never reported: {', '.join(missing_required)}"
+                        f"required checks never reported: {', '.join(missing_required)}",
                     )
-                    console.detail("Advancing to review stage despite missing checks")
-                    self._clear_ci_poll_timer(state)
-                    state.workflow_stage = "waiting_reviews"
-                    self.state_manager.save_state(state)
-                    return None
                 console.info(f"Waiting for required checks: {', '.join(missing_required)}")
                 console.detail(f"Next check in {self.CI_POLL_INTERVAL}s...")
                 if not interruptible_sleep(self.CI_POLL_INTERVAL):
@@ -436,14 +454,11 @@ class WorkflowStageHandler:
             else:
                 # CI still pending - check timeout
                 if self._is_ci_poll_timed_out(state):
-                    console.warning(
-                        f"CI polling timed out after {self.CI_POLL_TIMEOUT}s - "
-                        f"advancing despite {pr_status.checks_pending} pending checks"
+                    return self._ci_timeout_action(
+                        state,
+                        f"CI polling timed out after {self.CI_POLL_TIMEOUT}s with "
+                        f"{pr_status.checks_pending} pending checks",
                     )
-                    self._clear_ci_poll_timer(state)
-                    state.workflow_stage = "waiting_reviews"
-                    self.state_manager.save_state(state)
-                    return None
 
                 console.info(
                     f"Waiting for CI... ({pr_status.checks_pending} pending, "
@@ -466,13 +481,11 @@ class WorkflowStageHandler:
             console.warning(f"Error checking CI: {e}")
             # Check timeout even on errors
             if self._is_ci_poll_timed_out(state):
-                console.warning(
-                    f"CI polling timed out after {self.CI_POLL_TIMEOUT}s (with errors) - advancing"
+                return self._ci_timeout_action(
+                    state,
+                    f"CI polling timed out after {self.CI_POLL_TIMEOUT}s while errors "
+                    f"kept interrupting status checks",
                 )
-                self._clear_ci_poll_timer(state)
-                state.workflow_stage = "waiting_reviews"
-                self.state_manager.save_state(state)
-                return None
             console.detail("Will retry on next cycle...")
             # Stay in waiting_ci and retry - do NOT fall through to merge
             if not interruptible_sleep(self.CI_POLL_INTERVAL):

@@ -1194,7 +1194,7 @@ class TestCIPollingTimeout:
 
     @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
     @patch("claude_task_master.core.workflow_stages.console")
-    def test_ci_poll_timeout_advances_when_checks_pending(
+    def test_ci_poll_timeout_blocks_when_checks_pending(
         self,
         mock_console,
         mock_sleep,
@@ -1204,14 +1204,14 @@ class TestCIPollingTimeout:
         mock_pr_status,
         state_manager,
     ):
-        """Should advance to waiting_reviews when CI polling times out with pending checks."""
+        """Should block (not merge) when CI polling times out with pending checks."""
         from datetime import datetime, timedelta
 
         state_manager.state_dir.mkdir(exist_ok=True)
         basic_task_state.current_pr = 42
         basic_task_state.workflow_stage = "waiting_ci"
-        # Set poll start time in the past (beyond timeout)
-        basic_task_state.ci_poll_start_time = datetime.now() - timedelta(seconds=700)
+        # Set poll start time in the past (beyond the 7200s timeout)
+        basic_task_state.ci_poll_start_time = datetime.now() - timedelta(seconds=7300)
 
         mock_pr_status.state = "OPEN"
         mock_pr_status.ci_state = "PENDING"
@@ -1222,10 +1222,49 @@ class TestCIPollingTimeout:
         mock_github_client.get_pr_status.return_value = mock_pr_status
         mock_github_client.get_required_status_checks.return_value = []
 
-        workflow_handler.handle_waiting_ci_stage(basic_task_state)
+        result = workflow_handler.handle_waiting_ci_stage(basic_task_state)
 
+        # Non-admin: error out rather than merge a PR whose CI never finished
+        assert result == 1
+        assert basic_task_state.status == "blocked"
+        assert basic_task_state.ci_poll_start_time is None
+
+    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
+    @patch("claude_task_master.core.workflow_stages.console")
+    def test_ci_poll_timeout_advances_when_admin(
+        self,
+        mock_console,
+        mock_sleep,
+        workflow_handler,
+        basic_task_state,
+        mock_github_client,
+        mock_pr_status,
+        state_manager,
+    ):
+        """--admin should force-advance to waiting_reviews on CI timeout."""
+        from datetime import datetime, timedelta
+
+        state_manager.state_dir.mkdir(exist_ok=True)
+        basic_task_state.current_pr = 42
+        basic_task_state.workflow_stage = "waiting_ci"
+        basic_task_state.options.admin_merge = True
+        basic_task_state.ci_poll_start_time = datetime.now() - timedelta(seconds=7300)
+
+        mock_pr_status.state = "OPEN"
+        mock_pr_status.ci_state = "PENDING"
+        mock_pr_status.checks_pending = 2
+        mock_pr_status.check_details = [
+            {"name": "test", "status": "IN_PROGRESS", "conclusion": None}
+        ]
+        mock_github_client.get_pr_status.return_value = mock_pr_status
+        mock_github_client.get_required_status_checks.return_value = []
+
+        result = workflow_handler.handle_waiting_ci_stage(basic_task_state)
+
+        assert result is None
         assert basic_task_state.workflow_stage == "waiting_reviews"
         assert basic_task_state.ci_poll_start_time is None
+        assert basic_task_state.status != "blocked"
 
     @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
     @patch("claude_task_master.core.workflow_stages.console")
@@ -1239,13 +1278,13 @@ class TestCIPollingTimeout:
         mock_pr_status,
         state_manager,
     ):
-        """Should advance when required checks never report and timeout is reached."""
+        """Should block when required checks never report and timeout is reached."""
         from datetime import datetime, timedelta
 
         state_manager.state_dir.mkdir(exist_ok=True)
         basic_task_state.current_pr = 42
         basic_task_state.workflow_stage = "waiting_ci"
-        basic_task_state.ci_poll_start_time = datetime.now() - timedelta(seconds=700)
+        basic_task_state.ci_poll_start_time = datetime.now() - timedelta(seconds=7300)
 
         mock_pr_status.state = "OPEN"
         mock_pr_status.ci_state = "PENDING"
@@ -1254,9 +1293,10 @@ class TestCIPollingTimeout:
         mock_github_client.get_pr_status.return_value = mock_pr_status
         mock_github_client.get_required_status_checks.return_value = ["required-ci"]
 
-        workflow_handler.handle_waiting_ci_stage(basic_task_state)
+        result = workflow_handler.handle_waiting_ci_stage(basic_task_state)
 
-        assert basic_task_state.workflow_stage == "waiting_reviews"
+        assert result == 1
+        assert basic_task_state.status == "blocked"
         assert basic_task_state.ci_poll_start_time is None
 
     @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
@@ -1277,7 +1317,7 @@ class TestCIPollingTimeout:
         state_manager.state_dir.mkdir(exist_ok=True)
         basic_task_state.current_pr = 42
         basic_task_state.workflow_stage = "waiting_ci"
-        # Only 30 seconds in - well before the 600s timeout
+        # Only 30 seconds in - well before the 7200s timeout
         basic_task_state.ci_poll_start_time = datetime.now() - timedelta(seconds=30)
 
         mock_pr_status.state = "OPEN"
@@ -1367,19 +1407,20 @@ class TestCIPollingTimeout:
         mock_github_client,
         state_manager,
     ):
-        """Should advance on timeout even when CI check raises exceptions."""
+        """Should block on timeout even when CI check raises exceptions."""
         from datetime import datetime, timedelta
 
         state_manager.state_dir.mkdir(exist_ok=True)
         basic_task_state.current_pr = 42
         basic_task_state.workflow_stage = "waiting_ci"
-        basic_task_state.ci_poll_start_time = datetime.now() - timedelta(seconds=700)
+        basic_task_state.ci_poll_start_time = datetime.now() - timedelta(seconds=7300)
 
         mock_github_client.get_pr_status.side_effect = Exception("API error")
 
-        workflow_handler.handle_waiting_ci_stage(basic_task_state)
+        result = workflow_handler.handle_waiting_ci_stage(basic_task_state)
 
-        assert basic_task_state.workflow_stage == "waiting_reviews"
+        assert result == 1
+        assert basic_task_state.status == "blocked"
         assert basic_task_state.ci_poll_start_time is None
 
     @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
@@ -1400,7 +1441,7 @@ class TestCIPollingTimeout:
         state_manager.state_dir.mkdir(exist_ok=True)
         basic_task_state.current_pr = 42
         basic_task_state.workflow_stage = "waiting_ci"
-        basic_task_state.ci_poll_start_time = datetime.now() - timedelta(seconds=700)
+        basic_task_state.ci_poll_start_time = datetime.now() - timedelta(seconds=7300)
 
         mock_pr_status.state = "OPEN"
         mock_pr_status.ci_state = "FAILURE"
@@ -1461,7 +1502,7 @@ class TestWaitingReviewsTimeout:
         state_manager.state_dir.mkdir(exist_ok=True)
         basic_task_state.current_pr = 42
         basic_task_state.workflow_stage = "waiting_reviews"
-        basic_task_state.ci_poll_start_time = datetime.now() - timedelta(seconds=700)
+        basic_task_state.ci_poll_start_time = datetime.now() - timedelta(seconds=7300)
 
         mock_pr_status.state = "OPEN"
         mock_pr_status.check_details = [

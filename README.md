@@ -287,7 +287,7 @@ This creates `.claude-task-master/config.json`. The smartest tier (`opus`) defau
     "openrouter_base_url": "https://openrouter.ai/api/v1"
   },
   "models": {
-    "sonnet": "claude-sonnet-4-6",
+    "sonnet": "claude-sonnet-5",
     "opus": "claude-opus-4-8",
     "haiku": "claude-haiku-4-5-20251001"
   },
@@ -303,7 +303,7 @@ This creates `.claude-task-master/config.json`. The smartest tier (`opus`) defau
 }
 ```
 
-> **Note:** Opus 4.8 and Sonnet 4.6 support a 1M token context window in beta (**tier 4+** API access required). If you have tier 4+ access, you can increase the context windows:
+> **Note:** Opus 4.8 and Sonnet 5 support a 1M token context window in beta (**tier 4+** API access required). If you have tier 4+ access, you can increase the context windows:
 > ```json
 > "context_windows": {
 >   "opus": 1000000,

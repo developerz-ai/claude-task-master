@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.57] - 2026-07-12
+
+### Changed
+- **CI polling now waits up to 120 minutes and errors out instead of merging on timeout.** Big CIs can run for well over the old 10-minute (`600s`) budget, so a slow-but-healthy pipeline would hit the timeout and the orchestrator would *advance past it* — merging a PR whose CI never actually finished. `CI_POLL_TIMEOUT` is raised to `7200s` (120 min), and on timeout the run now **blocks** (exits, status `blocked`) rather than advancing, unless `--admin` is set — in which case it force-advances to the review stage as a policy override. Applies to every waiting-CI timeout branch (required checks never reported, checks still pending, repeated status-check errors); the "CI failed with checks still pending" branch continues to treat the incomplete result as a failure and route to the fix loop. The release fix-PR poll gets the same 120-minute patience.
+- **Default `sonnet` / `sonnet_1m` model updated to Claude Sonnet 5** (`claude-sonnet-5`). Sonnet 5 delivers near-Opus quality on coding and agentic work and ships with a native 1M-token context window, so both the balanced (`[general]`) and 1M-context debugging (`[debugging-qa]`) tiers now route to it. Override via `CLAUDETM_MODEL_SONNET` / `CLAUDETM_MODEL_SONNET_1M` as before.
+- **Upgraded `claude-agent-sdk` to `>=0.2.116`** (from `0.2.106`).
+
 ## [0.1.56] - 2026-07-08
 
 ### Changed
@@ -747,7 +754,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.56...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.57...HEAD
+[0.1.57]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.56...v0.1.57
 [0.1.56]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.55...v0.1.56
 [0.1.55]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.54...v0.1.55
 [0.1.54]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.53...v0.1.54
