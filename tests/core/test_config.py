@@ -80,6 +80,7 @@ class TestModelConfig:
         config = ModelConfig()
         assert config.sonnet == "claude-sonnet-5"
         assert config.opus == "claude-opus-4-8"
+        assert config.fable == "claude-fable-5"
         assert config.haiku == "claude-haiku-4-5-20251001"
         assert config.sonnet_1m == "claude-sonnet-5"
 
@@ -107,6 +108,7 @@ class TestContextWindowsConfig:
         """Test that ContextWindowsConfig has correct default values (200K standard)."""
         config = ContextWindowsConfig()
         assert config.opus == 200_000
+        assert config.fable == 1_000_000
         assert config.sonnet == 200_000
         assert config.haiku == 200_000
         assert config.sonnet_1m == 1_000_000
@@ -299,6 +301,12 @@ class TestUtilityFunctions:
         config = ClaudeTaskMasterConfig()
         assert get_model_name(config, "opus") == "claude-opus-4-8"
         assert get_model_name(config, "OPUS") == "claude-opus-4-8"
+
+    def test_get_model_name_fable(self) -> None:
+        """Test get_model_name returns correct model for fable."""
+        config = ClaudeTaskMasterConfig()
+        assert get_model_name(config, "fable") == "claude-fable-5"
+        assert get_model_name(config, "FABLE") == "claude-fable-5"
 
     def test_get_model_name_haiku(self) -> None:
         """Test get_model_name returns correct model for haiku."""
@@ -581,6 +589,7 @@ class TestEnvironmentVariableOverrides:
         env_vars = {
             "CLAUDETM_MODEL_SONNET": "custom-sonnet",
             "CLAUDETM_MODEL_OPUS": "custom-opus",
+            "CLAUDETM_MODEL_FABLE": "custom-fable",
             "CLAUDETM_MODEL_HAIKU": "custom-haiku",
         }
 
@@ -589,6 +598,7 @@ class TestEnvironmentVariableOverrides:
 
         assert overridden.models.sonnet == "custom-sonnet"
         assert overridden.models.opus == "custom-opus"
+        assert overridden.models.fable == "custom-fable"
         assert overridden.models.haiku == "custom-haiku"
 
     def test_apply_env_overrides_sonnet_1m(self) -> None:

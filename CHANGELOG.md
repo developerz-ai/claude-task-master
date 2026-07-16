@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.58] - 2026-07-16
+
+### Added
+- **New opt-in `fable` model tier** (`models.fable`, default `claude-fable-5`), mirroring Claude Code's new `ANTHROPIC_DEFAULT_FABLE_MODEL` env var. Overridable via `CLAUDETM_MODEL_FABLE` or the `"fable"` config key; `ModelType.FABLE` is a valid model key everywhere model keys are accepted (`get_model_name`, conversation/agent model maps). Context window defaults to 1M (`context_windows.fable` — Fable 5's 1M window is the default, not tier-gated), and the fallback chain is Fable → Opus. **No complexity level routes to it by default** — Claude Fable 5 is GA at $10/$50 per MTok (2x Opus 4.8), so it stays opt-in: set `CLAUDETM_MODEL_OPUS=claude-fable-5` to run the smartest tier on Fable, or pass the `fable` key explicitly. The `bin/claudetm` wrapper loads `CLAUDETM_MODEL_FABLE` from `config.json` like the other tiers.
+
+### Fixed
+- **`bin/claudetm --init-config` template was stale** — its embedded default config still pinned `sonnet` to `claude-sonnet-4-6` and omitted the `sonnet_1m` tier entirely. Now matches the `core/config.py` schema (`claude-sonnet-5`, plus `fable` and `sonnet_1m` entries in `models` and `context_windows`).
+
 ## [0.1.57] - 2026-07-12
 
 ### Changed
@@ -754,7 +762,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.57...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.58...HEAD
+[0.1.58]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.57...v0.1.58
 [0.1.57]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.56...v0.1.57
 [0.1.56]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.55...v0.1.56
 [0.1.55]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.54...v0.1.55

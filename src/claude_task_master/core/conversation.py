@@ -175,6 +175,7 @@ class ConversationManager:
         model_map = {
             "sonnet": config.models.sonnet,
             "opus": config.models.opus,
+            "fable": config.models.fable,
             "haiku": config.models.haiku,
         }
         return model_map.get(target_model, config.models.sonnet)

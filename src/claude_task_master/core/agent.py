@@ -348,6 +348,7 @@ class AgentWrapper:
         model_map = {
             ModelType.SONNET: config.models.sonnet,
             ModelType.OPUS: config.models.opus,
+            ModelType.FABLE: config.models.fable,
             ModelType.HAIKU: config.models.haiku,
             ModelType.SONNET_1M: config.models.sonnet_1m,
         }

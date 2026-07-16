@@ -58,7 +58,7 @@ class TestModelType:
 
     def test_all_model_types(self):
         """Test all expected model types exist."""
-        expected = {"SONNET", "OPUS", "HAIKU", "SONNET_1M"}
+        expected = {"SONNET", "OPUS", "FABLE", "HAIKU", "SONNET_1M"}
         actual = {m.name for m in ModelType}
         assert actual == expected
 
@@ -178,6 +178,11 @@ class TestModelContextWindows:
     def test_sonnet_context_window_standard(self):
         """Test Sonnet standard context window is 200K."""
         assert MODEL_CONTEXT_WINDOWS_STANDARD[ModelType.SONNET] == 200_000
+
+    def test_fable_context_window(self):
+        """Test Fable context window is 1M in both maps (1M is Fable 5's default)."""
+        assert MODEL_CONTEXT_WINDOWS[ModelType.FABLE] == 1_000_000
+        assert MODEL_CONTEXT_WINDOWS_STANDARD[ModelType.FABLE] == 1_000_000
 
     def test_haiku_context_window(self):
         """Test Haiku context window is 200K."""

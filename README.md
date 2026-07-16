@@ -275,7 +275,7 @@ claudetm --init-config
 claudetm --show-config
 ```
 
-This creates `.claude-task-master/config.json`. The smartest tier (`opus`) defaults to **Claude Opus 4.8** (`claude-opus-4-8`). Override it by editing the `"opus"` key or setting `CLAUDETM_MODEL_OPUS`.
+This creates `.claude-task-master/config.json`. The smartest tier (`opus`) defaults to **Claude Opus 4.8** (`claude-opus-4-8`). Override it by editing the `"opus"` key or setting `CLAUDETM_MODEL_OPUS`. A separate opt-in `fable` tier defaults to **Claude Fable 5** (`claude-fable-5`, premium-priced at 2x Opus) — mirroring Claude Code's `ANTHROPIC_DEFAULT_FABLE_MODEL`; override via the `"fable"` key or `CLAUDETM_MODEL_FABLE`. No task routes to it by default; set `CLAUDETM_MODEL_OPUS=claude-fable-5` to run the smartest tier on Fable.
 
 ```json
 {
@@ -289,10 +289,12 @@ This creates `.claude-task-master/config.json`. The smartest tier (`opus`) defau
   "models": {
     "sonnet": "claude-sonnet-5",
     "opus": "claude-opus-4-8",
+    "fable": "claude-fable-5",
     "haiku": "claude-haiku-4-5-20251001"
   },
   "context_windows": {
     "opus": 200000,
+    "fable": 1000000,
     "sonnet": 200000,
     "haiku": 200000
   },
@@ -324,6 +326,7 @@ The config file sets these environment variables before Python starts:
 | `api.openrouter_base_url` | `OPENROUTER_BASE_URL` | OpenRouter base URL |
 | `models.sonnet` | `CLAUDETM_MODEL_SONNET` | Model for sonnet tier |
 | `models.opus` | `CLAUDETM_MODEL_OPUS` | Model for opus tier |
+| `models.fable` | `CLAUDETM_MODEL_FABLE` | Model for fable tier (opt-in, premium) |
 | `models.haiku` | `CLAUDETM_MODEL_HAIKU` | Model for haiku tier |
 | `git.target_branch` | `CLAUDETM_TARGET_BRANCH` | Target branch for PRs |
 

@@ -111,7 +111,7 @@ uv tool install claude-task-master --force --reinstall
 | GENERAL | `[general]` | Sonnet | medium | Tests, documentation, moderate refactoring, balanced tasks |
 | DEBUGGING_QA | `[debugging-qa]` | Sonnet 1M | high | CI failures, bug tracing, visual QA, log analysis (1M context) |
 
-When uncertain, default to `[coding]` (uses the smartest model). The smartest tier is **Claude Opus 4.8** (`claude-opus-4-8`) — see the `opus` default in `ModelConfig` in `core/config.py`.
+When uncertain, default to `[coding]` (uses the smartest model). The smartest tier is **Claude Opus 4.8** (`claude-opus-4-8`) — see the `opus` default in `ModelConfig` in `core/config.py`. An opt-in `fable` tier (**Claude Fable 5**, `claude-fable-5`, premium-priced) exists alongside it — configured via the `"fable"` config key or `CLAUDETM_MODEL_FABLE`, mirroring Claude Code's `ANTHROPIC_DEFAULT_FABLE_MODEL`. No complexity level routes to it by default (2x Opus pricing); users opt in via `CLAUDETM_MODEL_OPUS=claude-fable-5` or by passing the `fable` model key explicitly. Fallback: Fable → Opus.
 
 **Fallback Models**: If primary model is unavailable, auto-fallback: Opus → Sonnet → Haiku.
 

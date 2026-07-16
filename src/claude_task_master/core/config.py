@@ -18,6 +18,7 @@ Environment Variable Mapping:
 | api.openrouter_base_url  | OPENROUTER_BASE_URL       |
 | models.sonnet            | CLAUDETM_MODEL_SONNET     |
 | models.opus              | CLAUDETM_MODEL_OPUS       |
+| models.fable             | CLAUDETM_MODEL_FABLE      |
 | models.haiku             | CLAUDETM_MODEL_HAIKU      |
 | models.sonnet_1m         | CLAUDETM_MODEL_SONNET_1M  |
 | git.target_branch        | CLAUDETM_TARGET_BRANCH    |
@@ -76,6 +77,11 @@ class ModelConfig(BaseModel):
         default="claude-opus-4-8",
         description="Model name for 'opus' (smartest). Overridden by CLAUDETM_MODEL_OPUS.",
     )
+    fable: str = Field(
+        default="claude-fable-5",
+        description="Model name for 'fable' (most capable, premium-priced, opt-in). "
+        "Overridden by CLAUDETM_MODEL_FABLE.",
+    )
     haiku: str = Field(
         default="claude-haiku-4-5-20251001",
         description="Model name for 'haiku' (fastest). Overridden by CLAUDETM_MODEL_HAIKU.",
@@ -117,6 +123,10 @@ class ContextWindowsConfig(BaseModel):
     opus: int = Field(
         default=200_000,
         description="Opus context window size in tokens. 200000 (standard) or 1000000 (beta, tier 4+).",
+    )
+    fable: int = Field(
+        default=1_000_000,
+        description="Fable context window size in tokens. Claude Fable 5 is 1M by default.",
     )
     sonnet: int = Field(
         default=200_000,
@@ -176,6 +186,7 @@ class ClaudeTaskMasterConfig(BaseModel):
       "models": {
         "sonnet": "claude-sonnet-5",
         "opus": "claude-opus-4-8",
+        "fable": "claude-fable-5",
         "haiku": "claude-haiku-4-5-20251001",
         "sonnet_1m": "claude-sonnet-5"
       },
@@ -185,6 +196,7 @@ class ClaudeTaskMasterConfig(BaseModel):
       },
       "context_windows": {
         "opus": 200000,
+        "fable": 1000000,
         "sonnet": 200000,
         "haiku": 200000,
         "sonnet_1m": 1000000
@@ -281,6 +293,7 @@ def get_model_name(config: ClaudeTaskMasterConfig, model_key: str) -> str:
     model_map = {
         "sonnet": config.models.sonnet,
         "opus": config.models.opus,
+        "fable": config.models.fable,
         "haiku": config.models.haiku,
         "sonnet_1m": config.models.sonnet_1m,
     }

@@ -25,6 +25,7 @@ Environment Variable Overrides:
 - OPENROUTER_BASE_URL -> config.api.openrouter_base_url
 - CLAUDETM_MODEL_SONNET -> config.models.sonnet
 - CLAUDETM_MODEL_OPUS -> config.models.opus
+- CLAUDETM_MODEL_FABLE -> config.models.fable
 - CLAUDETM_MODEL_HAIKU -> config.models.haiku
 - CLAUDETM_MODEL_SONNET_1M -> config.models.sonnet_1m
 - CLAUDETM_TARGET_BRANCH -> config.git.target_branch
@@ -61,6 +62,7 @@ ENV_VAR_MAPPINGS: list[tuple[str, tuple[str, ...]]] = [
     ("OPENROUTER_BASE_URL", ("api", "openrouter_base_url")),
     ("CLAUDETM_MODEL_SONNET", ("models", "sonnet")),
     ("CLAUDETM_MODEL_OPUS", ("models", "opus")),
+    ("CLAUDETM_MODEL_FABLE", ("models", "fable")),
     ("CLAUDETM_MODEL_HAIKU", ("models", "haiku")),
     ("CLAUDETM_MODEL_SONNET_1M", ("models", "sonnet_1m")),
     ("CLAUDETM_TARGET_BRANCH", ("git", "target_branch")),

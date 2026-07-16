@@ -28,6 +28,7 @@ class ModelType(Enum):
 
     SONNET = "sonnet"
     OPUS = "opus"
+    FABLE = "fable"
     HAIKU = "haiku"
     SONNET_1M = "sonnet_1m"
 
@@ -101,6 +102,7 @@ class ToolConfig(Enum):
 # See: https://platform.claude.com/docs/en/build-with-claude/context-windows
 MODEL_CONTEXT_WINDOWS = {
     ModelType.OPUS: 1_000_000,  # Claude Opus 4.8: 1M context (beta, tier 4+)
+    ModelType.FABLE: 1_000_000,  # Claude Fable 5: 1M context (default, no beta gate)
     ModelType.SONNET: 1_000_000,  # Claude Sonnet 5: 1M context (beta, tier 4+)
     ModelType.HAIKU: 200_000,  # Claude Haiku 4.5: 200K context
     ModelType.SONNET_1M: 1_000_000,  # Sonnet with 1M context (always 1M)
@@ -109,6 +111,7 @@ MODEL_CONTEXT_WINDOWS = {
 # Standard context windows (for users below tier 4)
 MODEL_CONTEXT_WINDOWS_STANDARD = {
     ModelType.OPUS: 200_000,
+    ModelType.FABLE: 1_000_000,  # Fable 5's 1M window is the default, not tier-gated
     ModelType.SONNET: 200_000,
     ModelType.HAIKU: 200_000,
     ModelType.SONNET_1M: 1_000_000,  # Always 1M — that's the point
@@ -116,6 +119,7 @@ MODEL_CONTEXT_WINDOWS_STANDARD = {
 
 # Fallback model mapping: if primary model unavailable, try fallback
 MODEL_FALLBACK_MAP = {
+    ModelType.FABLE: ModelType.OPUS,  # Fable → Opus (Anthropic's recommended fallback)
     ModelType.OPUS: ModelType.SONNET,  # Opus → Sonnet
     ModelType.SONNET: ModelType.HAIKU,  # Sonnet → Haiku
     ModelType.HAIKU: ModelType.SONNET,  # Haiku → Sonnet
@@ -139,6 +143,7 @@ def get_context_window(
     if config is not None:
         context_map = {
             ModelType.OPUS: config.context_windows.opus,
+            ModelType.FABLE: config.context_windows.fable,
             ModelType.SONNET: config.context_windows.sonnet,
             ModelType.HAIKU: config.context_windows.haiku,
             ModelType.SONNET_1M: config.context_windows.sonnet_1m,
