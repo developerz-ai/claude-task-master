@@ -376,6 +376,10 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
     def save_state(self, state: TaskState, validate_transition: bool = True) -> None:
         """Save state to state.json with file locking.
 
+        On success a rotating backup of the written state is created
+        (best-effort) so a later corruption can be recovered from the most
+        recent good state.
+
         Args:
             state: The TaskState to save.
             validate_transition: If True, validates state transition (default True).
@@ -403,6 +407,11 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
                 self._atomic_write_json(self.state_file, state.model_dump(mode="json"))
             except PermissionError as e:
                 raise StatePermissionError(self.state_file, "writing", e) from e
+
+            # Keep a rotating backup of every durable write so a later
+            # corruption can be recovered from the most recent good state.
+            # Best-effort: a backup failure must never fail the save itself.
+            self.create_state_backup()
 
     def load_state(self) -> TaskState:
         """Load state from state.json with error recovery.
@@ -658,8 +667,11 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
 
     # Backup/Recovery Methods are inherited from BackupRecoveryMixin:
     # - _attempt_recovery(original_error: Exception) -> TaskState | None
+    # - find_recoverable_state(reference_time: datetime | None = None) -> TaskState | None
     # - _create_backup(file_path: Path, suffix: str = "") -> Path | None
     # - create_state_backup() -> Path | None
+    # - _regular_backups() -> list[Path]
+    # - _rotate_backups(keep: int) -> None
     # - cleanup_on_success(run_id: str) -> None
     # - _cleanup_old_logs(max_logs: int = 10) -> None
 

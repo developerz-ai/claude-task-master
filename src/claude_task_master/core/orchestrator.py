@@ -818,8 +818,7 @@ class WorkLoopOrchestrator:
             previous_status = state.status
             state.status = "paused"
             self._emit_status_changed(previous_status, "paused", state, reason)
-            self.state_manager.save_state(state)
-            self.state_manager.create_state_backup()
+            self.state_manager.save_state(state)  # save_state backs up on every write
             console.newline()
             console.info(self.tracker.get_cost_report())
             console.info("Use 'claudetm resume' to continue")
@@ -1334,29 +1333,25 @@ class WorkLoopOrchestrator:
         return None
 
     def _attempt_state_recovery(self) -> TaskState | None:
-        """Attempt to recover state from backup."""
+        """Attempt to recover state from the newest non-stale backup.
+
+        Delegates to the state manager's staleness-guarded backup selection so a
+        materially old backup is never silently restored (which would roll back
+        merged tasks or duplicate PRs). Performs no write; the caller resumes
+        from the returned in-memory state.
+
+        Returns:
+            The recovered TaskState, or None if no fresh-enough backup exists.
+        """
         try:
-            backup_dir = self.state_manager.backup_dir
-            if not backup_dir.exists():
-                return None
-
-            import json
-
-            backups = sorted(
-                backup_dir.glob("state.*.json"),
-                key=lambda p: p.stat().st_mtime,
-                reverse=True,
-            )
-
-            for backup_file in backups:
+            reference_time: datetime | None = None
+            state_file = self.state_manager.state_file
+            if state_file.exists():
                 try:
-                    with open(backup_file) as f:
-                        data = json.load(f)
-                    return TaskState(**data)
-                except Exception:
-                    continue
-
-            return None
+                    reference_time = datetime.fromtimestamp(state_file.stat().st_mtime)
+                except OSError:
+                    reference_time = None
+            return self.state_manager.find_recoverable_state(reference_time)
         except Exception:
             return None
 
