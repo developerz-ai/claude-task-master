@@ -6,6 +6,7 @@ import re
 import subprocess
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import typer
 
@@ -18,9 +19,13 @@ from .ci_helpers import (
     CI_POLL_INTERVAL,
     CI_START_WAIT,
     REVIEW_COMMENTS_GRACE,
+    GitHubCITimeoutError,
     wait_for_ci_complete,
 )
 from .fix_session import get_current_branch, run_fix_session
+
+if TYPE_CHECKING:
+    from ..github import GitHubClient, PRStatus
 
 DEFAULT_BRANCHES = {"main", "master", "develop", "development"}
 
@@ -52,6 +57,62 @@ def _validate_not_default_branch() -> None:
         console.error(f"Cannot run merge-pr from default branch '{branch}'.")
         console.info("Checkout the PR branch first: git checkout <branch>")
         raise typer.Exit(1)
+
+
+def _wait_ci(
+    github_client: GitHubClient,
+    pr_number: int,
+    admin: bool,
+    state_manager: StateManager,
+) -> PRStatus:
+    """Wait for CI to complete, treating a timeout as a merge blocker unless --admin.
+
+    Args:
+        github_client: GitHub client for API calls.
+        pr_number: PR number to check.
+        admin: Whether --admin was passed (timeout only warns and continues).
+        state_manager: State manager used to release the session lock on failure.
+
+    Returns:
+        Final PRStatus after all checks complete.
+
+    Raises:
+        typer.Exit: If CI times out and --admin was not passed.
+    """
+    try:
+        return wait_for_ci_complete(github_client, pr_number, raise_on_timeout=True)
+    except GitHubCITimeoutError:
+        if admin:
+            console.warning(f"CI timed out on PR #{pr_number}, but continuing due to --admin.")
+            # Fresh status so the caller can keep evaluating the current state.
+            return github_client.get_pr_status(pr_number)
+        console.error(f"CI timed out on PR #{pr_number}.")
+        console.info("Re-run the command to keep waiting, or use --admin to merge anyway.")
+        state_manager.release_session_lock()
+        raise typer.Exit(1) from None
+
+
+def _confirm_merged(github_client: GitHubClient, pr_number: int) -> bool:
+    """Poll until the PR reports MERGED (bounded), distinguishing auto-merge from a real merge.
+
+    Args:
+        github_client: GitHub client for API calls.
+        pr_number: PR number to check.
+
+    Returns:
+        True if the PR is MERGED, False if not merged within the bound or the
+        state could not be confirmed (treated as auto-merge scheduled).
+    """
+    for attempt in range(1, 7):  # 6 polls * CI_POLL_INTERVAL = ~60s max
+        try:
+            if github_client.get_pr_status(pr_number).state == "MERGED":
+                return True
+        except Exception as e:
+            console.warning(f"Could not confirm merge state for PR #{pr_number}: {e}")
+            return False
+        if attempt < 6:
+            time.sleep(CI_POLL_INTERVAL)
+    return False
 
 
 def _parse_pr_input(pr_input: str | None) -> int | None:
@@ -182,7 +243,7 @@ def merge_pr(
             console.info(f"Iteration {iteration}/{max_iterations}")
 
             # Wait for all CI checks to complete
-            status = wait_for_ci_complete(github_client, pr_number)
+            status = _wait_ci(github_client, pr_number, admin, state_manager)
 
             # Determine what needs fixing
             ci_failed = status.ci_state in ("FAILURE", "ERROR")
@@ -236,6 +297,11 @@ def merge_pr(
                 state_manager.release_session_lock()
                 raise typer.Exit(1)
 
+            if agent_ran:
+                # A fresh push means review bots will re-review, so the grace
+                # window must run again before trusting a "no comments" verdict.
+                review_grace_done = False
+
             # Wait for CI to start after push
             console.info(f"Waiting {CI_START_WAIT}s for CI to start...")
             time.sleep(CI_START_WAIT)
@@ -243,7 +309,7 @@ def merge_pr(
             # for-loop exhausted without break = max iterations used up
             # Do one final CI check - the last fix may have resolved everything
             console.info("Max iterations reached - checking final CI status...")
-            status = wait_for_ci_complete(github_client, pr_number)
+            status = _wait_ci(github_client, pr_number, admin, state_manager)
             ci_failed = status.ci_state in ("FAILURE", "ERROR")
             has_comments = status.unresolved_threads > 0
             has_conflicts = status.mergeable == "CONFLICTING"
@@ -279,20 +345,31 @@ def merge_pr(
             merged_branch = get_current_branch()
             try:
                 github_client.merge_pr(pr_number, admin=admin)
-                console.success(f"PR #{pr_number} merged successfully!")
             except Exception as e:
                 console.error(f"Merge failed: {e}")
                 console.info("You can merge manually.")
                 state_manager.release_session_lock()
                 raise typer.Exit(1) from None
 
-            # Switch back to base branch, pull, and delete the merged local branch
-            base_branch = status.base_branch or "main"
-            console.info(f"Checking out to {base_branch}...")
-            if _checkout_and_pull(base_branch):
-                console.success(f"Switched to {base_branch}")
-                if merged_branch and merged_branch != base_branch:
-                    _delete_local_branch(merged_branch)
+            if _confirm_merged(github_client, pr_number):
+                console.success(f"PR #{pr_number} merged successfully!")
+
+                # Switch back to base branch, pull, and delete the merged local branch
+                base_branch = status.base_branch or "main"
+                console.info(f"Checking out to {base_branch}...")
+                if _checkout_and_pull(base_branch):
+                    console.success(f"Switched to {base_branch}")
+                    if merged_branch and merged_branch != base_branch:
+                        _delete_local_branch(merged_branch)
+            else:
+                # Auto-merge was scheduled/enabled and will complete when checks
+                # pass. The branch is still needed, so skip local cleanup.
+                console.info(
+                    f"Auto-merge scheduled for PR #{pr_number}; "
+                    "it will merge automatically when checks pass."
+                )
+                state_manager.release_session_lock()
+                raise typer.Exit(0)
         elif status.mergeable == "CONFLICTING":
             console.warning(f"PR #{pr_number} has merge conflicts - manual resolution required")
             state_manager.release_session_lock()

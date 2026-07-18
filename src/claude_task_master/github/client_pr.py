@@ -1,6 +1,7 @@
 """GitHub PR Operations - PR creation, status, and comments."""
 
 import json
+import re
 import subprocess
 from typing import Any, Protocol
 
@@ -82,9 +83,13 @@ class PROperationsMixin:
         # Extract PR number from output
         # gh CLI outputs URL like: https://github.com/owner/repo/pull/123
         output = result.stdout.strip()
-        pr_number = int(output.split("/")[-1])
+        match = re.search(r"/pull/(\d+)", output)
+        if not match:
+            from .exceptions import GitHubError
 
-        return pr_number
+            raise GitHubError(f"Could not parse PR URL from gh output: {output!r}")
+
+        return int(match.group(1))
 
     def get_pr_body(self: GitHubClientProtocol, pr_number: int) -> str:
         """Return the body/description text of a PR.
@@ -174,28 +179,40 @@ class PROperationsMixin:
             base_branch: The base branch to check protection for.
 
         Returns:
-            List of required check context names.
+            List of required check context names; empty only when the branch has
+            no protection rules or no required checks.
+
+        Raises:
+            GitHubError: If the API call fails for any reason other than missing
+                branch protection (auth, rate limit, network, or ambiguous errors).
+            GitHubTimeoutError: If the command times out.
         """
-        from .exceptions import GitHubError, GitHubTimeoutError
+        from .exceptions import GitHubError
 
         repo_info = self._get_repo_info()
-        try:
-            result = self._run_gh_command(
-                [
-                    "gh",
-                    "api",
-                    f"repos/{repo_info}/branches/{base_branch}/protection/required_status_checks",
-                    "--jq",
-                    ".contexts",
-                ],
-                timeout=15,
+        result = self._run_gh_command(
+            [
+                "gh",
+                "api",
+                f"repos/{repo_info}/branches/{base_branch}/protection/required_status_checks",
+                "--jq",
+                ".contexts",
+            ],
+            timeout=15,
+            check=False,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.strip()
+            lowered = stderr.lower()
+            if "not found" in lowered or "404" in lowered or "branch not protected" in lowered:
+                # Branch simply has no protection rules / no required checks
+                return []
+            raise GitHubError(
+                f"Failed to fetch required status checks for {base_branch!r}: {stderr}"
             )
-            # Parse JSON array of context names
-            contexts = json.loads(result.stdout)
-            return contexts if isinstance(contexts, list) else []
-        except (GitHubError, GitHubTimeoutError):
-            # No branch protection or no required checks
-            return []
+        # Parse JSON array of context names
+        contexts = json.loads(result.stdout)
+        return contexts if isinstance(contexts, list) else []
 
     def get_pr_for_current_branch(self: GitHubClientProtocol, cwd: str | None = None) -> int | None:
         """Get PR number for the current branch, if one exists.

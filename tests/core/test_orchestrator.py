@@ -1211,6 +1211,10 @@ class TestRunMethod:
         state_manager.state_dir.mkdir(exist_ok=True)
         state_manager.backup_dir.mkdir(exist_ok=True)
 
+        # Plan with fewer tasks than current_task_index=100 so is_all_complete
+        # returns True (a missing plan raises NoPlanFoundError and fails the run)
+        state_manager.save_plan("- [x] Task 1\n- [x] Task 2\n")
+
         # Create backup
         backup_file = state_manager.backup_dir / "state.20250117-120000.json"
         # Adjust sample_task_state to have plan-compatible state
@@ -1614,9 +1618,7 @@ class TestRunCompletedWebhookMapping:
         state_manager.save_plan(basic_plan)
 
         with (
-            patch.object(
-                orchestrator.task_runner, "is_all_complete", return_value=False
-            ),
+            patch.object(orchestrator.task_runner, "is_all_complete", return_value=False),
             patch.object(orchestrator, "_run_workflow_cycle", return_value=2),
         ):
             exit_code = orchestrator.run()
@@ -1659,9 +1661,7 @@ class TestRunCompletedWebhookMapping:
         state_manager.save_plan(basic_plan)
 
         with (
-            patch.object(
-                orchestrator.task_runner, "is_all_complete", return_value=False
-            ),
+            patch.object(orchestrator.task_runner, "is_all_complete", return_value=False),
             patch.object(orchestrator, "_run_workflow_cycle", return_value=0),
         ):
             exit_code = orchestrator.run()
@@ -1755,9 +1755,7 @@ class TestFixPrCiRetryLimit:
             patch.object(
                 basic_orchestrator, "_poll_fix_pr_ci", return_value="failure"
             ) as mock_poll,
-            patch.object(
-                basic_orchestrator, "_fix_pr_ci_failure", return_value=True
-            ) as mock_fix,
+            patch.object(basic_orchestrator, "_fix_pr_ci_failure", return_value=True) as mock_fix,
         ):
             result = basic_orchestrator._wait_for_fix_pr_merge(basic_task_state)
 
@@ -1826,12 +1824,8 @@ class TestWaitingCiResumeTimerReset:
             return 2  # Stop the loop immediately after the first cycle
 
         with (
-            patch.object(
-                basic_orchestrator.task_runner, "is_all_complete", return_value=False
-            ),
-            patch.object(
-                basic_orchestrator, "_run_workflow_cycle", side_effect=capture_stage
-            ),
+            patch.object(basic_orchestrator.task_runner, "is_all_complete", return_value=False),
+            patch.object(basic_orchestrator, "_run_workflow_cycle", side_effect=capture_stage),
         ):
             result = basic_orchestrator.run()
 

@@ -14,11 +14,36 @@ if TYPE_CHECKING:
 # Polling intervals
 CI_POLL_INTERVAL = 10  # seconds between CI checks (matches orchestrator)
 CI_START_WAIT = 60  # seconds to wait for CI to start after push
-CI_TIMEOUT = 90 * 60  # max seconds to wait for CI (90 minutes)
+CI_TIMEOUT = 120 * 60  # max seconds to wait for CI (120 minutes)
 # Grace period after CI passes before trusting the "no comments" verdict. Review bots (CodeRabbit)
 # post their review comments a little *after* CI completes rather than as a blocking status check,
 # so without this wait merge-pr races ahead and merges before the comments land.
 REVIEW_COMMENTS_GRACE = 120  # seconds to wait for review bots to post comments after CI passes
+
+
+class GitHubCITimeoutError(Exception):
+    """Raised when waiting for CI checks exceeds the timeout.
+
+    Attributes:
+        pr_number: PR number whose CI checks timed out.
+        elapsed: Seconds elapsed before the timeout was hit.
+    """
+
+    def __init__(self, pr_number: int, elapsed: float, timeout: int, waiting: list[str]) -> None:
+        """Initialize the timeout error.
+
+        Args:
+            pr_number: PR number whose CI checks timed out.
+            elapsed: Seconds elapsed before the timeout was hit.
+            timeout: Configured timeout in seconds.
+            waiting: Names of checks still pending at timeout.
+        """
+        self.pr_number = pr_number
+        self.elapsed = elapsed
+        super().__init__(
+            f"CI timeout after {timeout}s waiting for checks on PR #{pr_number}: "
+            f"still waiting on {', '.join(waiting[:5])}"
+        )
 
 
 def is_check_pending(check: dict[str, Any]) -> bool:
@@ -59,6 +84,7 @@ def wait_for_ci_complete(
     github_client: GitHubClient,
     pr_number: int,
     timeout: int = CI_TIMEOUT,
+    raise_on_timeout: bool = False,
 ) -> PRStatus:
     """Wait for all CI checks to complete.
 
@@ -68,10 +94,17 @@ def wait_for_ci_complete(
     Args:
         github_client: GitHub client for API calls.
         pr_number: PR number to check.
-        timeout: Maximum seconds to wait for CI (default: 90 minutes).
+        timeout: Maximum seconds to wait for CI (default: 120 minutes).
+        raise_on_timeout: If True, raise GitHubCITimeoutError on timeout instead
+            of returning the mid-flight status. If False (default), preserve the
+            legacy behavior of warning and returning the current status.
 
     Returns:
         Final PRStatus after all checks complete.
+
+    Raises:
+        GitHubCITimeoutError: If raise_on_timeout is True and the timeout is
+            exceeded before all checks complete.
     """
     console.info(f"Waiting for CI checks on PR #{pr_number}...")
 
@@ -80,10 +113,13 @@ def wait_for_ci_complete(
     required_checks = set(github_client.get_required_status_checks(status.base_branch))
 
     start_time = time.monotonic()
+    all_waiting: list[str] = []
     while True:
         # Check timeout
         elapsed = time.monotonic() - start_time
         if elapsed > timeout:
+            if raise_on_timeout:
+                raise GitHubCITimeoutError(pr_number, elapsed, timeout, all_waiting)
             console.warning(f"CI timeout after {timeout}s — returning current status")
             return status
 

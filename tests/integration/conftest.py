@@ -754,25 +754,30 @@ def mock_github_client():
     """Provide a mocked GitHubClient for integration tests."""
     mock = MagicMock()
     mock.create_pr = MagicMock(return_value=123)
+
+    status_kwargs = {
+        "number": 123,
+        "ci_state": "SUCCESS",
+        "unresolved_threads": 0,
+        "total_threads": 0,
+        "resolved_threads": 0,
+        "check_details": [],
+        "checks_passed": 1,
+        "checks_failed": 0,
+        "checks_pending": 0,
+        "checks_skipped": 0,
+        "mergeable": True,
+        "base_branch": "main",
+    }
+    open_status = MagicMock(**status_kwargs, state="OPEN", merged=False)
+    merged_status = MagicMock(**status_kwargs, state="MERGED", merged=True)
+
+    # Simulate GitHub: the PR reports MERGED once merge_pr has been called
+    mock.merge_pr = MagicMock()
     mock.get_pr_status = MagicMock(
-        return_value=MagicMock(
-            number=123,
-            ci_state="SUCCESS",
-            unresolved_threads=0,
-            total_threads=0,
-            resolved_threads=0,
-            check_details=[],
-            checks_passed=1,
-            checks_failed=0,
-            checks_pending=0,
-            checks_skipped=0,
-            mergeable=True,
-            merged=False,
-            base_branch="main",
-        )
+        side_effect=lambda *a, **k: merged_status if mock.merge_pr.called else open_status
     )
     mock.get_pr_comments = MagicMock(return_value="")
-    mock.merge_pr = MagicMock()
     mock.get_pr_for_current_branch = MagicMock(return_value=123)
     mock.wait_for_ci = MagicMock(return_value=("SUCCESS", None))
     return mock

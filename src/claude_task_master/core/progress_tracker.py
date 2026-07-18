@@ -52,9 +52,9 @@ class SessionMetrics:
     @property
     def estimated_cost(self) -> float:
         """Estimate cost in USD (approximate Claude pricing)."""
-        # Approximate pricing: $15/M input, $75/M output for Claude Opus
-        input_cost = (self.tokens_input / 1_000_000) * 15.0
-        output_cost = (self.tokens_output / 1_000_000) * 75.0
+        # Approximate pricing: $5/M input, $25/M output for Claude Opus 4.5+
+        input_cost = (self.tokens_input / 1_000_000) * 5.0
+        output_cost = (self.tokens_output / 1_000_000) * 25.0
         return input_cost + output_cost
 
 

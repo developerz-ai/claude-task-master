@@ -2,13 +2,17 @@
 
 import json
 import subprocess
+from enum import Enum
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+import claude_task_master.github.client as github_client_module
 from claude_task_master.github.client import (
+    AutoMergeResult,
     GitHubAuthError,
     GitHubClient,
+    GitHubError,
     GitHubMergeError,
     GitHubNotFoundError,
     GitHubTimeoutError,
@@ -834,6 +838,173 @@ class TestGitHubClientGetPRComments:
 # =============================================================================
 
 
+class TestAutoMergeResultModel:
+    """Tests for the AutoMergeResult enum and its export."""
+
+    def test_auto_merge_result_is_str_enum_with_expected_members(self):
+        """Test that AutoMergeResult is a str Enum with MERGED/SCHEDULED/FAILED."""
+        assert issubclass(AutoMergeResult, str)
+        assert issubclass(AutoMergeResult, Enum)
+        assert {member.name for member in AutoMergeResult} == {"MERGED", "SCHEDULED", "FAILED"}
+
+    def test_auto_merge_result_member_values(self):
+        """Test that each outcome member carries its lowercase string value."""
+        assert AutoMergeResult.MERGED.value == "merged"
+        assert AutoMergeResult.SCHEDULED.value == "scheduled"
+        assert AutoMergeResult.FAILED.value == "failed"
+        # StrEnum members compare equal to their string values
+        assert AutoMergeResult.MERGED == str(AutoMergeResult.MERGED)
+        assert AutoMergeResult.SCHEDULED == str(AutoMergeResult.SCHEDULED)
+        assert AutoMergeResult.FAILED == str(AutoMergeResult.FAILED)
+
+    def test_auto_merge_result_members_are_distinct(self):
+        """Test that merged/scheduled/failed outcomes are distinguishable."""
+        outcomes = {
+            AutoMergeResult.MERGED,
+            AutoMergeResult.SCHEDULED,
+            AutoMergeResult.FAILED,
+        }
+        assert len(outcomes) == 3
+        assert len({member.value for member in outcomes}) == 3
+
+    def test_auto_merge_result_lookups(self):
+        """Test name and value lookups resolve to the right outcome members."""
+        assert AutoMergeResult["MERGED"] is AutoMergeResult.MERGED
+        assert AutoMergeResult["SCHEDULED"] is AutoMergeResult.SCHEDULED
+        assert AutoMergeResult["FAILED"] is AutoMergeResult.FAILED
+        assert AutoMergeResult("merged") is AutoMergeResult.MERGED
+        assert AutoMergeResult("scheduled") is AutoMergeResult.SCHEDULED
+        assert AutoMergeResult("failed") is AutoMergeResult.FAILED
+
+    def test_auto_merge_result_invalid_value_raises(self):
+        """Test that an unknown outcome value raises ValueError."""
+        with pytest.raises(ValueError):
+            AutoMergeResult("unknown")
+
+    def test_auto_merge_result_in_module_all(self):
+        """Test that github.client.__all__ exports AutoMergeResult."""
+        assert "AutoMergeResult" in github_client_module.__all__
+
+
+class TestGitHubClientTryAutoMerge:
+    """Tests for GitHubClient._try_auto_merge polling behavior."""
+
+    @pytest.fixture
+    def github_client(self):
+        """Provide a GitHubClient with mocked auth check."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            client = GitHubClient()
+        return client
+
+    @pytest.fixture(autouse=True)
+    def _no_sleep(self, monkeypatch):
+        """Patch time.sleep in github.client so polls don't block."""
+        monkeypatch.setattr("claude_task_master.github.client.time.sleep", lambda _: None)
+
+    @staticmethod
+    def _make_status(state: str) -> MagicMock:
+        """Build a mock PR status carrying a raw GitHub ``state`` field."""
+        status = MagicMock(spec=PRStatus)
+        status.state = state
+        return status
+
+    def test_try_auto_merge_returns_merged_when_poll_confirms_merge(self, github_client):
+        """Poll finding state MERGED returns AutoMergeResult.MERGED."""
+        merged_status = self._make_status("MERGED")
+        with (
+            patch.object(github_client, "_run_gh_command", return_value=MagicMock()),
+            patch.object(github_client, "get_pr_status", return_value=merged_status),
+        ):
+            result = github_client._try_auto_merge("123")
+
+        assert result == AutoMergeResult.MERGED
+
+    def test_try_auto_merge_polls_until_merged(self, github_client):
+        """Non-MERGED states keep polling until a MERGED state is seen."""
+        open_status = self._make_status("OPEN")
+        merged_status = self._make_status("MERGED")
+        with (
+            patch.object(github_client, "_run_gh_command", return_value=MagicMock()),
+            patch.object(
+                github_client,
+                "get_pr_status",
+                side_effect=[open_status, open_status, merged_status],
+            ) as mock_status,
+        ):
+            result = github_client._try_auto_merge("123")
+
+        assert result == AutoMergeResult.MERGED
+        assert mock_status.call_count == 3
+
+    def test_try_auto_merge_scheduled_when_never_merged(self, github_client):
+        """Polls exhausted without MERGED returns SCHEDULED (not FAILED)."""
+        open_status = self._make_status("OPEN")
+        with (
+            patch.object(github_client, "_run_gh_command", return_value=MagicMock()),
+            patch.object(github_client, "get_pr_status", return_value=open_status) as mock_status,
+        ):
+            result = github_client._try_auto_merge("123")
+
+        assert result == AutoMergeResult.SCHEDULED
+        assert mock_status.call_count == 6
+
+    def test_try_auto_merge_scheduled_when_get_pr_status_keeps_raising(
+        self, github_client, monkeypatch
+    ):
+        """Persistent get_pr_status failure backs off and ends as SCHEDULED."""
+        sleep_mock = MagicMock()
+        monkeypatch.setattr("claude_task_master.github.client.time.sleep", sleep_mock)
+        with (
+            patch.object(github_client, "_run_gh_command", return_value=MagicMock()),
+            patch.object(
+                github_client,
+                "get_pr_status",
+                side_effect=GitHubError("boom", command=["gh"]),
+            ) as mock_status,
+        ):
+            result = github_client._try_auto_merge("123")
+
+        assert result == AutoMergeResult.SCHEDULED
+        assert mock_status.call_count == 6
+        # One backoff sleep per poll except after the final one.
+        assert sleep_mock.call_count == 5
+        # Backoff grows with the attempt (10 * attempt: 10, 20, 30, 40, 50).
+        backoff_sleeps = [call.args[0] for call in sleep_mock.call_args_list]
+        assert all(delay % 10 == 0 for delay in backoff_sleeps)
+        assert any(delay > 10 for delay in backoff_sleeps)
+
+    def test_try_auto_merge_failed_on_gh_error(self, github_client):
+        """gh command failure returns FAILED and never polls."""
+        with (
+            patch.object(
+                github_client,
+                "_run_gh_command",
+                side_effect=GitHubError("auto-merge is not allowed", command=["gh"]),
+            ),
+            patch.object(github_client, "get_pr_status") as mock_status,
+        ):
+            result = github_client._try_auto_merge("123")
+
+        assert result == AutoMergeResult.FAILED
+        mock_status.assert_not_called()
+
+    def test_try_auto_merge_failed_on_gh_timeout(self, github_client):
+        """gh command timeout returns FAILED and never polls."""
+        with (
+            patch.object(
+                github_client,
+                "_run_gh_command",
+                side_effect=GitHubTimeoutError("timed out", command=["gh"]),
+            ),
+            patch.object(github_client, "get_pr_status") as mock_status,
+        ):
+            result = github_client._try_auto_merge("123")
+
+        assert result == AutoMergeResult.FAILED
+        mock_status.assert_not_called()
+
+
 class TestGitHubClientMergePR:
     """Tests for PR merge functionality."""
 
@@ -846,15 +1017,78 @@ class TestGitHubClientMergePR:
         return client
 
     def test_merge_pr_success_with_auto(self, github_client):
-        """Test successful PR merge with --auto flag."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        """Test successful PR merge with --auto flag (confirmed MERGED)."""
+        with (
+            patch.object(
+                github_client,
+                "_try_auto_merge",
+                return_value=AutoMergeResult.MERGED,
+            ) as mock_auto,
+            patch.object(github_client, "_direct_merge") as mock_direct,
+        ):
             github_client.merge_pr(123)
 
-            # First call should be with --auto
-            call_args = mock_run.call_args_list[0]
-            assert call_args[0][0] == ["gh", "pr", "merge", "123", "--squash", "--auto"]
-            assert call_args[1]["timeout"] == 15
+        mock_auto.assert_called_once_with("123")
+        mock_direct.assert_not_called()
+
+    def test_merge_pr_scheduled_auto_merge_skips_direct_merge(self, github_client):
+        """SCHEDULED auto-merge means the merge is queued, so no direct merge."""
+        with (
+            patch.object(
+                github_client,
+                "_try_auto_merge",
+                return_value=AutoMergeResult.SCHEDULED,
+            ) as mock_auto,
+            patch.object(github_client, "_direct_merge") as mock_direct,
+        ):
+            github_client.merge_pr(123)
+
+        mock_auto.assert_called_once_with("123")
+        mock_direct.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("outcome", "expects_direct_merge"),
+        [
+            (AutoMergeResult.MERGED, False),
+            (AutoMergeResult.SCHEDULED, False),
+            (AutoMergeResult.FAILED, True),
+        ],
+        ids=["merged", "scheduled", "failed"],
+    )
+    def test_merge_pr_auto_merge_outcome_drives_direct_merge_fallback(
+        self, github_client, outcome, expects_direct_merge
+    ):
+        """Each AutoMergeResult outcome drives merge_pr's fallback decision."""
+        with (
+            patch.object(github_client, "_try_auto_merge", return_value=outcome) as mock_auto,
+            patch.object(github_client, "_direct_merge") as mock_direct,
+        ):
+            github_client.merge_pr(123)
+
+        mock_auto.assert_called_once_with("123")
+        if expects_direct_merge:
+            mock_direct.assert_called_once_with("123", 123)
+        else:
+            mock_direct.assert_not_called()
+
+    def test_merge_pr_failed_outcome_direct_merge_raises(self, github_client):
+        """FAILED outcome falls back to direct merge, which may raise."""
+        with (
+            patch.object(
+                github_client,
+                "_try_auto_merge",
+                return_value=AutoMergeResult.FAILED,
+            ),
+            patch.object(
+                github_client,
+                "_direct_merge",
+                side_effect=GitHubMergeError(
+                    "Failed to merge PR #123: boom", command=["gh", "pr", "merge"]
+                ),
+            ),
+            pytest.raises(GitHubMergeError, match="Failed to merge PR #123"),
+        ):
+            github_client.merge_pr(123)
 
     def test_merge_pr_fallback_to_direct_merge(self, github_client):
         """Test fallback to direct merge when --auto fails."""
@@ -875,19 +1109,23 @@ class TestGitHubClientMergePR:
 
     def test_merge_pr_converts_number_to_string(self, github_client):
         """Test that PR number is converted to string for command."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        with (
+            patch.object(
+                github_client,
+                "_try_auto_merge",
+                return_value=AutoMergeResult.MERGED,
+            ) as mock_auto,
+            patch.object(github_client, "_direct_merge"),
+        ):
             github_client.merge_pr(456)
 
-            call_args = mock_run.call_args[0][0]
-            assert "456" in call_args
-            assert isinstance(call_args[3], str)  # The PR number argument
+        mock_auto.assert_called_once_with("456")
 
     def test_merge_pr_uses_squash_merge(self, github_client):
         """Test that merge uses squash strategy."""
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-            github_client.merge_pr(789)
+            github_client.merge_pr(789, use_auto=False)
 
             call_args = mock_run.call_args[0][0]
             assert "--squash" in call_args
@@ -1112,7 +1350,7 @@ class TestGitHubClientIntegration:
         # Now merge
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
-            github_client.merge_pr(100)  # Should succeed
+            github_client.merge_pr(100, use_auto=False)  # Should succeed
 
 
 # =============================================================================

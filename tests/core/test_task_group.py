@@ -2,19 +2,33 @@
 
 from __future__ import annotations
 
-from claude_task_master.core.agent_models import ModelType
+from claude_task_master.core.agent_models import ModelType, TaskComplexity, parse_task_complexity
 from claude_task_master.core.task_group import (
     ParsedTask,
     PullRequest,
-    TaskComplexity,
     TaskGroup,
     get_group_for_task,
     get_incomplete_tasks,
     get_tasks_in_group,
-    parse_task_complexity,
     parse_tasks_with_groups,
     summarize_groups,
 )
+
+
+class TestTaskComplexityReExport:
+    """Tests for TaskComplexity re-export from agent_models via task_group."""
+
+    def test_task_complexity_importable_from_task_group(self):
+        """TaskComplexity should be importable from task_group (re-exported from agent_models)."""
+        import claude_task_master.core.task_group as task_group_module
+
+        assert task_group_module.TaskComplexity is TaskComplexity
+
+    def test_parse_task_complexity_importable_from_task_group(self):
+        """parse_task_complexity should be importable from task_group (re-exported)."""
+        import claude_task_master.core.task_group as task_group_module
+
+        assert task_group_module.parse_task_complexity is parse_task_complexity
 
 
 class TestTaskComplexity:
@@ -67,7 +81,9 @@ class TestTaskComplexity:
         """Should map complexity to correct ModelType."""
         assert TaskComplexity.get_model_name_for_complexity(TaskComplexity.CODING) is ModelType.OPUS
         assert TaskComplexity.get_model_name_for_complexity(TaskComplexity.QUICK) is ModelType.HAIKU
-        assert TaskComplexity.get_model_name_for_complexity(TaskComplexity.GENERAL) is ModelType.SONNET
+        assert (
+            TaskComplexity.get_model_name_for_complexity(TaskComplexity.GENERAL) is ModelType.SONNET
+        )
 
     def test_get_model_name_for_debugging_qa(self):
         """Should map DEBUGGING_QA complexity to SONNET_1M."""

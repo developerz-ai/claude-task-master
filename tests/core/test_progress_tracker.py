@@ -56,11 +56,11 @@ class TestSessionMetrics:
             tokens_input=1_000_000,  # 1M input tokens
             tokens_output=100_000,  # 100K output tokens
         )
-        # $15/M input + $75/M output = $15 + $7.5 = $22.5
-        assert metrics.estimated_cost == pytest.approx(22.5, rel=0.01)
+        # $5/M input + $25/M output = $5 + $2.5 = $7.5
+        assert metrics.estimated_cost == pytest.approx(7.5, rel=0.01)
 
     def test_estimated_cost_opus_rates(self):
-        """Test cost estimation uses Opus rates ($15/M input, $75/M output)."""
+        """Test cost estimation uses Opus rates ($5/M input, $25/M output)."""
         metrics = SessionMetrics(
             session_id=1,
             task_index=0,
@@ -68,8 +68,8 @@ class TestSessionMetrics:
             tokens_input=1_000_000,  # 1M input tokens
             tokens_output=1_000_000,  # 1M output tokens
         )
-        # $15/M input + $75/M output = $15 + $75 = $90
-        assert metrics.estimated_cost == pytest.approx(90.0, rel=0.01)
+        # $5/M input + $25/M output = $5 + $25 = $30
+        assert metrics.estimated_cost == pytest.approx(30.0, rel=0.01)
 
 
 class TestTrackerConfig:
@@ -358,6 +358,29 @@ class TestExecutionTracker:
 
         assert state == ProgressState.STALLED
 
+    def test_check_progress_healthy_without_active_session(self):
+        """Test healthy state between sessions with recent progress."""
+        tracker = ExecutionTracker()
+        tracker.start_session(1, 0, "Test")
+        tracker.record_task_progress(0)
+        tracker.end_session()
+
+        assert tracker._current_session is None
+        state = tracker.check_progress()
+
+        assert state == ProgressState.HEALTHY
+
+    def test_check_progress_stalled_on_fresh_tracker_without_session(self, monkeypatch):
+        """Test stall detection with no session ever started."""
+        tracker = ExecutionTracker()
+
+        monkeypatch.setattr(tracker, "_last_progress_time", time.time() - 10000.0)
+
+        assert tracker._current_session is None
+        state = tracker.check_progress()
+
+        assert state == ProgressState.STALLED
+
     def test_should_abort_stalled_without_active_session(self, monkeypatch):
         """Test abort on stall without an active session."""
         tracker = ExecutionTracker()
@@ -369,6 +392,25 @@ class TestExecutionTracker:
         should_abort, _reason = tracker.should_abort()
 
         assert should_abort
+
+    def test_should_abort_max_duration_exceeded(self, monkeypatch):
+        """Test abort reason when the hard session timeout is exceeded."""
+        config = TrackerConfig(
+            stall_threshold_seconds=10000.0,
+            slow_threshold_seconds=60.0,
+            max_session_duration=120.0,
+        )
+        tracker = ExecutionTracker(config=config)
+        tracker.start_session(1, 0, "Test")
+
+        session = tracker._current_session
+        assert session is not None
+        monkeypatch.setattr(session, "start_time", time.time() - 200.0)
+
+        should_abort, reason = tracker.should_abort()
+
+        assert should_abort
+        assert "Stalled" in reason
 
     def test_check_progress_max_duration_exceeded_returns_stalled(self, monkeypatch):
         """Test max_session_duration takes precedence over slow threshold."""

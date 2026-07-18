@@ -579,6 +579,21 @@ def cleanup_env(monkeypatch):
     # No cleanup needed as monkeypatch handles it automatically
 
 
+@pytest.fixture(autouse=True)
+def reset_global_shutdown():
+    """Reset the global shutdown manager after each test.
+
+    ControlManager.stop() and signal handlers set the process-global shutdown
+    flag; without a reset it leaks into later tests that call run() with
+    reset_shutdown patched out (cancellation check trips → spurious exit 2).
+    """
+    yield
+
+    from claude_task_master.core.shutdown import reset_shutdown
+
+    reset_shutdown()
+
+
 @pytest.fixture
 def isolated_filesystem(temp_dir: Path, monkeypatch):
     """Provide an isolated filesystem for tests that need to change cwd."""

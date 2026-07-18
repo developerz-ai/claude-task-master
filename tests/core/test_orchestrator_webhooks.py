@@ -559,8 +559,8 @@ class TestPRLifecycleWebhooks:
         # Mock GitHub to return a PR
         mock_github_client.get_pr_for_current_branch.return_value = 42
         mock_pr_status = Mock()
-        mock_pr_status.pr_url = "https://github.com/owner/repo/pull/42"
-        mock_pr_status.pr_title = "Test PR"
+        mock_pr_status.url = "https://github.com/owner/repo/pull/42"
+        mock_pr_status.title = "Test PR"
         mock_pr_status.base_branch = "main"
         mock_pr_status.ci_state = "SUCCESS"
         mock_pr_status.checks_pending = 0
@@ -598,16 +598,21 @@ class TestPRLifecycleWebhooks:
         basic_task_state.current_pr = 42
         basic_task_state.options.auto_merge = True
 
-        # Mock GitHub PR status
+        # Mock GitHub PR status (OPEN until merge_pr is called, then MERGED)
         mock_pr_status = Mock()
-        mock_pr_status.pr_url = "https://github.com/owner/repo/pull/42"
-        mock_pr_status.pr_title = "Test PR"
+        mock_pr_status.state = "OPEN"
+        mock_pr_status.mergeable = "MERGEABLE"
+        mock_pr_status.url = "https://github.com/owner/repo/pull/42"
+        mock_pr_status.title = "Test PR"
         mock_pr_status.base_branch = "main"
         mock_pr_status.ci_state = "SUCCESS"
         mock_pr_status.checks_pending = 0
         mock_pr_status.reviews_approved = 1
         mock_pr_status.reviews_requested = 0
-        mock_github_client.get_pr_status.return_value = mock_pr_status
+        merged_status = Mock(state="MERGED")
+        mock_github_client.get_pr_status.side_effect = lambda *a, **k: (
+            merged_status if mock_github_client.merge_pr.called else mock_pr_status
+        )
 
         # Mock successful merge
         mock_github_client.merge_pr.return_value = True
@@ -1513,8 +1518,8 @@ class TestPRCountTrackingWebhooks:
         # Mock GitHub to return a PR
         mock_github_client.get_pr_for_current_branch.return_value = 42
         mock_pr_status = Mock()
-        mock_pr_status.pr_url = "https://github.com/owner/repo/pull/42"
-        mock_pr_status.pr_title = "Test PR"
+        mock_pr_status.url = "https://github.com/owner/repo/pull/42"
+        mock_pr_status.title = "Test PR"
         mock_pr_status.base_branch = "main"
         mock_pr_status.ci_state = "SUCCESS"
         mock_pr_status.checks_pending = 0
@@ -1559,16 +1564,21 @@ class TestPRCountTrackingWebhooks:
         basic_task_state.current_pr = 42
         basic_task_state.options.auto_merge = True
 
-        # Mock GitHub PR status
+        # Mock GitHub PR status (OPEN until merge_pr is called, then MERGED)
         mock_pr_status = Mock()
-        mock_pr_status.pr_url = "https://github.com/owner/repo/pull/42"
-        mock_pr_status.pr_title = "Test PR"
+        mock_pr_status.state = "OPEN"
+        mock_pr_status.mergeable = "MERGEABLE"
+        mock_pr_status.url = "https://github.com/owner/repo/pull/42"
+        mock_pr_status.title = "Test PR"
         mock_pr_status.base_branch = "main"
         mock_pr_status.ci_state = "SUCCESS"
         mock_pr_status.checks_pending = 0
         mock_pr_status.reviews_approved = 1
         mock_pr_status.reviews_requested = 0
-        mock_github_client.get_pr_status.return_value = mock_pr_status
+        merged_status = Mock(state="MERGED")
+        mock_github_client.get_pr_status.side_effect = lambda *a, **k: (
+            merged_status if mock_github_client.merge_pr.called else mock_pr_status
+        )
 
         # Mock successful merge
         mock_github_client.merge_pr.return_value = True

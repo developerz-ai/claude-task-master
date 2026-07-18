@@ -174,8 +174,7 @@ _REPRESENTATIVE_PLANS = [
     ),
     (
         "pr_grouped",
-        "### PR 1: Schema\n- [ ] Task one\n- [x] Task two\n\n"
-        "### PR 2: Service\n- [ ] Task three",
+        "### PR 1: Schema\n- [ ] Task one\n- [x] Task two\n\n### PR 2: Service\n- [ ] Task three",
     ),
     (
         "release_checks_section",
@@ -237,9 +236,10 @@ class TestCrossParserConsistency:
     def _expected_updated_plan(plan: str, index: int) -> str:
         """Compute the expected mark_task_complete output from its contract.
 
-        mark_task_complete is line-based: it counts stripped lines starting
-        with ``- [ ]`` or ``- [x]`` (lowercase only) and replaces the first
-        ``- [ ]`` in the target line with ``- [x]``.
+        mark_task_complete uses group-parser semantics: task lines match
+        ``- [ ]``/``- [x]``/``- [X]`` with a non-empty description, and
+        checkbox lines inside a ``**Release checks:**`` section are ignored.
+        The first ``[ ]`` in the target line is replaced with ``[x]``.
 
         Args:
             plan: The original plan markdown.
@@ -248,20 +248,34 @@ class TestCrossParserConsistency:
         Returns:
             Expected updated plan markdown.
         """
+        import re
+
+        task_pattern = re.compile(r"^-\s*\[([ xX])\]\s*(.+)$")
+        release_checks_pattern = re.compile(r"^\*\*Release checks:?\*\*", re.IGNORECASE)
+
         lines = plan.split("\n")
         count = 0
+        in_release_checks = False
         for i, line in enumerate(lines):
             stripped = line.strip()
-            if stripped.startswith("- [ ]") or stripped.startswith("- [x]"):
+            if release_checks_pattern.match(stripped):
+                in_release_checks = True
+                continue
+            if in_release_checks:
+                if not stripped or stripped.startswith("#") or stripped.startswith("---"):
+                    in_release_checks = False
+                else:
+                    continue
+            if task_pattern.match(stripped):
                 if count == index:
-                    lines[i] = line.replace("- [ ]", "- [x]", 1)
+                    lines[i] = line.replace("[ ]", "[x]", 1)
                     break
                 count += 1
         return "\n".join(lines)
 
     @_representative
     def test_mark_task_complete_matches_line_based_contract(self, plan: str):
-        """Should rewrite exactly the Nth lowercase `- [ ]`/`- [x]` line."""
+        """Should rewrite the Nth parser-recognized task line's checkbox."""
         tasks, _ = parse_tasks_with_groups(plan)
         unchecked = [t.index for t in tasks if not t.is_complete]
         assert unchecked, "Representative plan must contain an unchecked task"
@@ -271,15 +285,17 @@ class TestCrossParserConsistency:
 
     @_representative
     def test_mark_task_complete_round_trip(self, plan: str):
-        """Should add exactly one group-parser task and keep descriptions unchanged."""
+        """Should flip exactly the target task to complete and keep the rest unchanged."""
         tasks, _ = parse_tasks_with_groups(plan)
         unchecked = [t.index for t in tasks if not t.is_complete]
         assert unchecked, "Representative plan must contain an unchecked task"
 
         index = unchecked[0]
         updated = mark_task_complete(plan, index)
-        tasks_before, _ = parse_tasks_with_groups(plan)
         tasks_after, _ = parse_tasks_with_groups(updated)
 
-        assert len(tasks_after) == len(tasks_before) + 1
         assert parse_task_descriptions(updated) == parse_task_descriptions(plan)
+        assert [t.is_complete for t in tasks_after] == [
+            t.is_complete or t.index == index for t in tasks
+        ]
+        assert count_completed_tasks(updated) == count_completed_tasks(plan) + 1

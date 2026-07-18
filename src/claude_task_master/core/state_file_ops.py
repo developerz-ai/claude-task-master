@@ -9,12 +9,8 @@ These methods are mixed into the StateManager class via the FileOperationsMixin.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from claude_task_master.core.plan_parsing import parse_task_descriptions
-
-if TYPE_CHECKING:
-    pass
 
 
 class FileOperationsMixin:

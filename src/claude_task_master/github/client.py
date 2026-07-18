@@ -12,6 +12,8 @@ The client uses composition via mixins:
 """
 
 import subprocess
+import time
+from enum import StrEnum
 
 from .client_ci import CIOperationsMixin, WorkflowRun
 from .client_pr import PROperationsMixin, PRStatus
@@ -26,9 +28,34 @@ from .exceptions import (
 # Default timeout for gh CLI commands (30 seconds)
 DEFAULT_GH_TIMEOUT = 30
 
+# Number of times to poll PR state after enabling auto-merge
+AUTO_MERGE_CONFIRM_ATTEMPTS = 6
+
+# Seconds between auto-merge confirmation polls
+AUTO_MERGE_CONFIRM_DELAY = 10
+
+
+class AutoMergeResult(StrEnum):
+    """Outcome of attempting to merge a PR via GitHub auto-merge.
+
+    Attributes:
+        MERGED: The PR was confirmed merged (state is MERGED).
+        SCHEDULED: The auto-merge command succeeded, but the PR was not yet
+            merged after bounded confirmation polling; GitHub will merge it
+            once all required checks pass.
+        FAILED: The auto-merge attempt failed; callers should fall back to
+            a direct merge.
+    """
+
+    MERGED = "merged"
+    SCHEDULED = "scheduled"
+    FAILED = "failed"
+
+
 # Re-export for backward compatibility
 __all__ = [
     "DEFAULT_GH_TIMEOUT",
+    "AutoMergeResult",
     "GitHubClient",
     "GitHubError",
     "GitHubTimeoutError",
@@ -166,9 +193,15 @@ class GitHubClient(PROperationsMixin, CIOperationsMixin):
         """Merge a pull request using squash strategy.
 
         This method attempts to merge the specified PR. If use_auto is True,
-        it first tries to enable GitHub's auto-merge feature (which merges
-        automatically when all checks pass). If auto-merge is not available
-        or fails, it falls back to direct merge.
+        it first tries GitHub's auto-merge feature. Note that a successful
+        auto-merge attempt may only SCHEDULE the merge (GitHub merges once
+        required checks pass) rather than merge immediately; both outcomes
+        are treated as success and this method returns normally. Only if the
+        auto-merge attempt itself fails does it fall back to direct merge.
+
+        Callers must not assume the branch is merged (or safe to delete) after
+        this method returns when auto-merge was used: the merge may still be
+        pending on GitHub until checks complete.
 
         Args:
             pr_number: The PR number to merge.
@@ -193,39 +226,58 @@ class GitHubClient(PROperationsMixin, CIOperationsMixin):
             return
 
         if use_auto:
-            # First try with --auto (enables auto-merge when checks pass)
-            if self._try_auto_merge(pr_str):
-                return  # Success with auto-merge enabled
+            # First try with --auto (merges now if allowed, else schedules the
+            # merge for when checks pass). Both outcomes count as success.
+            if self._try_auto_merge(pr_str) is not AutoMergeResult.FAILED:
+                return
 
         # Try direct merge (squash without --auto)
         self._direct_merge(pr_str, pr_number)
 
-    def _try_auto_merge(self, pr_str: str) -> bool:
-        """Attempt to enable auto-merge for a PR.
+    def _try_auto_merge(self, pr_str: str) -> AutoMergeResult:
+        """Attempt to merge a PR via GitHub auto-merge.
+
+        A successful ``gh pr merge --auto`` command does not mean the PR is
+        merged: GitHub may only have SCHEDULED the merge to occur once all
+        required checks pass. To distinguish the two, this method polls
+        ``get_pr_status`` until the PR state is MERGED, giving up after a
+        bounded number of attempts.
 
         Args:
             pr_str: The PR number as a string.
 
         Returns:
-            True if auto-merge was successfully enabled, False otherwise.
+            AutoMergeResult.MERGED if the PR is confirmed merged now,
+            AutoMergeResult.SCHEDULED if the command succeeded but the PR was
+            not yet merged after bounded polling, or AutoMergeResult.FAILED if
+            the auto-merge command itself failed (caller should fall back to
+            a direct merge).
         """
         try:
             self._run_gh_command(
                 ["gh", "pr", "merge", pr_str, "--squash", "--auto"],
                 timeout=15,  # Short timeout - --auto should be quick
             )
-            return True  # Success with auto-merge enabled
-        except GitHubTimeoutError:
-            # --auto timed out, caller should try direct merge
-            return False
-        except GitHubError as e:
-            # --auto not available (repo doesn't support it) or other error
-            # Check for common "not supported" messages
-            error_lower = str(e).lower()
-            if "auto-merge is not allowed" in error_lower or "not enabled" in error_lower:
-                return False
-            # Some other error, still return False to try direct merge
-            return False
+        except (GitHubTimeoutError, GitHubError):
+            # --auto timed out, is not supported by the repo, or hit another
+            # error; caller should fall back to a direct merge.
+            return AutoMergeResult.FAILED
+
+        # The command succeeded, but the PR may only be scheduled for merge.
+        # Confirm by polling until the state is MERGED (bounded attempts).
+        for attempt in range(1, AUTO_MERGE_CONFIRM_ATTEMPTS + 1):
+            try:
+                status = self.get_pr_status(int(pr_str))
+                if status.state == "MERGED":
+                    return AutoMergeResult.MERGED
+            except Exception:
+                # Treat a failed status check as not-yet-merged and retry;
+                # never raise from here.
+                pass
+            if attempt < AUTO_MERGE_CONFIRM_ATTEMPTS:
+                time.sleep(AUTO_MERGE_CONFIRM_DELAY * attempt)
+
+        return AutoMergeResult.SCHEDULED
 
     def _direct_merge(self, pr_str: str, pr_number: int, admin: bool = False) -> None:
         """Perform direct merge of a PR.

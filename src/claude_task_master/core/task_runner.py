@@ -13,23 +13,17 @@ import subprocess
 from typing import TYPE_CHECKING
 
 from . import console
-from .agent import ModelType
 from .agent_exceptions import AgentError
 from .agent_models import TaskComplexity, parse_task_complexity
 from .config_loader import get_config
 from .console import clear_task_context, set_task_context
-from .plan_parsing import (
-    count_completed_tasks,
-)
 from .plan_parsing import (
     is_task_complete as plan_is_task_complete,
 )
 from .plan_parsing import (
     mark_task_complete as plan_mark_task_complete,
 )
-from .plan_parsing import (
-    parse_task_descriptions,
-)
+from .plan_parsing import parse_task_descriptions
 from .task_group import (
     ParsedTask,
     TaskGroup,
@@ -328,7 +322,9 @@ Please complete this task."""
 
         console.newline()
         console.info(f"Working on task #{state.current_task_index + 1}: {cleaned_task}")
-        console.detail(f"PR: {pr_name} | Complexity: {complexity.value} → Model: {target_model.value}")
+        console.detail(
+            f"PR: {pr_name} | Complexity: {complexity.value} → Model: {target_model.value}"
+        )
         if not is_last_in_group:
             console.detail(f"   ({remaining_in_group} more task(s) in this PR group)")
 

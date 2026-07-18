@@ -3,7 +3,8 @@
 This module is the single entry point for reading task state out of a
 ``plan.md`` file. It is a thin facade over
 :func:`claude_task_master.core.task_group.parse_tasks_with_groups`, plus a
-line-based ``mark_task_complete`` that rewrites checkboxes in place.
+``mark_task_complete`` that rewrites checkboxes in place using the same
+task-line semantics as the group parser.
 
 Parsing semantics (inherited from the group parser):
 
@@ -11,11 +12,18 @@ Parsing semantics (inherited from the group parser):
 - Checkbox lines inside a ``**Release checks:**`` section are ignored
   (the section ends at a blank line, a heading, or a ``---`` rule).
 - Indented context bullets (``  - note``) are not tasks.
+- Checkbox lines without a description are not tasks.
 """
 
 from __future__ import annotations
 
+import re
+
 from claude_task_master.core.task_group import parse_tasks_with_groups
+
+# Same task-line and release-checks patterns as the group parser
+_TASK_LINE_PATTERN = re.compile(r"^-\s*\[([ xX])\]\s*(.+)$")
+_RELEASE_CHECKS_PATTERN = re.compile(r"^\*\*Release checks:?\*\*", re.IGNORECASE)
 
 
 def parse_task_descriptions(plan: str) -> list[str]:
@@ -60,13 +68,10 @@ def is_task_complete(plan: str, task_index: int) -> bool:
 def mark_task_complete(plan: str, task_index: int) -> str:
     """Mark the task at ``task_index`` as complete and return updated markdown.
 
-    Line-based reimplementation (does not use the group parser): lines are
-    counted as tasks when their stripped form starts with ``- [ ]`` or
-    ``- [x]`` (lowercase x only); the first ``- [ ]`` occurrence in the
-    matching line is replaced with ``- [x]``. Note that this differs from
-    the group parser: ``- [X]`` (uppercase X) lines are neither counted
-    nor rewritten here, and ``**Release checks:**`` sections are not
-    skipped.
+    Uses the same task-line semantics as the group parser: ``- [X]``
+    (uppercase X) counts as a task, checkbox lines inside a
+    ``**Release checks:**`` section (until blank line/heading/``---``) are
+    ignored, and checkbox lines without a description are not tasks.
 
     Args:
         plan: The plan markdown content.
@@ -78,11 +83,20 @@ def mark_task_complete(plan: str, task_index: int) -> str:
     """
     lines = plan.split("\n")
     count = 0
+    in_release_checks = False
     for i, line in enumerate(lines):
         stripped = line.strip()
-        if stripped.startswith("- [ ]") or stripped.startswith("- [x]"):
+        if _RELEASE_CHECKS_PATTERN.match(stripped):
+            in_release_checks = True
+            continue
+        if in_release_checks:
+            if not stripped or stripped.startswith("#") or stripped.startswith("---"):
+                in_release_checks = False
+            else:
+                continue
+        if _TASK_LINE_PATTERN.match(stripped):
             if count == task_index:
-                lines[i] = line.replace("- [ ]", "- [x]", 1)
+                lines[i] = line.replace("[ ]", "[x]", 1)
                 break
             count += 1
     return "\n".join(lines)

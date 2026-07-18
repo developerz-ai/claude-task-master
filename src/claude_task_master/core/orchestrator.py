@@ -1070,8 +1070,15 @@ class WorkLoopOrchestrator:
             elif stage == "addressing_reviews":
                 return self.stage_handler.handle_addressing_reviews_stage(state)
             elif stage == "ready_to_merge":
-                # pr.merged is emitted by handle_merged_stage (idempotently, via callback)
-                return self.stage_handler.handle_ready_to_merge_stage(state)
+                # Track stage before handler runs
+                stage_before = state.workflow_stage
+                result = self.stage_handler.handle_ready_to_merge_stage(state)
+                # Emit pr.merged webhook if PR was merged (stage changed to "merged").
+                # Idempotent (gated by last_counted_pr_merged); handle_merged_stage
+                # also emits via callback to cover externally-merged PRs.
+                if state.workflow_stage == "merged" and stage_before == "ready_to_merge":
+                    self._emit_pr_merged_event(state)
+                return result
             elif stage == "merged":
                 return self.stage_handler.handle_merged_stage(
                     state,
