@@ -227,6 +227,38 @@ class TestPasswordAuthMiddleware:
             assert response.status_code == 200
             assert response.json() == {"message": "protected"}
 
+    def test_non_ascii_bearer_token_returns_403(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Non-ASCII bearer token returns 403 — not 500/TypeError — via UTF-8 bytes comparison.
+
+        hmac.compare_digest (and secrets.compare_digest) accept only ASCII str on
+        CPython; passing a non-ASCII str raises TypeError, which the middleware
+        would previously surface as 500.  The fix encodes both sides to UTF-8
+        bytes in verify_password_plaintext.
+
+        HTTP headers are ASCII-only, so we inject the non-ASCII token at the
+        extract_bearer_token boundary instead of crafting an HTTP request with
+        a non-ASCII header value.
+        """
+        # Set a real plaintext password so authenticate() calls the actual
+        # verify_password_plaintext (no mock), exercising the UTF-8 encoding fix.
+        monkeypatch.delenv("CLAUDETM_PASSWORD_HASH", raising=False)
+        monkeypatch.setenv("CLAUDETM_PASSWORD", "plain-ascii-password")
+
+        # Inject a non-ASCII token past the HTTP header layer.
+        with patch(
+            "claude_task_master.auth.middleware.extract_bearer_token",
+            return_value="pässwörd-ñoño-東京",
+        ):
+            response = client.get(
+                "/api/protected", headers={"Authorization": "Bearer ascii-placeholder"}
+            )
+
+        assert response.status_code == 403
+        data = response.json()
+        assert data["error"] == "invalid_password"
+
     def test_auth_not_configured_returns_500(self, client: TestClient) -> None:
         """Test that missing auth config returns 500."""
         with patch("claude_task_master.auth.password.is_auth_enabled", return_value=False):

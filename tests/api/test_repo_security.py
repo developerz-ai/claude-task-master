@@ -164,3 +164,64 @@ class TestRunServerPublicBind:
             server_mod.run_server(host="127.0.0.1")
 
         mock_uvicorn_run.assert_called_once()
+
+
+# =============================================================================
+# plan_repo works from a running event loop
+# =============================================================================
+
+
+class TestPlanRepoFromRunningLoop:
+    """POST /repo/plan offloads plan_repo to a worker thread — no event-loop conflict.
+
+    The original bug: plan_repo called asyncio.get_event_loop().run_until_complete()
+    directly inside the async route handler, raising RuntimeError because there was
+    already a running loop.  The fix wraps the call with
+    ``await anyio.to_thread.run_sync(partial(plan_repo, ...))`` so plan_repo runs
+    in a worker thread where it may safely create and drive its own event loop.
+    """
+
+    def test_plan_repo_can_start_own_event_loop(self, api_client, enable_auth, confine_base):
+        """plan_repo runs in a worker thread — asyncio.new_event_loop() succeeds there.
+
+        The fake plan_repo does exactly what run_async_with_cleanup does: it creates
+        a fresh event loop and calls run_until_complete.  If anyio.to_thread.run_sync
+        is missing and plan_repo is invoked directly from the async handler, this
+        would raise RuntimeError("This event loop is already running"); the endpoint
+        would catch it and return 500/400.  Thread-offload makes it return 200.
+        """
+        repo_dir = confine_base / "plan-loop-repo"
+        repo_dir.mkdir(parents=True)
+
+        def _plan_with_own_loop(work_dir, goal, model="opus"):
+            """Simulate run_async_with_cleanup: start a fresh event loop from a thread."""
+            import asyncio
+
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(asyncio.sleep(0))
+            finally:
+                loop.close()
+            return {
+                "success": True,
+                "message": "Plan created",
+                "work_dir": str(work_dir),
+                "goal": goal,
+                "plan": "- [ ] Task 1",
+                "criteria": "All tests pass",
+                "run_id": "test-thread-loop-001",
+            }
+
+        with patch(
+            "claude_task_master.api.routes_repo.plan_repo",
+            side_effect=_plan_with_own_loop,
+        ):
+            response = api_client.post(
+                "/repo/plan",
+                json={"work_dir": str(repo_dir), "goal": "Write a test suite"},
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["run_id"] == "test-thread-loop-001"
