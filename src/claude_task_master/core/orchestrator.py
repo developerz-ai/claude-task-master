@@ -13,6 +13,7 @@ from .agent import AgentWrapper, ModelType
 from .agent_exceptions import AgentError, ConsecutiveFailuresError, ContentFilterError
 from .circuit_breaker import CircuitBreakerError
 from .config_loader import get_config
+from .control_channel import ControlChannel
 from .key_listener import (
     get_cancellation_reason,
     is_cancellation_requested,
@@ -24,7 +25,13 @@ from .plan_parsing import count_completed_tasks, parse_task_descriptions
 from .planner import Planner
 from .pr_context import PRContextManager
 from .progress_tracker import ExecutionTracker, TrackerConfig
-from .shutdown import interruptible_sleep, register_handlers, reset_shutdown, unregister_handlers
+from .shutdown import (
+    interruptible_sleep,
+    register_handlers,
+    reset_shutdown,
+    set_durable_stop_check,
+    unregister_handlers,
+)
 from .state import StateError, StateManager, StateValidationError, TaskState
 from .task_runner import (
     NoPlanFoundError,
@@ -223,6 +230,7 @@ class WorkLoopOrchestrator:
         self._webhook_client = webhook_client
 
         # Initialize component managers (lazy)
+        self._control_channel: ControlChannel | None = None
         self._task_runner: TaskRunner | None = None
         self._stage_handler: WorkflowStageHandler | None = None
         self._pr_context: PRContextManager | None = None
@@ -245,6 +253,13 @@ class WorkLoopOrchestrator:
                     f"Install gh CLI and run 'gh auth login': {e}",
                 ) from e
         return self._github_client
+
+    @property
+    def control_channel(self) -> ControlChannel:
+        """Get or lazily initialize the durable cross-process control channel."""
+        if self._control_channel is None:
+            self._control_channel = ControlChannel(self.state_manager.state_dir)
+        return self._control_channel
 
     @property
     def task_runner(self) -> TaskRunner:
@@ -816,6 +831,12 @@ class WorkLoopOrchestrator:
         start_listening()
         console.detail("Press [Escape] to pause, [Ctrl+C] to interrupt")
 
+        # Bind the durable control channel so a cross-process stop (from
+        # claudetm-server / MCP / CLI in another process) is observed by
+        # is_shutdown_requested()/interruptible_sleep — reaching even a long
+        # in-cycle CI wait. Unbound in the finally below.
+        set_durable_stop_check(self.control_channel.stop_requested)
+
         def _handle_pause(reason: str) -> int:
             stop_listening()
             unregister_handlers()
@@ -832,14 +853,51 @@ class WorkLoopOrchestrator:
             self._emit_run_completed(state, 2, "interrupted", run_start_time, reason)
             return 2
 
+        def _handle_stop(reason: str) -> int:
+            stop_listening()
+            unregister_handlers()
+            console.newline()
+            console.warning(f"{reason} - stopping...")
+            self.tracker.end_session(outcome="cancelled")
+            previous_status = state.status
+            state.status = "stopped"
+            self._emit_status_changed(previous_status, "stopped", state, reason)
+            # Re-assert the authoritative stopped status: a save earlier in this
+            # cycle may have written the stale in-memory "working" over the
+            # "stopped" that ControlManager.stop() persisted from another process.
+            self.state_manager.save_state(state)
+            console.newline()
+            console.info(self.tracker.get_cost_report())
+            console.info("Use 'claudetm resume' to continue")
+            self._emit_run_completed(state, 2, "interrupted", run_start_time, reason)
+            return 2
+
         try:
             console.detail(
                 f"Checking completion: task_index={state.current_task_index}, "
                 f"is_all_complete={self.task_runner.is_all_complete(state)}"
             )
             while not self.task_runner.is_all_complete(state):
-                # Check cancellation
+                # Durable cross-process control: a stop/pause written to
+                # control.json by ControlManager (server / MCP / CLI in another
+                # process) is polled here each cycle, beside the in-process
+                # cancellation check below.
+                control_request = self.control_channel.read()
+                if control_request is not None:
+                    self.control_channel.clear()
+                    if control_request.action == "stop":
+                        return _handle_stop(control_request.reason or "Stop requested")
+                    return _handle_pause(control_request.reason or "Pause requested")
+
+                # Check cancellation (Escape / SIGINT / durable stop bridged via
+                # the shutdown manager during an in-cycle wait).
                 if is_cancellation_requested():
+                    # A durable stop that raced in after the poll above (or broke
+                    # an in-cycle wait) surfaces here — honour it as a stop, not
+                    # a pause, so the terminal status matches the request.
+                    if self.control_channel.stop_requested():
+                        self.control_channel.clear()
+                        return _handle_stop(get_cancellation_reason() or "Stop requested")
                     reason = get_cancellation_reason() or "Cancellation requested"
                     if reason == "escape":
                         reason = "Escape pressed"
@@ -1047,6 +1105,10 @@ class WorkLoopOrchestrator:
                 pass  # Best effort - state save failed but we still return error
             self._emit_run_completed(state, 1, "failed", run_start_time, error_message)
             return 1
+        finally:
+            # Unbind the durable stop check so a later run/instance sharing the
+            # global shutdown manager is not affected by this run's channel.
+            set_durable_stop_check(None)
 
     def _run_workflow_cycle(self, state: TaskState) -> int | None:
         """Run one cycle of the PR workflow."""

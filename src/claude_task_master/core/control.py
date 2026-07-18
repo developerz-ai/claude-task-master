@@ -31,6 +31,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from claude_task_master.core.control_channel import ControlChannel
 from claude_task_master.core.shutdown import (
     ShutdownManager,
     get_shutdown_manager,
@@ -168,6 +169,10 @@ class ControlManager:
         """
         self.state_manager = state_manager or StateManager(state_dir)
         self.shutdown_manager = shutdown_manager or get_shutdown_manager()
+        # Durable cross-process control channel (control.json). Written here on
+        # stop/pause so a signal from another process (server/MCP/CLI) reaches a
+        # running orchestrator, which the process-local shutdown Event cannot.
+        self.control_channel = ControlChannel(self.state_manager.state_dir)
 
     def _ensure_task_exists(self, operation: str) -> None:
         """Ensure an active task exists.
@@ -214,6 +219,10 @@ class ControlManager:
         state.status = "paused"
         self.state_manager.save_state(state)
 
+        # Durable cross-process signal: a running orchestrator (possibly another
+        # process) polls control.json each cycle and honours the pause.
+        self.control_channel.request("pause", reason=reason)
+
         # Append reason to progress if provided
         if reason:
             progress = self.state_manager.load_progress() or ""
@@ -257,6 +266,10 @@ class ControlManager:
         # Transition to working
         state.status = "working"
         self.state_manager.save_state(state)
+
+        # Clear any pending stop/pause signal so it does not immediately
+        # re-trigger the freshly-resumed run.
+        self.control_channel.clear()
 
         # Append resume note to progress
         progress = self.state_manager.load_progress() or ""
@@ -304,6 +317,12 @@ class ControlManager:
         # Request shutdown to stop any running processes
         shutdown_reason = reason or "stop requested"
         request_shutdown(shutdown_reason)
+
+        # Durable cross-process signal: request_shutdown only sets a
+        # process-local Event (invisible to a CLI-launched orchestrator running
+        # in another process). control.json crosses that boundary — the
+        # orchestrator polls it each cycle and stops.
+        self.control_channel.request("stop", reason=shutdown_reason)
 
         # Transition to stopped (can be resumed or failed from this state)
         state.status = "stopped"
