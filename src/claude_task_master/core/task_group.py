@@ -23,74 +23,23 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from enum import Enum
 
+from .agent_models import TaskComplexity, parse_task_complexity
 
-class TaskComplexity(Enum):
-    """Task complexity levels for model selection.
-
-    - CODING: Complex implementation tasks → Opus (smartest)
-    - QUICK: Simple fixes, config changes → Haiku (fastest/cheapest)
-    - GENERAL: Moderate complexity → Sonnet (balanced)
-    - DEBUGGING_QA: Debugging/QA tasks → Sonnet 1M (deep context)
-    """
-
-    CODING = "coding"
-    QUICK = "quick"
-    GENERAL = "general"
-    DEBUGGING_QA = "debugging-qa"
-
-    @classmethod
-    def get_model_for_complexity(cls, complexity: TaskComplexity) -> str:
-        """Map task complexity to appropriate model name.
-
-        Args:
-            complexity: The task complexity level.
-
-        Returns:
-            Model name string ("opus", "sonnet", "haiku").
-        """
-        mapping = {
-            cls.CODING: "opus",
-            cls.QUICK: "haiku",
-            cls.GENERAL: "sonnet",
-            cls.DEBUGGING_QA: "sonnet_1m",
-        }
-        return mapping.get(complexity, "sonnet")
-
-
-def parse_task_complexity(task_description: str) -> tuple[TaskComplexity, str]:
-    """Parse task complexity tag from task description.
-
-    Looks for `[coding]`, `[quick]`, `[general]`, or `[debugging-qa]` tags in the task.
-
-    Args:
-        task_description: The task description potentially containing a complexity tag.
-
-    Returns:
-        Tuple of (TaskComplexity, cleaned_task_description).
-        Defaults to CODING if no tag found (prefer smarter model).
-    """
-    # Look for complexity tags with or without backticks:
-    # `[coding]` (backtick-wrapped) or [coding] (bare)
-    pattern = r"`?\[(coding|quick|general|debugging-qa)\]`?"
-    match = re.search(pattern, task_description, re.IGNORECASE)
-
-    if match:
-        complexity_str = match.group(1).lower()
-        # Remove the tag from the description
-        cleaned = re.sub(pattern, "", task_description, flags=re.IGNORECASE).strip()
-
-        complexity_map = {
-            "coding": TaskComplexity.CODING,
-            "quick": TaskComplexity.QUICK,
-            "general": TaskComplexity.GENERAL,
-            "debugging-qa": TaskComplexity.DEBUGGING_QA,
-        }
-        return complexity_map.get(complexity_str, TaskComplexity.CODING), cleaned
-
-    # Default to CODING (prefer smarter model when uncertain)
-    return TaskComplexity.CODING, task_description
+__all__ = [
+    "TaskGroup",
+    "PullRequest",
+    "ParsedTask",
+    "parse_tasks_with_groups",
+    "parse_tasks_with_prs",
+    "get_group_for_task",
+    "get_pr_for_task",
+    "get_tasks_in_group",
+    "get_tasks_in_pr",
+    "get_incomplete_tasks",
+    "summarize_groups",
+    "summarize_prs",
+]
 
 
 @dataclass

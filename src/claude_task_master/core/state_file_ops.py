@@ -9,10 +9,8 @@ These methods are mixed into the StateManager class via the FileOperationsMixin.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    pass
+from claude_task_master.core.plan_parsing import parse_task_descriptions
 
 
 class FileOperationsMixin:
@@ -193,7 +191,10 @@ class FileOperationsMixin:
     def _parse_plan_tasks(self, plan: str) -> list[str]:
         """Parse tasks from plan markdown.
 
-        Extracts task descriptions from markdown checkbox lines.
+        Delegates to :func:`claude_task_master.core.plan_parsing.parse_task_descriptions`,
+        the single source of truth for plan parsing. Note: `- [X]` (uppercase)
+        now counts as a checked task, and checkbox lines inside a
+        `**Release checks:**` section are ignored.
 
         Args:
             plan: The plan content in markdown format.
@@ -201,12 +202,4 @@ class FileOperationsMixin:
         Returns:
             List of task descriptions extracted from the plan.
         """
-        tasks = []
-        for line in plan.split("\n"):
-            # Look for markdown checkbox lines
-            stripped = line.strip()
-            if stripped.startswith("- [ ]") or stripped.startswith("- [x]"):
-                task = stripped[5:].strip()  # Remove "- [ ]" or "- [x]"
-                if task:
-                    tasks.append(task)
-        return tasks
+        return parse_task_descriptions(plan)

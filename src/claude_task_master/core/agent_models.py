@@ -2,7 +2,8 @@
 
 This module contains:
 - ModelType: Available Claude models (Sonnet, Opus, Haiku, Sonnet 1M)
-- TaskComplexity: Task complexity levels for dynamic model selection
+- TaskComplexity: Task complexity levels for dynamic model selection,
+  including get_model_name_for_complexity for name-based model routing
 - ToolConfig: Tool configurations for different execution phases (now config-backed)
 - MODEL_CONTEXT_WINDOWS: Model context window sizes
 - parse_task_complexity: Parse complexity tags from task descriptions
@@ -75,6 +76,28 @@ class TaskComplexity(Enum):
             cls.DEBUGGING_QA: "high",
         }
         return mapping.get(complexity, "medium")
+
+    @classmethod
+    def get_model_name_for_complexity(cls, complexity: TaskComplexity) -> ModelType:
+        """Map task complexity to the ModelType for name-based model routing.
+
+        Mirrors the historical task_group string map ("coding"->opus,
+        "quick"->haiku, "general"->sonnet, "debugging-qa"->sonnet_1m),
+        returned as ModelType so callers no longer do ModelType(str).
+
+        Args:
+            complexity: The task complexity level.
+
+        Returns:
+            ModelType for the given complexity (SONNET as fallback).
+        """
+        mapping = {
+            cls.CODING: ModelType.OPUS,
+            cls.QUICK: ModelType.HAIKU,
+            cls.GENERAL: ModelType.SONNET,
+            cls.DEBUGGING_QA: ModelType.SONNET_1M,
+        }
+        return mapping.get(complexity, ModelType.SONNET)
 
 
 class ToolConfig(Enum):

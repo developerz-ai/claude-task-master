@@ -3,6 +3,7 @@
 This module contains tests for task-related functionality including:
 - Task parsing from plan markdown (_parse_plan_tasks)
 - Resume validation (validate_for_resume)
+- Empty-plan resume validation (plans with no checkbox tasks)
 - Resume status constants (TERMINAL_STATUSES, RESUMABLE_STATUSES)
 - StateResumeValidationError exception
 """
@@ -118,15 +119,11 @@ class TestParsePlanTasks:
         tasks = state_manager._parse_plan_tasks(plan)
         assert tasks == ["Unchecked", "Lowercase x"]
 
-    def test_parse_tasks_uppercase_x_not_recognized(self, state_manager):
-        """Test that uppercase X is not recognized as a task marker.
-
-        This documents current behavior - uppercase X is NOT supported.
-        """
+    def test_parse_tasks_uppercase_x_recognized(self, state_manager):
+        """Test that uppercase X is recognized as a completed task marker."""
         plan = "- [X] Task with uppercase X"
         tasks = state_manager._parse_plan_tasks(plan)
-        # Current implementation doesn't recognize uppercase X
-        assert tasks == []
+        assert tasks == ["Task with uppercase X"]
 
     def test_parse_tasks_with_special_characters(self, state_manager):
         """Test parsing tasks with special characters."""
@@ -473,6 +470,18 @@ class TestValidateForResume:
         result = initialized_state_manager.validate_for_resume()
         assert result.current_task_index == 0
 
+    def test_validate_for_resume_raises_when_no_tasks_but_index_positive(
+        self, initialized_state_manager
+    ):
+        """Test validate_for_resume raises when plan has no tasks but index > 0."""
+        initialized_state_manager.save_plan("# Plan with no tasks\n\nJust text.")
+        state = initialized_state_manager.load_state()
+        state.current_task_index = 2
+        initialized_state_manager.save_state(state)
+
+        with pytest.raises(StateResumeValidationError):
+            initialized_state_manager.validate_for_resume()
+
     def test_validate_plan_with_mixed_task_status(self, initialized_state_manager):
         """Test validate_for_resume with plan containing completed and pending tasks."""
         state = initialized_state_manager.load_state()
@@ -490,6 +499,101 @@ class TestValidateForResume:
 
         result = initialized_state_manager.validate_for_resume()
         assert result.current_task_index == 2
+
+
+# =============================================================================
+# Empty-Plan Resume Validation Tests
+# =============================================================================
+
+
+class TestValidateForResumeEmptyPlan:
+    """Tests for validate_for_resume when the plan contains no checkbox tasks."""
+
+    def test_empty_plan_with_index_zero_succeeds(self, initialized_state_manager):
+        """Test validate_for_resume succeeds for empty plan with task index 0."""
+        state = initialized_state_manager.load_state()
+        state.status = "working"
+        state.current_task_index = 0
+        initialized_state_manager.save_state(state)
+        initialized_state_manager.save_plan("# Plan\n\nNo tasks yet")
+
+        result = initialized_state_manager.validate_for_resume()
+        assert result.status == "working"
+        assert result.current_task_index == 0
+
+    def test_empty_plan_with_positive_index_raises_error(self, initialized_state_manager):
+        """Test validate_for_resume raises error for empty plan with positive index."""
+        state = initialized_state_manager.load_state()
+        state.status = "working"
+        state.current_task_index = 3
+        initialized_state_manager.save_state(state, validate_transition=False)
+        initialized_state_manager.save_plan("# Plan\n\nNo tasks yet")
+
+        with pytest.raises(StateResumeValidationError) as exc_info:
+            initialized_state_manager.validate_for_resume()
+
+        error = exc_info.value
+        assert error.reason == "Plan contains no tasks but task index is not zero"
+        assert error.current_task_index == 3
+        assert error.total_tasks == 0
+        assert error.suggestion and "clean" in error.suggestion.lower()
+
+    def test_empty_plan_with_negative_index_raises_negative_error(self, initialized_state_manager):
+        """Test negative index with empty plan reports the negative index error."""
+        state = initialized_state_manager.load_state()
+        state.status = "working"
+        state.current_task_index = -1
+        initialized_state_manager.save_state(state, validate_transition=False)
+        initialized_state_manager.save_plan("# Plan\n\nNo tasks yet")
+
+        with pytest.raises(StateResumeValidationError) as exc_info:
+            initialized_state_manager.validate_for_resume()
+
+        error = exc_info.value
+        assert "negative" in error.reason.lower()
+        assert error.current_task_index == -1
+        assert error.total_tasks == 0
+
+    def test_whitespace_only_plan_treated_as_empty(self, initialized_state_manager):
+        """Test whitespace-only plan parses as zero tasks and allows index 0."""
+        state = initialized_state_manager.load_state()
+        state.status = "working"
+        state.current_task_index = 0
+        initialized_state_manager.save_state(state)
+        initialized_state_manager.save_plan("   \n\t\n   ")
+
+        result = initialized_state_manager.validate_for_resume()
+        assert result.current_task_index == 0
+
+    def test_empty_plan_paused_state_with_index_zero_succeeds(self, initialized_state_manager):
+        """Test paused state with empty plan and index 0 is resumable."""
+        state = initialized_state_manager.load_state()
+        state.status = "working"
+        initialized_state_manager.save_state(state)
+        state.status = "paused"
+        state.current_task_index = 0
+        initialized_state_manager.save_state(state)
+        initialized_state_manager.save_plan("# Plan\n\nNo tasks yet")
+
+        result = initialized_state_manager.validate_for_resume()
+        assert result.status == "paused"
+        assert result.current_task_index == 0
+
+    def test_empty_plan_error_message_details(self, initialized_state_manager):
+        """Test empty-plan error string contains index and total task details."""
+        state = initialized_state_manager.load_state()
+        state.status = "working"
+        state.current_task_index = 5
+        initialized_state_manager.save_state(state, validate_transition=False)
+        initialized_state_manager.save_plan("# Plan\n\nJust a heading, no checkboxes")
+
+        with pytest.raises(StateResumeValidationError) as exc_info:
+            initialized_state_manager.validate_for_resume()
+
+        error_str = str(exc_info.value)
+        assert "Plan contains no tasks" in error_str
+        assert "Task index: 5" in error_str
+        assert "Total tasks: 0" in error_str
 
 
 # =============================================================================

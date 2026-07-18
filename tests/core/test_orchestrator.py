@@ -14,7 +14,7 @@ Tests cover:
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1211,6 +1211,10 @@ class TestRunMethod:
         state_manager.state_dir.mkdir(exist_ok=True)
         state_manager.backup_dir.mkdir(exist_ok=True)
 
+        # Plan with fewer tasks than current_task_index=100 so is_all_complete
+        # returns True (a missing plan raises NoPlanFoundError and fails the run)
+        state_manager.save_plan("- [x] Task 1\n- [x] Task 2\n")
+
         # Create backup
         backup_file = state_manager.backup_dir / "state.20250117-120000.json"
         # Adjust sample_task_state to have plan-compatible state
@@ -1434,3 +1438,439 @@ class TestVerificationFixFlow:
 
         assert result is False
         mock_console.error.assert_called()
+
+
+# =============================================================================
+# Test Handle Working Stage Skip Path
+# =============================================================================
+
+
+class TestHandleWorkingStageSkipPath:
+    """Tests for _handle_working_stage when the task is already complete."""
+
+    @patch("claude_task_master.core.task_runner.get_current_branch")
+    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.orchestrator.reset_escape")
+    def test_handle_working_stage_skipped_task_does_not_double_mark(
+        self,
+        mock_reset,
+        mock_console,
+        mock_branch,
+        basic_orchestrator,
+        state_manager,
+        basic_task_state,
+    ):
+        """Should not mark the next task complete when the session is skipped.
+
+        When run_work_session returns "skipped_already_complete" (task was
+        already [x]), the orchestrator must NOT call mark_task_complete, must
+        NOT increment session_count, and must NOT emit task.completed - else
+        a pre-completed first task would silently mark the SECOND task done.
+        """
+        pre_completed_plan = """## Task List
+
+- [x] Task 1: already done before the run
+- [ ] Task 2: still open
+"""
+        mock_branch.return_value = "main"
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan(pre_completed_plan)
+        state_manager.save_goal("Test goal")
+        basic_task_state.current_task_index = 0
+        session_count_before = basic_task_state.session_count
+        mock_emitter = MagicMock()
+        basic_orchestrator._webhook_emitter = mock_emitter
+
+        with (
+            patch.object(
+                basic_orchestrator.task_runner,
+                "run_work_session",
+                return_value="skipped_already_complete",
+            ),
+            patch.object(
+                basic_orchestrator.task_runner, "mark_task_complete"
+            ) as mock_mark_complete,
+        ):
+            result = basic_orchestrator._handle_working_stage(basic_task_state)
+
+        assert result is None
+        # The task at the CURRENT index must not be re-marked complete
+        mock_mark_complete.assert_not_called()
+        # Skipped sessions are not billable work sessions
+        assert basic_task_state.session_count == session_count_before
+        # No task.completed webhook may be emitted for skipped work
+        emitted_types = [c.args[0] for c in mock_emitter.emit.call_args_list]
+        assert "task.completed" not in emitted_types
+
+    @patch("claude_task_master.core.task_runner.get_current_branch")
+    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.orchestrator.reset_escape")
+    def test_handle_working_stage_ran_marks_task_at_captured_index(
+        self,
+        mock_reset,
+        mock_console,
+        mock_branch,
+        basic_orchestrator,
+        state_manager,
+        basic_task_state,
+        basic_plan,
+    ):
+        """Should mark the task captured BEFORE the session ran, without +1 drift.
+
+        When run_work_session returns "ran", the task at the index captured
+        before the session is marked complete and task.completed reports
+        completed_tasks exactly as counted after marking (no double count).
+        """
+        mock_branch.return_value = "main"
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan(basic_plan)
+        state_manager.save_goal("Test goal")
+        basic_task_state.current_task_index = 0
+        mock_emitter = MagicMock()
+        basic_orchestrator._webhook_emitter = mock_emitter
+
+        with patch.object(
+            basic_orchestrator.task_runner,
+            "run_work_session",
+            return_value="ran",
+        ):
+            result = basic_orchestrator._handle_working_stage(basic_task_state)
+
+        assert result is None
+        assert basic_task_state.session_count == 2
+        # Task 1 (index captured before the session) was marked in plan.md
+        updated_plan = state_manager.load_plan()
+        assert "- [x] Task 1: Set up project structure" in updated_plan
+        assert "- [ ] Task 2: Implement core functionality" in updated_plan
+        # completed_tasks reflects the post-mark count with no +1 beyond it
+        task_completed = [
+            c for c in mock_emitter.emit.call_args_list if c.args[0] == "task.completed"
+        ]
+        assert len(task_completed) == 1
+        assert task_completed[0].kwargs["task_index"] == 0
+        assert task_completed[0].kwargs["completed_tasks"] == 1
+        assert task_completed[0].kwargs["total_tasks"] == 3
+
+
+# =============================================================================
+# Test Run Completed Webhook Mapping
+# =============================================================================
+
+
+class TestRunCompletedWebhookMapping:
+    """Tests for run.completed webhook result mapping and payload content."""
+
+    def _make_orchestrator_with_webhooks(
+        self, mock_agent, state_manager, mock_planner, mock_github_client, mock_webhook_client
+    ):
+        """Create a WorkLoopOrchestrator wired to a mock webhook client."""
+        return WorkLoopOrchestrator(
+            agent=mock_agent,
+            state_manager=state_manager,
+            planner=mock_planner,
+            github_client=mock_github_client,
+            webhook_client=mock_webhook_client,
+        )
+
+    def _get_run_completed_events(self, mock_webhook_client):
+        """Extract run.completed event payloads from webhook send calls."""
+        calls = mock_webhook_client.send_sync.call_args_list
+        return [c.kwargs["data"] for c in calls if c.kwargs.get("event_type") == "run.completed"]
+
+    @pytest.fixture
+    def mock_webhook_client(self):
+        """Create a mock webhook client."""
+        client = MagicMock()
+        client.send_sync = MagicMock(
+            return_value=MagicMock(success=True, status_code=200, error=None)
+        )
+        return client
+
+    @patch("claude_task_master.core.orchestrator.register_handlers")
+    @patch("claude_task_master.core.orchestrator.start_listening")
+    @patch("claude_task_master.core.orchestrator.unregister_handlers")
+    @patch("claude_task_master.core.orchestrator.stop_listening")
+    @patch("claude_task_master.core.orchestrator.reset_shutdown")
+    @patch("claude_task_master.core.orchestrator.console")
+    def test_run_completed_maps_exit_code_2_to_interrupted(
+        self,
+        mock_console,
+        mock_reset_shutdown,
+        mock_stop,
+        mock_unregister,
+        mock_start,
+        mock_register,
+        mock_agent,
+        state_manager,
+        mock_planner,
+        mock_github_client,
+        mock_webhook_client,
+        sample_task_options,
+        basic_plan,
+    ):
+        """Should emit run.completed with result "interrupted" (not "blocked") for exit 2."""
+        orchestrator = self._make_orchestrator_with_webhooks(
+            mock_agent, state_manager, mock_planner, mock_github_client, mock_webhook_client
+        )
+        state_manager.state_dir.mkdir(exist_ok=True)
+        options = TaskOptions(**sample_task_options)
+        state_manager.initialize(goal="Test goal", model="sonnet", options=options)
+        state_manager.save_plan(basic_plan)
+
+        with (
+            patch.object(orchestrator.task_runner, "is_all_complete", return_value=False),
+            patch.object(orchestrator, "_run_workflow_cycle", return_value=2),
+        ):
+            exit_code = orchestrator.run()
+
+        assert exit_code == 2
+        events = self._get_run_completed_events(mock_webhook_client)
+        assert len(events) == 1
+        assert events[0]["exit_code"] == 2
+        assert events[0]["result"] == "interrupted"
+
+    @patch("claude_task_master.core.orchestrator.register_handlers")
+    @patch("claude_task_master.core.orchestrator.start_listening")
+    @patch("claude_task_master.core.orchestrator.unregister_handlers")
+    @patch("claude_task_master.core.orchestrator.stop_listening")
+    @patch("claude_task_master.core.orchestrator.reset_shutdown")
+    @patch("claude_task_master.core.orchestrator.console")
+    def test_run_completed_maps_exit_code_0_to_success(
+        self,
+        mock_console,
+        mock_reset_shutdown,
+        mock_stop,
+        mock_unregister,
+        mock_start,
+        mock_register,
+        mock_agent,
+        state_manager,
+        mock_planner,
+        mock_github_client,
+        mock_webhook_client,
+        sample_task_options,
+        basic_plan,
+    ):
+        """Should emit run.completed with result "success" for exit code 0."""
+        orchestrator = self._make_orchestrator_with_webhooks(
+            mock_agent, state_manager, mock_planner, mock_github_client, mock_webhook_client
+        )
+        state_manager.state_dir.mkdir(exist_ok=True)
+        options = TaskOptions(**sample_task_options)
+        state_manager.initialize(goal="Test goal", model="sonnet", options=options)
+        state_manager.save_plan(basic_plan)
+
+        with (
+            patch.object(orchestrator.task_runner, "is_all_complete", return_value=False),
+            patch.object(orchestrator, "_run_workflow_cycle", return_value=0),
+        ):
+            exit_code = orchestrator.run()
+
+        assert exit_code == 0
+        events = self._get_run_completed_events(mock_webhook_client)
+        assert len(events) == 1
+        assert events[0]["exit_code"] == 0
+        assert events[0]["result"] == "success"
+
+    @patch("claude_task_master.core.orchestrator.register_handlers")
+    @patch("claude_task_master.core.orchestrator.start_listening")
+    @patch("claude_task_master.core.orchestrator.unregister_handlers")
+    @patch("claude_task_master.core.orchestrator.stop_listening")
+    @patch("claude_task_master.core.orchestrator.reset_shutdown")
+    @patch("subprocess.run")
+    @patch("claude_task_master.core.orchestrator.is_cancellation_requested")
+    @patch("claude_task_master.core.orchestrator.console")
+    def test_run_completed_payload_emitted_before_cleanup(
+        self,
+        mock_console,
+        mock_is_cancelled,
+        mock_subprocess,
+        mock_reset_shutdown,
+        mock_stop,
+        mock_unregister,
+        mock_start,
+        mock_register,
+        mock_agent,
+        state_manager,
+        mock_planner,
+        mock_github_client,
+        mock_webhook_client,
+        sample_task_options,
+    ):
+        """Should emit run.completed with goal/task counts before cleanup deletes files."""
+        orchestrator = self._make_orchestrator_with_webhooks(
+            mock_agent, state_manager, mock_planner, mock_github_client, mock_webhook_client
+        )
+        state_manager.state_dir.mkdir(exist_ok=True)
+        options = TaskOptions(**sample_task_options)  # enable_verification defaults to False
+        state_manager.initialize(goal="Ship the feature", model="sonnet", options=options)
+        state_manager.save_plan("- [x] Task 1")  # Already complete
+
+        state = state_manager.load_state()
+        state.status = "working"
+        state.current_task_index = 1
+        state_manager.save_state(state)
+
+        mock_is_cancelled.return_value = False
+
+        exit_code = orchestrator.run()
+
+        assert exit_code == 0
+        events = self._get_run_completed_events(mock_webhook_client)
+        assert len(events) == 1
+        event = events[0]
+        assert event["result"] == "success"
+        # cleanup_on_success deletes goal.txt/plan.md, so these must have been
+        # captured when the event was emitted (non-empty payload)
+        assert event["goal"] == "Ship the feature"
+        assert event["total_tasks"] == 1
+        assert event["completed_tasks"] == 1
+
+
+# =============================================================================
+# Test Fix PR CI Retry Limit
+# =============================================================================
+
+
+class TestFixPrCiRetryLimit:
+    """Tests for max_ci_fix_attempts in the fix-PR merge path."""
+
+    @patch("claude_task_master.core.orchestrator.interruptible_sleep", return_value=True)
+    @patch("claude_task_master.core.orchestrator.console")
+    def test_wait_for_fix_pr_merge_retries_ci_fix_exactly_twice(
+        self,
+        mock_console,
+        mock_sleep,
+        basic_orchestrator,
+        state_manager,
+        mock_github_client,
+        basic_task_state,
+    ):
+        """Should attempt exactly 2 CI fixes before giving up on repeated failure."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        mock_github_client.get_pr_for_current_branch.return_value = 42
+        basic_task_state.options.auto_merge = True
+
+        with (
+            patch.object(
+                basic_orchestrator, "_poll_fix_pr_ci", return_value="failure"
+            ) as mock_poll,
+            patch.object(basic_orchestrator, "_fix_pr_ci_failure", return_value=True) as mock_fix,
+        ):
+            result = basic_orchestrator._wait_for_fix_pr_merge(basic_task_state)
+
+        assert result is False
+        # 1 initial poll + 1 re-poll after each of the 2 fixes
+        assert mock_poll.call_count == 3
+        # max_ci_fix_attempts is 2: fix attempted exactly twice, then give up
+        assert mock_fix.call_count == 2
+        # CI never succeeded, so the PR must not be merged
+        mock_github_client.merge_pr.assert_not_called()
+
+
+# =============================================================================
+# Test Waiting CI Resume Timer Reset
+# =============================================================================
+
+
+class TestWaitingCiResumeTimerReset:
+    """Tests for ci_poll_start_time reset when resuming in waiting_ci stage."""
+
+    @patch("claude_task_master.core.orchestrator.is_cancellation_requested")
+    @patch("claude_task_master.core.orchestrator.start_listening")
+    @patch("claude_task_master.core.orchestrator.stop_listening")
+    @patch("claude_task_master.core.orchestrator.register_handlers")
+    @patch("claude_task_master.core.orchestrator.unregister_handlers")
+    @patch("claude_task_master.core.orchestrator.reset_shutdown")
+    @patch("claude_task_master.core.orchestrator.console")
+    def test_run_resets_stale_ci_poll_start_time_on_resume(
+        self,
+        mock_console,
+        mock_reset_shutdown,
+        mock_unregister,
+        mock_register,
+        mock_stop,
+        mock_start,
+        mock_is_cancelled,
+        basic_orchestrator,
+        state_manager,
+        sample_task_options,
+    ):
+        """Should reset a stale ci_poll_start_time when run() resumes in waiting_ci.
+
+        A ci_poll_start_time persisted by a previous run must not cause an
+        instant CI timeout on resume; run() entry clears it so the current
+        poll cycle starts a fresh timer.
+        """
+        state_manager.state_dir.mkdir(exist_ok=True)
+        options = TaskOptions(**sample_task_options)
+        state_manager.initialize(goal="Test", model="sonnet", options=options)
+        state_manager.save_plan("- [ ] Task 1")
+
+        state = state_manager.load_state()
+        state.status = "working"
+        state.workflow_stage = "waiting_ci"
+        state.current_pr = 123
+        # Simulate a poll timer left over from a run 3 hours ago
+        state.ci_poll_start_time = datetime.now() - timedelta(hours=3)
+        state_manager.save_state(state)
+
+        mock_is_cancelled.return_value = False
+
+        captured_stage = {}
+
+        def capture_stage(state_arg):
+            captured_stage["ci_poll_start_time"] = state_arg.ci_poll_start_time
+            return 2  # Stop the loop immediately after the first cycle
+
+        with (
+            patch.object(basic_orchestrator.task_runner, "is_all_complete", return_value=False),
+            patch.object(basic_orchestrator, "_run_workflow_cycle", side_effect=capture_stage),
+        ):
+            result = basic_orchestrator.run()
+
+        assert result == 2
+        # The stale timer must have been cleared before the stage handler ran
+        assert captured_stage["ci_poll_start_time"] is None
+
+
+# =============================================================================
+# Test Fix PR CI Failure Branch
+# =============================================================================
+
+
+class TestFixPrCiFailureBranch:
+    """Tests for _fix_pr_ci_failure required_branch resolution."""
+
+    @patch("claude_task_master.core.orchestrator.console")
+    def test_fix_pr_ci_failure_uses_pr_head_branch_not_current_branch(
+        self,
+        mock_console,
+        basic_orchestrator,
+        state_manager,
+        mock_agent,
+        mock_github_client,
+        basic_task_state,
+    ):
+        """Should pass the PR head branch as required_branch, not the current git branch."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        mock_github_client.get_pr_status.return_value = MagicMock(
+            number=42,
+            head_branch="fix/verification-failures",
+            ci_state="FAILURE",
+        )
+        basic_orchestrator._pr_context = MagicMock()
+        basic_orchestrator._pr_context.get_combined_feedback.return_value = (
+            True,
+            False,
+            "/tmp/pr-context",
+        )
+
+        # Current git branch is unrelated (e.g. main after checkout)
+        with patch.object(basic_orchestrator, "_get_current_branch", return_value="main"):
+            result = basic_orchestrator._fix_pr_ci_failure(42, basic_task_state)
+
+        assert result is True
+        mock_agent.run_work_session.assert_called_once()
+        call_kwargs = mock_agent.run_work_session.call_args.kwargs
+        assert call_kwargs["required_branch"] == "fix/verification-failures"

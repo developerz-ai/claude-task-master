@@ -13,16 +13,21 @@ import subprocess
 from typing import TYPE_CHECKING
 
 from . import console
-from .agent import ModelType
 from .agent_exceptions import AgentError
+from .agent_models import TaskComplexity, parse_task_complexity
 from .config_loader import get_config
 from .console import clear_task_context, set_task_context
+from .plan_parsing import (
+    is_task_complete as plan_is_task_complete,
+)
+from .plan_parsing import (
+    mark_task_complete as plan_mark_task_complete,
+)
+from .plan_parsing import parse_task_descriptions
 from .task_group import (
     ParsedTask,
-    TaskComplexity,
     TaskGroup,
     get_group_for_task,
-    parse_task_complexity,
     parse_tasks_with_groups,
 )
 
@@ -214,7 +219,7 @@ class TaskRunner:
             "tasks_in_group": tasks_in_group,
         }
 
-    def run_work_session(self, state: TaskState) -> None:
+    def run_work_session(self, state: TaskState) -> str:
         """Run a single work session.
 
         If a ConversationManager is available, uses conversation mode for tasks
@@ -222,6 +227,16 @@ class TaskRunner:
 
         Args:
             state: Current task state.
+
+        Returns:
+            Status string describing what happened:
+
+            - ``"skipped_already_complete"``: the current task was already
+              checked off in the plan; only the task index was advanced.
+            - ``"ran"``: an agent work session executed to completion.
+            - ``"no_tasks_remaining"``: the task index is past the end of the
+              plan; no work was started. Distinct from ``"ran"`` so callers
+              only mark tasks complete when work actually ran.
 
         Raises:
             NoPlanFoundError: If no plan file exists.
@@ -243,7 +258,7 @@ class TaskRunner:
 
         if state.current_task_index >= len(tasks):
             # All tasks processed
-            return
+            return "no_tasks_remaining"
 
         current_task = tasks[state.current_task_index]
 
@@ -255,11 +270,11 @@ class TaskRunner:
             )
             state.current_task_index += 1
             self.state_manager.save_state(state)
-            return
+            return "skipped_already_complete"
 
         # Parse task complexity to determine which model to use
         complexity, cleaned_task = parse_task_complexity(current_task)
-        target_model = TaskComplexity.get_model_for_complexity(complexity)
+        target_model = TaskComplexity.get_model_name_for_complexity(complexity)
 
         # Get PR/group context for this task (reuses _get_group_context for DRY)
         group_context = self._get_group_context(state, plan)
@@ -307,7 +322,9 @@ Please complete this task."""
 
         console.newline()
         console.info(f"Working on task #{state.current_task_index + 1}: {cleaned_task}")
-        console.detail(f"PR: {pr_name} | Complexity: {complexity.value} → Model: {target_model}")
+        console.detail(
+            f"PR: {pr_name} | Complexity: {complexity.value} → Model: {target_model.value}"
+        )
         if not is_last_in_group:
             console.detail(f"   ({remaining_in_group} more task(s) in this PR group)")
 
@@ -347,8 +364,7 @@ Please complete this task."""
 
         # Run work session with model routing based on task complexity
         try:
-            # Convert string model name to ModelType enum
-            model_type = ModelType(target_model)
+            model_type = target_model
             # Get target branch from config for rebase instructions
             config = get_config()
             target_branch = config.git.target_branch
@@ -383,6 +399,8 @@ Please complete this task."""
         # Log the response
         if self.logger and result.get("output"):
             self.logger.log_response(result.get("output", ""))
+
+        return "ran"
 
     def update_progress(
         self,
@@ -482,13 +500,7 @@ Please complete this task."""
         Returns:
             List of task descriptions.
         """
-        tasks = []
-        for line in plan.split("\n"):
-            if line.strip().startswith("- [ ]") or line.strip().startswith("- [x]"):
-                task = line.strip()[5:].strip()  # Remove "- [ ]" or "- [x]"
-                if task:
-                    tasks.append(task)
-        return tasks
+        return parse_task_descriptions(plan)
 
     def is_task_complete(self, plan: str, task_index: int) -> bool:
         """Check if a task is already marked as complete.
@@ -500,36 +512,19 @@ Please complete this task."""
         Returns:
             True if task is complete, False otherwise.
         """
-        lines = plan.split("\n")
-        task_count = -1
-
-        for line in lines:
-            if line.strip().startswith("- [ ]") or line.strip().startswith("- [x]"):
-                task_count += 1
-                if task_count == task_index:
-                    return line.strip().startswith("- [x]")
-
-        return False
+        return plan_is_task_complete(plan, task_index)
 
     def mark_task_complete(self, plan: str, task_index: int) -> None:
         """Mark a task as complete in the plan.
 
         Args:
             plan: The plan markdown content.
-            task_index: Index of the task to mark complete.
+            task_index: Index of the task to mark complete. If out of range,
+                the plan is saved unchanged.
         """
-        lines = plan.split("\n")
-        task_count = -1
-
-        for i, line in enumerate(lines):
-            if line.strip().startswith("- [ ]") or line.strip().startswith("- [x]"):
-                task_count += 1
-                if task_count == task_index:
-                    lines[i] = line.replace("- [ ]", "- [x]", 1)
-                    break
-
-        updated_plan = "\n".join(lines)
+        updated_plan = plan_mark_task_complete(plan, task_index)
         self.state_manager.save_plan(updated_plan)
+        self._invalidate_cache()
 
     def is_all_complete(self, state: TaskState) -> bool:
         """Check if all tasks are complete.
@@ -539,12 +534,15 @@ Please complete this task."""
 
         Returns:
             True if all tasks are processed.
+
+        Raises:
+            NoPlanFoundError: If no plan file exists.
         """
         plan = self.state_manager.load_plan()
         if not plan:
-            return True
+            raise NoPlanFoundError()
 
-        tasks = self.parse_tasks(plan)
+        tasks = parse_task_descriptions(plan)
         return state.current_task_index >= len(tasks)
 
     def is_last_task_in_group(self, state: TaskState) -> bool:

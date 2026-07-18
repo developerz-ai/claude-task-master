@@ -52,9 +52,9 @@ class SessionMetrics:
     @property
     def estimated_cost(self) -> float:
         """Estimate cost in USD (approximate Claude pricing)."""
-        # Approximate pricing: $3/M input, $15/M output for Opus
-        input_cost = (self.tokens_input / 1_000_000) * 3.0
-        output_cost = (self.tokens_output / 1_000_000) * 15.0
+        # Approximate pricing: $5/M input, $25/M output for Claude Opus 4.5+
+        input_cost = (self.tokens_input / 1_000_000) * 5.0
+        output_cost = (self.tokens_output / 1_000_000) * 25.0
         return input_cost + output_cost
 
 
@@ -215,14 +215,19 @@ class ExecutionTracker:
     def check_progress(self) -> ProgressState:
         """Check current progress state.
 
+        Loop detection, regression, and stall checks run even without an
+        active session (using the last known task index) so the safety net
+        works between sessions. Session-scoped checks (timeout, slow) only
+        run when a session is active, with the hard timeout taking
+        precedence over the soft slow check.
+
         Returns:
             Current progress state indicating health.
         """
-        if not self._current_session:
-            return ProgressState.HEALTHY
-
-        task_index = self._current_session.task_index
-        duration = self._current_session.duration
+        # Fall back to the last known task index when no session is active
+        task_index = (
+            self._current_session.task_index if self._current_session else self._last_task_index
+        )
         time_since_progress = time.time() - self._last_progress_time
 
         # Check for loop detection (same task too many times)
@@ -234,17 +239,22 @@ class ExecutionTracker:
         if task_index < self._last_task_index:
             return ProgressState.REGRESSING
 
+        # Hard session timeout takes precedence over the soft slow check
+        if self._current_session:
+            duration = self._current_session.duration
+            if duration > self.config.max_session_duration:
+                return ProgressState.STALLED
+
         # Check for stall (no progress for too long)
         if time_since_progress > self.config.stall_threshold_seconds:
             return ProgressState.STALLED
 
-        # Check for slow progress
-        if duration > self.config.slow_threshold_seconds:
+        # Check for slow progress (session running longer than expected)
+        if (
+            self._current_session
+            and self._current_session.duration > self.config.slow_threshold_seconds
+        ):
             return ProgressState.SLOW
-
-        # Check for session timeout
-        if duration > self.config.max_session_duration:
-            return ProgressState.STALLED
 
         return ProgressState.HEALTHY
 
@@ -316,7 +326,9 @@ class ExecutionTracker:
         state = self.check_progress()
 
         if state == ProgressState.LOOP_DETECTED:
-            task_idx = self._current_session.task_index if self._current_session else -1
+            task_idx = (
+                self._current_session.task_index if self._current_session else self._last_task_index
+            )
             attempts = self._task_attempts.get(task_idx, 0)
             return (
                 True,

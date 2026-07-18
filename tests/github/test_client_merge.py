@@ -21,7 +21,10 @@ class TestGitHubClientMergePR:
 
     def test_merge_pr_success_with_auto(self, github_client):
         """Test successful PR merge with --auto flag."""
-        with patch("subprocess.run") as mock_run:
+        with (
+            patch("subprocess.run") as mock_run,
+            patch.object(github_client, "get_pr_status", return_value=MagicMock(state="MERGED")),
+        ):
             mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
             github_client.merge_pr(123)
 
@@ -49,7 +52,10 @@ class TestGitHubClientMergePR:
 
     def test_merge_pr_converts_number_to_string(self, github_client):
         """Test that PR number is converted to string for command."""
-        with patch("subprocess.run") as mock_run:
+        with (
+            patch("subprocess.run") as mock_run,
+            patch.object(github_client, "get_pr_status", return_value=MagicMock(state="MERGED")),
+        ):
             mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
             github_client.merge_pr(456)
 
@@ -59,7 +65,10 @@ class TestGitHubClientMergePR:
 
     def test_merge_pr_uses_squash_merge(self, github_client):
         """Test that merge uses squash strategy."""
-        with patch("subprocess.run") as mock_run:
+        with (
+            patch("subprocess.run") as mock_run,
+            patch.object(github_client, "get_pr_status", return_value=MagicMock(state="MERGED")),
+        ):
             mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
             github_client.merge_pr(789)
 
@@ -138,7 +147,12 @@ class TestGitHubClientMergePR:
         """Test merge with various PR number formats."""
         test_cases = [1, 100, 9999, 123456]
         for pr_num in test_cases:
-            with patch("subprocess.run") as mock_run:
+            with (
+                patch("subprocess.run") as mock_run,
+                patch.object(
+                    github_client, "get_pr_status", return_value=MagicMock(state="MERGED")
+                ),
+            ):
                 mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
                 github_client.merge_pr(pr_num)
 
@@ -373,7 +387,10 @@ class TestGitHubClientMergeIntegration:
                 assert status.unresolved_threads == 0
 
         # Now merge
-        with patch("subprocess.run") as mock_run:
+        with (
+            patch("subprocess.run") as mock_run,
+            patch.object(github_client, "get_pr_status", return_value=MagicMock(state="MERGED")),
+        ):
             mock_run.return_value = MagicMock(returncode=0)
             github_client.merge_pr(100)  # Should succeed
 
@@ -397,7 +414,10 @@ class TestGitHubClientMergeIntegration:
             assert status.ci_state == "SUCCESS"
 
         # Then merge
-        with patch("subprocess.run") as mock_run:
+        with (
+            patch("subprocess.run") as mock_run,
+            patch.object(github_client, "get_pr_status", return_value=MagicMock(state="MERGED")),
+        ):
             mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
             github_client.merge_pr(50)
             assert mock_run.called
@@ -466,14 +486,20 @@ class TestGitHubClientMergeEdgeCases:
 
     def test_merge_pr_empty_response(self, github_client):
         """Test merge with empty stdout (successful merge often has no output)."""
-        with patch("subprocess.run") as mock_run:
+        with (
+            patch("subprocess.run") as mock_run,
+            patch.object(github_client, "get_pr_status", return_value=MagicMock(state="MERGED")),
+        ):
             mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
             # Should not raise
             github_client.merge_pr(123)
 
     def test_merge_pr_with_message_in_stdout(self, github_client):
         """Test merge when gh outputs a success message."""
-        with patch("subprocess.run") as mock_run:
+        with (
+            patch("subprocess.run") as mock_run,
+            patch.object(github_client, "get_pr_status", return_value=MagicMock(state="MERGED")),
+        ):
             mock_run.return_value = MagicMock(
                 returncode=0,
                 stdout="Pull request #123 merged\n",

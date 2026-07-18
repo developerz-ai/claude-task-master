@@ -139,8 +139,10 @@ class TaskState(BaseModel):
     pr_active_work_seconds: float = 0.0  # Accumulated work time for current PR (excluding CI wait)
     # CI polling fields
     ci_poll_start_time: datetime | None = None  # When CI polling started for current PR
+    ci_fix_attempts: int = 0  # Number of CI-fix agent sessions for current PR
     # Release phase fields
     release_fix_attempts: int = 0  # Number of release fix attempts for current PR
+    in_release_fix: bool = False  # True while current PR is a release-fix PR
 
 
 # =============================================================================
@@ -578,8 +580,20 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
                 suggestion="Task state may be corrupted. Use 'clean' to start fresh.",
             )
 
+        # Empty plan (no parsed tasks): any nonzero index is stale state
+        if not tasks:
+            if state.current_task_index != 0:
+                raise StateResumeValidationError(
+                    "Plan contains no tasks but task index is not zero",
+                    status=state.status,
+                    current_task_index=state.current_task_index,
+                    total_tasks=0,
+                    suggestion="Plan has no tasks. Use 'clean' to start fresh.",
+                )
+            return state
+
         # Allow index == len(tasks) since it means all tasks are complete
-        if tasks and state.current_task_index > len(tasks):
+        if state.current_task_index > len(tasks):
             raise StateResumeValidationError(
                 "Task index exceeds number of tasks in plan",
                 status=state.status,
@@ -590,7 +604,8 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
 
         return state
 
-    # _parse_plan_tasks is inherited from FileOperationsMixin
+    # _parse_plan_tasks is inherited from FileOperationsMixin; it delegates to
+    # claude_task_master.core.plan_parsing.parse_task_descriptions (single parser)
 
     # PR Context Methods are inherited from PRContextMixin:
     # - get_pr_dir(pr_number: int) -> Path

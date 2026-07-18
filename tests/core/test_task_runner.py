@@ -352,6 +352,43 @@ class TestMarkTaskComplete:
         assert task_runner.is_task_complete(updated_plan, 1)
         assert not task_runner.is_task_complete(updated_plan, 2)
 
+    def test_mark_task_complete_invalidates_cache(
+        self, task_runner, state_manager, plan_with_pr_groups
+    ):
+        """Should invalidate the parsed-tasks cache after marking a task complete.
+
+        Without invalidation, subsequent calls to _get_parsed_tasks would reuse
+        stale completion/group data parsed from the pre-update plan.
+        """
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan(plan_with_pr_groups)
+
+        task_runner._get_parsed_tasks(plan_with_pr_groups)
+        assert task_runner._parsed_tasks_cache is not None
+        assert task_runner._plan_hash is not None
+
+        task_runner.mark_task_complete(plan_with_pr_groups, 0)
+
+        assert task_runner._parsed_tasks_cache is None
+        assert task_runner._parsed_groups_cache is None
+        assert task_runner._plan_hash is None
+
+    def test_cache_rebuilt_from_updated_plan_after_mark_complete(
+        self, task_runner, state_manager, plan_with_pr_groups
+    ):
+        """Should re-parse from the updated plan on the next cache access."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan(plan_with_pr_groups)
+
+        task_runner._get_parsed_tasks(plan_with_pr_groups)
+        task_runner.mark_task_complete(plan_with_pr_groups, 0)
+
+        updated_plan = state_manager.load_plan()
+        tasks, _ = task_runner._get_parsed_tasks(updated_plan)
+
+        assert task_runner._parsed_tasks_cache is not None
+        assert tasks[0].is_complete
+
 
 # =============================================================================
 # Test Is All Complete
@@ -378,9 +415,23 @@ class TestIsAllComplete:
         basic_task_state.current_task_index = 10  # Beyond task count
         assert task_runner.is_all_complete(basic_task_state)
 
-    def test_all_complete_no_plan(self, task_runner, basic_task_state):
-        """Should return True when no plan exists."""
-        # Don't save any plan
+    def test_no_plan_raises(self, task_runner, basic_task_state):
+        """Should raise NoPlanFoundError when no plan exists."""
+        with pytest.raises(NoPlanFoundError, match="No plan found") as exc_info:
+            task_runner.is_all_complete(basic_task_state)
+
+        assert exc_info.value.details is not None
+        assert "planning phase" in exc_info.value.details
+
+    def test_plan_without_tasks_returns_true(self, task_runner, state_manager, basic_task_state):
+        """Should return True when the plan exists but contains no tasks.
+
+        A non-empty plan with zero parseable tasks yields len(tasks) == 0, so
+        any index >= 0 satisfies index >= len(tasks) and is treated as done.
+        """
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan("## Notes\n\nNo checkboxes here.")
+
         assert task_runner.is_all_complete(basic_task_state)
 
 
@@ -763,16 +814,51 @@ class TestRunWorkSession:
         basic_task_state,
         basic_plan,
     ):
-        """Should return early when all tasks processed."""
+        """Should return 'no_tasks_remaining' when index is past end of plan.
+
+        The status must be distinct from 'ran' so callers only mark tasks
+        complete when work actually ran. The index must not be advanced and
+        no agent session may be started.
+        """
         mock_branch.return_value = "main"
         state_manager.state_dir.mkdir(exist_ok=True)
         state_manager.save_plan(basic_plan)
 
         basic_task_state.current_task_index = 100  # Beyond task count
 
-        task_runner.run_work_session(basic_task_state)
+        result = task_runner.run_work_session(basic_task_state)
 
+        assert result == "no_tasks_remaining"
+        assert basic_task_state.current_task_index == 100
         # Agent should NOT be called
+        mock_agent.run_work_session.assert_not_called()
+
+    @patch("claude_task_master.core.task_runner.get_current_branch")
+    @patch("claude_task_master.core.task_runner.console")
+    def test_run_work_session_exactly_at_end_returns_no_tasks_remaining(
+        self,
+        mock_console,
+        mock_branch,
+        task_runner,
+        state_manager,
+        mock_agent,
+        basic_task_state,
+        basic_plan,
+    ):
+        """Should return 'no_tasks_remaining' when index equals the task count.
+
+        Edge case: index == len(tasks) is past the end (0-indexed), so no work
+        may be started even though the index looks like a valid 1-based count.
+        """
+        mock_branch.return_value = "main"
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan(basic_plan)
+
+        basic_task_state.current_task_index = 3  # basic_plan has exactly 3 tasks
+
+        result = task_runner.run_work_session(basic_task_state)
+
+        assert result == "no_tasks_remaining"
         mock_agent.run_work_session.assert_not_called()
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
@@ -901,6 +987,99 @@ class TestRunWorkSession:
 
         call_kwargs = mock_agent.run_work_session.call_args.kwargs
         assert call_kwargs["create_pr"] is True
+
+    @patch("claude_task_master.core.task_runner.get_current_branch")
+    @patch("claude_task_master.core.task_runner.console")
+    def test_run_work_session_already_complete_returns_skipped(
+        self,
+        mock_console,
+        mock_branch,
+        task_runner,
+        state_manager,
+        mock_agent,
+        basic_task_state,
+        plan_with_completed_tasks,
+    ):
+        """Should return 'skipped_already_complete' for an already checked-off task.
+
+        The index must advance by one, the state must be persisted, and no
+        agent session may be started for an already complete task.
+        """
+        mock_branch.return_value = "main"
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan(plan_with_completed_tasks)
+        state_manager.save_goal("Test goal")
+
+        result = task_runner.run_work_session(basic_task_state)
+
+        assert result == "skipped_already_complete"
+        assert basic_task_state.current_task_index == 1
+        # Agent session must NOT be started for a completed task
+        mock_agent.run_work_session.assert_not_called()
+        # State must be saved with the advanced index
+        saved_state = state_manager.load_state()
+        assert saved_state is not None
+        assert saved_state.current_task_index == 1
+
+    @patch("claude_task_master.core.task_runner.get_current_branch")
+    @patch("claude_task_master.core.task_runner.console")
+    def test_run_work_session_incomplete_task_returns_ran(
+        self,
+        mock_console,
+        mock_branch,
+        task_runner,
+        state_manager,
+        mock_agent,
+        basic_task_state,
+        basic_plan,
+    ):
+        """Should return 'ran' after executing a real agent work session."""
+        mock_branch.return_value = "feature/test"
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan(basic_plan)
+        state_manager.save_goal("Test goal")
+
+        result = task_runner.run_work_session(basic_task_state)
+
+        assert result == "ran"
+        mock_agent.run_work_session.assert_called_once()
+
+    @patch("claude_task_master.core.task_runner.get_current_branch")
+    @patch("claude_task_master.core.task_runner.console")
+    def test_run_work_session_consecutive_complete_tasks_each_skip(
+        self,
+        mock_console,
+        mock_branch,
+        task_runner,
+        state_manager,
+        mock_agent,
+        basic_task_state,
+        plan_with_completed_tasks,
+    ):
+        """Should return 'skipped_already_complete' on each call and advance by one.
+
+        Edge case: two consecutive already-complete tasks. Each call must skip
+        exactly one task, so two calls move the index from 0 to 2 with no
+        agent session ever started.
+        """
+        mock_branch.return_value = "main"
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan(plan_with_completed_tasks)
+        state_manager.save_goal("Test goal")
+
+        first = task_runner.run_work_session(basic_task_state)
+        assert first == "skipped_already_complete"
+        assert basic_task_state.current_task_index == 1
+
+        second = task_runner.run_work_session(basic_task_state)
+        assert second == "skipped_already_complete"
+        assert basic_task_state.current_task_index == 2
+
+        # No agent session started for either skipped task
+        mock_agent.run_work_session.assert_not_called()
+        saved_state = state_manager.load_state()
+        assert saved_state is not None
+        assert saved_state.current_task_index == 2
 
 
 # =============================================================================

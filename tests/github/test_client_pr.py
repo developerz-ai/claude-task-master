@@ -10,6 +10,7 @@ from claude_task_master.github.client import (
     GitHubTimeoutError,
     PRStatus,
 )
+from claude_task_master.github.exceptions import GitHubError
 
 # =============================================================================
 # PRStatus Model Tests
@@ -120,6 +121,83 @@ class TestPRStatusModel:
             )
             assert status.ci_state == state
 
+    def test_pr_status_new_fields_have_defaults(self):
+        """Test that new PRStatus fields fall back to sensible defaults."""
+        status = PRStatus(
+            number=1,
+            ci_state="SUCCESS",
+            unresolved_threads=0,
+            check_details=[],
+        )
+        assert status.state == "OPEN"
+        assert status.resolved_threads == 0
+        assert status.total_threads == 0
+        assert status.checks_passed == 0
+        assert status.checks_failed == 0
+        assert status.checks_pending == 0
+        assert status.checks_skipped == 0
+        assert status.mergeable == "UNKNOWN"
+        assert status.merge_state_status == "UNKNOWN"
+        assert status.base_branch == "main"
+        assert status.title == ""
+        assert status.url == ""
+        assert status.head_branch == ""
+        assert status.merged_at is None
+
+    def test_pr_status_new_fields_set_explicitly(self):
+        """Test creating PRStatus with the new fields set explicitly."""
+        status = PRStatus(
+            number=42,
+            state="MERGED",
+            ci_state="SUCCESS",
+            unresolved_threads=1,
+            resolved_threads=3,
+            total_threads=4,
+            checks_passed=2,
+            checks_failed=1,
+            checks_pending=1,
+            checks_skipped=1,
+            check_details=[],
+            mergeable="MERGEABLE",
+            merge_state_status="CLEAN",
+            base_branch="develop",
+            title="My PR",
+            url="https://github.com/owner/repo/pull/42",
+            head_branch="feature-x",
+            merged_at="2026-07-18T12:00:00Z",
+        )
+        assert status.state == "MERGED"
+        assert status.resolved_threads == 3
+        assert status.total_threads == 4
+        assert status.checks_passed == 2
+        assert status.checks_failed == 1
+        assert status.checks_pending == 1
+        assert status.checks_skipped == 1
+        assert status.mergeable == "MERGEABLE"
+        assert status.merge_state_status == "CLEAN"
+        assert status.base_branch == "develop"
+        assert status.title == "My PR"
+        assert status.url == "https://github.com/owner/repo/pull/42"
+        assert status.head_branch == "feature-x"
+        assert status.merged_at == "2026-07-18T12:00:00Z"
+
+    def test_pr_status_new_fields_in_model_dump(self):
+        """Test that new fields are included in serialized output."""
+        status = PRStatus(
+            number=7,
+            ci_state="PENDING",
+            unresolved_threads=0,
+            check_details=[],
+            mergeable="CONFLICTING",
+            merge_state_status="DIRTY",
+        )
+        data = status.model_dump()
+        assert data["mergeable"] == "CONFLICTING"
+        assert data["merge_state_status"] == "DIRTY"
+        assert data["state"] == "OPEN"
+        assert data["checks_pending"] == 0
+        assert data["merged_at"] is None
+
 
 # =============================================================================
 # GitHubClient.create_pr Tests
@@ -213,11 +291,63 @@ class TestGitHubClientCreatePR:
     def test_create_pr_failure_subprocess_error(self, github_client):
         """Test PR creation handles subprocess errors."""
         with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = subprocess.CalledProcessError(
-                1, "gh pr create", stderr="Error creating PR"
+            mock_run.return_value = MagicMock(
+                returncode=1,
+                stdout="",
+                stderr="Error creating PR",
             )
-            with pytest.raises(subprocess.CalledProcessError):
+            with pytest.raises(GitHubError) as exc_info:
                 github_client.create_pr("Title", "Body")
+            assert "Error creating PR" in str(exc_info.value)
+
+    def test_create_pr_parses_url_with_trailing_output(self, github_client):
+        """Test that the PR number is parsed from gh output with extra text."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="Creating pull request\nhttps://github.com/owner/repo/pull/42\n",
+                stderr="",
+            )
+            pr_number = github_client.create_pr("Title", "Body")
+            assert pr_number == 42
+
+    def test_create_pr_garbage_output_raises_github_error(self, github_client):
+        """Test that unparseable gh output raises GitHubError with the raw output."""
+        raw_output = "no pull request was created\n"
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout=raw_output,
+                stderr="",
+            )
+            with pytest.raises(GitHubError) as exc_info:
+                github_client.create_pr("Title", "Body")
+            assert raw_output.strip() in str(exc_info.value)
+
+    def test_create_pr_pull_mention_without_number_raises_github_error(self, github_client):
+        """Test that a '/pull/' mention without a trailing number raises GitHubError."""
+        raw_output = "see https://github.com/owner/repo/pull/ for details\n"
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout=raw_output,
+                stderr="",
+            )
+            with pytest.raises(GitHubError) as exc_info:
+                github_client.create_pr("Title", "Body")
+            assert "Could not parse PR URL" in str(exc_info.value)
+
+    def test_create_pr_empty_output_raises_github_error(self, github_client):
+        """Test that empty gh output raises GitHubError even on success exit code."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="",
+                stderr="",
+            )
+            with pytest.raises(GitHubError) as exc_info:
+                github_client.create_pr("Title", "Body")
+            assert "Could not parse PR URL" in str(exc_info.value)
 
     def test_create_pr_with_special_characters_in_title(self, github_client):
         """Test PR creation with special characters in title."""
@@ -301,6 +431,136 @@ All tests pass"""
 
 
 # =============================================================================
+# GitHubClient.get_required_status_checks Tests
+# =============================================================================
+
+
+class TestGitHubClientGetRequiredStatusChecks:
+    """Tests for required status checks retrieval from branch protection."""
+
+    def test_get_required_status_checks_success(self, github_client):
+        """Test getting required status checks returns the parsed list."""
+        with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(
+                    returncode=0,
+                    stdout=json.dumps(["lint", "tests"]),
+                    stderr="",
+                )
+                checks = github_client.get_required_status_checks("main")
+
+                assert checks == ["lint", "tests"]
+                call_args = mock_run.call_args
+                assert call_args[0][0] == [
+                    "gh",
+                    "api",
+                    "repos/owner/repo/branches/main/protection/required_status_checks",
+                    "--jq",
+                    ".contexts",
+                ]
+
+    def test_get_required_status_checks_non_list_json_returns_empty(self, github_client):
+        """Test that non-list JSON output returns an empty list."""
+        with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(
+                    returncode=0,
+                    stdout=json.dumps({"contexts": ["lint"]}),
+                    stderr="",
+                )
+                checks = github_client.get_required_status_checks("main")
+
+                assert checks == []
+
+    def test_get_required_status_checks_not_found_returns_empty(self, github_client):
+        """Test that a 404 'not found' response means no branch protection."""
+        with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(
+                    returncode=1,
+                    stdout="",
+                    stderr='{"message": "Not Found", "documentation_url": "https://..."}',
+                )
+                checks = github_client.get_required_status_checks("main")
+
+                assert checks == []
+
+    def test_get_required_status_checks_branch_not_protected_returns_empty(self, github_client):
+        """Test that 'branch not protected' stderr returns an empty list."""
+        with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(
+                    returncode=1,
+                    stdout="",
+                    stderr="Branch not protected",
+                )
+                checks = github_client.get_required_status_checks("main")
+
+                assert checks == []
+
+    def test_get_required_status_checks_auth_failure_raises(self, github_client):
+        """Test that an auth failure raises GitHubError with the stderr message."""
+        with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(
+                    returncode=1,
+                    stdout="",
+                    stderr="Resource not accessible by integration",
+                )
+                with pytest.raises(GitHubError) as exc_info:
+                    github_client.get_required_status_checks("main")
+                assert "Resource not accessible by integration" in str(exc_info.value)
+
+    def test_get_required_status_checks_timeout_propagates(self, github_client):
+        """Test that a command timeout raises GitHubTimeoutError."""
+        with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
+            with patch("subprocess.run") as mock_run:
+                mock_run.side_effect = subprocess.TimeoutExpired(cmd="gh", timeout=15)
+                with pytest.raises(GitHubTimeoutError) as exc_info:
+                    github_client.get_required_status_checks("main")
+                assert "timed out" in str(exc_info.value)
+
+    def test_get_required_status_checks_rate_limit_raises(self, github_client):
+        """Test that a rate limit error propagates as GitHubError with the stderr message."""
+        with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(
+                    returncode=1,
+                    stdout="",
+                    stderr="API rate limit exceeded for user ID 123.",
+                )
+                with pytest.raises(GitHubError) as exc_info:
+                    github_client.get_required_status_checks("main")
+                assert "API rate limit exceeded" in str(exc_info.value)
+
+    def test_get_required_status_checks_error_includes_branch_name(self, github_client):
+        """Test that propagated errors mention the base branch that was queried."""
+        with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(
+                    returncode=1,
+                    stdout="",
+                    stderr="Resource not accessible by integration",
+                )
+                with pytest.raises(GitHubError) as exc_info:
+                    github_client.get_required_status_checks("release/1.x")
+                assert "'release/1.x'" in str(exc_info.value)
+                assert "Resource not accessible by integration" in str(exc_info.value)
+
+    def test_get_required_status_checks_malformed_json_raises(self, github_client):
+        """Test that malformed JSON output propagates a JSONDecodeError."""
+        with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(
+                    returncode=0,
+                    stdout="{ not valid json }",
+                    stderr="",
+                )
+                with pytest.raises(json.JSONDecodeError):
+                    github_client.get_required_status_checks("main")
+
+
+# =============================================================================
 # GitHubClient.get_pr_body / update_pr_body Tests
 # =============================================================================
 
@@ -356,6 +616,123 @@ class TestGitHubClientGetPRStatus:
                 assert status.unresolved_threads == 1
                 assert len(status.check_details) == 1
                 assert status.check_details[0]["name"] == "tests"
+
+    def test_get_pr_status_populates_new_fields(self, github_client):
+        """Test that new PRStatus fields are populated from the GraphQL response."""
+        response = {
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "state": "OPEN",
+                        "mergeable": "MERGEABLE",
+                        "mergeStateStatus": "CLEAN",
+                        "baseRefName": "develop",
+                        "title": "Add feature",
+                        "url": "https://github.com/owner/repo/pull/99",
+                        "headRefName": "feature-branch",
+                        "mergedAt": None,
+                        "commits": {
+                            "nodes": [
+                                {
+                                    "commit": {
+                                        "statusCheckRollup": {
+                                            "state": "FAILURE",
+                                            "contexts": {
+                                                "nodes": [
+                                                    {
+                                                        "__typename": "CheckRun",
+                                                        "name": "tests",
+                                                        "status": "COMPLETED",
+                                                        "conclusion": "FAILURE",
+                                                        "detailsUrl": "https://example.com/1",
+                                                    },
+                                                    {
+                                                        "__typename": "CheckRun",
+                                                        "name": "lint",
+                                                        "status": "COMPLETED",
+                                                        "conclusion": "SUCCESS",
+                                                        "detailsUrl": "https://example.com/2",
+                                                    },
+                                                    {
+                                                        "__typename": "CheckRun",
+                                                        "name": "build",
+                                                        "status": "IN_PROGRESS",
+                                                        "conclusion": None,
+                                                        "detailsUrl": None,
+                                                    },
+                                                ]
+                                            },
+                                        }
+                                    }
+                                }
+                            ]
+                        },
+                        "reviewThreads": {
+                            "nodes": [
+                                {"isResolved": False, "comments": {"nodes": []}},
+                                {"isResolved": True, "comments": {"nodes": []}},
+                            ]
+                        },
+                    }
+                }
+            }
+        }
+        with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(
+                    returncode=0,
+                    stdout=json.dumps(response),
+                    stderr="",
+                )
+                status = github_client.get_pr_status(99)
+
+                assert status.state == "OPEN"
+                assert status.mergeable == "MERGEABLE"
+                assert status.merge_state_status == "CLEAN"
+                assert status.base_branch == "develop"
+                assert status.title == "Add feature"
+                assert status.url == "https://github.com/owner/repo/pull/99"
+                assert status.head_branch == "feature-branch"
+                assert status.merged_at is None
+                assert status.total_threads == 2
+                assert status.unresolved_threads == 1
+                assert status.resolved_threads == 1
+                assert status.checks_failed == 1
+                assert status.checks_passed == 1
+                assert status.checks_pending == 1
+                assert status.checks_skipped == 0
+
+    def test_get_pr_status_merged_pr_fields(self, github_client):
+        """Test that a merged PR reports MERGED state and merged_at timestamp."""
+        response = {
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "state": "MERGED",
+                        "mergeable": "UNKNOWN",
+                        "mergeStateStatus": "UNKNOWN",
+                        "baseRefName": "main",
+                        "title": "Done",
+                        "url": "https://github.com/owner/repo/pull/5",
+                        "headRefName": "old-feature",
+                        "mergedAt": "2026-07-17T09:30:00Z",
+                        "commits": {"nodes": []},
+                        "reviewThreads": {"nodes": []},
+                    }
+                }
+            }
+        }
+        with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(
+                    returncode=0,
+                    stdout=json.dumps(response),
+                    stderr="",
+                )
+                status = github_client.get_pr_status(5)
+
+                assert status.state == "MERGED"
+                assert status.merged_at == "2026-07-17T09:30:00Z"
 
     def test_get_pr_status_pending_ci(self, github_client):
         """Test PR status when CI is pending."""
@@ -611,11 +988,14 @@ class TestGitHubClientGetPRStatus:
         """Test PR status handles subprocess errors."""
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
-                mock_run.side_effect = subprocess.CalledProcessError(
-                    1, "gh api graphql", stderr="GraphQL error"
+                mock_run.return_value = MagicMock(
+                    returncode=1,
+                    stdout="",
+                    stderr="GraphQL error",
                 )
-                with pytest.raises(subprocess.CalledProcessError):
+                with pytest.raises(GitHubError) as exc_info:
                     github_client.get_pr_status(123)
+                assert "GraphQL error" in str(exc_info.value)
 
     def test_get_pr_status_with_malformed_json(self, github_client):
         """Test PR status handles malformed JSON response."""
