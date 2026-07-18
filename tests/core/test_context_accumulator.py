@@ -373,6 +373,51 @@ Use this for utility functions."""
         assert "def helper():" in context
 
 
+class TestGetContextForPromptCap:
+    """Tests for the max_chars cap in get_context_for_prompt."""
+
+    def test_get_context_no_truncation_when_within_limit(self, context_accumulator):
+        """Context within the default cap is returned in full."""
+        context_accumulator.add_learning("Short learning content.")
+
+        result = context_accumulator.get_context_for_prompt()
+        assert "Short learning content." in result
+        assert "[Earlier context truncated" not in result
+
+    def test_get_context_truncated_when_over_limit(self, context_accumulator):
+        """Context exceeding max_chars is trimmed from the front."""
+        # Write a large context directly so we can control the exact size.
+        old_part = "OLD_CONTENT_" * 1000  # ~12 KB of old text
+        new_part = "NEW_CONTENT"
+        large_context = old_part + new_part
+        context_accumulator.state_manager.save_context(large_context)
+
+        # Use a small cap that excludes the old part.
+        result = context_accumulator.get_context_for_prompt(max_chars=100)
+
+        assert "NEW_CONTENT" in result
+        assert "[Earlier context truncated" in result
+        # The old content at the very beginning should be gone.
+        assert result.count("OLD_CONTENT_") < 1000
+
+    def test_get_context_custom_max_chars(self, context_accumulator):
+        """Custom max_chars is respected."""
+        context_accumulator.state_manager.save_context("A" * 200 + "MARKER")
+
+        result = context_accumulator.get_context_for_prompt(max_chars=50)
+        # With 50-char cap the 200 'A' prefix is gone; MARKER is retained.
+        assert "MARKER" in result
+
+    def test_get_context_exact_limit_is_not_truncated(self, context_accumulator):
+        """Context exactly at the cap limit is not truncated."""
+        content = "X" * 100
+        context_accumulator.state_manager.save_context(content)
+
+        result = context_accumulator.get_context_for_prompt(max_chars=100)
+        assert "[Earlier context truncated" not in result
+        assert "X" * 100 in result
+
+
 class TestContextIntegration:
     """Integration tests for ContextAccumulator."""
 

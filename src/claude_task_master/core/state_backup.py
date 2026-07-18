@@ -285,8 +285,10 @@ class BackupRecoveryMixin:
         # Release session lock first
         self.release_session_lock()
 
-        # Files to preserve (besides logs/ directory)
-        preserved_files = {"coding-style.md", "release.md"}
+        # Files to preserve (besides logs/ directory).
+        # Include lock/pid files so an interrupted cleanup doesn't leave the
+        # session permanently locked if the process restarts before releasing.
+        preserved_files = {"coding-style.md", "release.md", ".state.lock", ".pid"}
 
         # Delete all files in state directory except preserved ones and logs/
         for item in self.state_dir.iterdir():
@@ -308,11 +310,21 @@ class BackupRecoveryMixin:
         if not self.logs_dir.exists():
             return
 
-        # Get all log files sorted by modification time (newest first)
-        log_files = sorted(
-            self.logs_dir.glob("run-*.txt"), key=lambda p: p.stat().st_mtime, reverse=True
-        )
+        # Get all log files sorted by modification time (newest first).
+        # Guard against files that vanish between glob and stat (concurrent
+        # rotation or cleanup) — treat missing files as oldest so they sort
+        # to the tail and are pruned, rather than raising.
+        def _log_mtime(p: Path) -> float:
+            try:
+                return p.stat().st_mtime
+            except OSError:
+                return -1.0
+
+        log_files = sorted(self.logs_dir.glob("run-*.txt"), key=_log_mtime, reverse=True)
 
         # Delete older logs
         for log_file in log_files[max_logs:]:
-            log_file.unlink()
+            try:
+                log_file.unlink()
+            except OSError:
+                continue  # Already gone — best effort

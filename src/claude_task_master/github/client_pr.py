@@ -48,7 +48,7 @@ class GitHubClientProtocol(Protocol):
         """Run a gh CLI command."""
         raise NotImplementedError("Protocol method must be implemented")
 
-    def _get_repo_info(self) -> str:
+    def _get_repo_info(self, cwd: str | None = None) -> str:
         """Get repository info."""
         raise NotImplementedError("Protocol method must be implemented")
 
@@ -120,11 +120,15 @@ class PROperationsMixin:
             timeout=60,
         )
 
-    def get_pr_status(self: GitHubClientProtocol, pr_number: int) -> PRStatus:
+    def get_pr_status(
+        self: GitHubClientProtocol, pr_number: int, cwd: str | None = None
+    ) -> PRStatus:
         """Get PR status including CI checks and review comments.
 
         Args:
             pr_number: The PR number to check.
+            cwd: Working directory (project root) for gh CLI commands.
+                Defaults to the current working directory when ``None``.
 
         Returns:
             PRStatus with CI state, checks, and thread counts.
@@ -134,7 +138,7 @@ class PROperationsMixin:
             GitHubTimeoutError: If command times out.
         """
         # Get repository info
-        repo_info = self._get_repo_info()
+        repo_info = self._get_repo_info(cwd=cwd)
         owner, repo = repo_info.split("/")
 
         # Run GraphQL query
@@ -155,6 +159,7 @@ class PROperationsMixin:
                 f"pr={pr_number}",
             ],
             timeout=30,
+            cwd=cwd,
         )
 
         data = json.loads(result.stdout)

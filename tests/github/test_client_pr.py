@@ -1290,3 +1290,74 @@ class TestGitHubClientGetPRComments:
                 # Should not raise, just return formatted output
                 comments = github_client.get_pr_comments(1)
                 assert "user" in comments
+
+
+# =============================================================================
+# cwd threading tests: get_pr_status / _get_repo_info
+# =============================================================================
+
+
+class TestCwdThreading:
+    """Tests that cwd is forwarded through get_pr_status → _get_repo_info."""
+
+    def test_get_repo_info_passes_cwd_to_run_gh_command(self, github_client):
+        """_get_repo_info(cwd=...) forwards the cwd arg to _run_gh_command."""
+        with patch.object(
+            github_client,
+            "_run_gh_command",
+            return_value=MagicMock(returncode=0, stdout="owner/repo\n", stderr=""),
+        ) as mock_cmd:
+            github_client._get_repo_info(cwd="/my/project")
+
+        _, call_kwargs = mock_cmd.call_args
+        assert call_kwargs.get("cwd") == "/my/project"
+
+    def test_get_pr_status_passes_cwd_to_get_repo_info(
+        self, github_client, sample_pr_graphql_response
+    ):
+        """get_pr_status(cwd=...) passes cwd to _get_repo_info and the GraphQL call."""
+        received_cwds: list = []
+
+        def fake_get_repo_info(cwd: str | None = None) -> str:
+            received_cwds.append(cwd)
+            return "owner/repo"
+
+        with patch.object(github_client, "_get_repo_info", side_effect=fake_get_repo_info):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(
+                    returncode=0,
+                    stdout=json.dumps(sample_pr_graphql_response),
+                    stderr="",
+                )
+                github_client.get_pr_status(123, cwd="/some/path")
+
+        assert received_cwds == ["/some/path"]
+
+    def test_get_pr_status_graphql_call_uses_cwd(self, github_client, sample_pr_graphql_response):
+        """The GraphQL subprocess call in get_pr_status receives the cwd argument."""
+        with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(
+                    returncode=0,
+                    stdout=json.dumps(sample_pr_graphql_response),
+                    stderr="",
+                )
+                github_client.get_pr_status(123, cwd="/proj/root")
+
+        # subprocess.run must have been called with cwd="/proj/root"
+        call_kwargs = mock_run.call_args[1]
+        assert call_kwargs.get("cwd") == "/proj/root"
+
+    def test_get_pr_status_cwd_none_by_default(self, github_client, sample_pr_graphql_response):
+        """get_pr_status cwd defaults to None (uses process CWD)."""
+        with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(
+                    returncode=0,
+                    stdout=json.dumps(sample_pr_graphql_response),
+                    stderr="",
+                )
+                github_client.get_pr_status(123)
+
+        call_kwargs = mock_run.call_args[1]
+        assert call_kwargs.get("cwd") is None

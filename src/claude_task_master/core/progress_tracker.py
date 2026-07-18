@@ -51,10 +51,17 @@ class SessionMetrics:
 
     @property
     def estimated_cost(self) -> float:
-        """Estimate cost in USD (approximate Claude pricing)."""
-        # Approximate pricing: $5/M input, $25/M output for Claude Opus 4.5+
-        input_cost = (self.tokens_input / 1_000_000) * 5.0
-        output_cost = (self.tokens_output / 1_000_000) * 25.0
+        """Estimate cost in USD (approximate Claude pricing).
+
+        Uses Claude Opus 4 rates as the upper-bound estimate; actual cost
+        will be lower for sessions that used Sonnet or Haiku.
+        Rates: $15 / M input tokens, $75 / M output tokens (Opus 4).
+        """
+        # Approximate pricing for Claude Opus 4 (claude-opus-4-*)
+        # Sonnet: ~$3/$15; Haiku: ~$0.25/$1.25 — we use Opus as a conservative
+        # upper bound since the default task complexity routes there.
+        input_cost = (self.tokens_input / 1_000_000) * 15.0
+        output_cost = (self.tokens_output / 1_000_000) * 75.0
         return input_cost + output_cost
 
 

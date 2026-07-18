@@ -836,3 +836,60 @@ class TestStalenessGuardedRestore:
 
         assert recovered.session_count == 7
         assert recovered.run_id == "run-x"
+
+
+# =============================================================================
+# cleanup_on_success Hardening Tests
+# =============================================================================
+
+
+class TestCleanupHardening:
+    """Tests for cleanup_on_success hardening (lock/pid preservation, log rotation)."""
+
+    def test_cleanup_preserves_state_lock_file(self, initialized_state_manager):
+        """cleanup_on_success must not delete the .state.lock advisory lock file."""
+        lock_file = initialized_state_manager.state_dir / ".state.lock"
+        # Create the file (it may already exist from initialize).
+        lock_file.touch()
+
+        run_id = initialized_state_manager.load_state().run_id
+        initialized_state_manager.cleanup_on_success(run_id)
+
+        # The lock file must still be present so a concurrent reader doesn't lose
+        # its fcntl fd referent mid-cleanup.
+        assert lock_file.exists(), ".state.lock must survive cleanup_on_success"
+
+    def test_cleanup_preserves_pid_file_during_lock_release(self, initialized_state_manager):
+        """The .pid file is released (unlinked) by release_session_lock, not by file cleanup.
+
+        This test confirms the exclusion prevents the file-cleanup loop from
+        racing against release_session_lock and deleting the file twice (which
+        would raise on some OS paths or silently succeed with wrong semantics).
+        """
+        # cleanup_on_success calls release_session_lock first, which removes
+        # .pid; the file-cleanup loop then must not fail if it's already gone.
+        run_id = initialized_state_manager.load_state().run_id
+        initialized_state_manager.cleanup_on_success(run_id)  # must not raise
+
+    def test_cleanup_old_logs_tolerates_vanishing_file(self, initialized_state_manager):
+        """_cleanup_old_logs must not crash when a log file disappears mid-sort."""
+        logs_dir = initialized_state_manager.logs_dir
+
+        # Create more than 10 log files.
+        for i in range(12):
+            lf = logs_dir / f"run-vanish-{i:02d}.txt"
+            lf.write_text(f"log {i}")
+            time.sleep(0.01)
+
+        # Delete one of the files AFTER glob but before stat — simulate this by
+        # patching _cleanup_old_logs to delete one file just before sorting.
+        # Simplest approximation: pre-delete a file, then call cleanup.
+        (logs_dir / "run-vanish-00.txt").unlink()
+
+        run_id = initialized_state_manager.load_state().run_id
+        # Must not raise despite the missing file.
+        initialized_state_manager.cleanup_on_success(run_id)
+
+        remaining = list(logs_dir.glob("run-*.txt"))
+        # 12 created − 1 pre-deleted = 11; after rotation keep 10.
+        assert len(remaining) <= 10

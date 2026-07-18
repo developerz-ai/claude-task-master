@@ -48,7 +48,7 @@ class TestSessionMetrics:
         assert metrics.total_tokens == 150
 
     def test_estimated_cost(self):
-        """Test cost estimation."""
+        """Test cost estimation uses Opus 4 rates ($15/M input, $75/M output)."""
         metrics = SessionMetrics(
             session_id=1,
             task_index=0,
@@ -56,11 +56,11 @@ class TestSessionMetrics:
             tokens_input=1_000_000,  # 1M input tokens
             tokens_output=100_000,  # 100K output tokens
         )
-        # $5/M input + $25/M output = $5 + $2.5 = $7.5
-        assert metrics.estimated_cost == pytest.approx(7.5, rel=0.01)
+        # $15/M input + $75/M output = $15 + $7.5 = $22.5
+        assert metrics.estimated_cost == pytest.approx(22.5, rel=0.01)
 
     def test_estimated_cost_opus_rates(self):
-        """Test cost estimation uses Opus rates ($5/M input, $25/M output)."""
+        """Test cost estimation uses Opus 4 rates ($15/M input, $75/M output)."""
         metrics = SessionMetrics(
             session_id=1,
             task_index=0,
@@ -68,8 +68,8 @@ class TestSessionMetrics:
             tokens_input=1_000_000,  # 1M input tokens
             tokens_output=1_000_000,  # 1M output tokens
         )
-        # $5/M input + $25/M output = $5 + $25 = $30
-        assert metrics.estimated_cost == pytest.approx(30.0, rel=0.01)
+        # $15/M input + $75/M output = $15 + $75 = $90
+        assert metrics.estimated_cost == pytest.approx(90.0, rel=0.01)
 
 
 class TestTrackerConfig:
