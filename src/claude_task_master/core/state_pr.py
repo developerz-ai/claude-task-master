@@ -13,6 +13,8 @@ import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from claude_task_master.core.atomic_io import atomic_write_json, atomic_write_text
+
 if TYPE_CHECKING:
     pass
 
@@ -87,7 +89,7 @@ Status: {"Resolved" if is_resolved else "Unresolved"}
 
 {body}
 """
-            (comments_dir / filename).write_text(content)
+            atomic_write_text(comments_dir / filename, content)
 
         # Also save a summary file
         summary_file = pr_dir / "comments_summary.txt"
@@ -101,7 +103,7 @@ Status: {"Resolved" if is_resolved else "Unresolved"}
         for p in sorted(paths):
             summary_lines.append(f"  - {p}")
 
-        summary_file.write_text("\n".join(summary_lines))
+        atomic_write_text(summary_file, "\n".join(summary_lines))
 
     def save_ci_failure(self, pr_number: int, check_name: str, logs: str) -> None:
         """Save CI failure logs for Claude to read.
@@ -242,10 +244,11 @@ FAILURE LOGS:
         # Add new thread IDs
         all_addressed = existing | set(thread_ids)
 
-        # Save updated list
+        # Save updated list durably (temp file + fsync + atomic rename) so a
+        # crash can't corrupt the file into re-answered threads / duplicate
+        # comments.
         try:
-            with open(addressed_file, "w") as f:
-                json.dump({"thread_ids": list(all_addressed)}, f, indent=2)
+            atomic_write_json(addressed_file, {"thread_ids": list(all_addressed)})
         except OSError:
             pass  # Best effort - don't fail if we can't save
 

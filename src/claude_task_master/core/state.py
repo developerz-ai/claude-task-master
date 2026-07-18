@@ -3,8 +3,6 @@
 import fcntl
 import json
 import os
-import shutil
-import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime
@@ -12,6 +10,9 @@ from pathlib import Path
 from typing import IO, Literal
 
 from pydantic import BaseModel, ValidationError
+
+# Import shared durable atomic-write helper
+from claude_task_master.core.atomic_io import atomic_write_json
 
 # Import backup/recovery mixin
 from claude_task_master.core.state_backup import BackupRecoveryMixin
@@ -457,28 +458,17 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
             raise InvalidStateTransitionError(current_status, new_status)
 
     def _atomic_write_json(self, path: Path, data: dict) -> None:
-        """Atomically write JSON data to a file using a temp file.
+        """Atomically and durably write JSON data to a file.
+
+        Delegates to the shared :func:`atomic_write_json` helper, which writes
+        to a temp file, fsyncs it, renames it over the target, then fsyncs the
+        parent directory so a crash cannot leave a truncated ``state.json``.
 
         Args:
             path: The target file path.
             data: The data to write as JSON.
         """
-        path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Write to a temp file in the same directory, then rename
-        fd, temp_path = tempfile.mkstemp(dir=path.parent, prefix=".tmp_", suffix=".json")
-        try:
-            with open(fd, "w") as f:
-                json.dump(data, f, indent=2)
-            # Atomic rename
-            shutil.move(temp_path, path)
-        except Exception:
-            # Clean up temp file on error
-            try:
-                Path(temp_path).unlink()
-            except Exception:
-                pass  # Temp file cleanup is best-effort
-            raise
+        atomic_write_json(path, data)
 
     # Backup/recovery methods (_attempt_recovery, _create_backup, create_state_backup,
     # cleanup_on_success, _cleanup_old_logs) are inherited from BackupRecoveryMixin
