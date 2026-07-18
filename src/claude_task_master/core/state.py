@@ -376,9 +376,13 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
     def save_state(self, state: TaskState, validate_transition: bool = True) -> None:
         """Save state to state.json with file locking.
 
-        On success a rotating backup of the written state is created
-        (best-effort) so a later corruption can be recovered from the most
-        recent good state.
+        The transition check, the atomic write, and the rotating backup all run
+        under a single exclusive lock. The current state is read for validation
+        *inside* the lock (not before acquiring it) so a concurrent writer cannot
+        change the on-disk status between the check and the write
+        (time-of-check-to-time-of-use). On success a rotating backup of the
+        written state is created (best-effort) so a later corruption can be
+        recovered from the most recent good state.
 
         Args:
             state: The TaskState to save.
@@ -389,21 +393,24 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
             StatePermissionError: If the file cannot be written.
             StateLockError: If the file lock cannot be acquired.
         """
-        # Validate state transition if there's an existing state
-        if validate_transition and self.state_file.exists():
-            try:
-                current_state = self._load_state_internal()
-                self._validate_transition(current_state.status, state.status)
-            except (StateNotFoundError, StateCorruptedError):
-                # If we can't load current state, allow the save
-                pass
-
-        state.updated_at = datetime.now().isoformat()
-
         with file_lock(self._lock_file, timeout=self.LOCK_TIMEOUT):
+            # Validate the transition while holding the exclusive lock so no
+            # other writer can slip a status change in between the read and the
+            # write (TOCTOU). _load_state_internal may heal a corrupt file via
+            # recovery, which is safe here because we hold the exclusive lock.
+            if validate_transition and self.state_file.exists():
+                try:
+                    current_state = self._load_state_internal()
+                    self._validate_transition(current_state.status, state.status)
+                except (StateNotFoundError, StateCorruptedError):
+                    # If we can't load current state, allow the save.
+                    pass
+
+            state.updated_at = datetime.now().isoformat()
+
             try:
-                # Use atomic write with temp file
-                # Use mode='json' to ensure datetime fields are serialized as ISO strings
+                # Use atomic write with temp file.
+                # Use mode='json' to serialize datetime fields as ISO strings.
                 self._atomic_write_json(self.state_file, state.model_dump(mode="json"))
             except PermissionError as e:
                 raise StatePermissionError(self.state_file, "writing", e) from e
@@ -416,6 +423,13 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
     def load_state(self) -> TaskState:
         """Load state from state.json with error recovery.
 
+        Acquires the *exclusive* lock rather than a shared one: on a corrupt
+        state file :meth:`_load_state_internal` triggers recovery, which heals
+        ``state.json`` by writing the newest good backup back to disk. Writing
+        under a shared lock would let two concurrent readers recover-and-write at
+        the same time; the exclusive lock serializes them. The state file is
+        tiny, so serializing reads costs nothing measurable.
+
         Returns:
             TaskState: The loaded task state.
 
@@ -426,13 +440,16 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
             StatePermissionError: If the file cannot be read.
             StateLockError: If the file lock cannot be acquired.
         """
-        with file_lock(self._lock_file, timeout=self.LOCK_TIMEOUT, exclusive=False):
+        with file_lock(self._lock_file, timeout=self.LOCK_TIMEOUT):
             return self._load_state_internal()
 
     def _load_state_internal(self) -> TaskState:
-        """Internal method to load state without locking.
+        """Load and parse state without acquiring the lock.
 
-        This is used by save_state to check transitions without deadlock.
+        The caller MUST already hold the exclusive state lock: on corruption
+        this delegates to :meth:`_attempt_recovery`, which writes the healed
+        state back to ``state.json``. Both callers (:meth:`load_state` and
+        :meth:`save_state`) invoke it inside ``file_lock``.
         """
         if not self.state_file.exists():
             raise StateNotFoundError(self.state_file)

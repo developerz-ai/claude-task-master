@@ -78,6 +78,11 @@ class BackupRecoveryMixin:
         silently rolls back completed work (merged tasks, created PRs, ``--prs``
         counters).
 
+        On success this writes the healed state back to ``state.json`` via
+        :meth:`_atomic_write_json`, so the caller MUST hold the exclusive state
+        lock. Both call sites reach it through ``_load_state_internal`` under
+        ``file_lock``.
+
         Args:
             original_error: The error that triggered recovery (logged only).
 

@@ -1352,6 +1352,27 @@ class TestCorruptedStateRecovery:
         recovered_state = manager.load_state()
         assert recovered_state.run_id == original_state.run_id
 
+    def test_recovery_persists_healed_state(self, temp_dir):
+        """A recovering load rewrites state.json with the healed state.
+
+        The rewrite runs under load_state's exclusive lock, so a corrupt file is
+        healed on disk rather than re-recovered on every subsequent load.
+        """
+        state_dir = temp_dir / ".claude-task-master"
+        manager = StateManager(state_dir)
+
+        options = TaskOptions()
+        original_state = manager.initialize(goal="Test", model="sonnet", options=options)
+        manager.create_state_backup()
+
+        # Corrupt the live state file, then trigger recovery.
+        manager.state_file.write_text("corrupted")
+        manager.load_state()
+
+        # state.json is now valid JSON matching the recovered state on disk.
+        on_disk = json.loads(manager.state_file.read_text())
+        assert on_disk["run_id"] == original_state.run_id
+
     def test_corrupted_backup_creates_backup(self, temp_dir):
         """Test that corrupted file is backed up before recovery."""
         state_dir = temp_dir / ".claude-task-master"
@@ -1474,6 +1495,56 @@ class TestFileLocking:
         assert len(errors) == 0, f"Errors during concurrent access: {errors}"
         # All threads should have completed
         assert len(results) == 5
+
+    def test_load_state_acquires_exclusive_lock(self, initialized_state_manager):
+        """load_state takes the exclusive lock (not a shared one).
+
+        A shared reader would coexist with an already-held shared lock; the fact
+        that load_state cannot acquire the lock while a shared lock is held
+        proves it now requests an exclusive lock so recovery can safely rewrite
+        the healed state.
+        """
+        manager = initialized_state_manager
+        manager.LOCK_TIMEOUT = 0.3
+
+        with file_lock(manager._lock_file, timeout=1.0, exclusive=False):
+            with pytest.raises(StateLockError):
+                manager.load_state()
+
+    def test_concurrent_load_of_corrupt_state_recovers(self, temp_dir):
+        """Concurrent recovering loads serialize on the exclusive lock.
+
+        Several threads load a corrupt state that has a valid backup. Each must
+        recover the same state with no error or deadlock — the recovery write is
+        safe because load_state holds the exclusive (not shared) lock.
+        """
+        state_dir = temp_dir / ".claude-task-master"
+        manager = StateManager(state_dir)
+
+        options = TaskOptions()
+        original = manager.initialize(goal="Test", model="sonnet", options=options)
+        manager.create_state_backup()
+
+        # Corrupt the live state file; a valid backup remains for recovery.
+        manager.state_file.write_text("corrupted")
+
+        results: list[str] = []
+        errors: list[Exception] = []
+
+        def do_load() -> None:
+            try:
+                results.append(manager.load_state().run_id)
+            except Exception as e:  # noqa: BLE001 - collected for assertion
+                errors.append(e)
+
+        threads = [threading.Thread(target=do_load) for _ in range(6)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10.0)
+
+        assert errors == []
+        assert results == [original.run_id] * 6
 
 
 # =============================================================================
