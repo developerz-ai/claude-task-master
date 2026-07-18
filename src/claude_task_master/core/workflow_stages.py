@@ -42,7 +42,17 @@ class WorkflowStageHandler:
     CI_POLL_TIMEOUT = 7200  # seconds (120 min) before giving up on CI. Big CIs can run for
     # a long time; on timeout we block (error out) rather than merge a PR whose CI never
     # finished — unless --admin is set, which force-advances. See _ci_timeout_action.
-    REVIEW_POLL_TIMEOUT = 300  # seconds (5 min) before giving up on pending checks in reviews
+    # Grace period before trusting the "No CI configured" fast path: GitHub can be
+    # slow to register checks right after a push, so we only conclude there is no
+    # CI once this many polls have run (or NO_CI_MIN_ELAPSED seconds have passed).
+    NO_CI_MIN_POLLS = 2
+    NO_CI_MIN_ELAPSED = 30  # seconds before trusting the no-CI fast path
+    # Max consecutive "UNKNOWN" mergeable results / merge-status errors in
+    # ready_to_merge before blocking for manual intervention.
+    MAX_MERGE_UNKNOWN_ATTEMPTS = 6
+    # Polls used to confirm a merge actually landed after merge_pr succeeds
+    # (auto-merge enablement leaves the PR open until checks pass).
+    MERGE_CONFIRM_POLLS = 6
     # Max consecutive CI-fix cycles before blocking for manual intervention.
     MAX_CI_FIX_ATTEMPTS = 3
     # Grace period after CI passes before checking reviews. Review bots (CodeRabbit) post their
@@ -233,6 +243,10 @@ class WorkflowStageHandler:
         self.github_client = github_client
         self.pr_context = pr_context
         self.webhook_emitter = webhook_emitter
+        # Consecutive UNKNOWN-mergeable/merge-status-error counts keyed by PR number.
+        # Instance-level (not persisted) so state.py stays untouched; entries are
+        # reset when the PR merges/closes or mergeability resolves.
+        self._merge_unknown_attempts: dict[int, int] = {}
 
     def _emit_ci_event(
         self,
@@ -352,6 +366,28 @@ class WorkflowStageHandler:
         """Clear CI poll timer (called when leaving CI polling stages)."""
         state.ci_poll_start_time = None
 
+    def _no_ci_confirmed(self, state: TaskState) -> bool:
+        """Check whether the no-CI fast path may be trusted yet.
+
+        GitHub can take a moment to register checks right after a push, so an
+        empty check list on the first poll is not proof that no CI is configured.
+        Only trust it once the poll timer has been running for at least
+        NO_CI_MIN_ELAPSED seconds or at least NO_CI_MIN_POLLS polls have run.
+
+        Args:
+            state: Current task state (uses ci_poll_start_time as the timer).
+
+        Returns:
+            True if the no-CI fast path is safe to take, False to keep waiting.
+        """
+        if state.ci_poll_start_time is None:
+            return False
+        from datetime import datetime
+
+        elapsed = (datetime.now() - state.ci_poll_start_time).total_seconds()
+        polls = int(elapsed // self.CI_POLL_INTERVAL) + 1
+        return polls >= self.NO_CI_MIN_POLLS or elapsed >= self.NO_CI_MIN_ELAPSED
+
     def _ci_timeout_action(self, state: TaskState, reason: str) -> int | None:
         """Decide what to do when CI polling times out.
 
@@ -403,7 +439,10 @@ class WorkflowStageHandler:
                 self.state_manager.save_state(state)
                 return 1
 
-            # Get required checks from branch protection
+            # Get required checks from branch protection. Fetch failures raise
+            # (GitHubError/GitHubTimeoutError) rather than returning an empty
+            # list, and the except below treats that as "unknown — keep waiting"
+            # instead of "zero required checks".
             required_checks = set(
                 self.github_client.get_required_status_checks(pr_status.base_branch)
             )
@@ -416,12 +455,27 @@ class WorkflowStageHandler:
             missing_required = required_checks - reported_checks
 
             # No CI configured: no required checks AND no checks reported AND
-            # GitHub hasn't computed a CI state yet (ci_state is None or empty)
+            # GitHub hasn't computed a CI state yet (ci_state is None or empty).
+            # Only trust this after the poll has run for a minimum time — right
+            # after a push GitHub may not have registered any checks yet.
             if (
                 not required_checks
                 and not pr_status.check_details
                 and pr_status.ci_state not in ("SUCCESS", "FAILURE", "ERROR")
             ):
+                if not self._no_ci_confirmed(state):
+                    if state.ci_poll_start_time is None:
+                        from datetime import datetime
+
+                        state.ci_poll_start_time = datetime.now()
+                        self.state_manager.save_state(state)
+                    console.info(
+                        "No CI checks reported yet - waiting to confirm no CI is configured"
+                    )
+                    console.detail(f"Next check in {self.CI_POLL_INTERVAL}s...")
+                    if not interruptible_sleep(self.CI_POLL_INTERVAL):
+                        return None
+                    return None
                 console.info("No CI checks configured - skipping CI wait")
                 self._clear_ci_poll_timer(state)
                 state.workflow_stage = "waiting_reviews"
@@ -564,8 +618,7 @@ class WorkflowStageHandler:
         state.ci_fix_attempts += 1
         if state.ci_fix_attempts > self.MAX_CI_FIX_ATTEMPTS:
             console.error(
-                f"CI failed {state.ci_fix_attempts} times — blocking, "
-                "manual intervention required"
+                f"CI failed {state.ci_fix_attempts} times — blocking, manual intervention required"
             )
             state.status = "blocked"
             self.state_manager.save_state(state)
@@ -821,15 +874,14 @@ After verifying, end with: TASK COMPLETE"""
                 return 1
 
             # Check if ANY checks are still pending (CI, review bots, etc)
-            # A check is pending if: status is not terminal AND conclusion is None
+            # Local import: cli_commands/__init__ imports core.orchestrator,
+            # so a top-level import here would be circular.
+            from ..cli_commands.ci_helpers import is_check_pending
+
             pending_checks = [
                 self._get_check_name(check)
                 for check in pr_status.check_details
-                if (
-                    check.get("status", "").upper()
-                    not in ("COMPLETED", "SUCCESS", "FAILURE", "ERROR", "SKIPPED")
-                    and check.get("conclusion") is None
-                )
+                if is_check_pending(check)
             ]
 
             if pending_checks:
@@ -990,6 +1042,61 @@ End with: TASK COMPLETE"""
         self.state_manager.save_state(state)
         return None
 
+    def _merge_status_retry(self, state: TaskState, reason: str) -> int | None:
+        """Handle a merge-status check failure with bounded backoff.
+
+        Never falls through to merge: retries with linear backoff (capped at
+        60s) and blocks after MAX_MERGE_UNKNOWN_ATTEMPTS consecutive failures.
+
+        Args:
+            state: Current task state.
+            reason: Human-readable description of the failure.
+
+        Returns:
+            1 if blocked, None to retry on the next cycle.
+        """
+        attempt = self._merge_unknown_attempts.get(state.current_pr or 0, 0)
+        if attempt >= self.MAX_MERGE_UNKNOWN_ATTEMPTS:
+            console.error(
+                f"Merge status unavailable after {attempt} attempts ({reason}) - "
+                "blocking, manual intervention required"
+            )
+            state.status = "blocked"
+            self.state_manager.save_state(state)
+            return 1
+        delay = min(self.CI_POLL_INTERVAL * attempt, 60)
+        console.warning(f"{reason} - retry {attempt}/{self.MAX_MERGE_UNKNOWN_ATTEMPTS} in {delay}s")
+        if not interruptible_sleep(delay):
+            return None
+        return None
+
+    def _confirm_pr_merged(self, pr_number: int) -> bool | None:
+        """Poll GitHub to confirm a PR actually merged after merge_pr succeeds.
+
+        merge_pr can enable auto-merge instead of merging immediately, leaving
+        the PR open until checks pass, so the success return is not proof of
+        merge. Polls get_pr_status up to MERGE_CONFIRM_POLLS times at
+        CI_POLL_INTERVAL seconds apart.
+
+        Args:
+            pr_number: The PR number to confirm.
+
+        Returns:
+            True if merged, False if still open (auto-merge scheduled), None if
+            the status could not be fetched.
+        """
+        for _ in range(self.MERGE_CONFIRM_POLLS):
+            try:
+                confirm_status = self.github_client.get_pr_status(pr_number)
+            except Exception as e:
+                console.warning(f"Could not confirm merge of PR #{pr_number}: {e}")
+                return None
+            if confirm_status.state == "MERGED":
+                return True
+            if not interruptible_sleep(self.CI_POLL_INTERVAL):
+                return False
+        return False
+
     def handle_ready_to_merge_stage(self, state: TaskState) -> int | None:
         """Handle ready to merge - merge the PR if auto_merge enabled."""
         if state.current_pr is None:
@@ -997,57 +1104,77 @@ End with: TASK COMPLETE"""
             self.state_manager.save_state(state)
             return None
 
+        pr_number = state.current_pr
+
         # Check PR status before attempting merge
         try:
-            pr_status = self.github_client.get_pr_status(state.current_pr)
+            pr_status = self.github_client.get_pr_status(pr_number)
 
             # Check if PR was already merged (e.g., manually)
             if pr_status.state == "MERGED":
-                console.success(
-                    f"PR #{state.current_pr} was already merged - skipping to next task"
-                )
+                console.success(f"PR #{pr_number} was already merged - skipping to next task")
+                self._merge_unknown_attempts.pop(pr_number, None)
                 state.workflow_stage = "merged"
                 self.state_manager.save_state(state)
                 return None
 
             # Check if PR was closed without merging
             if pr_status.state == "CLOSED":
-                console.warning(f"PR #{state.current_pr} was closed without merging")
+                console.warning(f"PR #{pr_number} was closed without merging")
+                self._merge_unknown_attempts.pop(pr_number, None)
                 state.status = "blocked"
                 self.state_manager.save_state(state)
                 return 1
 
             if pr_status.mergeable == "CONFLICTING":
-                console.warning(f"PR #{state.current_pr} has merge conflicts!")
+                console.warning(f"PR #{pr_number} has merge conflicts!")
                 console.detail("Conflicts must be resolved before merging")
+                self._merge_unknown_attempts.pop(pr_number, None)
                 state.status = "blocked"
                 self.state_manager.save_state(state)
                 return 1
             elif pr_status.mergeable == "UNKNOWN":
-                console.info("Waiting for GitHub to calculate mergeable status...")
-                if not interruptible_sleep(self.CI_POLL_INTERVAL):
-                    return None
-                return None  # Retry on next cycle
+                attempt = self._merge_unknown_attempts.get(pr_number, 0) + 1
+                self._merge_unknown_attempts[pr_number] = attempt
+                return self._merge_status_retry(
+                    state, "Waiting for GitHub to calculate mergeable status"
+                )
+            # Mergeability resolved - reset the UNKNOWN/error counter
+            self._merge_unknown_attempts.pop(pr_number, None)
         except Exception as e:
-            console.warning(f"Error checking mergeable status: {e}")
-            # Continue trying to merge anyway
+            attempt = self._merge_unknown_attempts.get(pr_number, 0) + 1
+            self._merge_unknown_attempts[pr_number] = attempt
+            return self._merge_status_retry(state, f"Error checking mergeable status: {e}")
 
         if state.options.auto_merge:
-            console.info(f"Merging PR #{state.current_pr}...")
+            console.info(f"Merging PR #{pr_number}...")
             try:
-                self.github_client.merge_pr(state.current_pr, admin=state.options.admin_merge)
-                console.success(f"PR #{state.current_pr} merged!")
-                state.workflow_stage = "merged"
-                self.state_manager.save_state(state)
-                return None
+                self.github_client.merge_pr(pr_number, admin=state.options.admin_merge)
             except Exception as e:
                 console.warning(f"Auto-merge failed: {e}")
                 console.detail("PR may need manual merge or have merge conflicts")
                 state.status = "blocked"
                 self.state_manager.save_state(state)
                 return 1
+            # Confirm the merge actually landed - merge_pr may have enabled
+            # auto-merge instead, which only merges once checks pass.
+            merged = self._confirm_pr_merged(pr_number)
+            if merged:
+                console.success(f"PR #{pr_number} merged!")
+                self._merge_unknown_attempts.pop(pr_number, None)
+                state.workflow_stage = "merged"
+                self.state_manager.save_state(state)
+                return None
+            if merged is False:
+                console.info(
+                    f"Auto-merge scheduled for PR #{pr_number} - will complete when checks pass"
+                )
+            # Keep stage ready_to_merge; the next cycle's get_pr_status sees
+            # MERGED and advances via the already-merged check above.
+            self.state_manager.save_state(state)
+            return None
         else:
-            console.info(f"PR #{state.current_pr} ready to merge (auto_merge disabled)")
+            console.info(f"PR #{pr_number} ready to merge (auto_merge disabled)")
             console.detail("Use 'claudetm resume' after manual merge")
             state.status = "paused"
             self.state_manager.save_state(state)
