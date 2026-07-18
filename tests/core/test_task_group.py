@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from claude_task_master.core.agent_models import ModelType
 from claude_task_master.core.task_group import (
     ParsedTask,
     PullRequest,
@@ -62,15 +63,18 @@ class TestTaskComplexity:
         complexity, _ = parse_task_complexity("`[DEBUGGING-QA]` Task")
         assert complexity == TaskComplexity.DEBUGGING_QA
 
-    def test_get_model_for_complexity(self):
-        """Should map complexity to correct model name."""
-        assert TaskComplexity.get_model_for_complexity(TaskComplexity.CODING) == "opus"
-        assert TaskComplexity.get_model_for_complexity(TaskComplexity.QUICK) == "haiku"
-        assert TaskComplexity.get_model_for_complexity(TaskComplexity.GENERAL) == "sonnet"
+    def test_get_model_name_for_complexity(self):
+        """Should map complexity to correct ModelType."""
+        assert TaskComplexity.get_model_name_for_complexity(TaskComplexity.CODING) is ModelType.OPUS
+        assert TaskComplexity.get_model_name_for_complexity(TaskComplexity.QUICK) is ModelType.HAIKU
+        assert TaskComplexity.get_model_name_for_complexity(TaskComplexity.GENERAL) is ModelType.SONNET
 
-    def test_get_model_for_debugging_qa(self):
-        """Should map DEBUGGING_QA complexity to sonnet_1m."""
-        assert TaskComplexity.get_model_for_complexity(TaskComplexity.DEBUGGING_QA) == "sonnet_1m"
+    def test_get_model_name_for_debugging_qa(self):
+        """Should map DEBUGGING_QA complexity to SONNET_1M."""
+        assert (
+            TaskComplexity.get_model_name_for_complexity(TaskComplexity.DEBUGGING_QA)
+            is ModelType.SONNET_1M
+        )
 
 
 class TestParseTasksWithGroups:

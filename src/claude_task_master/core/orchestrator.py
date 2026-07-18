@@ -20,6 +20,7 @@ from .key_listener import (
     start_listening,
     stop_listening,
 )
+from .plan_parsing import count_completed_tasks, parse_task_descriptions
 from .planner import Planner
 from .pr_context import PRContextManager
 from .progress_tracker import ExecutionTracker, TrackerConfig
@@ -341,7 +342,7 @@ class WorkLoopOrchestrator:
         try:
             plan = self.state_manager.load_plan()
             if plan:
-                tasks = self.state_manager._parse_plan_tasks(plan)
+                tasks = parse_task_descriptions(plan)
                 return len(tasks)
         except Exception:
             pass
@@ -350,20 +351,19 @@ class WorkLoopOrchestrator:
     def _get_completed_tasks(self, state: TaskState) -> int:
         """Get number of completed tasks from the plan.
 
+        Counts ``- [x]``/``- [X]`` completions via core.plan_parsing.
+
         Args:
             state: Current task state.
 
         Returns:
-            Number of completed tasks.
+            Number of completed tasks, falling back to
+            ``state.current_task_index`` on error or missing plan.
         """
         try:
             plan = self.state_manager.load_plan()
             if plan:
-                # Count tasks marked as [x]
-                import re
-
-                completed = len(re.findall(r"^- \[x\]", plan, re.MULTILINE))
-                return completed
+                return count_completed_tasks(plan)
         except Exception:
             pass
         return state.current_task_index

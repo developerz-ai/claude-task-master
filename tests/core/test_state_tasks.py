@@ -118,15 +118,11 @@ class TestParsePlanTasks:
         tasks = state_manager._parse_plan_tasks(plan)
         assert tasks == ["Unchecked", "Lowercase x"]
 
-    def test_parse_tasks_uppercase_x_not_recognized(self, state_manager):
-        """Test that uppercase X is not recognized as a task marker.
-
-        This documents current behavior - uppercase X is NOT supported.
-        """
+    def test_parse_tasks_uppercase_x_recognized(self, state_manager):
+        """Test that uppercase X is recognized as a completed task marker."""
         plan = "- [X] Task with uppercase X"
         tasks = state_manager._parse_plan_tasks(plan)
-        # Current implementation doesn't recognize uppercase X
-        assert tasks == []
+        assert tasks == ["Task with uppercase X"]
 
     def test_parse_tasks_with_special_characters(self, state_manager):
         """Test parsing tasks with special characters."""
@@ -472,6 +468,18 @@ class TestValidateForResume:
 
         result = initialized_state_manager.validate_for_resume()
         assert result.current_task_index == 0
+
+    def test_validate_for_resume_raises_when_no_tasks_but_index_positive(
+        self, initialized_state_manager
+    ):
+        """Test validate_for_resume raises when plan has no tasks but index > 0."""
+        initialized_state_manager.save_plan("# Plan with no tasks\n\nJust text.")
+        state = initialized_state_manager.load_state()
+        state.current_task_index = 2
+        initialized_state_manager.save_state(state)
+
+        with pytest.raises(StateResumeValidationError):
+            initialized_state_manager.validate_for_resume()
 
     def test_validate_plan_with_mixed_task_status(self, initialized_state_manager):
         """Test validate_for_resume with plan containing completed and pending tasks."""

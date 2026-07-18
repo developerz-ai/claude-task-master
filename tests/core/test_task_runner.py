@@ -378,10 +378,10 @@ class TestIsAllComplete:
         basic_task_state.current_task_index = 10  # Beyond task count
         assert task_runner.is_all_complete(basic_task_state)
 
-    def test_all_complete_no_plan(self, task_runner, basic_task_state):
-        """Should return True when no plan exists."""
-        # Don't save any plan
-        assert task_runner.is_all_complete(basic_task_state)
+    def test_no_plan_raises(self, task_runner, basic_task_state):
+        """Should raise NoPlanFoundError when no plan exists."""
+        with pytest.raises(NoPlanFoundError):
+            task_runner.is_all_complete(basic_task_state)
 
 
 # =============================================================================
