@@ -18,7 +18,10 @@ Usage:
 from __future__ import annotations
 
 import logging
+from functools import partial
 from typing import TYPE_CHECKING
+
+import anyio
 
 from claude_task_master.api.models import (
     CloneRepoRequest,
@@ -29,6 +32,7 @@ from claude_task_master.api.models import (
     SetupRepoRequest,
     SetupRepoResponse,
 )
+from claude_task_master.auth import is_auth_enabled
 from claude_task_master.mcp.tools import (
     clone_repo,
     plan_repo,
@@ -49,6 +53,25 @@ except ImportError:
     FASTAPI_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+
+def _auth_required_response() -> JSONResponse:
+    """Build a 403 response refusing a repo operation when auth is disabled.
+
+    Repo endpoints clone repositories, run subprocesses, and spawn agents, so
+    they must never be reachable when authentication is not configured.
+
+    Returns:
+        A 403 JSONResponse instructing the operator to configure a password.
+    """
+    return JSONResponse(
+        status_code=403,
+        content=ErrorResponse(
+            error="authentication_required",
+            message="Repository operations require authentication to be enabled.",
+            suggestion="Set CLAUDETM_PASSWORD or CLAUDETM_PASSWORD_HASH before starting the server.",
+        ).model_dump(),
+    )
 
 
 def create_repo_router() -> APIRouter:
@@ -100,14 +123,22 @@ def create_repo_router() -> APIRouter:
 
         Raises:
             400: If the URL is invalid or clone fails.
+            403: If authentication is not enabled.
             500: If an unexpected error occurs.
         """
+        if not is_auth_enabled():
+            return _auth_required_response()
         try:
-            # Use the MCP tool implementation for consistency
-            result = clone_repo(
-                url=clone_request.url,
-                target_dir=clone_request.target_dir,
-                branch=clone_request.branch,
+            # Use the MCP tool implementation for consistency. Offload the
+            # (blocking, subprocess-heavy) clone to a worker thread so the
+            # event loop stays responsive.
+            result = await anyio.to_thread.run_sync(
+                partial(
+                    clone_repo,
+                    url=clone_request.url,
+                    target_dir=clone_request.target_dir,
+                    branch=clone_request.branch,
+                )
             )
 
             if not result.get("success", False):
@@ -172,12 +203,23 @@ def create_repo_router() -> APIRouter:
 
         Raises:
             400: If setup fails.
+            403: If authentication is not enabled.
             404: If the work directory doesn't exist.
             500: If an unexpected error occurs.
         """
+        if not is_auth_enabled():
+            return _auth_required_response()
         try:
-            # Use the MCP tool implementation for consistency
-            result = setup_repo(work_dir=setup_request.work_dir)
+            # Use the MCP tool implementation for consistency. Offload the
+            # (blocking, subprocess-heavy) setup to a worker thread so the
+            # event loop stays responsive.
+            result = await anyio.to_thread.run_sync(
+                partial(
+                    setup_repo,
+                    work_dir=setup_request.work_dir,
+                    run_setup_scripts=setup_request.run_setup_scripts,
+                )
+            )
 
             if not result.get("success", False):
                 # Determine appropriate error code
@@ -258,15 +300,24 @@ def create_repo_router() -> APIRouter:
 
         Raises:
             400: If planning fails or goal is invalid.
+            403: If authentication is not enabled.
             404: If the work directory doesn't exist.
             500: If an unexpected error occurs.
         """
+        if not is_auth_enabled():
+            return _auth_required_response()
         try:
-            # Use the MCP tool implementation for consistency
-            result = plan_repo(
-                work_dir=plan_request.work_dir,
-                goal=plan_request.goal,
-                model=plan_request.model,
+            # Use the MCP tool implementation for consistency. Offload the
+            # (blocking, agent-driven) planning to a worker thread: it avoids
+            # freezing the event loop and lets ``run_async_with_cleanup`` drive
+            # its own loop without hitting the running-loop RuntimeError.
+            result = await anyio.to_thread.run_sync(
+                partial(
+                    plan_repo,
+                    work_dir=plan_request.work_dir,
+                    goal=plan_request.goal,
+                    model=plan_request.model,
+                )
             )
 
             if not result.get("success", False):

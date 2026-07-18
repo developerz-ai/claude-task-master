@@ -69,26 +69,11 @@ API_PORT = int(os.getenv("CLAUDETM_API_PORT", "8000"))
 # Comma-separated list of allowed origins, or "*" for all
 CORS_ORIGINS = os.getenv("CLAUDETM_CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
 
-# Optional API key for authentication
-API_KEY = os.getenv("CLAUDETM_API_KEY", "")
-
-
-def _truncate_api_key(key: str) -> str:
-    """Truncate API key for safe display.
-
-    Shows first 4 and last 4 characters with ellipsis in between.
-
-    Args:
-        key: The API key to truncate.
-
-    Returns:
-        Truncated key string or "(not set)" if empty.
-    """
-    if not key:
-        return "(not set)"
-    if len(key) <= 12:
-        return key[:2] + "..." + key[-2:]
-    return key[:4] + "..." + key[-4:]
+# NOTE: Authentication for the REST API is enforced solely by PasswordAuthMiddleware
+# (CLAUDETM_PASSWORD / CLAUDETM_PASSWORD_HASH). There is deliberately no separate
+# CLAUDETM_API_KEY here: that name is owned by the profile system for a real
+# Anthropic API key (see cli_commands/profile.py), so reading — and especially
+# logging — it from the server would collide with it and leak a credential fragment.
 
 
 def _log_api_config(
@@ -107,7 +92,6 @@ def _log_api_config(
     logger.info(f"  Host: {host}")
     logger.info(f"  Port: {port}")
     logger.info(f"  CORS Origins: {', '.join(cors_origins) if cors_origins else '(none)'}")
-    logger.info(f"  API Key: {_truncate_api_key(API_KEY)}")
     logger.info(f"  Password Auth: {'enabled' if auth_enabled else 'disabled'}")
     logger.info("=" * 50)
 
@@ -398,17 +382,16 @@ def run_server(
     # Log API configuration
     _log_api_config(effective_host, effective_port, effective_cors, auth_enabled)
 
-    # Security warning for non-localhost binding without authentication
+    # Refuse non-localhost binding without enforceable authentication.
+    # Mirrors mcp/server.py:run_server so both transports fail closed.
     if effective_host not in ("127.0.0.1", "localhost", "::1"):
         if not auth_enabled:
-            logger.warning(
-                f"API server binding to non-localhost address ({effective_host}) without authentication. "
-                "Set CLAUDETM_PASSWORD or CLAUDETM_PASSWORD_HASH for security."
+            logger.error(
+                f"API server cannot bind to non-localhost address ({effective_host}) "
+                "without authentication. Set CLAUDETM_PASSWORD or CLAUDETM_PASSWORD_HASH."
             )
-        else:
-            logger.info(
-                f"API server binding to {effective_host} with password authentication enabled."
-            )
+            raise SystemExit(1)
+        logger.info(f"API server binding to {effective_host} with password authentication enabled.")
 
     if reload:
         # Reload mode requires import string with factory so uvicorn can spawn

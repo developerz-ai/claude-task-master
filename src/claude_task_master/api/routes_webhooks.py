@@ -23,15 +23,19 @@ Usage:
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import logging
+import socket
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, field_validator
 
+from claude_task_master.auth import is_auth_enabled
 from claude_task_master.webhooks import (
     EventType,
     WebhookClient,
@@ -435,6 +439,184 @@ def _generate_webhook_id(url: str) -> str:
     return f"wh_{url_hash}_{unique_id}"
 
 
+# =============================================================================
+# Security Helpers
+# =============================================================================
+
+# Hop-by-hop headers (RFC 7230 §6.1) plus routing headers that must never be
+# smuggled from a user-supplied webhook config into an outbound request.
+_HOP_BY_HOP_HEADERS: frozenset[str] = frozenset(
+    {
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "upgrade",
+        "host",
+        "content-length",
+    }
+)
+
+# Substrings that mark a header as carrying a credential; matched case-insensitively.
+_SENSITIVE_HEADER_MARKERS: tuple[str, ...] = (
+    "authorization",
+    "auth",
+    "token",
+    "secret",
+    "cookie",
+    "password",
+    "credential",
+    "signature",
+    "api-key",
+    "apikey",
+    "x-key",
+)
+
+# Placeholder shown instead of a sensitive header value.
+_MASKED_VALUE = "***"
+
+
+def _mask_headers(headers: dict[str, str]) -> dict[str, str]:
+    """Redact credential-bearing header values for safe display.
+
+    Header names are preserved so operators can see which headers are configured,
+    but values of credential headers (e.g. ``Authorization: Bearer ...``) are
+    replaced with a placeholder to avoid leaking bearer tokens/secrets.
+
+    Args:
+        headers: The stored header mapping.
+
+    Returns:
+        A new mapping with sensitive values masked.
+    """
+    masked: dict[str, str] = {}
+    for name, value in headers.items():
+        lowered = name.lower()
+        if any(marker in lowered for marker in _SENSITIVE_HEADER_MARKERS):
+            masked[name] = _MASKED_VALUE
+        else:
+            masked[name] = value
+    return masked
+
+
+def _strip_hop_headers(headers: dict[str, str]) -> dict[str, str]:
+    """Drop hop-by-hop/routing headers before an outbound request.
+
+    Prevents a stored webhook config from smuggling connection-control or
+    ``Host`` headers into the request the server makes on its behalf.
+
+    Args:
+        headers: The stored header mapping.
+
+    Returns:
+        A new mapping without hop-by-hop headers.
+    """
+    return {
+        name: value for name, value in headers.items() if name.lower() not in _HOP_BY_HOP_HEADERS
+    }
+
+
+def _resolve_host(host: str) -> list[str]:
+    """Resolve a hostname to all of its IP addresses.
+
+    Numeric IP literals are returned as-is (no network I/O). Extracted as a
+    module-level function so tests can stub DNS resolution.
+
+    Args:
+        host: The hostname or IP literal to resolve.
+
+    Returns:
+        List of resolved IP address strings.
+
+    Raises:
+        OSError: If resolution fails (e.g. unknown host).
+    """
+    infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    # sockaddr[0] is the address string (typeshed widens it to str | int).
+    return [str(info[4][0]) for info in infos]
+
+
+def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Return True if an IP is private, loopback, link-local, or otherwise reserved.
+
+    Args:
+        ip: The parsed IP address to classify.
+
+    Returns:
+        True if the address must not be reachable via a server-side request.
+    """
+    # Unwrap IPv4-mapped IPv6 (e.g. ::ffff:169.254.169.254) before classifying.
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_reserved
+        or ip.is_unspecified
+    )
+
+
+def _url_ssrf_error(url: str) -> str | None:
+    """Validate that a URL's host resolves only to public addresses.
+
+    Resolves the host post-DNS and rejects the request if any resolved address
+    falls in a private/loopback/link-local/reserved range. This blocks SSRF to
+    cloud metadata endpoints (169.254.169.254), localhost, and internal networks
+    even when the attacker hides behind a hostname.
+
+    Args:
+        url: The target URL.
+
+    Returns:
+        An error message if the target is not permitted, otherwise None.
+    """
+    host = urlparse(url).hostname
+    if not host:
+        return "URL has no host"
+    try:
+        addresses = _resolve_host(host)
+    except OSError:
+        return f"Could not resolve host: {host}"
+    if not addresses:
+        return f"Could not resolve host: {host}"
+    for addr in addresses:
+        try:
+            ip = ipaddress.ip_address(addr)
+        except ValueError:
+            return f"Invalid resolved address: {addr}"
+        if _is_blocked_ip(ip):
+            return (
+                f"Target resolves to a non-public address ({addr}); "
+                "private, loopback, link-local, and reserved ranges are blocked"
+            )
+    return None
+
+
+def _auth_required_response() -> JSONResponse:
+    """Build a 403 response refusing a webhook operation when auth is disabled.
+
+    Webhook endpoints manage outbound-request configuration and can trigger
+    server-side requests (POST /webhooks/test), so they must never be reachable
+    when authentication is not configured.
+
+    Returns:
+        A 403 JSONResponse instructing the operator to configure a password.
+    """
+    return JSONResponse(
+        status_code=403,
+        content=WebhookErrorResponse(
+            error="authentication_required",
+            message="Webhook operations require authentication to be enabled.",
+            detail="Set CLAUDETM_PASSWORD or CLAUDETM_PASSWORD_HASH before starting the server.",
+        ).model_dump(),
+    )
+
+
 def _webhook_to_response(webhook_id: str, webhook: dict[str, Any]) -> WebhookResponse:
     """Convert a stored webhook to response model.
 
@@ -456,7 +638,7 @@ def _webhook_to_response(webhook_id: str, webhook: dict[str, Any]) -> WebhookRes
         timeout=webhook.get("timeout", 30.0),
         max_retries=webhook.get("max_retries", 3),
         verify_ssl=webhook.get("verify_ssl", True),
-        headers=webhook.get("headers", {}),
+        headers=_mask_headers(webhook.get("headers", {})),
         created_at=webhook.get("created_at", datetime.now().isoformat()),
         updated_at=webhook.get("updated_at", datetime.now().isoformat()),
     )
@@ -507,6 +689,8 @@ def create_webhooks_router() -> APIRouter:
         Returns:
             WebhooksListResponse with list of webhooks.
         """
+        if not is_auth_enabled():
+            return _auth_required_response()
         try:
             webhooks_file = _get_webhooks_file(request)
             webhooks = _load_webhooks(webhooks_file)
@@ -559,6 +743,8 @@ def create_webhooks_router() -> APIRouter:
         Returns:
             WebhookCreateResponse with created webhook.
         """
+        if not is_auth_enabled():
+            return _auth_required_response()
         try:
             webhooks_file = _get_webhooks_file(request)
             webhooks = _load_webhooks(webhooks_file)
@@ -645,6 +831,8 @@ def create_webhooks_router() -> APIRouter:
         Returns:
             WebhookResponse with webhook configuration.
         """
+        if not is_auth_enabled():
+            return _auth_required_response()
         try:
             webhooks_file = _get_webhooks_file(request)
             webhooks = _load_webhooks(webhooks_file)
@@ -701,6 +889,8 @@ def create_webhooks_router() -> APIRouter:
         Returns:
             WebhookResponse with updated webhook configuration.
         """
+        if not is_auth_enabled():
+            return _auth_required_response()
         try:
             webhooks_file = _get_webhooks_file(request)
             webhooks = _load_webhooks(webhooks_file)
@@ -800,6 +990,8 @@ def create_webhooks_router() -> APIRouter:
         Returns:
             WebhookDeleteResponse with deletion result.
         """
+        if not is_auth_enabled():
+            return _auth_required_response()
         try:
             webhooks_file = _get_webhooks_file(request)
             webhooks = _load_webhooks(webhooks_file)
@@ -864,6 +1056,8 @@ def create_webhooks_router() -> APIRouter:
         Returns:
             WebhookTestResponse with delivery result.
         """
+        if not is_auth_enabled():
+            return _auth_required_response()
         try:
             # Determine webhook URL and secret
             if test_request.webhook_id:
@@ -903,6 +1097,24 @@ def create_webhooks_router() -> APIRouter:
                         message="Either webhook_id or url must be provided",
                     ).model_dump(),
                 )
+
+            # SSRF guard: resolve the target host and refuse private, loopback,
+            # link-local, or otherwise reserved addresses (post-DNS, so a public
+            # hostname that resolves inward is still blocked).
+            ssrf_error = _url_ssrf_error(url)
+            if ssrf_error is not None:
+                return JSONResponse(
+                    status_code=400,
+                    content=WebhookErrorResponse(
+                        error="url_not_allowed",
+                        message="Webhook target address is not permitted",
+                        detail=ssrf_error,
+                    ).model_dump(),
+                )
+
+            # Strip hop-by-hop/routing headers so a stored config can't smuggle
+            # connection-control or Host headers into the outbound request.
+            headers = _strip_hop_headers(headers)
 
             # Create test payload
             event_id = str(uuid.uuid4())

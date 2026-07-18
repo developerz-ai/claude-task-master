@@ -46,10 +46,37 @@ MCP_PORT = int(os.getenv("CLAUDETM_MCP_PORT", "8080"))
 # Default host - localhost for security
 SERVER_HOST = os.getenv("CLAUDETM_SERVER_HOST", "127.0.0.1")
 
+
+def _validate_mcp_transport(
+    transport: str,
+) -> Literal["sse", "streamable-http"]:
+    """Validate MCP transport type.
+
+    Args:
+        transport: The transport type from environment variable.
+
+    Returns:
+        Valid transport type.
+
+    Raises:
+        ValueError: If transport is not a valid option.
+    """
+    valid_transports = {"sse", "streamable-http"}
+    if transport not in valid_transports:
+        raise ValueError(
+            f"Invalid CLAUDETM_MCP_TRANSPORT={transport!r}. "
+            f"Must be one of: {', '.join(sorted(valid_transports))}"
+        )
+    return transport  # type: ignore[return-value]
+
+
 # MCP transport type for unified server
-MCP_TRANSPORT: Literal["sse", "streamable-http"] = os.getenv(  # type: ignore[assignment]
-    "CLAUDETM_MCP_TRANSPORT", "sse"
-)
+_mcp_transport_env = os.getenv("CLAUDETM_MCP_TRANSPORT", "sse")
+try:
+    MCP_TRANSPORT: Literal["sse", "streamable-http"] = _validate_mcp_transport(_mcp_transport_env)
+except ValueError as err:
+    logger.error(str(err))
+    raise
 
 
 # =============================================================================

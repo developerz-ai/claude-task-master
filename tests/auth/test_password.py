@@ -237,6 +237,25 @@ class TestVerifyPasswordPlaintext:
         assert verify_password_plaintext("wrong", expected) is False
         assert verify_password_plaintext("my_secret_password_extra", expected) is False
 
+    def test_verify_plaintext_non_ascii_no_type_error(self) -> None:
+        """Non-ASCII passwords use UTF-8 bytes comparison; no TypeError.
+
+        hmac.compare_digest (and secrets.compare_digest) only accept ASCII
+        strings when passed str inputs — non-ASCII str raises TypeError on
+        CPython.  The fix encodes both sides to UTF-8 bytes first.
+        """
+        # Correct non-ASCII password matches itself
+        assert verify_password_plaintext("pässwörd", "pässwörd") is True
+        # Wrong non-ASCII password correctly returns False (not TypeError)
+        assert verify_password_plaintext("pässwörd", "different") is False
+        # Non-ASCII provided against ASCII expected
+        assert verify_password_plaintext("pässwörd", "ascii-password") is False
+        # ASCII provided against non-ASCII expected
+        assert verify_password_plaintext("ascii-password", "pässwörd") is False
+        # Multi-byte CJK and emoji characters
+        assert verify_password_plaintext("東京🔐", "東京🔐") is True
+        assert verify_password_plaintext("東京🔐", "other") is False
+
 
 # =============================================================================
 # Test: get_password_from_env

@@ -13,6 +13,27 @@ import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _enable_repo_auth_and_confine(monkeypatch, temp_dir):
+    """Enable auth and confine the workspace base for repo endpoint tests.
+
+    Repo endpoints now return 403 when authentication is disabled and reject
+    paths outside ``DEFAULT_WORKSPACE_BASE``. These behavior tests exercise the
+    authenticated happy path, so we enable the auth gate and point the workspace
+    base at ``temp_dir``. Dedicated refusal/escape tests live in
+    ``test_repo_security.py``.
+    """
+    import claude_task_master.api.routes_repo as routes_mod
+    import claude_task_master.mcp.tools as tools_mod
+
+    monkeypatch.setattr(routes_mod, "is_auth_enabled", lambda: True)
+    monkeypatch.setattr(tools_mod, "is_auth_enabled", lambda: True)
+    monkeypatch.setattr(tools_mod, "DEFAULT_WORKSPACE_BASE", temp_dir)
+
+
 # =============================================================================
 # POST /repo/clone Tests
 # =============================================================================
@@ -323,7 +344,7 @@ def test_post_setup_repo_with_setup_scripts(api_client, temp_dir):
         with patch("shutil.which", return_value="/usr/bin/uv"):
             response = api_client.post(
                 "/repo/setup",
-                json={"work_dir": str(repo_dir)},
+                json={"work_dir": str(repo_dir), "run_setup_scripts": True},
             )
 
     assert response.status_code == 200
@@ -651,18 +672,19 @@ def test_repo_endpoints_independent_of_task_state(api_client, temp_dir):
 # =============================================================================
 
 
-def test_clone_repo_request_model():
+def test_clone_repo_request_model(temp_dir):
     """Test CloneRepoRequest model validation."""
     from claude_task_master.api.models import CloneRepoRequest
 
-    # Valid request with all fields
+    # Valid request with all fields (target confined to the workspace base)
+    target = str(temp_dir / "target")
     request = CloneRepoRequest(
         url="https://github.com/test/repo.git",
-        target_dir="/path/to/target",
+        target_dir=target,
         branch="main",
     )
     assert request.url == "https://github.com/test/repo.git"
-    assert request.target_dir == "/path/to/target"
+    assert request.target_dir == target
     assert request.branch == "main"
 
     # Valid request with minimal fields
@@ -672,30 +694,33 @@ def test_clone_repo_request_model():
     assert request.branch is None
 
 
-def test_setup_repo_request_model():
+def test_setup_repo_request_model(temp_dir):
     """Test SetupRepoRequest model validation."""
     from claude_task_master.api.models import SetupRepoRequest
 
-    request = SetupRepoRequest(work_dir="/path/to/repo")
-    assert request.work_dir == "/path/to/repo"
+    work_dir = str(temp_dir / "repo")
+    request = SetupRepoRequest(work_dir=work_dir)
+    assert request.work_dir == work_dir
+    assert request.run_setup_scripts is False  # Opt-in defaults to off
 
 
-def test_plan_repo_request_model():
+def test_plan_repo_request_model(temp_dir):
     """Test PlanRepoRequest model validation."""
     from claude_task_master.api.models import PlanRepoRequest
 
-    # Valid request with all fields
+    # Valid request with all fields (work_dir confined to the workspace base)
+    work_dir = str(temp_dir / "repo")
     request = PlanRepoRequest(
-        work_dir="/path/to/repo",
+        work_dir=work_dir,
         goal="Implement feature",
         model="sonnet",
     )
-    assert request.work_dir == "/path/to/repo"
+    assert request.work_dir == work_dir
     assert request.goal == "Implement feature"
     assert request.model == "sonnet"
 
     # Valid request with default model
-    request = PlanRepoRequest(work_dir="/path/to/repo", goal="Fix bug")
+    request = PlanRepoRequest(work_dir=work_dir, goal="Fix bug")
     assert request.model == "opus"  # Default
 
 

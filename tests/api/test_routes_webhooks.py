@@ -27,6 +27,21 @@ pytestmark = pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="FastAPI not insta
 # =============================================================================
 
 
+@pytest.fixture(autouse=True)
+def _enable_webhook_auth_and_stub_dns(monkeypatch):
+    """Enable the /webhooks* auth gate and stub DNS for the happy-path suite.
+
+    All webhook routes now refuse (403) when authentication is disabled, so the
+    default posture for these tests is auth-enabled. DNS resolution is stubbed to
+    a public IP so the SSRF guard never touches the network for example.com
+    fixtures. Individual tests override either stub as needed.
+    """
+    import claude_task_master.api.routes_webhooks as rw
+
+    monkeypatch.setattr(rw, "is_auth_enabled", lambda: True)
+    monkeypatch.setattr(rw, "_resolve_host", lambda host: ["93.184.216.34"])
+
+
 @pytest.fixture
 def webhooks_file(api_state_dir: Path) -> Path:
     """Create a webhooks.json file with sample data."""
@@ -522,3 +537,317 @@ class TestTestWebhook:
             # Verify custom headers were passed
             call_kwargs = mock_client_class.call_args[1]
             assert call_kwargs["headers"] == {"X-Custom-Header": "value"}
+
+
+# =============================================================================
+# Auth-gate Tests (/webhooks* require auth)
+# =============================================================================
+
+
+def _disable_auth(monkeypatch) -> None:
+    """Report webhook authentication as disabled at the route boundary."""
+    import claude_task_master.api.routes_webhooks as rw
+
+    monkeypatch.setattr(rw, "is_auth_enabled", lambda: False)
+
+
+class TestWebhooksRequireAuth:
+    """Every /webhooks* route refuses with 403 when auth is disabled."""
+
+    def test_list_requires_auth(self, api_client, webhooks_file, monkeypatch):
+        """GET /webhooks returns 403 when auth is disabled."""
+        _disable_auth(monkeypatch)
+        response = api_client.get("/webhooks")
+        assert response.status_code == 403
+        assert response.json()["error"] == "authentication_required"
+
+    def test_create_requires_auth(self, api_client, api_state_dir, monkeypatch):
+        """POST /webhooks returns 403 when auth is disabled."""
+        _disable_auth(monkeypatch)
+        response = api_client.post("/webhooks", json={"url": "https://example.com/hook"})
+        assert response.status_code == 403
+        assert response.json()["error"] == "authentication_required"
+
+    def test_get_requires_auth(self, api_client, webhooks_file, monkeypatch):
+        """GET /webhooks/{id} returns 403 when auth is disabled."""
+        _disable_auth(monkeypatch)
+        response = api_client.get("/webhooks/wh_abc12345_def67890")
+        assert response.status_code == 403
+
+    def test_update_requires_auth(self, api_client, webhooks_file, monkeypatch):
+        """PUT /webhooks/{id} returns 403 when auth is disabled."""
+        _disable_auth(monkeypatch)
+        response = api_client.put("/webhooks/wh_abc12345_def67890", json={"enabled": False})
+        assert response.status_code == 403
+
+    def test_delete_requires_auth(self, api_client, webhooks_file, monkeypatch):
+        """DELETE /webhooks/{id} returns 403 when auth is disabled."""
+        _disable_auth(monkeypatch)
+        response = api_client.delete("/webhooks/wh_abc12345_def67890")
+        assert response.status_code == 403
+
+    def test_test_requires_auth(self, api_client, webhooks_file, monkeypatch):
+        """POST /webhooks/test returns 403 when auth is disabled (before any egress)."""
+        _disable_auth(monkeypatch)
+        with patch("claude_task_master.api.routes_webhooks.WebhookClient") as mock_client_class:
+            response = api_client.post("/webhooks/test", json={"url": "https://example.com/hook"})
+            assert response.status_code == 403
+            mock_client_class.assert_not_called()
+
+
+# =============================================================================
+# SSRF Guard Tests (POST /webhooks/test)
+# =============================================================================
+
+
+class TestWebhookSSRFGuard:
+    """POST /webhooks/test refuses targets resolving to internal addresses."""
+
+    def _stub_resolver(self, monkeypatch, addresses):
+        """Force _resolve_host to return the given addresses."""
+        import claude_task_master.api.routes_webhooks as rw
+
+        monkeypatch.setattr(rw, "_resolve_host", lambda host: addresses)
+
+    def test_rejects_loopback(self, api_client, api_state_dir, monkeypatch):
+        """A host resolving to loopback is rejected with 400 and no egress."""
+        self._stub_resolver(monkeypatch, ["127.0.0.1"])
+        with patch("claude_task_master.api.routes_webhooks.WebhookClient") as mock_client_class:
+            response = api_client.post(
+                "/webhooks/test", json={"url": "http://sneaky.internal.test/hook"}
+            )
+            assert response.status_code == 400
+            assert response.json()["error"] == "url_not_allowed"
+            mock_client_class.assert_not_called()
+
+    def test_rejects_cloud_metadata(self, api_client, api_state_dir, monkeypatch):
+        """The cloud metadata IP (169.254.169.254) is rejected with 400."""
+        self._stub_resolver(monkeypatch, ["169.254.169.254"])
+        with patch("claude_task_master.api.routes_webhooks.WebhookClient") as mock_client_class:
+            response = api_client.post(
+                "/webhooks/test", json={"url": "http://metadata.test/latest/meta-data/"}
+            )
+            assert response.status_code == 400
+            assert response.json()["error"] == "url_not_allowed"
+            mock_client_class.assert_not_called()
+
+    def test_rejects_private_range(self, api_client, api_state_dir, monkeypatch):
+        """A private RFC1918 address (10.x) is rejected with 400."""
+        self._stub_resolver(monkeypatch, ["10.1.2.3"])
+        response = api_client.post("/webhooks/test", json={"url": "http://intranet.test/hook"})
+        assert response.status_code == 400
+        assert response.json()["error"] == "url_not_allowed"
+
+    def test_rejects_ipv4_mapped_ipv6_loopback(self, api_client, api_state_dir, monkeypatch):
+        """An IPv4-mapped IPv6 loopback (::ffff:127.0.0.1) is unwrapped and rejected."""
+        self._stub_resolver(monkeypatch, ["::ffff:127.0.0.1"])
+        response = api_client.post("/webhooks/test", json={"url": "http://mapped.test/hook"})
+        assert response.status_code == 400
+
+    def test_rejects_unresolvable_host(self, api_client, api_state_dir, monkeypatch):
+        """A host that fails DNS resolution is rejected with 400."""
+        import socket
+
+        import claude_task_master.api.routes_webhooks as rw
+
+        def _boom(host):
+            raise socket.gaierror("name resolution failed")
+
+        monkeypatch.setattr(rw, "_resolve_host", _boom)
+        response = api_client.post("/webhooks/test", json={"url": "http://nope.invalid/hook"})
+        assert response.status_code == 400
+        assert response.json()["error"] == "url_not_allowed"
+
+    def test_allows_public_address(self, api_client, api_state_dir, monkeypatch):
+        """A public address passes the guard and the client is invoked."""
+        self._stub_resolver(monkeypatch, ["93.184.216.34"])
+        with patch("claude_task_master.api.routes_webhooks.WebhookClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.send.return_value = AsyncMock(
+                success=True,
+                status_code=200,
+                delivery_time_ms=10.0,
+                attempt_count=1,
+                error=None,
+            )
+            mock_client_class.return_value = mock_client
+            response = api_client.post(
+                "/webhooks/test", json={"url": "https://public.example.com/hook"}
+            )
+            assert response.status_code == 200
+            mock_client_class.assert_called_once()
+
+
+# =============================================================================
+# Header Masking Tests (no bearer/secret leak)
+# =============================================================================
+
+
+def _write_single_webhook(api_state_dir: Path, webhook_id: str, headers: dict) -> None:
+    """Write a webhooks.json containing one webhook with the given headers."""
+    data = {
+        "webhooks": {
+            webhook_id: {
+                "url": "https://example.com/masked",
+                "secret": "s3cr3t",
+                "events": None,
+                "enabled": True,
+                "name": "Masked",
+                "description": None,
+                "timeout": 30.0,
+                "max_retries": 3,
+                "verify_ssl": True,
+                "headers": headers,
+                "created_at": "2025-01-18T12:00:00",
+                "updated_at": "2025-01-18T12:00:00",
+            }
+        },
+        "updated_at": "2025-01-18T12:00:00",
+    }
+    (api_state_dir / "webhooks.json").write_text(json.dumps(data))
+
+
+class TestWebhookHeaderMasking:
+    """Credential-bearing header values are masked in responses."""
+
+    def test_list_masks_authorization_header(self, api_client, api_state_dir):
+        """GET /webhooks masks an Authorization bearer value but keeps benign headers."""
+        _write_single_webhook(
+            api_state_dir,
+            "wh_mask_0001",
+            {"Authorization": "Bearer super-secret-token", "Content-Type": "application/json"},
+        )
+        response = api_client.get("/webhooks")
+        assert response.status_code == 200
+        headers = response.json()["webhooks"][0]["headers"]
+        assert headers["Authorization"] == "***"
+        assert headers["Content-Type"] == "application/json"
+
+    def test_get_masks_sensitive_headers(self, api_client, api_state_dir):
+        """GET /webhooks/{id} masks X-Api-Key and Cookie, preserves Accept."""
+        _write_single_webhook(
+            api_state_dir,
+            "wh_mask_0002",
+            {"X-Api-Key": "abc123", "Cookie": "session=xyz", "Accept": "application/json"},
+        )
+        response = api_client.get("/webhooks/wh_mask_0002")
+        assert response.status_code == 200
+        headers = response.json()["headers"]
+        assert headers["X-Api-Key"] == "***"
+        assert headers["Cookie"] == "***"
+        assert headers["Accept"] == "application/json"
+
+    def test_create_response_masks_headers(self, api_client, api_state_dir):
+        """POST /webhooks masks Authorization in the creation response."""
+        response = api_client.post(
+            "/webhooks",
+            json={
+                "url": "https://example.com/newhook",
+                "headers": {"Authorization": "Bearer leak-me"},
+            },
+        )
+        assert response.status_code == 201
+        assert response.json()["webhook"]["headers"]["Authorization"] == "***"
+
+
+# =============================================================================
+# Hop-by-hop Header Stripping Tests (POST /webhooks/test)
+# =============================================================================
+
+
+class TestWebhookHopHeaderStripping:
+    """Hop-by-hop/routing headers are removed before the outbound test request."""
+
+    def test_strips_hop_headers_before_send(self, api_client, api_state_dir, monkeypatch):
+        """Connection/Host headers are dropped while custom headers survive."""
+        import claude_task_master.api.routes_webhooks as rw
+
+        monkeypatch.setattr(rw, "_resolve_host", lambda host: ["93.184.216.34"])
+        _write_single_webhook(
+            api_state_dir,
+            "wh_hop_0001",
+            {"Connection": "keep-alive", "Host": "evil.example.com", "X-Custom": "keep-me"},
+        )
+        with patch("claude_task_master.api.routes_webhooks.WebhookClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.send.return_value = AsyncMock(
+                success=True,
+                status_code=200,
+                delivery_time_ms=10.0,
+                attempt_count=1,
+                error=None,
+            )
+            mock_client_class.return_value = mock_client
+            response = api_client.post("/webhooks/test", json={"webhook_id": "wh_hop_0001"})
+            assert response.status_code == 200
+            sent_headers = mock_client_class.call_args[1]["headers"]
+            assert sent_headers == {"X-Custom": "keep-me"}
+
+
+# =============================================================================
+# Security Helper Unit Tests
+# =============================================================================
+
+
+class TestSecurityHelpers:
+    """Unit tests for the webhook security helper functions."""
+
+    def test_mask_headers_redacts_credentials(self):
+        """_mask_headers redacts credential headers and preserves benign ones."""
+        from claude_task_master.api.routes_webhooks import _mask_headers
+
+        masked = _mask_headers({"Authorization": "Bearer x", "Accept": "application/json"})
+        assert masked == {"Authorization": "***", "Accept": "application/json"}
+
+    def test_mask_headers_is_case_insensitive(self):
+        """_mask_headers matches credential markers case-insensitively."""
+        from claude_task_master.api.routes_webhooks import _mask_headers
+
+        assert _mask_headers({"x-api-key": "k", "X-SECRET-TOKEN": "t"}) == {
+            "x-api-key": "***",
+            "X-SECRET-TOKEN": "***",
+        }
+
+    def test_strip_hop_headers_removes_hop_by_hop(self):
+        """_strip_hop_headers drops hop-by-hop/routing headers only."""
+        from claude_task_master.api.routes_webhooks import _strip_hop_headers
+
+        result = _strip_hop_headers(
+            {"Connection": "keep-alive", "X-Ok": "1", "Host": "h", "Transfer-Encoding": "chunked"}
+        )
+        assert result == {"X-Ok": "1"}
+
+    @pytest.mark.parametrize(
+        "addr",
+        ["127.0.0.1", "10.0.0.1", "192.168.1.1", "172.16.0.1", "169.254.169.254", "::1", "0.0.0.0"],
+    )
+    def test_is_blocked_ip_blocks_internal(self, addr):
+        """_is_blocked_ip flags loopback/private/link-local/reserved addresses."""
+        import ipaddress
+
+        from claude_task_master.api.routes_webhooks import _is_blocked_ip
+
+        assert _is_blocked_ip(ipaddress.ip_address(addr)) is True
+
+    @pytest.mark.parametrize("addr", ["93.184.216.34", "8.8.8.8", "1.1.1.1"])
+    def test_is_blocked_ip_allows_public(self, addr):
+        """_is_blocked_ip permits public addresses."""
+        import ipaddress
+
+        from claude_task_master.api.routes_webhooks import _is_blocked_ip
+
+        assert _is_blocked_ip(ipaddress.ip_address(addr)) is False
+
+    def test_url_ssrf_error_none_for_public(self, monkeypatch):
+        """_url_ssrf_error returns None when the host resolves to a public address."""
+        import claude_task_master.api.routes_webhooks as rw
+
+        monkeypatch.setattr(rw, "_resolve_host", lambda host: ["93.184.216.34"])
+        assert rw._url_ssrf_error("https://example.com/hook") is None
+
+    def test_url_ssrf_error_blocks_private(self, monkeypatch):
+        """_url_ssrf_error returns a message when the host resolves internally."""
+        import claude_task_master.api.routes_webhooks as rw
+
+        monkeypatch.setattr(rw, "_resolve_host", lambda host: ["10.0.0.5"])
+        assert rw._url_ssrf_error("http://intranet.test/") is not None

@@ -18,8 +18,11 @@ from __future__ import annotations
 
 import logging
 import os
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
+
+import anyio
 
 from claude_task_master.mcp import tools
 
@@ -458,7 +461,7 @@ def create_server(
     # =============================================================================
 
     @mcp.tool()
-    def clone_repo(
+    async def clone_repo(
         url: str,
         target_dir: str | None = None,
         branch: str | None = None,
@@ -490,18 +493,21 @@ def create_server(
             clone_repo("git@github.com:user/project.git", branch="develop")
             clone_repo("https://github.com/user/project", target_dir="/custom/path")
         """
-        return tools.clone_repo(url, target_dir, branch)
+        # Offload the blocking subprocess work to a thread so the MCP event
+        # loop is never frozen during a (potentially minutes-long) clone.
+        return await anyio.to_thread.run_sync(partial(tools.clone_repo, url, target_dir, branch))
 
     @mcp.tool()
-    def setup_repo(
+    async def setup_repo(
         repo_dir: str,
+        run_setup_scripts: bool = False,
     ) -> dict[str, Any]:
         """Set up a cloned repository for development.
 
         Detects the project type and performs appropriate setup:
         - Creates virtual environment (for Python projects)
         - Installs dependencies (pip, npm, pnpm, yarn, bun)
-        - Runs setup scripts (setup-hooks.sh, setup.sh, etc.)
+        - Runs setup scripts (setup-hooks.sh, setup.sh, etc.) only when opted in
 
         Supports Python projects (pyproject.toml, setup.py, requirements.txt)
         and Node.js projects (package.json). Uses uv for Python dependency
@@ -509,6 +515,9 @@ def create_server(
 
         Args:
             repo_dir: Path to the cloned repository directory to set up.
+            run_setup_scripts: Execute repo-supplied setup scripts. Disabled by
+                default because running untrusted scripts is a remote-code-execution
+                risk; scripts are detected but skipped unless this is True.
 
         Returns:
             Dictionary containing:
@@ -525,10 +534,14 @@ def create_server(
             setup_repo("/home/user/workspace/claude-task-master/my-project")
             setup_repo("~/workspace/claude-task-master/python-app")
         """
-        return tools.setup_repo(repo_dir)
+        # Offload the blocking subprocess work to a thread so the MCP event
+        # loop is never frozen during dependency installation / setup scripts.
+        return await anyio.to_thread.run_sync(
+            partial(tools.setup_repo, repo_dir, run_setup_scripts=run_setup_scripts)
+        )
 
     @mcp.tool()
-    def plan_repo(
+    async def plan_repo(
         repo_dir: str,
         goal: str,
         model: str = "opus",
@@ -564,7 +577,10 @@ def create_server(
             plan_repo("/home/user/workspace/project", "Add user authentication")
             plan_repo("~/workspace/my-app", "Fix the login bug", model="sonnet")
         """
-        return tools.plan_repo(repo_dir, goal, model)
+        # Offload to a thread: keeps the MCP event loop responsive and lets the
+        # agent's ``run_async_with_cleanup`` drive its own loop in a thread that
+        # has none running, avoiding the running-loop RuntimeError.
+        return await anyio.to_thread.run_sync(partial(tools.plan_repo, repo_dir, goal, model))
 
     # =============================================================================
     # Resource Wrappers

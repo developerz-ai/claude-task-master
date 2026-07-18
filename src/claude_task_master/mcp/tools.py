@@ -7,11 +7,13 @@ of the MCP server wrapper.
 from __future__ import annotations
 
 import shutil
+from collections import deque
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
 
+from claude_task_master.auth.password import is_auth_enabled
 from claude_task_master.core.control import (
     ControlManager,
     ControlOperationNotAllowedError,
@@ -292,12 +294,19 @@ def get_logs(
 
     Args:
         work_dir: Working directory for the server.
-        tail: Number of lines to return from the end of the log.
+        tail: Number of lines to return from the end of the log (must be >= 1).
         state_dir: Optional custom state directory path.
 
     Returns:
         Dictionary containing log content or error.
     """
+    # Validate tail parameter
+    if tail < 1:
+        return LogsResult(
+            success=False,
+            error="tail must be >= 1",
+        ).model_dump()
+
     state_path = Path(state_dir) if state_dir else work_dir / ".claude-task-master"
     state_manager = StateManager(state_dir=state_path)
 
@@ -317,10 +326,11 @@ def get_logs(
                 error="No log file found",
             ).model_dump()
 
+        # Use deque to efficiently read only the last N lines
         with open(log_file) as f:
-            lines = f.readlines()
+            lines = deque(f, maxlen=tail)
 
-        log_content = "".join(lines[-tail:])
+        log_content = "".join(lines)
 
         return LogsResult(
             success=True,
@@ -477,7 +487,22 @@ def clean_task(
     Returns:
         Dictionary indicating success or failure.
     """
-    state_path = Path(state_dir) if state_dir else work_dir / ".claude-task-master"
+    # Confine the cleanup target to work_dir: clean_task rmtree's the state
+    # directory, so an unconstrained state_dir would allow arbitrary tree deletion.
+    if state_dir is not None:
+        candidate = Path(state_dir).expanduser().resolve()
+        work_base = Path(work_dir).expanduser().resolve()
+        if not candidate.is_relative_to(work_base):
+            return CleanResult(
+                success=False,
+                message=(
+                    f"Refusing to clean '{candidate}': outside the working directory '{work_base}'."
+                ),
+                files_removed=False,
+            ).model_dump()
+        state_path = candidate
+    else:
+        state_path = work_dir / ".claude-task-master"
     state_manager = StateManager(state_dir=state_path)
 
     if not state_manager.exists():
@@ -1123,6 +1148,43 @@ def clear_mailbox(
 # Default workspace base for repo setup
 DEFAULT_WORKSPACE_BASE = Path.home() / "workspace" / "claude-task-master"
 
+# Shown when a repo operation is invoked while authentication is disabled.
+_REPO_AUTH_REQUIRED_MESSAGE = (
+    "Repository operations are disabled because authentication is not configured. "
+    "Set CLAUDETM_PASSWORD or CLAUDETM_PASSWORD_HASH to enable them."
+)
+
+
+class WorkspaceConfinementError(ValueError):
+    """Raised when a user-supplied path resolves outside the workspace base."""
+
+
+def _resolve_within_workspace(path: str | Path) -> Path:
+    """Resolve *path* and ensure it stays within ``DEFAULT_WORKSPACE_BASE``.
+
+    Expands ``~`` and resolves ``..``/symlinks, then verifies the result is the
+    workspace base itself or a descendant. This blocks path-traversal escapes
+    (e.g. ``target_dir="/etc"`` or ``"../../root"``) from the repo endpoints,
+    which would otherwise allow arbitrary-filesystem writes.
+
+    Args:
+        path: The user-supplied filesystem path.
+
+    Returns:
+        The fully-resolved absolute path, guaranteed inside the workspace base.
+
+    Raises:
+        WorkspaceConfinementError: If the resolved path escapes the workspace base.
+    """
+    resolved = Path(path).expanduser().resolve()
+    base = DEFAULT_WORKSPACE_BASE.expanduser().resolve()
+    if not resolved.is_relative_to(base):
+        raise WorkspaceConfinementError(
+            f"Path '{resolved}' is outside the permitted workspace '{base}'. "
+            "Repository paths must stay within the workspace base."
+        )
+    return resolved
+
 
 def _extract_repo_name(url: str) -> str:
     """Extract repository name from a git URL.
@@ -1175,6 +1237,16 @@ def clone_repo(
     """
     import subprocess
 
+    # Refuse when authentication is not configured: this endpoint writes to the
+    # filesystem and must never be reachable unauthenticated.
+    if not is_auth_enabled():
+        return CloneRepoResult(
+            success=False,
+            message=_REPO_AUTH_REQUIRED_MESSAGE,
+            repo_url=url or None,
+            error="authentication_required",
+        ).model_dump()
+
     # Validate URL
     if not url or not url.strip():
         return CloneRepoResult(
@@ -1199,10 +1271,19 @@ def clone_repo(
             error="URL must start with https://, git@, git://, or ssh://",
         ).model_dump()
 
-    # Determine target directory
+    # Determine target directory (confined to the workspace base)
     repo_name = _extract_repo_name(url)
     if target_dir:
-        target_path = Path(target_dir).expanduser().resolve()
+        try:
+            target_path = _resolve_within_workspace(target_dir)
+        except WorkspaceConfinementError as e:
+            return CloneRepoResult(
+                success=False,
+                message=str(e),
+                repo_url=url,
+                target_dir=str(Path(target_dir).expanduser()),
+                error="path_outside_workspace",
+            ).model_dump()
     else:
         # Default to ~/workspace/claude-task-master/{repo-name}
         target_path = DEFAULT_WORKSPACE_BASE / repo_name
@@ -1317,16 +1398,21 @@ def clone_repo(
 
 def setup_repo(
     work_dir: str | Path,
+    run_setup_scripts: bool = False,
 ) -> dict[str, Any]:
     """Set up a cloned repository for development.
 
     Detects the project type and performs appropriate setup:
     - Creates virtual environment (for Python projects)
     - Installs dependencies (pip, npm, etc.)
-    - Runs setup scripts (setup-hooks.sh, etc.)
+    - Runs setup scripts (setup-hooks.sh, etc.) only when explicitly opted in
 
     Args:
-        work_dir: Path to the cloned repository directory.
+        work_dir: Path to the cloned repository directory (confined to the
+            workspace base).
+        run_setup_scripts: Execute repo-supplied setup scripts. Disabled by
+            default because running untrusted scripts is a remote-code-execution
+            risk; scripts are detected but skipped unless this is True.
 
     Returns:
         Dictionary containing setup result with success status and details.
@@ -1334,7 +1420,27 @@ def setup_repo(
     import subprocess
     import sys
 
-    work_path = Path(work_dir).expanduser().resolve()
+    # Refuse when authentication is not configured: this endpoint runs
+    # subprocesses and must never be reachable unauthenticated.
+    if not is_auth_enabled():
+        return SetupRepoResult(
+            success=False,
+            message=_REPO_AUTH_REQUIRED_MESSAGE,
+            work_dir=str(work_dir),
+            error="authentication_required",
+        ).model_dump()
+
+    # Confine the work directory to the workspace base.
+    try:
+        work_path = _resolve_within_workspace(work_dir)
+    except WorkspaceConfinementError as e:
+        return SetupRepoResult(
+            success=False,
+            message=str(e),
+            work_dir=str(Path(work_dir).expanduser()),
+            error="path_outside_workspace",
+        ).model_dump()
+
     steps_completed: list[str] = []
     setup_scripts_run: list[str] = []
     venv_path: str | None = None
@@ -1588,29 +1694,38 @@ def setup_repo(
                     )
 
         # === Run Setup Scripts ===
-        for script in setup_scripts:
-            try:
-                # Make script executable (skip on Windows where chmod is not needed)
-                if sys.platform != "win32":
-                    script.chmod(script.stat().st_mode | 0o755)
+        # Executing repo-supplied scripts is a remote-code-execution vector, so it
+        # is gated behind an explicit opt-in. When disabled, scripts are detected
+        # but never run.
+        if setup_scripts and not run_setup_scripts:
+            steps_completed.append(
+                f"Detected {len(setup_scripts)} setup script(s) but skipped execution "
+                "(set run_setup_scripts=true to run them)"
+            )
+        elif run_setup_scripts:
+            for script in setup_scripts:
+                try:
+                    # Make script executable (skip on Windows where chmod is not needed)
+                    if sys.platform != "win32":
+                        script.chmod(script.stat().st_mode | 0o755)
 
-                result = subprocess.run(
-                    [str(script)],
-                    cwd=work_path,
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    timeout=120,
-                )
-                if result.returncode == 0:
-                    setup_scripts_run.append(str(script.relative_to(work_path)))
-                    steps_completed.append(f"Ran setup script: {script.name}")
-                else:
-                    steps_completed.append(
-                        f"Warning: Setup script {script.name} failed: {result.stderr}"
+                    result = subprocess.run(
+                        [str(script)],
+                        cwd=work_path,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=120,
                     )
-            except Exception as e:
-                steps_completed.append(f"Warning: Could not run {script.name}: {e}")
+                    if result.returncode == 0:
+                        setup_scripts_run.append(str(script.relative_to(work_path)))
+                        steps_completed.append(f"Ran setup script: {script.name}")
+                    else:
+                        steps_completed.append(
+                            f"Warning: Setup script {script.name} failed: {result.stderr}"
+                        )
+                except Exception as e:
+                    steps_completed.append(f"Warning: Could not run {script.name}: {e}")
 
         # Determine overall success
         # Success if we detected a project type and either installed deps or ran scripts
@@ -1688,7 +1803,28 @@ def plan_repo(
     Returns:
         Dictionary containing planning result with success status, plan, and criteria.
     """
-    work_path = Path(work_dir).expanduser().resolve()
+    # Refuse when authentication is not configured: this endpoint spawns an agent
+    # and must never be reachable unauthenticated.
+    if not is_auth_enabled():
+        return PlanRepoResult(
+            success=False,
+            message=_REPO_AUTH_REQUIRED_MESSAGE,
+            work_dir=str(work_dir),
+            goal=goal,
+            error="authentication_required",
+        ).model_dump()
+
+    # Confine the work directory to the workspace base.
+    try:
+        work_path = _resolve_within_workspace(work_dir)
+    except WorkspaceConfinementError as e:
+        return PlanRepoResult(
+            success=False,
+            message=str(e),
+            work_dir=str(Path(work_dir).expanduser()),
+            goal=goal,
+            error="path_outside_workspace",
+        ).model_dump()
 
     # Validate work directory
     if not work_path.exists():
