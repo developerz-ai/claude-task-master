@@ -27,6 +27,10 @@ class PRStatus(BaseModel):
         "UNKNOWN"  # BLOCKED, BEHIND, CLEAN, DIRTY, HAS_HOOKS, UNKNOWN, UNSTABLE
     )
     base_branch: str = "main"
+    title: str = ""
+    url: str = ""
+    head_branch: str = ""
+    merged_at: str | None = None
 
 
 class GitHubClientProtocol(Protocol):
@@ -331,6 +335,10 @@ def _build_pr_status_query() -> str:
           mergeable
           mergeStateStatus
           baseRefName
+          title
+          url
+          headRefName
+          mergedAt
           commits(last: 1) {
             nodes {
               commit {
@@ -423,6 +431,10 @@ def _parse_pr_status_response(pr_number: int, pr_data: dict[str, Any]) -> PRStat
     mergeable = pr_data.get("mergeable", "UNKNOWN")
     merge_state_status = pr_data.get("mergeStateStatus", "UNKNOWN")
     base_branch = pr_data.get("baseRefName", "main")
+    title = pr_data.get("title") or ""
+    url = pr_data.get("url") or ""
+    head_branch = pr_data.get("headRefName") or ""
+    merged_at = pr_data.get("mergedAt")
 
     return PRStatus(
         number=pr_number,
@@ -439,6 +451,10 @@ def _parse_pr_status_response(pr_number: int, pr_data: dict[str, Any]) -> PRStat
         mergeable=mergeable,
         merge_state_status=merge_state_status,
         base_branch=base_branch,
+        title=title,
+        url=url,
+        head_branch=head_branch,
+        merged_at=merged_at,
     )
 
 

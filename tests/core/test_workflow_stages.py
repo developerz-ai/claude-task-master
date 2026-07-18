@@ -1051,6 +1051,117 @@ class TestHandleMergedStage:
         mock_console.error.assert_called()
 
     @patch("claude_task_master.core.workflow_stages.console")
+    def test_release_fix_pr_merge_preserves_attempt_counter(
+        self,
+        mock_console,
+        workflow_handler,
+        state_manager,
+        basic_task_state,
+        mock_github_client,
+        mock_pr_status,
+    ):
+        """A merged release-fix PR must NOT reset release_fix_attempts (cap stays reachable)."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan("- [ ] Task 1")
+        state_manager.save_release_guide("# Release\n\n1. Check /health returns 200")
+        basic_task_state.options.enable_release = True
+        basic_task_state.current_pr = 42
+        basic_task_state.in_release_fix = True
+        basic_task_state.release_fix_attempts = 4
+        mock_github_client.get_pr_status.return_value = mock_pr_status
+
+        with patch.object(WorkflowStageHandler, "_checkout_branch", return_value=True):
+            result = workflow_handler.handle_merged_stage(basic_task_state, MagicMock())
+
+        assert result is None
+        assert basic_task_state.workflow_stage == "releasing"
+        assert basic_task_state.release_fix_attempts == 4
+
+    @patch("claude_task_master.core.workflow_stages.console")
+    def test_normal_pr_merge_resets_release_fix_attempts(
+        self,
+        mock_console,
+        workflow_handler,
+        state_manager,
+        basic_task_state,
+        mock_github_client,
+        mock_pr_status,
+    ):
+        """A normal (non-release-fix) PR merge DOES reset release_fix_attempts."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan("- [ ] Task 1")
+        state_manager.save_release_guide("# Release\n\n1. Check /health returns 200")
+        basic_task_state.options.enable_release = True
+        basic_task_state.current_pr = 42
+        basic_task_state.in_release_fix = False
+        basic_task_state.release_fix_attempts = 2
+        mock_github_client.get_pr_status.return_value = mock_pr_status
+
+        with patch.object(WorkflowStageHandler, "_checkout_branch", return_value=True):
+            result = workflow_handler.handle_merged_stage(basic_task_state, MagicMock())
+
+        assert result is None
+        assert basic_task_state.workflow_stage == "releasing"
+        assert basic_task_state.release_fix_attempts == 0
+
+    @patch("claude_task_master.core.workflow_stages.console")
+    def test_pr_merged_event_fn_invoked_for_externally_merged_pr(
+        self,
+        mock_console,
+        workflow_handler,
+        state_manager,
+        basic_task_state,
+        mock_github_client,
+        mock_pr_status,
+    ):
+        """Merged stage reached via external merge invokes pr_merged_event_fn exactly once."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan("- [ ] Task 1")
+        # Stage reached without a ready_to_merge transition (PR merged externally)
+        basic_task_state.workflow_stage = "merged"
+        basic_task_state.current_pr = 42
+        mock_github_client.get_pr_status.return_value = mock_pr_status
+
+        mark_fn = MagicMock()
+        event_fn = MagicMock()
+
+        with patch.object(WorkflowStageHandler, "_checkout_branch", return_value=True):
+            result = workflow_handler.handle_merged_stage(basic_task_state, mark_fn, event_fn)
+
+        assert result is None
+        event_fn.assert_called_once_with(basic_task_state)
+
+    @patch("claude_task_master.core.workflow_stages.console")
+    def test_pr_merged_event_fn_not_double_called_across_stages(
+        self,
+        mock_console,
+        workflow_handler,
+        state_manager,
+        basic_task_state,
+        mock_github_client,
+        mock_pr_status,
+    ):
+        """Second merged-stage call for the same PR invokes the callback again (once per call).
+
+        Idempotency lives in the orchestrator callback, not in the stage handler.
+        """
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan("- [ ] Task 1")
+        basic_task_state.current_pr = 42
+        mock_github_client.get_pr_status.return_value = mock_pr_status
+
+        event_fn = MagicMock()
+
+        with patch.object(WorkflowStageHandler, "_checkout_branch", return_value=True):
+            workflow_handler.handle_merged_stage(basic_task_state, MagicMock(), event_fn)
+            # Simulate the stage being re-entered for the same PR (e.g. after resume)
+            basic_task_state.current_pr = 42
+            workflow_handler.handle_merged_stage(basic_task_state, MagicMock(), event_fn)
+
+        # Each stage entry fires the callback once; the callback itself dedupes
+        assert event_fn.call_count == 2
+
+    @patch("claude_task_master.core.workflow_stages.console")
     def test_no_plan_continues(
         self, mock_console, workflow_handler, state_manager, basic_task_state
     ):
@@ -1517,3 +1628,267 @@ class TestWaitingReviewsTimeout:
 
         assert basic_task_state.workflow_stage == "ready_to_merge"
         assert basic_task_state.ci_poll_start_time is None
+
+
+# =============================================================================
+# Test CI Fix Attempt Cap
+# =============================================================================
+
+
+class TestHandleCIFailedStageCap:
+    """Tests for the MAX_CI_FIX_ATTEMPTS cap in handle_ci_failed_stage."""
+
+    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
+    @patch("claude_task_master.core.workflow_stages.console")
+    def test_ci_fix_at_cap_blocks_without_agent(
+        self,
+        mock_console,
+        mock_sleep,
+        workflow_handler,
+        state_manager,
+        basic_task_state,
+        mock_agent,
+    ):
+        """At the cap (3 attempts), should block and return 1 WITHOUT running the agent."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        basic_task_state.current_pr = 42
+        basic_task_state.ci_fix_attempts = WorkflowStageHandler.MAX_CI_FIX_ATTEMPTS
+
+        result = workflow_handler.handle_ci_failed_stage(basic_task_state)
+
+        assert result == 1
+        assert basic_task_state.status == "blocked"
+        mock_agent.run_work_session.assert_not_called()
+        mock_console.error.assert_called()
+        mock_sleep.assert_not_called()
+
+    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
+    @patch("claude_task_master.core.workflow_stages.console")
+    def test_ci_fix_below_cap_increments_and_runs_agent(
+        self,
+        mock_console,
+        mock_sleep,
+        workflow_handler,
+        state_manager,
+        basic_task_state,
+        mock_agent,
+    ):
+        """Below the cap, should increment ci_fix_attempts, run agent, and wait for CI."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        basic_task_state.current_pr = 42
+        basic_task_state.ci_fix_attempts = 1
+        mock_sleep.return_value = True
+
+        with patch.object(WorkflowStageHandler, "_get_current_branch", return_value="feat"):
+            result = workflow_handler.handle_ci_failed_stage(basic_task_state)
+
+        assert result is None
+        assert basic_task_state.ci_fix_attempts == 2
+        mock_agent.run_work_session.assert_called_once()
+        assert basic_task_state.workflow_stage == "waiting_ci"
+
+
+# =============================================================================
+# Test Advance To Next Task Resets
+# =============================================================================
+
+
+class TestAdvanceToNextTask:
+    """Tests for _advance_to_next_task field resets."""
+
+    def test_advance_resets_fix_attempt_fields(self, workflow_handler, state_manager,
+                                               basic_task_state):
+        """Should reset in_release_fix, release_fix_attempts, and ci_fix_attempts."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        basic_task_state.in_release_fix = True
+        basic_task_state.release_fix_attempts = 3
+        basic_task_state.ci_fix_attempts = 2
+
+        workflow_handler._advance_to_next_task(basic_task_state)
+
+        assert basic_task_state.current_task_index == 1
+        assert basic_task_state.current_pr is None
+        assert basic_task_state.workflow_stage == "working"
+        assert basic_task_state.in_release_fix is False
+        assert basic_task_state.release_fix_attempts == 0
+        assert basic_task_state.ci_fix_attempts == 0
+
+
+# =============================================================================
+# Test PR Head Branch Sessions
+# =============================================================================
+
+
+class TestPRHeadBranchSessions:
+    """Fix sessions must target the PR head ref, not whatever branch is checked out."""
+
+    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
+    @patch("claude_task_master.core.workflow_stages.console")
+    def test_ci_failed_stage_passes_head_branch_as_required_branch(
+        self,
+        mock_console,
+        mock_sleep,
+        workflow_handler,
+        state_manager,
+        basic_task_state,
+        mock_agent,
+        mock_github_client,
+        mock_pr_status,
+    ):
+        """handle_ci_failed_stage passes get_pr_status(...).head_branch as required_branch."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        basic_task_state.current_pr = 42
+        mock_pr_status.head_branch = "feat/pr-branch"
+        mock_github_client.get_pr_status.return_value = mock_pr_status
+        mock_sleep.return_value = True
+
+        with (
+            patch.object(WorkflowStageHandler, "_get_current_branch", return_value="feat/pr-branch"),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stdout="")
+            result = workflow_handler.handle_ci_failed_stage(basic_task_state)
+
+        assert result is None
+        call_kwargs = mock_agent.run_work_session.call_args.kwargs
+        assert call_kwargs["required_branch"] == "feat/pr-branch"
+
+    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
+    @patch("claude_task_master.core.workflow_stages.console")
+    def test_ci_failed_stage_checks_out_head_branch_when_different(
+        self,
+        mock_console,
+        mock_sleep,
+        workflow_handler,
+        state_manager,
+        basic_task_state,
+        mock_agent,
+        mock_github_client,
+        mock_pr_status,
+    ):
+        """When current branch differs, the PR head branch is checked out before the session."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        basic_task_state.current_pr = 42
+        mock_pr_status.head_branch = "feat/pr-branch"
+        mock_github_client.get_pr_status.return_value = mock_pr_status
+        mock_sleep.return_value = True
+
+        with (
+            patch.object(WorkflowStageHandler, "_get_current_branch", return_value="main"),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stdout="")
+            result = workflow_handler.handle_ci_failed_stage(basic_task_state)
+
+        assert result is None
+        checkout_calls = [
+            c for c in mock_run.call_args_list if c.args[0][:2] == ["git", "checkout"]
+        ]
+        assert len(checkout_calls) == 1
+        assert checkout_calls[0].args[0] == ["git", "checkout", "feat/pr-branch"]
+        call_kwargs = mock_agent.run_work_session.call_args.kwargs
+        assert call_kwargs["required_branch"] == "feat/pr-branch"
+
+    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
+    @patch("claude_task_master.core.workflow_stages.console")
+    def test_addressing_reviews_stage_passes_head_branch_as_required_branch(
+        self,
+        mock_console,
+        mock_sleep,
+        workflow_handler,
+        state_manager,
+        basic_task_state,
+        mock_agent,
+        mock_github_client,
+        mock_pr_status,
+    ):
+        """handle_addressing_reviews_stage also targets the PR head branch."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        basic_task_state.current_pr = 42
+        mock_pr_status.head_branch = "feat/review-branch"
+        mock_github_client.get_pr_status.return_value = mock_pr_status
+        mock_sleep.return_value = True
+
+        with (
+            patch.object(WorkflowStageHandler, "_get_current_branch", return_value="main"),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stdout="")
+            result = workflow_handler.handle_addressing_reviews_stage(basic_task_state)
+
+        assert result is None
+        checkout_calls = [
+            c for c in mock_run.call_args_list if c.args[0][:2] == ["git", "checkout"]
+        ]
+        assert len(checkout_calls) == 1
+        assert checkout_calls[0].args[0] == ["git", "checkout", "feat/review-branch"]
+        call_kwargs = mock_agent.run_work_session.call_args.kwargs
+        assert call_kwargs["required_branch"] == "feat/review-branch"
+
+
+# =============================================================================
+# Test CI Poll Timer Helpers
+# =============================================================================
+
+
+class TestCIPollTimerHelpers:
+    """Tests for _is_ci_poll_timed_out (resume must not insta-timeout)."""
+
+    def test_is_ci_poll_timed_out_false_when_timer_cleared(
+        self, workflow_handler, basic_task_state
+    ):
+        """A cleared timer (None) is never timed out, regardless of prior elapsed time."""
+        basic_task_state.ci_poll_start_time = None
+        assert workflow_handler._is_ci_poll_timed_out(basic_task_state) is False
+
+    def test_is_ci_poll_timed_out_true_when_elapsed_exceeds_timeout(
+        self, workflow_handler, basic_task_state
+    ):
+        """An uncleared timer far in the past IS timed out."""
+        from datetime import timedelta
+
+        basic_task_state.ci_poll_start_time = datetime.now() - timedelta(
+            seconds=WorkflowStageHandler.CI_POLL_TIMEOUT + 100
+        )
+        assert workflow_handler._is_ci_poll_timed_out(basic_task_state) is True
+
+    def test_clear_ci_poll_timer_prevents_insta_timeout_on_resume(
+        self, workflow_handler, basic_task_state
+    ):
+        """After the timer is cleared, a resume does not instantly time out."""
+        from datetime import timedelta
+
+        basic_task_state.ci_poll_start_time = datetime.now() - timedelta(seconds=7300)
+        workflow_handler._clear_ci_poll_timer(basic_task_state)
+        assert basic_task_state.ci_poll_start_time is None
+        assert workflow_handler._is_ci_poll_timed_out(basic_task_state) is False
+
+
+# =============================================================================
+# Test Checkout Branch Stash Recovery
+# =============================================================================
+
+
+class TestCheckoutBranchStashRecovery:
+    """Tests for _checkout_branch dirty-tree stash recovery."""
+
+    @patch("claude_task_master.core.workflow_stages.console")
+    def test_stash_recovery_logs_stash_ref_loudly(self, mock_console):
+        """Dirty-tree recovery must warn loudly with the stash ref."""
+        from subprocess import CalledProcessError
+
+        responses = [
+            CalledProcessError(1, "git checkout"),  # initial checkout fails
+            MagicMock(returncode=0, stdout=" M dirty.py\n"),  # status: dirty tree
+            MagicMock(returncode=0, stdout=""),  # stash push succeeds
+            MagicMock(returncode=0, stdout="stash@{0}: claudetm: auto-stash\n"),  # stash list
+            MagicMock(returncode=0, stdout=""),  # retry checkout succeeds
+            MagicMock(returncode=0, stdout=""),  # pull succeeds
+        ]
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = responses
+            result = WorkflowStageHandler._checkout_branch("main")
+
+        assert result is True
+        warning_texts = [str(c.args[0]) for c in mock_console.warning.call_args_list]
+        assert any("stash" in text.lower() for text in warning_texts)

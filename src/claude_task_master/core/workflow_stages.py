@@ -43,6 +43,8 @@ class WorkflowStageHandler:
     # a long time; on timeout we block (error out) rather than merge a PR whose CI never
     # finished — unless --admin is set, which force-advances. See _ci_timeout_action.
     REVIEW_POLL_TIMEOUT = 300  # seconds (5 min) before giving up on pending checks in reviews
+    # Max consecutive CI-fix cycles before blocking for manual intervention.
+    MAX_CI_FIX_ATTEMPTS = 3
     # Grace period after CI passes before checking reviews. Review bots (CodeRabbit) post their
     # review comments a little *after* CI completes, not as a blocking status check — so a short
     # delay would race the merge ahead of the comments. 120s gives them time to land.
@@ -55,6 +57,45 @@ class WorkflowStageHandler:
         CheckRun has 'name' field, StatusContext has 'context' field.
         """
         return str(check.get("name") or check.get("context", "unknown"))
+
+    def _get_pr_head_branch(self, state: TaskState) -> str | None:
+        """Resolve the branch a fix session must run on, preferring the PR head ref.
+
+        After a resume the local checkout may be back on the target branch (e.g.
+        main), so the current branch is not reliable. Fetches the PR head branch
+        and checks it out (without pulling — PR branches must not be pulled over
+        local state). Falls back to the current branch on any failure.
+
+        Args:
+            state: Current task state.
+
+        Returns:
+            Branch name the agent must work on, or None if unknown.
+        """
+        if state.current_pr is not None:
+            try:
+                pr_status = self.github_client.get_pr_status(state.current_pr)
+                head_branch = pr_status.head_branch
+                if head_branch:
+                    current = self._get_current_branch()
+                    if head_branch != current:
+                        try:
+                            subprocess.run(
+                                ["git", "checkout", head_branch],
+                                check=True,
+                                capture_output=True,
+                                text=True,
+                            )
+                            console.info(f"Checked out PR branch {head_branch}")
+                        except subprocess.CalledProcessError as e:
+                            console.warning(
+                                f"Could not checkout PR branch {head_branch}: "
+                                f"{e.stderr.strip() or e}"
+                            )
+                    return head_branch
+            except Exception as e:
+                console.warning(f"Could not determine PR head branch: {e}")
+        return self._get_current_branch()
 
     @staticmethod
     def _get_current_branch() -> str | None:
@@ -77,6 +118,8 @@ class WorkflowStageHandler:
         Args:
             branch: Branch name to checkout.
             allow_recovery: If True, attempts recovery on failure (stash changes).
+                The stash ref is logged loudly after a successful stash, and a failed
+                stash aborts the checkout instead of losing track of local work.
 
         Returns:
             True if successful, False otherwise.
@@ -112,11 +155,27 @@ class WorkflowStageHandler:
                 )
                 if status.stdout.strip():
                     console.info("Stashing uncommitted changes...")
-                    subprocess.run(
-                        ["git", "stash", "push", "-m", "claudetm: auto-stash before checkout"],
-                        check=True,
+                    try:
+                        subprocess.run(
+                            ["git", "stash", "push", "-m", "claudetm: auto-stash before checkout"],
+                            check=True,
+                            capture_output=True,
+                            text=True,
+                        )
+                    except subprocess.CalledProcessError as stash_error:
+                        console.warning(f"Failed to stash uncommitted changes: {stash_error}")
+                        console.warning(f"Aborting checkout of {branch} to avoid losing work")
+                        return False
+                    stash_ref = subprocess.run(
+                        ["git", "stash", "list", "-1", "--format=%gd:%s"],
+                        check=False,
                         capture_output=True,
                         text=True,
+                    ).stdout.strip()
+                    console.warning(
+                        f"Uncommitted changes were STASHED as "
+                        f"{stash_ref or 'stash@{0}: claudetm: auto-stash before checkout'} — "
+                        "run `git stash pop` to restore them"
                     )
 
                 # Retry checkout
@@ -501,6 +560,18 @@ class WorkflowStageHandler:
         """
         console.info("CI failed - running agent to fix...")
 
+        # Cap consecutive CI-fix cycles to avoid an infinite fix loop
+        state.ci_fix_attempts += 1
+        if state.ci_fix_attempts > self.MAX_CI_FIX_ATTEMPTS:
+            console.error(
+                f"CI failed {state.ci_fix_attempts} times — blocking, "
+                "manual intervention required"
+            )
+            state.status = "blocked"
+            self.state_manager.save_state(state)
+            return 1
+        self.state_manager.save_state(state)
+
         # Save CI failure logs (this also saves PR comments via _also_save_comments=True)
         self.pr_context.save_ci_failures(state.current_pr)
 
@@ -518,12 +589,12 @@ class WorkflowStageHandler:
         except Exception:
             context = ""
 
-        current_branch = self._get_current_branch()
+        required_branch = self._get_pr_head_branch(state)
         self.agent.run_work_session(
             task_description=task_description,
             context=context,
             model_override=ModelType.OPUS,
-            required_branch=current_branch,
+            required_branch=required_branch,
         )
 
         # Wait for CI to start after push
@@ -898,12 +969,12 @@ End with: TASK COMPLETE"""
         except Exception:
             context = ""
 
-        current_branch = self._get_current_branch()
+        required_branch = self._get_pr_head_branch(state)
         self.agent.run_work_session(
             task_description=task_description,
             context=context,
             model_override=ModelType.OPUS,
-            required_branch=current_branch,
+            required_branch=required_branch,
         )
 
         # Post replies to comments using resolution file
@@ -983,14 +1054,23 @@ End with: TASK COMPLETE"""
             return 2
 
     def handle_merged_stage(
-        self, state: TaskState, mark_task_complete_fn: Callable[[str, int], None]
+        self,
+        state: TaskState,
+        mark_task_complete_fn: Callable[[str, int], None],
+        pr_merged_event_fn: Callable[[TaskState], None] | None = None,
     ) -> int | None:
         """Handle merged state - move to next task.
 
         Args:
             state: Current task state.
             mark_task_complete_fn: Function to mark task complete in plan.
+            pr_merged_event_fn: Optional idempotent callback that emits the pr.merged
+                event (gated by state.last_counted_pr_merged in the orchestrator),
+                so externally-merged PRs also emit the event.
         """
+        if pr_merged_event_fn is not None:
+            pr_merged_event_fn(state)
+
         console.success(f"Task #{state.current_task_index + 1} complete!")
 
         # Mark task as complete in plan
@@ -1067,7 +1147,10 @@ End with: TASK COMPLETE"""
             if "no release verification available" not in release_guide.lower():
                 console.info("Starting release verification...")
                 state.workflow_stage = "releasing"
-                state.release_fix_attempts = 0
+                # Only reset the release-fix counter when the merged PR was NOT a
+                # release-fix PR — otherwise the attempt cap becomes unreachable.
+                if not state.in_release_fix:
+                    state.release_fix_attempts = 0
                 self.state_manager.save_state(state)
                 return None
 
@@ -1076,7 +1159,7 @@ End with: TASK COMPLETE"""
         return None
 
     def _advance_to_next_task(self, state: TaskState) -> None:
-        """Move to next task and reset timing/release fields."""
+        """Move to next task and reset timing/fix-attempt fields."""
         state.current_task_index += 1
         state.current_pr = None
         state.workflow_stage = "working"
@@ -1084,6 +1167,8 @@ End with: TASK COMPLETE"""
         state.pr_start_time = None
         state.pr_active_work_seconds = 0.0
         state.release_fix_attempts = 0
+        state.ci_fix_attempts = 0
+        state.in_release_fix = False
         state.ci_poll_start_time = None
         self.state_manager.save_state(state)
 
@@ -1141,7 +1226,7 @@ End with: TASK COMPLETE"""
         if state.current_pr is not None:
             try:
                 pr_status = self.github_client.get_pr_status(state.current_pr)
-                pr_title = pr_status.title if hasattr(pr_status, "title") else None
+                pr_title = pr_status.title
             except Exception:
                 pass
 
@@ -1204,6 +1289,8 @@ End with: TASK COMPLETE"""
         Max 5 attempts before giving up and moving to next task.
         """
         state.release_fix_attempts += 1
+        state.in_release_fix = True
+        self.state_manager.save_state(state)
         console.info(
             f"Release fix attempt {state.release_fix_attempts} for PR #{state.current_pr or '?'}..."
         )

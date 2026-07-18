@@ -225,7 +225,7 @@ class TaskRunner:
             "tasks_in_group": tasks_in_group,
         }
 
-    def run_work_session(self, state: TaskState) -> None:
+    def run_work_session(self, state: TaskState) -> str:
         """Run a single work session.
 
         If a ConversationManager is available, uses conversation mode for tasks
@@ -233,6 +233,16 @@ class TaskRunner:
 
         Args:
             state: Current task state.
+
+        Returns:
+            Status string describing what happened:
+
+            - ``"skipped_already_complete"``: the current task was already
+              checked off in the plan; only the task index was advanced.
+            - ``"ran"``: an agent work session executed to completion.
+            - ``"no_tasks_remaining"``: the task index is past the end of the
+              plan; no work was started. Distinct from ``"ran"`` so callers
+              only mark tasks complete when work actually ran.
 
         Raises:
             NoPlanFoundError: If no plan file exists.
@@ -254,7 +264,7 @@ class TaskRunner:
 
         if state.current_task_index >= len(tasks):
             # All tasks processed
-            return
+            return "no_tasks_remaining"
 
         current_task = tasks[state.current_task_index]
 
@@ -266,7 +276,7 @@ class TaskRunner:
             )
             state.current_task_index += 1
             self.state_manager.save_state(state)
-            return
+            return "skipped_already_complete"
 
         # Parse task complexity to determine which model to use
         complexity, cleaned_task = parse_task_complexity(current_task)
@@ -393,6 +403,8 @@ Please complete this task."""
         # Log the response
         if self.logger and result.get("output"):
             self.logger.log_response(result.get("output", ""))
+
+        return "ran"
 
     def update_progress(
         self,

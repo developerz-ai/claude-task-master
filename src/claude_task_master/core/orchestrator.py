@@ -409,8 +409,8 @@ class WorkLoopOrchestrator:
         base_branch = "main"
         try:
             pr_status = self.github_client.get_pr_status(state.current_pr)
-            pr_url = pr_status.pr_url if hasattr(pr_status, "pr_url") else ""
-            pr_title = pr_status.pr_title if hasattr(pr_status, "pr_title") else ""
+            pr_url = pr_status.url
+            pr_title = pr_status.title
             base_branch = pr_status.base_branch
         except Exception:
             # Use fallback values if PR details can't be fetched
@@ -453,9 +453,10 @@ class WorkLoopOrchestrator:
         merged_at = None
         try:
             pr_status = self.github_client.get_pr_status(state.current_pr)
-            pr_url = pr_status.pr_url if hasattr(pr_status, "pr_url") else ""
-            pr_title = pr_status.pr_title if hasattr(pr_status, "pr_title") else ""
+            pr_url = pr_status.url
+            pr_title = pr_status.title
             base_branch = pr_status.base_branch
+            merged_at = getattr(pr_status, "merged_at", None)
         except Exception:
             pass
 
@@ -761,6 +762,14 @@ class WorkLoopOrchestrator:
             else:
                 raise StateRecoveryError("State file corrupted", e) from e
 
+        # Reset CI poll timer when resuming a paused run mid-CI-wait so the
+        # timeout doesn't fire immediately (timer restarts on next stage entry)
+        if state.workflow_stage in ("waiting_ci", "waiting_reviews") and (
+            state.ci_poll_start_time is not None
+        ):
+            state.ci_poll_start_time = None
+            self.state_manager.save_state(state)
+
         # Check max sessions
         if state.options.max_sessions and state.session_count >= state.options.max_sessions:
             console.warning(
@@ -851,7 +860,7 @@ class WorkLoopOrchestrator:
                     unregister_handlers()
                     console.info(self.tracker.get_cost_report())
                     # Determine result string based on exit code
-                    result_str = "success" if result == 0 else "blocked"
+                    result_str = {0: "success", 2: "interrupted"}.get(result, "blocked")
                     self._emit_run_completed(state, result, result_str, run_start_time)
                     return result
 
@@ -899,12 +908,13 @@ class WorkLoopOrchestrator:
                     "All tasks completed (final verification disabled)",
                 )
                 self.state_manager.save_state(state)
-                self.state_manager.cleanup_on_success(state.run_id)
                 console.success(
                     "All tasks completed! (Final verification skipped — pass --verify to enable.)"
                 )
                 console.info(self.tracker.get_cost_report())
+                # Emit run.completed BEFORE cleanup deletes plan/goal (payload needs them)
                 self._emit_run_completed(state, 0, "success", run_start_time)
+                self.state_manager.cleanup_on_success(state.run_id)
                 return 0
 
             # Allow up to 3 fix attempts
@@ -923,10 +933,11 @@ class WorkLoopOrchestrator:
                         previous_status, "success", state, "All tasks completed successfully"
                     )
                     self.state_manager.save_state(state)
-                    self.state_manager.cleanup_on_success(state.run_id)
                     console.success("All tasks completed successfully!")
                     console.info(self.tracker.get_cost_report())
+                    # Emit run.completed BEFORE cleanup deletes plan/goal (payload needs them)
                     self._emit_run_completed(state, 0, "success", run_start_time)
+                    self.state_manager.cleanup_on_success(state.run_id)
                     return 0
 
                 # Verification failed
@@ -1059,16 +1070,13 @@ class WorkLoopOrchestrator:
             elif stage == "addressing_reviews":
                 return self.stage_handler.handle_addressing_reviews_stage(state)
             elif stage == "ready_to_merge":
-                # Track stage before handler runs
-                stage_before = state.workflow_stage
-                result = self.stage_handler.handle_ready_to_merge_stage(state)
-                # Emit pr.merged webhook if PR was merged (stage changed to "merged")
-                if state.workflow_stage == "merged" and stage_before == "ready_to_merge":
-                    self._emit_pr_merged_event(state)
-                return result
+                # pr.merged is emitted by handle_merged_stage (idempotently, via callback)
+                return self.stage_handler.handle_ready_to_merge_stage(state)
             elif stage == "merged":
                 return self.stage_handler.handle_merged_stage(
-                    state, self.task_runner.mark_task_complete
+                    state,
+                    self.task_runner.mark_task_complete,
+                    self._emit_pr_merged_event,
                 )
             elif stage == "releasing":
                 return self.stage_handler.handle_releasing_stage(state)
@@ -1167,8 +1175,13 @@ class WorkLoopOrchestrator:
         outcome = "completed"
         error_message = None
         error_type = None
+        # Capture the task index BEFORE the work session: on a normal run the
+        # runner may advance state.current_task_index, and on an
+        # already-complete task it advances the index without doing any work.
+        completed_task_index = state.current_task_index
+        session_result: str | None = None
         try:
-            self.task_runner.run_work_session(state)
+            session_result = self.task_runner.run_work_session(state)
         except Exception as e:
             outcome = "failed"
             error_message = str(e)
@@ -1177,6 +1190,8 @@ class WorkLoopOrchestrator:
             raise
         finally:
             session_duration = time.time() - session_start_time
+            if session_result == "skipped_already_complete":
+                outcome = "skipped"
             self.tracker.end_session(outcome=outcome)
             if self.logger:
                 self.logger.end_session(outcome)
@@ -1206,6 +1221,14 @@ class WorkLoopOrchestrator:
                     recoverable=True,
                 )
 
+        # Task was already complete - the runner advanced state.current_task_index.
+        # Skip session counting, mark_task_complete, and task.completed; return so
+        # the next loop iteration picks up the new index.
+        if session_result == "skipped_already_complete":
+            console.info(f"Task #{completed_task_index + 1} already complete - skipping")
+            self.state_manager.save_state(state)
+            return None
+
         self.tracker.record_task_progress(state.current_task_index)
         reset_escape()
 
@@ -1216,7 +1239,6 @@ class WorkLoopOrchestrator:
 
         # Mark current task as complete in plan.md
         # This is done by the orchestrator (not the agent) for reliability
-        completed_task_index = state.current_task_index
         plan = self.state_manager.load_plan()
         if plan:
             self.task_runner.mark_task_complete(plan, completed_task_index)
@@ -1238,7 +1260,8 @@ class WorkLoopOrchestrator:
         )
 
         # Emit task.completed webhook event
-        completed_tasks = self._get_completed_tasks(state) + 1  # +1 for task we just completed
+        # (count already includes the task just marked complete in plan.md)
+        completed_tasks = self._get_completed_tasks(state)
         self.webhook_emitter.emit(
             "task.completed",
             task_index=state.current_task_index,
@@ -1290,6 +1313,17 @@ class WorkLoopOrchestrator:
         self.task_runner.update_progress(state)
 
         self.state_manager.save_state(state)
+
+        # Stall check after the session ended (works without an active session)
+        should_abort, abort_reason = self.tracker.should_abort()
+        if should_abort:
+            console.warning(f"Execution issue: {abort_reason}")
+            previous_status = state.status
+            state.status = "blocked"
+            self._emit_status_changed(previous_status, "blocked", state, abort_reason)
+            self.state_manager.save_state(state)
+            return 1
+
         return None
 
     def _attempt_state_recovery(self) -> TaskState | None:
@@ -1455,7 +1489,7 @@ After completing your fixes, end with: TASK COMPLETE"""
             return False
 
         # Allow up to 2 CI fix attempts before giving up
-        max_ci_fix_attempts = 1  # 0 and 1 = 2 attempts
+        max_ci_fix_attempts = 2
         ci_fix_attempt = 0
 
         while ci_fix_attempt <= max_ci_fix_attempts:
@@ -1468,7 +1502,7 @@ After completing your fixes, end with: TASK COMPLETE"""
             elif ci_result == "failure":
                 ci_fix_attempt += 1
                 if ci_fix_attempt > max_ci_fix_attempts:
-                    console.error(f"Fix PR CI failed after {max_ci_fix_attempts} fix attempts")
+                    console.error(f"Fix PR CI failed after {ci_fix_attempt - 1} fix attempts")
                     return False
 
                 # Attempt to fix the CI failure
@@ -1592,11 +1626,33 @@ Important:
             coding_style = self.state_manager.load_coding_style()
 
             current_branch = self._get_current_branch()
+
+            # Determine the fix PR's head branch - after a resume we may be on
+            # main, so fetch the PR head ref instead of trusting the checkout
+            head_branch = None
+            try:
+                head_branch = self.github_client.get_pr_status(pr_number).head_branch
+            except Exception as e:
+                console.warning(f"Could not fetch PR head branch: {e}")
+
+            # Best effort: checkout the PR branch if we're not already on it
+            if head_branch and head_branch != current_branch:
+                try:
+                    subprocess.run(
+                        ["git", "checkout", head_branch],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    )
+                    console.info(f"Checked out PR branch {head_branch}")
+                except Exception as e:
+                    console.warning(f"Failed to checkout {head_branch}: {e}")
+
             self.agent.run_work_session(
                 task_description=task_description,
                 context=context,
                 model_override=ModelType.OPUS,
-                required_branch=current_branch,
+                required_branch=head_branch or current_branch,
                 coding_style=coding_style,
             )
 

@@ -902,6 +902,99 @@ class TestRunWorkSession:
         call_kwargs = mock_agent.run_work_session.call_args.kwargs
         assert call_kwargs["create_pr"] is True
 
+    @patch("claude_task_master.core.task_runner.get_current_branch")
+    @patch("claude_task_master.core.task_runner.console")
+    def test_run_work_session_already_complete_returns_skipped(
+        self,
+        mock_console,
+        mock_branch,
+        task_runner,
+        state_manager,
+        mock_agent,
+        basic_task_state,
+        plan_with_completed_tasks,
+    ):
+        """Should return 'skipped_already_complete' for an already checked-off task.
+
+        The index must advance by one, the state must be persisted, and no
+        agent session may be started for an already complete task.
+        """
+        mock_branch.return_value = "main"
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan(plan_with_completed_tasks)
+        state_manager.save_goal("Test goal")
+
+        result = task_runner.run_work_session(basic_task_state)
+
+        assert result == "skipped_already_complete"
+        assert basic_task_state.current_task_index == 1
+        # Agent session must NOT be started for a completed task
+        mock_agent.run_work_session.assert_not_called()
+        # State must be saved with the advanced index
+        saved_state = state_manager.load_state()
+        assert saved_state is not None
+        assert saved_state.current_task_index == 1
+
+    @patch("claude_task_master.core.task_runner.get_current_branch")
+    @patch("claude_task_master.core.task_runner.console")
+    def test_run_work_session_incomplete_task_returns_ran(
+        self,
+        mock_console,
+        mock_branch,
+        task_runner,
+        state_manager,
+        mock_agent,
+        basic_task_state,
+        basic_plan,
+    ):
+        """Should return 'ran' after executing a real agent work session."""
+        mock_branch.return_value = "feature/test"
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan(basic_plan)
+        state_manager.save_goal("Test goal")
+
+        result = task_runner.run_work_session(basic_task_state)
+
+        assert result == "ran"
+        mock_agent.run_work_session.assert_called_once()
+
+    @patch("claude_task_master.core.task_runner.get_current_branch")
+    @patch("claude_task_master.core.task_runner.console")
+    def test_run_work_session_consecutive_complete_tasks_each_skip(
+        self,
+        mock_console,
+        mock_branch,
+        task_runner,
+        state_manager,
+        mock_agent,
+        basic_task_state,
+        plan_with_completed_tasks,
+    ):
+        """Should return 'skipped_already_complete' on each call and advance by one.
+
+        Edge case: two consecutive already-complete tasks. Each call must skip
+        exactly one task, so two calls move the index from 0 to 2 with no
+        agent session ever started.
+        """
+        mock_branch.return_value = "main"
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan(plan_with_completed_tasks)
+        state_manager.save_goal("Test goal")
+
+        first = task_runner.run_work_session(basic_task_state)
+        assert first == "skipped_already_complete"
+        assert basic_task_state.current_task_index == 1
+
+        second = task_runner.run_work_session(basic_task_state)
+        assert second == "skipped_already_complete"
+        assert basic_task_state.current_task_index == 2
+
+        # No agent session started for either skipped task
+        mock_agent.run_work_session.assert_not_called()
+        saved_state = state_manager.load_state()
+        assert saved_state is not None
+        assert saved_state.current_task_index == 2
+
 
 # =============================================================================
 # Test Update Progress

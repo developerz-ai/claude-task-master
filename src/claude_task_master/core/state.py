@@ -139,8 +139,10 @@ class TaskState(BaseModel):
     pr_active_work_seconds: float = 0.0  # Accumulated work time for current PR (excluding CI wait)
     # CI polling fields
     ci_poll_start_time: datetime | None = None  # When CI polling started for current PR
+    ci_fix_attempts: int = 0  # Number of CI-fix agent sessions for current PR
     # Release phase fields
     release_fix_attempts: int = 0  # Number of release fix attempts for current PR
+    in_release_fix: bool = False  # True while current PR is a release-fix PR
 
 
 # =============================================================================

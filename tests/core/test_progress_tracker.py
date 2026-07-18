@@ -56,8 +56,20 @@ class TestSessionMetrics:
             tokens_input=1_000_000,  # 1M input tokens
             tokens_output=100_000,  # 100K output tokens
         )
-        # $3/M input + $15/M output = $3 + $1.5 = $4.5
-        assert metrics.estimated_cost == pytest.approx(4.5, rel=0.01)
+        # $15/M input + $75/M output = $15 + $7.5 = $22.5
+        assert metrics.estimated_cost == pytest.approx(22.5, rel=0.01)
+
+    def test_estimated_cost_opus_rates(self):
+        """Test cost estimation uses Opus rates ($15/M input, $75/M output)."""
+        metrics = SessionMetrics(
+            session_id=1,
+            task_index=0,
+            task_description="Test",
+            tokens_input=1_000_000,  # 1M input tokens
+            tokens_output=1_000_000,  # 1M output tokens
+        )
+        # $15/M input + $75/M output = $15 + $75 = $90
+        assert metrics.estimated_cost == pytest.approx(90.0, rel=0.01)
 
 
 class TestTrackerConfig:
@@ -297,3 +309,116 @@ class TestExecutionTracker:
 
         assert len(tracker._sessions) == 0
         assert len(tracker._task_attempts) == 0
+
+    def test_check_progress_loop_detected_without_active_session(self):
+        """Test loop detection fires after the session has ended."""
+        config = TrackerConfig(max_same_task_attempts=2)
+        tracker = ExecutionTracker(config=config)
+
+        # Same task 3 times, exceeding max_same_task_attempts
+        for i in range(3):
+            tracker.start_session(i, 0, "Test")
+            tracker.end_session()
+
+        # Record the last known task so the safety net works between sessions
+        tracker.record_task_progress(0)
+
+        assert tracker._current_session is None
+        state = tracker.check_progress()
+
+        assert state == ProgressState.LOOP_DETECTED
+
+    def test_should_abort_loop_detected_without_active_session(self):
+        """Test abort on loop detection after the session has ended."""
+        config = TrackerConfig(max_same_task_attempts=2)
+        tracker = ExecutionTracker(config=config)
+
+        for i in range(3):
+            tracker.start_session(i, 0, "Test")
+            tracker.end_session()
+
+        tracker.record_task_progress(0)
+
+        assert tracker._current_session is None
+        should_abort, reason = tracker.should_abort()
+
+        assert should_abort
+        assert "loop" in reason.lower()
+
+    def test_check_progress_stalled_without_active_session(self, monkeypatch):
+        """Test stall detection fires without an active session."""
+        tracker = ExecutionTracker()
+        tracker.start_session(1, 0, "Test")
+        tracker.end_session()
+
+        monkeypatch.setattr(tracker, "_last_progress_time", time.time() - 10000.0)
+
+        assert tracker._current_session is None
+        state = tracker.check_progress()
+
+        assert state == ProgressState.STALLED
+
+    def test_should_abort_stalled_without_active_session(self, monkeypatch):
+        """Test abort on stall without an active session."""
+        tracker = ExecutionTracker()
+        tracker.start_session(1, 0, "Test")
+        tracker.end_session()
+
+        monkeypatch.setattr(tracker, "_last_progress_time", time.time() - 10000.0)
+
+        should_abort, _reason = tracker.should_abort()
+
+        assert should_abort
+
+    def test_check_progress_max_duration_exceeded_returns_stalled(self, monkeypatch):
+        """Test max_session_duration takes precedence over slow threshold."""
+        config = TrackerConfig(
+            stall_threshold_seconds=10000.0,
+            slow_threshold_seconds=60.0,
+            max_session_duration=120.0,
+        )
+        tracker = ExecutionTracker(config=config)
+        tracker.start_session(1, 0, "Test")
+
+        session = tracker._current_session
+        assert session is not None
+        # Duration exceeds both slow_threshold and max_session_duration, but
+        # recent activity keeps it under the inactivity stall threshold.
+        monkeypatch.setattr(session, "start_time", time.time() - 200.0)
+
+        state = tracker.check_progress()
+
+        assert state == ProgressState.STALLED
+
+    def test_check_progress_under_all_thresholds_healthy(self):
+        """Test healthy state when session is under all thresholds."""
+        config = TrackerConfig(
+            stall_threshold_seconds=1000.0,
+            slow_threshold_seconds=100.0,
+            max_session_duration=500.0,
+        )
+        tracker = ExecutionTracker(config=config)
+        tracker.start_session(1, 0, "Test")
+
+        state = tracker.check_progress()
+
+        assert state == ProgressState.HEALTHY
+
+    def test_check_progress_only_slow_threshold_exceeded_slow(self, monkeypatch):
+        """Test slow state when only slow_threshold_seconds is exceeded."""
+        config = TrackerConfig(
+            stall_threshold_seconds=10000.0,
+            slow_threshold_seconds=60.0,
+            max_session_duration=1000.0,
+        )
+        tracker = ExecutionTracker(config=config)
+        tracker.start_session(1, 0, "Test")
+
+        session = tracker._current_session
+        assert session is not None
+        # Recent activity, duration past slow threshold but under max duration.
+        monkeypatch.setattr(session, "start_time", time.time() - 100.0)
+
+        state = tracker.check_progress()
+
+        assert state == ProgressState.SLOW
