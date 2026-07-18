@@ -929,3 +929,100 @@ Also consider:
 
         assert result is not None
         assert result["success"] is True
+
+
+# =============================================================================
+# run_async_with_cleanup Tests
+# =============================================================================
+
+
+class TestRunAsyncWithCleanup:
+    """Tests for run_async_with_cleanup across sync and running-loop contexts.
+
+    Regression coverage for the plan_repo RuntimeError: when invoked from a
+    thread that already has a running event loop (e.g. an async REST handler or
+    MCP tool) the helper must offload to a worker thread instead of raising
+    ``RuntimeError: Cannot run the event loop while another loop is running``.
+    """
+
+    def test_returns_result_without_running_loop(self):
+        """Directly drives the coroutine when no event loop is running."""
+        from claude_task_master.core.agent_phases import run_async_with_cleanup
+
+        async def _coro() -> str:
+            return "done"
+
+        assert run_async_with_cleanup(_coro()) == "done"
+
+    def test_propagates_exception_without_running_loop(self):
+        """Coroutine exceptions surface to the caller on the direct path."""
+        from claude_task_master.core.agent_phases import run_async_with_cleanup
+
+        async def _boom() -> None:
+            raise ValueError("boom")
+
+        with pytest.raises(ValueError, match="boom"):
+            run_async_with_cleanup(_boom())
+
+    def test_direct_run_leaves_no_closed_loop(self):
+        """The finally-block resets the thread loop so no closed loop lingers."""
+        import asyncio
+
+        from claude_task_master.core.agent_phases import run_async_with_cleanup
+
+        async def _coro() -> int:
+            return 7
+
+        run_async_with_cleanup(_coro())
+
+        # Pre-fix, a closed loop was left installed as the thread-current loop;
+        # get_event_loop() would then hand back an unusable, closed loop.
+        try:
+            current = asyncio.get_event_loop()
+        except RuntimeError:
+            current = None
+        assert current is None or not current.is_closed()
+
+    def test_sequential_calls_each_succeed(self):
+        """Repeated calls do not poison the thread with a stale/closed loop."""
+        from claude_task_master.core.agent_phases import run_async_with_cleanup
+
+        async def _coro(value: int) -> int:
+            return value
+
+        assert run_async_with_cleanup(_coro(1)) == 1
+        assert run_async_with_cleanup(_coro(2)) == 2
+
+    async def test_returns_result_from_running_loop(self):
+        """Works when a loop is already running (offloads to a worker thread)."""
+        from claude_task_master.core.agent_phases import run_async_with_cleanup
+
+        async def _coro() -> str:
+            return "from-thread"
+
+        # Called from within the async test's running loop — must NOT raise.
+        assert run_async_with_cleanup(_coro()) == "from-thread"
+
+    async def test_propagates_exception_from_running_loop(self):
+        """Coroutine exceptions surface when offloaded from a running loop."""
+        from claude_task_master.core.agent_phases import run_async_with_cleanup
+
+        async def _boom() -> None:
+            raise ValueError("kaboom")
+
+        with pytest.raises(ValueError, match="kaboom"):
+            run_async_with_cleanup(_boom())
+
+    async def test_running_loop_stays_usable_afterward(self):
+        """Offloading must not disturb the caller's own running loop."""
+        import asyncio
+
+        from claude_task_master.core.agent_phases import run_async_with_cleanup
+
+        async def _coro() -> str:
+            return "ok"
+
+        assert run_async_with_cleanup(_coro()) == "ok"
+        # The caller's loop is untouched and still drives coroutines.
+        assert asyncio.get_running_loop() is not None
+        await asyncio.sleep(0)

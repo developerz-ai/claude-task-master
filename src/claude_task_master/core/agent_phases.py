@@ -8,6 +8,7 @@ following the Single Responsibility Principle (SRP). It handles:
 """
 
 import asyncio
+import threading
 from collections.abc import Coroutine
 from typing import TYPE_CHECKING, Any, TypeVar
 
@@ -30,11 +31,13 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 
-def run_async_with_cleanup[T](coro: Coroutine[Any, Any, T]) -> T:
-    """Run async coroutine with proper cleanup on KeyboardInterrupt.
+def _drive_coroutine_on_new_loop[T](coro: Coroutine[Any, Any, T]) -> T:
+    """Drive a coroutine to completion on a fresh event loop in this thread.
 
-    This ensures that when Ctrl+C is pressed, all pending tasks are cancelled
-    and the event loop is properly closed.
+    Assumes the calling thread has no running event loop. Creates a dedicated
+    loop, runs the coroutine, and always tears the loop down — resetting the
+    thread's current loop to ``None`` so a closed loop is never left behind for
+    a later ``asyncio.get_event_loop()`` to pick up.
 
     Args:
         coro: The coroutine to run.
@@ -43,7 +46,7 @@ def run_async_with_cleanup[T](coro: Coroutine[Any, Any, T]) -> T:
         The result of the coroutine.
 
     Raises:
-        KeyboardInterrupt: Re-raised after cleanup to allow proper handling.
+        KeyboardInterrupt: Re-raised after cancelling pending tasks.
     """
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -77,6 +80,55 @@ def run_async_with_cleanup[T](coro: Coroutine[Any, Any, T]) -> T:
         except Exception:
             pass
         loop.close()
+        # Never leave a closed loop as the thread-current loop.
+        asyncio.set_event_loop(None)
+
+
+def run_async_with_cleanup[T](coro: Coroutine[Any, Any, T]) -> T:
+    """Run a coroutine synchronously with proper event-loop cleanup.
+
+    Safe to call from either a plain synchronous context or from a thread that
+    already has a running event loop (e.g. an async REST handler or MCP tool).
+    When a loop is already running in this thread, driving another loop here
+    would raise ``RuntimeError: Cannot run the event loop while another loop is
+    running``; instead the coroutine is run to completion on its own loop in a
+    dedicated worker thread. Otherwise it runs directly on a fresh loop in the
+    current thread, cancelling pending tasks on ``KeyboardInterrupt``.
+
+    Args:
+        coro: The coroutine to run.
+
+    Returns:
+        The result of the coroutine.
+
+    Raises:
+        KeyboardInterrupt: Re-raised after cleanup to allow proper handling.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        # No event loop running in this thread: drive one here directly.
+        return _drive_coroutine_on_new_loop(coro)
+
+    # A loop is already running in this thread. We cannot nest another loop on
+    # it, so run the coroutine on its own loop inside a dedicated worker thread
+    # and block until it finishes, surfacing its result or exception here.
+    result: list[T] = []
+    error: list[BaseException] = []
+
+    def _worker() -> None:
+        try:
+            result.append(_drive_coroutine_on_new_loop(coro))
+        except BaseException as exc:  # noqa: B036 - re-raised in the caller thread
+            error.append(exc)
+
+    thread = threading.Thread(target=_worker, name="run-async-with-cleanup", daemon=True)
+    thread.start()
+    thread.join()
+
+    if error:
+        raise error[0]
+    return result[0]
 
 
 class AgentPhaseExecutor:

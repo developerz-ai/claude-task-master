@@ -18,7 +18,10 @@ Usage:
 from __future__ import annotations
 
 import logging
+from functools import partial
 from typing import TYPE_CHECKING
+
+import anyio
 
 from claude_task_master.api.models import (
     CloneRepoRequest,
@@ -126,11 +129,16 @@ def create_repo_router() -> APIRouter:
         if not is_auth_enabled():
             return _auth_required_response()
         try:
-            # Use the MCP tool implementation for consistency
-            result = clone_repo(
-                url=clone_request.url,
-                target_dir=clone_request.target_dir,
-                branch=clone_request.branch,
+            # Use the MCP tool implementation for consistency. Offload the
+            # (blocking, subprocess-heavy) clone to a worker thread so the
+            # event loop stays responsive.
+            result = await anyio.to_thread.run_sync(
+                partial(
+                    clone_repo,
+                    url=clone_request.url,
+                    target_dir=clone_request.target_dir,
+                    branch=clone_request.branch,
+                )
             )
 
             if not result.get("success", False):
@@ -202,10 +210,15 @@ def create_repo_router() -> APIRouter:
         if not is_auth_enabled():
             return _auth_required_response()
         try:
-            # Use the MCP tool implementation for consistency
-            result = setup_repo(
-                work_dir=setup_request.work_dir,
-                run_setup_scripts=setup_request.run_setup_scripts,
+            # Use the MCP tool implementation for consistency. Offload the
+            # (blocking, subprocess-heavy) setup to a worker thread so the
+            # event loop stays responsive.
+            result = await anyio.to_thread.run_sync(
+                partial(
+                    setup_repo,
+                    work_dir=setup_request.work_dir,
+                    run_setup_scripts=setup_request.run_setup_scripts,
+                )
             )
 
             if not result.get("success", False):
@@ -294,11 +307,17 @@ def create_repo_router() -> APIRouter:
         if not is_auth_enabled():
             return _auth_required_response()
         try:
-            # Use the MCP tool implementation for consistency
-            result = plan_repo(
-                work_dir=plan_request.work_dir,
-                goal=plan_request.goal,
-                model=plan_request.model,
+            # Use the MCP tool implementation for consistency. Offload the
+            # (blocking, agent-driven) planning to a worker thread: it avoids
+            # freezing the event loop and lets ``run_async_with_cleanup`` drive
+            # its own loop without hitting the running-loop RuntimeError.
+            result = await anyio.to_thread.run_sync(
+                partial(
+                    plan_repo,
+                    work_dir=plan_request.work_dir,
+                    goal=plan_request.goal,
+                    model=plan_request.model,
+                )
             )
 
             if not result.get("success", False):
