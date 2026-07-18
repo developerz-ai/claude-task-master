@@ -398,17 +398,16 @@ def run_server(
     # Log API configuration
     _log_api_config(effective_host, effective_port, effective_cors, auth_enabled)
 
-    # Security warning for non-localhost binding without authentication
+    # Refuse non-localhost binding without enforceable authentication.
+    # Mirrors mcp/server.py:run_server so both transports fail closed.
     if effective_host not in ("127.0.0.1", "localhost", "::1"):
         if not auth_enabled:
-            logger.warning(
-                f"API server binding to non-localhost address ({effective_host}) without authentication. "
-                "Set CLAUDETM_PASSWORD or CLAUDETM_PASSWORD_HASH for security."
+            logger.error(
+                f"API server cannot bind to non-localhost address ({effective_host}) "
+                "without authentication. Set CLAUDETM_PASSWORD or CLAUDETM_PASSWORD_HASH."
             )
-        else:
-            logger.info(
-                f"API server binding to {effective_host} with password authentication enabled."
-            )
+            raise SystemExit(1)
+        logger.info(f"API server binding to {effective_host} with password authentication enabled.")
 
     if reload:
         # Reload mode requires import string with factory so uvicorn can spawn

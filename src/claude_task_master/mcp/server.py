@@ -495,13 +495,14 @@ def create_server(
     @mcp.tool()
     def setup_repo(
         repo_dir: str,
+        run_setup_scripts: bool = False,
     ) -> dict[str, Any]:
         """Set up a cloned repository for development.
 
         Detects the project type and performs appropriate setup:
         - Creates virtual environment (for Python projects)
         - Installs dependencies (pip, npm, pnpm, yarn, bun)
-        - Runs setup scripts (setup-hooks.sh, setup.sh, etc.)
+        - Runs setup scripts (setup-hooks.sh, setup.sh, etc.) only when opted in
 
         Supports Python projects (pyproject.toml, setup.py, requirements.txt)
         and Node.js projects (package.json). Uses uv for Python dependency
@@ -509,6 +510,9 @@ def create_server(
 
         Args:
             repo_dir: Path to the cloned repository directory to set up.
+            run_setup_scripts: Execute repo-supplied setup scripts. Disabled by
+                default because running untrusted scripts is a remote-code-execution
+                risk; scripts are detected but skipped unless this is True.
 
         Returns:
             Dictionary containing:
@@ -525,7 +529,7 @@ def create_server(
             setup_repo("/home/user/workspace/claude-task-master/my-project")
             setup_repo("~/workspace/claude-task-master/python-app")
         """
-        return tools.setup_repo(repo_dir)
+        return tools.setup_repo(repo_dir, run_setup_scripts=run_setup_scripts)
 
     @mcp.tool()
     def plan_repo(

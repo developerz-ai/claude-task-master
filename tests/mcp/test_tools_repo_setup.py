@@ -10,6 +10,21 @@ from .conftest import MCP_AVAILABLE
 pytestmark = pytest.mark.skipif(not MCP_AVAILABLE, reason="MCP SDK not installed")
 
 
+@pytest.fixture(autouse=True)
+def _enable_repo_auth_and_confine(monkeypatch, temp_dir):
+    """Enable auth and confine the workspace base to a temp dir for repo tools.
+
+    Repo tools now refuse to run when authentication is disabled and confine
+    paths under ``DEFAULT_WORKSPACE_BASE``. These behavior tests exercise the
+    happy path, so we enable auth and point the workspace base at ``temp_dir``.
+    Dedicated refusal/escape tests live in ``test_repo_security.py``.
+    """
+    import claude_task_master.mcp.tools as tools_mod
+
+    monkeypatch.setattr(tools_mod, "is_auth_enabled", lambda: True)
+    monkeypatch.setattr(tools_mod, "DEFAULT_WORKSPACE_BASE", temp_dir)
+
+
 class TestSetupRepoTool:
     """Test the setup_repo MCP tool."""
 
@@ -397,12 +412,12 @@ class TestPlanRepoTool:
         assert "required" in result["message"].lower()
         assert result["error"] == "Goal cannot be empty"
 
-    def test_plan_repo_accepts_string_path(self):
+    def test_plan_repo_accepts_string_path(self, temp_dir):
         """Test plan_repo accepts string path."""
         from claude_task_master.mcp.tools import plan_repo
 
-        # Test with nonexistent path to fail fast without agent calls
-        result = plan_repo("/nonexistent/test/path", goal="Test goal")
+        # Nonexistent path under the (confined) workspace base fails fast.
+        result = plan_repo(str(temp_dir / "nonexistent"), goal="Test goal")
 
         assert result["success"] is False
         assert result["error"] == "Work directory not found"
@@ -456,23 +471,23 @@ class TestPlanRepoTool:
         assert result["success"] is False
         assert "already in progress" in result["message"]
 
-    def test_plan_repo_model_parameter(self):
+    def test_plan_repo_model_parameter(self, temp_dir):
         """Test plan_repo accepts model parameter."""
         from claude_task_master.mcp.tools import plan_repo
 
         # Test with different model values using nonexistent path to fail fast
         for model in ["opus", "sonnet", "haiku"]:
-            result = plan_repo("/nonexistent/path", goal="Test goal", model=model)
+            result = plan_repo(str(temp_dir / "nonexistent"), goal="Test goal", model=model)
             # Should accept the parameter and fail quickly on path validation
             assert result["success"] is False
             assert result["error"] == "Work directory not found"
 
-    def test_plan_repo_result_structure(self):
+    def test_plan_repo_result_structure(self, temp_dir):
         """Test plan_repo returns correct result structure."""
         from claude_task_master.mcp.tools import plan_repo
 
         # Use nonexistent path to fail fast without agent initialization
-        result = plan_repo("/nonexistent/path", goal="Test goal")
+        result = plan_repo(str(temp_dir / "nonexistent"), goal="Test goal")
 
         # Verify required keys are present
         assert "success" in result

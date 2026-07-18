@@ -51,7 +51,36 @@ from datetime import datetime
 from enum import Enum, StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+def _validate_within_workspace(value: str) -> str:
+    """Validate that *value* resolves inside the repo workspace base.
+
+    Used by repo request models to reject path-traversal escapes (e.g.
+    ``target_dir="/etc"`` or ``"../../root"``) at request-parse time, mirroring
+    the confinement enforced in ``mcp.tools``.
+
+    Args:
+        value: The user-supplied filesystem path.
+
+    Returns:
+        The original value, unchanged, when it is inside the workspace base.
+
+    Raises:
+        ValueError: If the path escapes the workspace base (surfaced as HTTP 422).
+    """
+    from claude_task_master.mcp.tools import (
+        WorkspaceConfinementError,
+        _resolve_within_workspace,
+    )
+
+    try:
+        _resolve_within_workspace(value)
+    except WorkspaceConfinementError as exc:
+        raise ValueError(str(exc)) from exc
+    return value
+
 
 # =============================================================================
 # Enums
@@ -334,6 +363,14 @@ class CloneRepoRequest(BaseModel):
         examples=["main", "develop", "feature/new-feature"],
     )
 
+    @field_validator("target_dir")
+    @classmethod
+    def _confine_target_dir(cls, v: str | None) -> str | None:
+        """Reject target directories that escape the workspace base."""
+        if v is None:
+            return v
+        return _validate_within_workspace(v)
+
 
 class SetupRepoRequest(BaseModel):
     """Request model for setting up a cloned repository for development.
@@ -357,6 +394,18 @@ class SetupRepoRequest(BaseModel):
             "/home/user/projects/my-app",
         ],
     )
+    run_setup_scripts: bool = Field(
+        default=False,
+        description="Execute repo-supplied setup scripts (setup.sh, install.sh, "
+        "setup-hooks.sh, ...). Disabled by default because running untrusted "
+        "scripts is a remote-code-execution risk.",
+    )
+
+    @field_validator("work_dir")
+    @classmethod
+    def _confine_work_dir(cls, v: str) -> str:
+        """Reject work directories that escape the workspace base."""
+        return _validate_within_workspace(v)
 
 
 class PlanRepoRequest(BaseModel):
@@ -401,6 +450,12 @@ class PlanRepoRequest(BaseModel):
         pattern="^(opus|sonnet|haiku)$",
         description="Model to use for planning (opus, sonnet, haiku)",
     )
+
+    @field_validator("work_dir")
+    @classmethod
+    def _confine_work_dir(cls, v: str) -> str:
+        """Reject work directories that escape the workspace base."""
+        return _validate_within_workspace(v)
 
 
 # =============================================================================
