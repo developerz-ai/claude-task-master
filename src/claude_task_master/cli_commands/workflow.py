@@ -49,7 +49,9 @@ def _initialize_logger(
     """Initialize the task logger with configured level and format."""
     log_file = state_manager.get_log_file(run_id)
     if log_format == LogFormat.JSON:
-        log_file = log_file.with_suffix(".json")
+        # JSON logs are written as JSON Lines (one entry per line), appended on
+        # the fly — name the file accordingly.
+        log_file = log_file.with_suffix(".jsonl")
     return TaskLogger(log_file, level=log_level, log_format=log_format)
 
 

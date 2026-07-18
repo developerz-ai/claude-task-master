@@ -58,7 +58,6 @@ class TaskLogger:
         self.log_format = log_format
         self.current_session: int | None = None
         self.session_start: datetime | None = None
-        self._json_entries: list[dict[str, Any]] = []  # Buffer for JSON format
 
     def _truncate(self, text: str) -> str:
         """Truncate text to max line length per line."""
@@ -249,37 +248,35 @@ class TaskLogger:
             )
 
     def _log_json_entry(self, entry_type: str, **kwargs: Any) -> None:
-        """Add an entry to the JSON buffer."""
+        """Append a single entry to the JSON Lines log file.
+
+        The entry is serialized to one line and appended immediately (JSON Lines
+        format). Writing on the fly — rather than buffering until ``end_session``
+        — means a crash loses at most the final in-flight line and never rewrites
+        or discards existing history. Append is O(1) per entry, avoiding the
+        previous O(n²) whole-file read-modify-rewrite.
+
+        Args:
+            entry_type: The entry category (e.g. "prompt", "error", "session_end").
+            **kwargs: Additional fields merged into the entry.
+        """
         entry: dict[str, Any] = {
             "type": entry_type,
             "timestamp": datetime.now().isoformat(),
             "session": self.current_session,
         }
         entry.update(kwargs)
-        self._json_entries.append(entry)
+        line = json.dumps(entry, default=str)
+        with open(self.log_file, "a") as f:
+            f.write(line + "\n")
 
     def _flush_json(self) -> None:
-        """Flush JSON entries to file."""
-        if not self._json_entries:
-            return
+        """No-op retained for backward compatibility.
 
-        # Read existing entries if file exists
-        existing: list[dict[str, Any]] = []
-        if self.log_file.exists():
-            try:
-                with open(self.log_file) as f:
-                    content = f.read().strip()
-                    if content:
-                        existing = json.loads(content)
-            except (json.JSONDecodeError, OSError):
-                pass  # Start fresh if file is corrupted
-
-        # Combine and write all entries
-        all_entries = existing + self._json_entries
-        with open(self.log_file, "w") as f:
-            json.dump(all_entries, f, indent=2, default=str)
-
-        self._json_entries = []
+        JSON entries are appended immediately by :meth:`_log_json_entry`, so
+        there is nothing to flush. Kept so existing callers (``end_session``)
+        keep working without change.
+        """
 
     def _write_raw(self, message: str) -> None:
         """Write message to log file (text format only)."""
@@ -298,3 +295,35 @@ class TaskLogger:
             self._log_json_entry("raw", content=message)
         else:
             self._write_raw(message)
+
+
+def read_json_log(log_file: Path) -> list[dict[str, Any]]:
+    """Read all entries from a JSON Lines (JSONL) log file.
+
+    Each line is an independent JSON object. Blank lines and lines that fail to
+    parse (for example a partially-written final line left by a crash) are
+    skipped, so a single corrupt line never discards the surrounding history —
+    the property the previous whole-file rewrite lacked.
+
+    Args:
+        log_file: Path to the JSONL log file.
+
+    Returns:
+        Parsed log entries in write order. Empty list if the file is absent.
+    """
+    if not log_file.exists():
+        return []
+
+    entries: list[dict[str, Any]] = []
+    with open(log_file) as f:
+        for raw_line in f:
+            stripped = raw_line.strip()
+            if not stripped:
+                continue
+            try:
+                parsed = json.loads(stripped)
+            except json.JSONDecodeError:
+                continue  # Skip a torn or corrupt line; keep the rest.
+            if isinstance(parsed, dict):
+                entries.append(parsed)
+    return entries

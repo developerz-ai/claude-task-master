@@ -6,8 +6,9 @@ This module covers:
 - Combinations of levels and formats
 """
 
-import json
 from pathlib import Path
+
+from claude_task_master.core.logger import read_json_log
 
 
 class TestLogLevels:
@@ -138,8 +139,7 @@ class TestLogFormats:
         logger.end_session("success")
 
         # Parse the JSON output
-        content = json_log_file.read_text()
-        entries = json.loads(content)
+        entries = read_json_log(json_log_file)
 
         assert isinstance(entries, list)
         assert (
@@ -183,8 +183,7 @@ class TestLogFormats:
         logger2.end_session("done")
 
         # Parse and verify all entries are present
-        content = json_log_file.read_text()
-        entries = json.loads(content)
+        entries = read_json_log(json_log_file)
 
         sessions = [e for e in entries if e["type"] == "session_start"]
         assert len(sessions) == 2
@@ -203,8 +202,7 @@ class TestLogFormats:
         logger.log_error("Should be logged")
         logger.end_session("done")
 
-        content = json_log_file.read_text()
-        entries = json.loads(content)
+        entries = read_json_log(json_log_file)
 
         types = [e["type"] for e in entries]
         assert "session_start" in types
@@ -231,8 +229,7 @@ class TestLogLevelAndFormatCombinations:
         logger.log_error("Error")
         logger.end_session("done")
 
-        content = json_log_file.read_text()
-        entries = json.loads(content)
+        entries = read_json_log(json_log_file)
 
         types = [e["type"] for e in entries]
         assert len(types) == 7
