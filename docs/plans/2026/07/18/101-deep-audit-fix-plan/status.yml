@@ -1,0 +1,63 @@
+plan: 101-deep-audit-fix-plan
+title: Deep Audit — Bug & Quality Fix Plan
+status: not_started        # not_started | in_progress | blocked | complete | superseded
+created_by: sebi
+worked_by: ""              # executor fills with their git user.name
+owner: sebi
+percent: 0
+current_focus: ""
+slices:
+  - file: 01-plan-parsing.md
+    status: not_started
+    percent: 0
+  - file: 02-orchestrator-loop.md
+    status: not_started
+    percent: 0
+  - file: 03-merge-safety-ci.md
+    status: not_started
+    percent: 0
+  - file: 04-github-efficiency.md
+    status: not_started
+    percent: 0
+  - file: 05-mailbox-plan-updates.md
+    status: not_started
+    percent: 0
+  - file: 06-cross-process-control.md
+    status: not_started
+    percent: 0
+  - file: 07-state-durability.md
+    status: not_started
+    percent: 0
+  - file: 08-api-mcp-security.md
+    status: not_started
+    percent: 0
+  - file: 09-webhooks.md
+    status: not_started
+    percent: 0
+  - file: 10-rest-mcp-services.md
+    status: not_started
+    percent: 0
+  - file: 11-cli-config-credentials.md
+    status: not_started
+    percent: 0
+  - file: 12-sdk-agent-lifecycle.md
+    status: not_started
+    percent: 0
+  - file: 13-prompts.md
+    status: not_started
+    percent: 0
+  - file: 14-dead-code.md
+    status: not_started
+    percent: 0
+  - file: 15-architecture-splits.md
+    status: not_started
+    percent: 0
+  - file: 16-tests-ci-deps.md
+    status: not_started
+    percent: 0
+  - file: 17-docs.md
+    status: not_started
+    percent: 0
+evidence: []
+notes: "Source: 8-agent parallel audit, 2026-07-18. All findings call-site-verified by auditors; re-verify line numbers at execution time."
+last_updated: 2026-07-18
