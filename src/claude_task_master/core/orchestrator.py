@@ -25,7 +25,7 @@ from .planner import Planner
 from .pr_context import PRContextManager
 from .progress_tracker import ExecutionTracker, TrackerConfig
 from .shutdown import interruptible_sleep, register_handlers, reset_shutdown, unregister_handlers
-from .state import StateError, StateManager, TaskState
+from .state import StateError, StateManager, StateValidationError, TaskState
 from .task_runner import (
     NoPlanFoundError,
     NoTasksFoundError,
@@ -750,9 +750,16 @@ class WorkLoopOrchestrator:
         # Track run start time for duration calculation
         run_start_time = time.time()
 
-        # Load state with recovery
+        # Load state with recovery. Backup fallback is scoped to genuine
+        # corruption: a StateValidationError signals a *deliberate* schema or
+        # structural incompatibility (state written by a newer version, an
+        # invalid schema marker, missing required fields). Silently restoring an
+        # older backup there would downgrade the state and destroy
+        # forward-schema fields, so that error is surfaced instead.
         try:
             state = self.state_manager.load_state()
+        except StateValidationError:
+            raise
         except StateError as e:
             console.warning(f"State loading error: {e.message}")
             recovered = self._attempt_state_recovery()

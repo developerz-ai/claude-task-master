@@ -1,6 +1,7 @@
 """Logger - Single consolidated log file per run with compact output."""
 
 import json
+import os
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -267,8 +268,31 @@ class TaskLogger:
         }
         entry.update(kwargs)
         line = json.dumps(entry, default=str)
+        # If a prior crash left the final record unterminated (bytes written but
+        # the trailing newline never reached disk), appending directly would fuse
+        # this entry onto the fragment so the parser discards *both* lines. Heal
+        # the boundary with a leading newline before writing the new record.
+        separator = "\n" if self._jsonl_needs_record_separator() else ""
         with open(self.log_file, "a") as f:
-            f.write(line + "\n")
+            f.write(separator + line + "\n")
+
+    def _jsonl_needs_record_separator(self) -> bool:
+        """Whether the JSONL log ends mid-record (non-empty, no trailing newline).
+
+        Returns:
+            True if the log file exists, is non-empty, and its last byte is not a
+            newline — meaning the previous record was torn and the next append
+            must start on a fresh line. False for a missing, empty, or
+            properly-terminated file.
+        """
+        try:
+            if self.log_file.stat().st_size == 0:
+                return False
+            with open(self.log_file, "rb") as f:
+                f.seek(-1, os.SEEK_END)
+                return f.read(1) != b"\n"
+        except OSError:
+            return False
 
     def _flush_json(self) -> None:
         """No-op retained for backward compatibility.

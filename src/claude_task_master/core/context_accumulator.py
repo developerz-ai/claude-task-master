@@ -71,7 +71,16 @@ class ContextAccumulator:
         Returns:
             A formatted string ready for prompt injection, or ``""`` when no
             context has been accumulated yet.
+
+        Raises:
+            ValueError: If ``max_chars`` is not a positive integer. With
+                ``max_chars == 0`` the slice ``context[-max_chars:]`` degrades to
+                ``context[0:]`` and would inject the *entire* unbounded context,
+                defeating the cap; negatives truncate incorrectly.
         """
+        if max_chars <= 0:
+            raise ValueError(f"max_chars must be positive, got {max_chars}")
+
         context = self.state_manager.load_context()
 
         if not context:

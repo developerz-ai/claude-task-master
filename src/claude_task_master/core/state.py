@@ -287,7 +287,8 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
             True if the lock was acquired, False otherwise.
         """
         self._pid_file.parent.mkdir(parents=True, exist_ok=True)
-        payload = session_lock.serialize_owner(session_lock.current_owner())
+        current = session_lock.current_owner()
+        payload = session_lock.serialize_owner(current)
 
         # Initial create plus one stale-lock reclaim. Because the whole section
         # runs under the exclusive state lock, one retry always suffices: no
@@ -297,8 +298,15 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
                 fd = os.open(self._pid_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
             except FileExistsError:
                 owner = session_lock.read_owner(self._pid_file)
-                if owner is not None and owner.pid == os.getpid():
-                    return True  # We already hold the lock.
+                if owner is not None and owner.pid == current.pid:
+                    if owner == current:
+                        return True  # True re-entry: this exact process holds it.
+                    # Same PID, different start time — the recorded owner is a
+                    # dead predecessor whose PID the OS recycled onto us. Treating
+                    # it as re-entry would leave the stale identity in place, so
+                    # another starter reclaims it and runs concurrently. Reclaim.
+                    self._remove_pid_file()
+                    continue
                 if owner is not None and session_lock.is_owner_running(owner):
                     return False  # Another live session holds it.
                 # Stale, PID-recycled, or corrupt lock — remove it and retry.
@@ -508,6 +516,22 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
                 recoverable=False,
             )
 
+        # A valid state file is a JSON object. A bare list, number, or string is
+        # corruption: route it through the same backup-recovery path as a parse
+        # error rather than letting the ``TaskState(**data)`` below raise an
+        # uncaught TypeError that bypasses both recovery and StateValidationError.
+        if not isinstance(data, dict):
+            recovered_non_dict: TaskState | None = self._attempt_recovery(
+                TypeError(f"State root is a JSON {type(data).__name__}, expected an object")
+            )
+            if recovered_non_dict:
+                return recovered_non_dict
+            raise StateCorruptedError(
+                self.state_file,
+                f"State root is a JSON {type(data).__name__}, expected an object",
+                recoverable=False,
+            )
+
         # Migrate the raw dict to the current schema version before pydantic
         # validation. Older state is upgraded in place; state from a newer
         # version is rejected here rather than having its unknown fields
@@ -541,8 +565,9 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
         Applies the steps in :data:`_STATE_MIGRATIONS` in sequence from the
         on-disk ``schema_version`` up to :data:`CURRENT_SCHEMA_VERSION`, then
         stamps the current version onto the result. State written before schema
-        versioning existed (no ``schema_version`` key), or with a missing or
-        malformed marker, is treated as version 1 — the initial schema.
+        versioning existed (no ``schema_version`` key) is treated as version 1 —
+        the initial schema. A *present* but malformed marker is rejected rather
+        than assumed to be version 1.
 
         Rejecting state written by a *newer* version is deliberate: pydantic
         would otherwise silently drop the unknown fields and then destroy them
@@ -564,10 +589,21 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
         if not isinstance(data, dict):
             return data
 
-        raw_version = data.get("schema_version", 1)
-        # A missing or garbled marker is treated as the initial schema rather
-        # than aborting the load: the field simply did not exist before this.
-        version = raw_version if isinstance(raw_version, int) and raw_version >= 1 else 1
+        # Only an *absent* marker proves legacy version 1 — the field simply did
+        # not exist before schema versioning. A *present* but malformed marker
+        # ("abc", 0, a float, or a bool) is corruption: treating it as version 1
+        # could apply the wrong migrations and silently discard forward-schema
+        # fields, so reject it loudly instead.
+        if "schema_version" not in data:
+            version = 1
+        else:
+            raw_version = data["schema_version"]
+            if isinstance(raw_version, bool) or not isinstance(raw_version, int) or raw_version < 1:
+                raise StateValidationError(
+                    "State file has an invalid schema version",
+                    invalid_fields=["schema_version: expected a positive integer"],
+                )
+            version = raw_version
 
         if version > CURRENT_SCHEMA_VERSION:
             raise StateValidationError(

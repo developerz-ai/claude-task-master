@@ -68,6 +68,15 @@ class BackupRecoveryMixin:
         """Atomically write JSON data - provided by StateManager."""
         raise NotImplementedError("Provided by StateManager")
 
+    @staticmethod
+    def _migrate_state(data: dict) -> dict:
+        """Migrate a raw state dict to the current schema - provided by StateManager.
+
+        Raises StateValidationError for state written by a newer, unsupported
+        schema version.
+        """
+        raise NotImplementedError("Provided by StateManager")
+
     def _attempt_recovery(self, original_error: Exception) -> TaskState | None:
         """Recover state from the newest backup that is not stale.
 
@@ -126,13 +135,26 @@ class BackupRecoveryMixin:
         """
         # Import here to avoid a circular import at module load time.
         from claude_task_master.core.state import TaskState
+        from claude_task_master.core.state_exceptions import StateValidationError
 
         for backup_file in self._regular_backups():
             try:
                 with open(backup_file) as f:
                     data = json.load(f)
+                # Route the backup through the same schema-compatibility boundary
+                # as the primary state file: older backups are migrated forward,
+                # and a backup written by a *newer* schema raises
+                # StateValidationError here and is skipped rather than loaded with
+                # its unknown fields silently dropped.
+                data = self._migrate_state(data)
                 state = TaskState(**data)
-            except (OSError, json.JSONDecodeError, ValidationError):
+            except (
+                OSError,
+                json.JSONDecodeError,
+                ValidationError,
+                StateValidationError,
+                TypeError,
+            ):
                 continue
 
             staleness = self._backup_staleness_seconds(state, reference_time)
@@ -172,8 +194,13 @@ class BackupRecoveryMixin:
             return None
         try:
             backup_time = datetime.fromisoformat(state.updated_at)
-            return (reference_time - backup_time).total_seconds()
-        except (ValueError, TypeError):
+            # Compare via POSIX timestamps rather than subtracting the datetimes:
+            # a timezone-aware ``updated_at`` minus the naive ``reference_time``
+            # raises TypeError, which was swallowed and let a stale backup slip
+            # past the guard. ``.timestamp()`` yields a comparable epoch for both
+            # naive and aware datetimes.
+            return reference_time.timestamp() - backup_time.timestamp()
+        except (ValueError, TypeError, OSError, OverflowError):
             return None
 
     def _create_backup(self, file_path: Path, suffix: str = "") -> Path | None:
@@ -230,28 +257,57 @@ class BackupRecoveryMixin:
             self._rotate_backups(self.MAX_STATE_BACKUPS)
         return backup_path
 
+    @staticmethod
+    def _backup_order_key(path: Path) -> tuple[str, int, float]:
+        """Deterministic creation-order sort key for a backup (newest = largest).
+
+        Backups are named ``state.<ts>.json`` (the first write in a given
+        second) or ``state.<ts>.NNN.json`` (later writes that second), where
+        ``<ts>`` is a zero-padded ``%Y%m%d-%H%M%S`` stamp and ``NNN`` an
+        incrementing disambiguator. Ordering by ``(timestamp, sequence)``
+        reproduces creation order exactly.
+
+        Modification time cannot: :func:`shutil.copy2` copies the *source*
+        file's mtime onto the backup, so several backups of a ``state.json``
+        written within one mtime tick collide on mtime and sort arbitrarily by
+        glob order — which silently restored (or rotation-pruned) the wrong
+        backup. mtime is retained only as a final tiebreak for any file whose
+        name does not match the expected pattern.
+
+        Args:
+            path: A backup file path.
+
+        Returns:
+            ``(timestamp, sequence, mtime)`` — larger is newer.
+        """
+        stem = path.name[: -len(path.suffix)] if path.suffix else path.name
+        parts = stem.split(".")  # ["state", "<ts>"] or ["state", "<ts>", "NNN"]
+        timestamp = parts[1] if len(parts) >= 2 else ""
+        sequence = int(parts[2]) if len(parts) >= 3 and parts[2].isdigit() else 0
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            mtime = -1.0
+        return (timestamp, sequence, mtime)
+
     def _regular_backups(self) -> list[Path]:
         """Return regular state backups, newest first.
 
         Excludes diagnostic ``.corrupted`` backups. Files that vanish mid-scan
         (a concurrent rotation or cleanup) are skipped rather than raising.
+        Ordering is by the filename-encoded creation timestamp and sequence
+        (see :meth:`_backup_order_key`), which is deterministic even when
+        several backups share an mtime.
 
         Returns:
-            Backup paths sorted by modification time, newest first.
+            Backup paths in creation order, newest first.
         """
         if not self.backup_dir.exists():
             return []
         candidates = [
             p for p in self.backup_dir.glob("state.*.json") if ".corrupted." not in p.name
         ]
-
-        def _mtime(path: Path) -> float:
-            try:
-                return path.stat().st_mtime
-            except OSError:
-                return -1.0
-
-        return sorted(candidates, key=_mtime, reverse=True)
+        return sorted(candidates, key=self._backup_order_key, reverse=True)
 
     def _rotate_backups(self, keep: int) -> None:
         """Prune old regular backups, retaining the newest ``keep``.
@@ -320,7 +376,16 @@ class BackupRecoveryMixin:
             except OSError:
                 return -1.0
 
-        log_files = sorted(self.logs_dir.glob("run-*.txt"), key=_log_mtime, reverse=True)
+        # JSON logging writes ``run-*.jsonl`` alongside the text ``run-*.txt``;
+        # both formats must be pruned or structured logs accumulate forever.
+        log_files = sorted(
+            [
+                *self.logs_dir.glob("run-*.txt"),
+                *self.logs_dir.glob("run-*.jsonl"),
+            ],
+            key=_log_mtime,
+            reverse=True,
+        )
 
         # Delete older logs
         for log_file in log_files[max_logs:]:

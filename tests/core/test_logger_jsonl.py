@@ -82,6 +82,30 @@ class TestJsonlDurability:
         assert "after restart" in prompts
         assert "half-writ" not in "".join(str(p) for p in prompts)
 
+        # The FIRST entry after the crash — session 2's session_start — must also
+        # survive. The torn fragment has no trailing newline, so without healing
+        # the boundary this entry would be fused onto it and discarded with it.
+        session_starts = [e for e in entries if e["type"] == "session_start"]
+        assert any(e.get("session") == 2 for e in session_starts), (
+            "session 2's session_start was lost to the torn record boundary"
+        )
+
+    def test_torn_boundary_healed_before_append(self, log_file: Path) -> None:
+        """An append onto an unterminated file inserts a record separator first."""
+        # A prior crash left a fragment with no trailing newline.
+        log_file.write_text('{"type": "prompt", "content": "torn')
+
+        logger = TaskLogger(log_file, log_format=LogFormat.JSON)
+        logger.start_session(1, "work")
+
+        raw = log_file.read_text()
+        # The healing newline separates the fragment from the first new record so
+        # the fragment is an isolated (corrupt, skipped) line rather than fused.
+        assert '"torn\n' in raw
+        # The first appended record parses cleanly and survives recovery.
+        entries = read_json_log(log_file)
+        assert any(e["type"] == "session_start" for e in entries)
+
 
 class TestJsonlFormat:
     """Format invariants of the JSONL output."""

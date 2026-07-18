@@ -29,6 +29,7 @@ realistic foreign lock without spawning extra sub-processes.
 from __future__ import annotations
 
 import json
+import multiprocessing as mp
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -160,6 +161,83 @@ class TestCrashSimTruncateMidWrite:
 # =============================================================================
 # 2. Two concurrent ``start`` — exactly one wins
 # =============================================================================
+
+
+def _race_initialize_worker(
+    state_dir_str: str, start_barrier: object, done_barrier: object, results: object
+) -> None:
+    """Subprocess entry point for the concurrent-``initialize`` race.
+
+    Both workers block on ``start_barrier`` so their ``O_CREAT | O_EXCL`` lock
+    creations land as simultaneously as possible, then each reports whether it
+    acquired the session lock. Each worker waits on ``done_barrier`` *after*
+    reporting so the winner stays alive — and thus observable as a live lock
+    owner — throughout the loser's acquisition attempt; a prematurely-exited
+    winner would otherwise look like a reclaimable dead PID and both could win.
+    """
+    from pathlib import Path as _Path
+
+    from claude_task_master.core.state import StateError, StateManager, TaskOptions
+
+    manager = StateManager(_Path(state_dir_str))
+    outcome = "error"
+    try:
+        start_barrier.wait(timeout=30)  # type: ignore[attr-defined]
+        try:
+            manager.initialize(goal="race", model="sonnet", options=TaskOptions())
+            outcome = "acquired"
+        except StateError:
+            outcome = "blocked"
+    except Exception:  # pragma: no cover - defensive against a broken barrier
+        outcome = "error"
+    finally:
+        results.put(outcome)  # type: ignore[attr-defined]
+    try:
+        done_barrier.wait(timeout=30)  # type: ignore[attr-defined]
+    except Exception:  # pragma: no cover - sibling already exited
+        pass
+
+
+class TestConcurrentStartRace:
+    """A genuine two-process race on the O_CREAT | O_EXCL session lock."""
+
+    def test_two_processes_race_exactly_one_acquires(self, temp_dir: Path) -> None:
+        """Two subprocesses initialize() the same dir behind a barrier — one wins.
+
+        Unlike the sequential foreign-PID simulations below, this exercises the
+        real cross-process ``O_CREAT | O_EXCL`` race window: both processes reach
+        the lock creation at (near) the same instant, and exactly one must
+        acquire while the other is cleanly blocked.
+        """
+        if not hasattr(os, "fork"):
+            pytest.skip("cross-process fork race requires a POSIX fork")
+
+        ctx = mp.get_context("fork")
+        state_dir = temp_dir / ".claude-task-master"
+        start_barrier = ctx.Barrier(2)
+        done_barrier = ctx.Barrier(2)
+        results: mp.Queue = ctx.Queue()
+
+        procs = [
+            ctx.Process(
+                target=_race_initialize_worker,
+                args=(str(state_dir), start_barrier, done_barrier, results),
+            )
+            for _ in range(2)
+        ]
+        for proc in procs:
+            proc.start()
+
+        try:
+            outcomes = sorted(results.get(timeout=60) for _ in procs)
+        finally:
+            for proc in procs:
+                proc.join(timeout=30)
+                if proc.is_alive():  # pragma: no cover - safety net for a hung child
+                    proc.terminate()
+
+        # Exactly one process acquires the lock; the other is cleanly blocked.
+        assert outcomes == ["acquired", "blocked"], outcomes
 
 
 class TestConcurrentStart:

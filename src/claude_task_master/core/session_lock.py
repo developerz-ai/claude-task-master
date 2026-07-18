@@ -113,11 +113,16 @@ def parse_owner(text: str) -> LockOwner | None:
     if isinstance(data, bool):
         return None
     if isinstance(data, int):  # Legacy bare-PID lock file.
+        if data <= 0:
+            return None  # A non-positive PID drives os.kill process-group semantics.
         return LockOwner(pid=data, start_time=None)
     if isinstance(data, dict):
-        try:
-            pid = int(data["pid"])
-        except (KeyError, TypeError, ValueError):
+        # Require a strict positive integer PID. ``int()`` would coerce numeric
+        # strings and truncate floats, and zero/negative values invoke
+        # process-group semantics in ``os.kill`` — a malformed lock could then
+        # read as permanently held instead of being reclaimed.
+        pid = data.get("pid")
+        if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
             return None
         raw_start = data.get("start_time")
         if isinstance(raw_start, bool) or not isinstance(raw_start, (int, float)):

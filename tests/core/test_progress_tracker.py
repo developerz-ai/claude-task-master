@@ -59,7 +59,7 @@ class TestSessionMetrics:
         # $15/M input + $75/M output = $15 + $7.5 = $22.5
         assert metrics.estimated_cost == pytest.approx(22.5, rel=0.01)
 
-    def test_estimated_cost_opus_rates(self):
+    def test_estimated_cost_opus_rates(self) -> None:
         """Test cost estimation uses Opus 4 rates ($15/M input, $75/M output)."""
         metrics = SessionMetrics(
             session_id=1,

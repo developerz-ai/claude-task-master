@@ -2544,15 +2544,21 @@ class TestSchemaVersionMigration:
             manager.load_state()
         assert "newer" in str(exc_info.value).lower()
 
-    @pytest.mark.parametrize("bad_version", ["abc", 0, -3, 1.5, None])
-    def test_malformed_version_treated_as_baseline(self, state_dir, sample_task_state, bad_version):
-        """A missing/garbled schema_version is treated as the initial schema, not an error."""
+    @pytest.mark.parametrize("bad_version", ["abc", 0, -3, 1.5, None, True])
+    def test_present_malformed_version_rejected(self, state_dir, sample_task_state, bad_version):
+        """A *present* garbled schema_version is rejected, not assumed to be v1.
+
+        Only an absent marker proves legacy version 1; a present non-positive-int
+        value could apply the wrong migrations and silently discard
+        forward-schema fields, so it must fail loudly instead.
+        """
         sample_task_state["schema_version"] = bad_version
         (state_dir / "state.json").write_text(json.dumps(sample_task_state))
 
         manager = StateManager(state_dir)
-        state = manager.load_state()
-        assert state.schema_version == CURRENT_SCHEMA_VERSION
+        with pytest.raises(StateValidationError) as exc_info:
+            manager.load_state()
+        assert "schema version" in str(exc_info.value).lower()
 
     def test_migrate_state_non_dict_passthrough(self):
         """_migrate_state leaves non-mapping JSON untouched for downstream handling."""

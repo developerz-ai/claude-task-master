@@ -19,6 +19,7 @@ or the fully-written new one -- never a partial write.
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import tempfile
@@ -28,26 +29,84 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from typing import Any
 
+# Errnos that mean "this filesystem/platform cannot fsync a *directory* fd", as
+# opposed to a genuine storage failure (EIO, ENOSPC, ...) that must surface. A
+# suppressed storage error would let a write claim durability it does not have.
+_UNSUPPORTED_DIR_FSYNC_ERRNOS = frozenset(
+    code
+    for code in (
+        getattr(errno, "EINVAL", None),
+        getattr(errno, "ENOTSUP", None),
+        getattr(errno, "EOPNOTSUPP", None),
+    )
+    if code is not None
+)
+
 
 def _fsync_dir(directory: Path) -> None:
     """fsync a directory so a rename inside it survives a crash.
 
-    Best-effort: some platforms (notably Windows) cannot open a directory for
-    fsync, so any OSError is ignored rather than propagated.
+    Tolerates only *explicitly unsupported* directory syncing — Windows has no
+    directory-open primitive, and some filesystems reject ``fsync`` on a
+    directory fd (EINVAL/ENOTSUP/EOPNOTSUPP). Any other error (a missing
+    directory, a genuine EIO/ENOSPC storage failure) is propagated rather than
+    silently suppressed, so a write never reports durability it did not achieve.
 
     Args:
         directory: The directory whose entries should be flushed to disk.
+
+    Raises:
+        OSError: On a genuine directory open/fsync failure (not an unsupported
+            platform).
     """
     try:
         dir_fd = os.open(directory, os.O_RDONLY)
     except OSError:
-        return
+        # Windows cannot open a directory fd; there is no dir-sync primitive to
+        # attempt, so tolerate. On POSIX a failure to open an existing directory
+        # is a real error and must surface.
+        if os.name == "nt":
+            return
+        raise
     try:
         os.fsync(dir_fd)
-    except OSError:
-        pass  # Directory fsync is best-effort.
+    except OSError as exc:
+        if exc.errno not in _UNSUPPORTED_DIR_FSYNC_ERRNOS:
+            raise  # Genuine storage error — do not hide it.
     finally:
         os.close(dir_fd)
+
+
+def _makedirs_durable(directory: Path) -> None:
+    """Create ``directory`` and any missing parents, durably.
+
+    ``Path.mkdir(parents=True)`` links each new directory into its parent, but
+    those parent directory entries are not persisted until fsynced. A crash
+    could therefore lose the whole freshly-created hierarchy even though the
+    call returned. Sync the parent of every directory this call newly creates so
+    the target path survives a crash.
+
+    Args:
+        directory: The directory to create (parents included).
+
+    Raises:
+        OSError: If a directory cannot be created or its parent synced.
+    """
+    # Collect ancestors that do not yet exist, deepest first.
+    missing: list[Path] = []
+    node = directory
+    while not node.exists():
+        missing.append(node)
+        if node.parent == node:  # Reached the filesystem root.
+            break
+        node = node.parent
+
+    directory.mkdir(parents=True, exist_ok=True)
+
+    # Persist each newly-created directory's entry via its parent. Order is
+    # irrelevant for correctness; each parent fsync is independent.
+    for created in missing:
+        _fsync_dir(created.parent)
 
 
 def atomic_write_text(path: Path, text: str, *, encoding: str = "utf-8") -> None:
@@ -65,7 +124,7 @@ def atomic_write_text(path: Path, text: str, *, encoding: str = "utf-8") -> None
     Raises:
         OSError: If the file cannot be written, synced, or renamed.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
+    _makedirs_durable(path.parent)
 
     fd, temp_path = tempfile.mkstemp(dir=path.parent, prefix=".tmp_", suffix=".tmp")
     try:
