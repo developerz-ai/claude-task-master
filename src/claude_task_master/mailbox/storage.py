@@ -10,13 +10,13 @@ This module provides the MailboxStorage class that handles:
 from __future__ import annotations
 
 import json
-import shutil
-import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
+
+from claude_task_master.core.atomic_io import atomic_write_json
 
 from .models import MailboxMessage, MailboxState, Priority
 
@@ -71,29 +71,18 @@ class MailboxStorage:
             return MailboxState()
 
     def _save_state(self, state: MailboxState) -> None:
-        """Save mailbox state atomically.
+        """Save mailbox state atomically and durably.
 
-        Uses temp file + rename for atomic writes.
+        Delegates to the shared :func:`atomic_write_json` helper (temp file +
+        fsync + rename + directory fsync) so a crash cannot leave a truncated
+        ``mailbox.json``.
 
         Args:
             state: The MailboxState to save.
         """
         self._ensure_dir()
-
-        # Write to temp file, then rename for atomicity
-        fd, temp_path = tempfile.mkstemp(dir=self.state_dir, prefix=".mailbox_", suffix=".json")
-        try:
-            with open(fd, "w") as f:
-                # Use model_dump with mode='json' for proper datetime serialization
-                json.dump(state.model_dump(mode="json"), f, indent=2)
-            shutil.move(temp_path, self.storage_path)
-        except Exception:
-            # Clean up temp file on error
-            try:
-                Path(temp_path).unlink()
-            except Exception:
-                pass
-            raise
+        # Use model_dump(mode="json") for proper datetime serialization.
+        atomic_write_json(self.storage_path, state.model_dump(mode="json"))
 
     def add_message(
         self,

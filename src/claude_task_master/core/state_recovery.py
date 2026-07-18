@@ -65,7 +65,7 @@ class StateRecovery:
                 )
 
             # Get PR status
-            pr_status = self.github_client.get_pr_status(pr_number)
+            pr_status = self.github_client.get_pr_status(pr_number, cwd=cwd)
 
             # Determine workflow stage based on PR state
             if pr_status.ci_state in ("FAILURE", "ERROR"):

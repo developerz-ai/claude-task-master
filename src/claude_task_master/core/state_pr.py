@@ -13,6 +13,8 @@ import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from claude_task_master.core.atomic_io import atomic_write_json, atomic_write_text
+
 if TYPE_CHECKING:
     pass
 
@@ -30,10 +32,26 @@ class PRContextMixin:
     # This will be set by StateManager
     state_dir: Path
 
+    def _pr_dir_path(self, pr_number: int) -> Path:
+        """Return the path for a specific PR's context directory without creating it.
+
+        Use this for read operations where the directory may not exist yet.
+
+        Args:
+            pr_number: The PR number.
+
+        Returns:
+            Path to the PR directory (not guaranteed to exist).
+        """
+        return self.state_dir / "debugging" / "pr" / str(pr_number)
+
     def get_pr_dir(self, pr_number: int) -> Path:
-        """Get the directory for a specific PR's context.
+        """Get (and create) the directory for a specific PR's context.
 
         Structure: .claude-task-master/debugging/pr/{number}/
+
+        Use this for write operations that need the directory to exist.
+        For read-only access use :meth:`_pr_dir_path` instead (no mkdir).
 
         Args:
             pr_number: The PR number.
@@ -41,7 +59,7 @@ class PRContextMixin:
         Returns:
             Path to the PR directory (created if it doesn't exist).
         """
-        pr_dir = self.state_dir / "debugging" / "pr" / str(pr_number)
+        pr_dir = self._pr_dir_path(pr_number)
         pr_dir.mkdir(parents=True, exist_ok=True)
         return pr_dir
 
@@ -87,7 +105,7 @@ Status: {"Resolved" if is_resolved else "Unresolved"}
 
 {body}
 """
-            (comments_dir / filename).write_text(content)
+            atomic_write_text(comments_dir / filename, content)
 
         # Also save a summary file
         summary_file = pr_dir / "comments_summary.txt"
@@ -101,7 +119,7 @@ Status: {"Resolved" if is_resolved else "Unresolved"}
         for p in sorted(paths):
             summary_lines.append(f"  - {p}")
 
-        summary_file.write_text("\n".join(summary_lines))
+        atomic_write_text(summary_file, "\n".join(summary_lines))
 
     def save_ci_failure(self, pr_number: int, check_name: str, logs: str) -> None:
         """Save CI failure logs for Claude to read.
@@ -141,7 +159,7 @@ FAILURE LOGS:
         Returns:
             Combined context string.
         """
-        pr_dir = self.get_pr_dir(pr_number)
+        pr_dir = self._pr_dir_path(pr_number)
         if not pr_dir.exists():
             return ""
 
@@ -208,7 +226,7 @@ FAILURE LOGS:
         Returns:
             Set of thread IDs that have been addressed.
         """
-        pr_dir = self.get_pr_dir(pr_number)
+        pr_dir = self._pr_dir_path(pr_number)
         addressed_file = pr_dir / "addressed_threads.json"
 
         if not addressed_file.exists():
@@ -242,10 +260,11 @@ FAILURE LOGS:
         # Add new thread IDs
         all_addressed = existing | set(thread_ids)
 
-        # Save updated list
+        # Save updated list durably (temp file + fsync + atomic rename) so a
+        # crash can't corrupt the file into re-answered threads / duplicate
+        # comments.
         try:
-            with open(addressed_file, "w") as f:
-                json.dump({"thread_ids": list(all_addressed)}, f, indent=2)
+            atomic_write_json(addressed_file, {"thread_ids": list(all_addressed)})
         except OSError:
             pass  # Best effort - don't fail if we can't save
 
@@ -258,7 +277,7 @@ FAILURE LOGS:
         Args:
             pr_number: The PR number.
         """
-        pr_dir = self.get_pr_dir(pr_number)
+        pr_dir = self._pr_dir_path(pr_number)
         addressed_file = pr_dir / "addressed_threads.json"
 
         if addressed_file.exists():

@@ -319,3 +319,45 @@ class TestAddressedThreadsTracking:
         # Should return empty set instead of crashing
         addressed = state_manager.get_addressed_threads(123)
         assert addressed == set()
+
+
+class TestPRDirPathAccessor:
+    """Tests for the path-accessor vs ensure-dir split."""
+
+    def test_pr_dir_path_does_not_create_directory(self, state_manager: StateManager) -> None:
+        """_pr_dir_path returns the correct path without creating it."""
+        path = state_manager._pr_dir_path(999)
+        assert not path.exists(), "_pr_dir_path must NOT create the directory"
+        assert path.name == "999"
+        assert path.parent.name == "pr"
+
+    def test_get_pr_dir_creates_directory(self, state_manager: StateManager) -> None:
+        """get_pr_dir (write path) must create the directory."""
+        path = state_manager.get_pr_dir(888)
+        assert path.exists(), "get_pr_dir must create the directory"
+
+    def test_pr_dir_path_and_get_pr_dir_return_same_path(self, state_manager: StateManager) -> None:
+        """_pr_dir_path and get_pr_dir point to the same location."""
+        assert state_manager._pr_dir_path(777) == state_manager.get_pr_dir(777)
+
+    def test_load_pr_context_no_mkdir_on_missing_pr(self, state_manager: StateManager) -> None:
+        """load_pr_context must not create the PR directory if it doesn't exist."""
+        result = state_manager.load_pr_context(42)
+        assert result == ""
+        # Directory must NOT have been created as a side-effect.
+        assert not state_manager._pr_dir_path(42).exists()
+
+    def test_get_addressed_threads_no_mkdir_on_missing_pr(
+        self, state_manager: StateManager
+    ) -> None:
+        """get_addressed_threads must not create the PR directory if it doesn't exist."""
+        threads = state_manager.get_addressed_threads(43)
+        assert threads == set()
+        assert not state_manager._pr_dir_path(43).exists()
+
+    def test_clear_addressed_threads_no_mkdir_on_missing_pr(
+        self, state_manager: StateManager
+    ) -> None:
+        """clear_addressed_threads must not create the PR directory if it doesn't exist."""
+        state_manager.clear_addressed_threads(44)  # must not raise
+        assert not state_manager._pr_dir_path(44).exists()

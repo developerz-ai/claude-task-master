@@ -824,7 +824,7 @@ class TestAtomicWriteFailure:
     """Test atomic write failure handling."""
 
     def test_save_state_cleans_temp_file_on_error(self, state_dir, monkeypatch):
-        """Test that temp file is cleaned up when shutil.move fails."""
+        """Test that temp file is cleaned up when the atomic rename fails."""
         from pathlib import Path as RealPath
 
         storage = MailboxStorage(state_dir=state_dir)
@@ -839,12 +839,12 @@ class TestAtomicWriteFailure:
             temp_files_created.append(path)
             return fd, path
 
-        # Mock shutil.move to fail
-        def failing_move(src, dst):
+        # Mock os.replace (the atomic rename) to fail
+        def failing_replace(src, dst):
             raise OSError("Simulated disk full error")
 
         monkeypatch.setattr("tempfile.mkstemp", tracking_mkstemp)
-        monkeypatch.setattr("shutil.move", failing_move)
+        monkeypatch.setattr("os.replace", failing_replace)
 
         # Should raise the error
         with pytest.raises(OSError, match="Simulated disk full error"):
@@ -869,7 +869,7 @@ class TestAtomicWriteFailure:
             temp_files_created.append(path)
             return fd, path
 
-        def failing_move_and_delete_temp(src, dst):
+        def failing_replace_and_delete_temp(src, dst):
             # Delete the temp file before the cleanup code can
             try:
                 RealPath(src).unlink()
@@ -878,7 +878,7 @@ class TestAtomicWriteFailure:
             raise OSError("Simulated error after temp deletion")
 
         monkeypatch.setattr("tempfile.mkstemp", tracking_mkstemp)
-        monkeypatch.setattr("shutil.move", failing_move_and_delete_temp)
+        monkeypatch.setattr("os.replace", failing_replace_and_delete_temp)
 
         # Should still raise the original error, even if temp cleanup fails
         with pytest.raises(OSError, match="Simulated error after temp deletion"):

@@ -173,8 +173,12 @@ class GitHubClient(PROperationsMixin, CIOperationsMixin):
                 command=["gh", "auth", "status"],
             ) from e
 
-    def _get_repo_info(self) -> str:
+    def _get_repo_info(self, cwd: str | None = None) -> str:
         """Get current repository owner/name.
+
+        Args:
+            cwd: Working directory for the gh command. Defaults to the current
+                working directory when ``None``.
 
         Returns:
             Repository in owner/name format (e.g., "owner/repo").
@@ -186,6 +190,7 @@ class GitHubClient(PROperationsMixin, CIOperationsMixin):
         result = self._run_gh_command(
             ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
             timeout=15,
+            cwd=cwd,
         )
         return result.stdout.strip()
 

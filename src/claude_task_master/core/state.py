@@ -3,15 +3,19 @@
 import fcntl
 import json
 import os
-import shutil
-import tempfile
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import IO, Literal
+from typing import IO, Any, Literal
 
 from pydantic import BaseModel, ValidationError
+
+# Import single-instance session-lock helpers
+from claude_task_master.core import session_lock
+
+# Import shared durable atomic-write helper
+from claude_task_master.core.atomic_io import atomic_write_json
 
 # Import backup/recovery mixin
 from claude_task_master.core.state_backup import BackupRecoveryMixin
@@ -56,6 +60,7 @@ __all__ = [
     "TERMINAL_STATUSES",
     "RESUMABLE_STATUSES",
     "VALID_TRANSITIONS",
+    "CURRENT_SCHEMA_VERSION",
     # Classes
     "TaskOptions",
     "TaskState",
@@ -112,9 +117,32 @@ WorkflowStageType = Literal[
 ]
 
 
+# =============================================================================
+# State schema versioning
+# =============================================================================
+
+#: Current on-disk state schema version. Bump by one whenever a change to
+#: :class:`TaskState` cannot be absorbed by pydantic defaults alone (a renamed
+#: or removed field, or a field whose meaning changed) and register the matching
+#: upgrade step in :data:`_STATE_MIGRATIONS`.
+CURRENT_SCHEMA_VERSION = 1
+
+#: Ordered state migrations keyed by *source* version: ``_STATE_MIGRATIONS[n]``
+#: takes a raw version-``n`` state dict and returns a version-``n+1`` dict.
+#: :meth:`StateManager._migrate_state` applies them in sequence from the on-disk
+#: version up to :data:`CURRENT_SCHEMA_VERSION`. Empty at version 1 — there is no
+#: earlier format to upgrade from yet.
+_STATE_MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {}
+
+
 class TaskState(BaseModel):
     """Machine-readable state."""
 
+    # On-disk schema version, written on every save and checked on load by
+    # ``StateManager._migrate_state``. State from an older version is migrated
+    # forward; state from a newer version is rejected rather than letting
+    # pydantic silently drop its unknown fields and then destroy them on save.
+    schema_version: int = CURRENT_SCHEMA_VERSION
     status: StatusType  # planning|working|blocked|paused|stopped|success|failed
     workflow_stage: WorkflowStageType | None = None  # PR lifecycle stage
     current_task_index: int = 0
@@ -230,55 +258,99 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
         return self.state_dir / "backups"
 
     def acquire_session_lock(self) -> bool:
-        """Acquire session lock by writing PID file.
+        """Acquire the single-instance session lock.
+
+        Atomically creates the ``.pid`` lock file with ``O_CREAT | O_EXCL`` so
+        two concurrent ``claudetm`` processes can never both acquire it (the old
+        check-then-write left a race window). The critical section is serialized
+        under the state file lock so a stale lock left by a crashed process is
+        reclaimed by at most one racer at a time. A recorded pid+start-time lets
+        a lock held by a dead or PID-recycled process be reclaimed rather than
+        blocking forever.
 
         Returns:
-            True if lock acquired, False if another session is active.
+            True if the lock was acquired, False if another live session holds it
+            (or the lock could not be written).
         """
-        if self.is_session_active():
-            return False
         try:
-            self._pid_file.parent.mkdir(parents=True, exist_ok=True)
-            self._pid_file.write_text(str(os.getpid()))
-            return True
-        except OSError:
+            with file_lock(self._lock_file, timeout=self.LOCK_TIMEOUT):
+                return self._acquire_session_lock_locked()
+        except StateLockError:
+            # Another process is actively holding the state lock — treat the
+            # state directory as in use by another session.
             return False
+
+    def _acquire_session_lock_locked(self) -> bool:
+        """Acquire the PID lock while holding the state file lock.
+
+        Returns:
+            True if the lock was acquired, False otherwise.
+        """
+        self._pid_file.parent.mkdir(parents=True, exist_ok=True)
+        current = session_lock.current_owner()
+        payload = session_lock.serialize_owner(current)
+
+        # Initial create plus one stale-lock reclaim. Because the whole section
+        # runs under the exclusive state lock, one retry always suffices: no
+        # other process can recreate the file between our removal and re-create.
+        for _ in range(2):
+            try:
+                fd = os.open(self._pid_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            except FileExistsError:
+                owner = session_lock.read_owner(self._pid_file)
+                if owner is not None and owner.pid == current.pid:
+                    if owner == current:
+                        return True  # True re-entry: this exact process holds it.
+                    # Same PID, different start time — the recorded owner is a
+                    # dead predecessor whose PID the OS recycled onto us. Treating
+                    # it as re-entry would leave the stale identity in place, so
+                    # another starter reclaims it and runs concurrently. Reclaim.
+                    self._remove_pid_file()
+                    continue
+                if owner is not None and session_lock.is_owner_running(owner):
+                    return False  # Another live session holds it.
+                # Stale, PID-recycled, or corrupt lock — remove it and retry.
+                self._remove_pid_file()
+                continue
+            except OSError:
+                return False
+
+            try:
+                with os.fdopen(fd, "w", encoding="ascii") as f:
+                    f.write(payload)
+            except OSError:
+                self._remove_pid_file()
+                return False
+            return True
+        return False
 
     def release_session_lock(self) -> None:
-        """Release session lock by removing PID file."""
-        try:
-            if self._pid_file.exists():
-                # Only remove if we own the lock
-                try:
-                    pid = int(self._pid_file.read_text().strip())
-                    if pid == os.getpid():
-                        self._pid_file.unlink()
-                except (ValueError, OSError):
-                    pass  # Ignore errors reading own PID - will be cleaned up
-        except OSError:
-            pass  # Ignore errors when PID file doesn't exist
+        """Release the session lock, only if this process still owns it."""
+        owner = session_lock.read_owner(self._pid_file)
+        # A live process's PID is unique, so a matching PID means the lock is
+        # ours — never remove a lock a different (or recycled) process holds.
+        if owner is not None and owner.pid == os.getpid():
+            self._remove_pid_file()
 
     def is_session_active(self) -> bool:
-        """Check if another session is actively using this state.
+        """Check if another live session is using this state directory.
 
         Returns:
-            True if another process is using this state directory.
+            True if a *different* process holds a live lock. A missing, stale,
+            PID-recycled, or corrupt lock reads as inactive. This is a read-only
+            probe; stale locks are reclaimed by :meth:`acquire_session_lock`.
         """
-        if not self._pid_file.exists():
+        owner = session_lock.read_owner(self._pid_file)
+        if owner is None or owner.pid == os.getpid():
             return False
+        return session_lock.is_owner_running(owner)
+
+    def _remove_pid_file(self) -> None:
+        """Best-effort removal of the PID lock file."""
         try:
-            pid = int(self._pid_file.read_text().strip())
-            # Check if process is still running (signal 0 = existence check)
-            os.kill(pid, 0)
-            # Process exists - check if it's not us
-            return pid != os.getpid()
-        except (ValueError, OSError, ProcessLookupError):
-            # Invalid PID or process not running - clean up stale PID file
-            try:
-                self._pid_file.unlink()
-            except OSError:
-                pass  # Stale PID file cleanup is best-effort
-            return False
+            self._pid_file.unlink(missing_ok=True)
+        except OSError:
+            pass  # Concurrent removal or permissions — best effort.
 
     def is_safe_to_delete(self) -> bool:
         """Check if state directory can be safely deleted.
@@ -336,6 +408,14 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
     def save_state(self, state: TaskState, validate_transition: bool = True) -> None:
         """Save state to state.json with file locking.
 
+        The transition check, the atomic write, and the rotating backup all run
+        under a single exclusive lock. The current state is read for validation
+        *inside* the lock (not before acquiring it) so a concurrent writer cannot
+        change the on-disk status between the check and the write
+        (time-of-check-to-time-of-use). On success a rotating backup of the
+        written state is created (best-effort) so a later corruption can be
+        recovered from the most recent good state.
+
         Args:
             state: The TaskState to save.
             validate_transition: If True, validates state transition (default True).
@@ -345,27 +425,42 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
             StatePermissionError: If the file cannot be written.
             StateLockError: If the file lock cannot be acquired.
         """
-        # Validate state transition if there's an existing state
-        if validate_transition and self.state_file.exists():
-            try:
-                current_state = self._load_state_internal()
-                self._validate_transition(current_state.status, state.status)
-            except (StateNotFoundError, StateCorruptedError):
-                # If we can't load current state, allow the save
-                pass
-
-        state.updated_at = datetime.now().isoformat()
-
         with file_lock(self._lock_file, timeout=self.LOCK_TIMEOUT):
+            # Validate the transition while holding the exclusive lock so no
+            # other writer can slip a status change in between the read and the
+            # write (TOCTOU). _load_state_internal may heal a corrupt file via
+            # recovery, which is safe here because we hold the exclusive lock.
+            if validate_transition and self.state_file.exists():
+                try:
+                    current_state = self._load_state_internal()
+                    self._validate_transition(current_state.status, state.status)
+                except (StateNotFoundError, StateCorruptedError):
+                    # If we can't load current state, allow the save.
+                    pass
+
+            state.updated_at = datetime.now().isoformat()
+
             try:
-                # Use atomic write with temp file
-                # Use mode='json' to ensure datetime fields are serialized as ISO strings
+                # Use atomic write with temp file.
+                # Use mode='json' to serialize datetime fields as ISO strings.
                 self._atomic_write_json(self.state_file, state.model_dump(mode="json"))
             except PermissionError as e:
                 raise StatePermissionError(self.state_file, "writing", e) from e
 
+            # Keep a rotating backup of every durable write so a later
+            # corruption can be recovered from the most recent good state.
+            # Best-effort: a backup failure must never fail the save itself.
+            self.create_state_backup()
+
     def load_state(self) -> TaskState:
         """Load state from state.json with error recovery.
+
+        Acquires the *exclusive* lock rather than a shared one: on a corrupt
+        state file :meth:`_load_state_internal` triggers recovery, which heals
+        ``state.json`` by writing the newest good backup back to disk. Writing
+        under a shared lock would let two concurrent readers recover-and-write at
+        the same time; the exclusive lock serializes them. The state file is
+        tiny, so serializing reads costs nothing measurable.
 
         Returns:
             TaskState: The loaded task state.
@@ -377,13 +472,16 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
             StatePermissionError: If the file cannot be read.
             StateLockError: If the file lock cannot be acquired.
         """
-        with file_lock(self._lock_file, timeout=self.LOCK_TIMEOUT, exclusive=False):
+        with file_lock(self._lock_file, timeout=self.LOCK_TIMEOUT):
             return self._load_state_internal()
 
     def _load_state_internal(self) -> TaskState:
-        """Internal method to load state without locking.
+        """Load and parse state without acquiring the lock.
 
-        This is used by save_state to check transitions without deadlock.
+        The caller MUST already hold the exclusive state lock: on corruption
+        this delegates to :meth:`_attempt_recovery`, which writes the healed
+        state back to ``state.json``. Both callers (:meth:`load_state` and
+        :meth:`save_state`) invoke it inside ``file_lock``.
         """
         if not self.state_file.exists():
             raise StateNotFoundError(self.state_file)
@@ -418,6 +516,28 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
                 recoverable=False,
             )
 
+        # A valid state file is a JSON object. A bare list, number, or string is
+        # corruption: route it through the same backup-recovery path as a parse
+        # error rather than letting the ``TaskState(**data)`` below raise an
+        # uncaught TypeError that bypasses both recovery and StateValidationError.
+        if not isinstance(data, dict):
+            recovered_non_dict: TaskState | None = self._attempt_recovery(
+                TypeError(f"State root is a JSON {type(data).__name__}, expected an object")
+            )
+            if recovered_non_dict:
+                return recovered_non_dict
+            raise StateCorruptedError(
+                self.state_file,
+                f"State root is a JSON {type(data).__name__}, expected an object",
+                recoverable=False,
+            )
+
+        # Migrate the raw dict to the current schema version before pydantic
+        # validation. Older state is upgraded in place; state from a newer
+        # version is rejected here rather than having its unknown fields
+        # silently dropped and then destroyed on the next save.
+        data = self._migrate_state(data)
+
         # Validate and parse the state data
         try:
             return TaskState(**data)
@@ -438,6 +558,77 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
                 invalid_fields=invalid_fields if invalid_fields else None,
             ) from e
 
+    @staticmethod
+    def _migrate_state(data: dict[str, Any]) -> dict[str, Any]:
+        """Migrate a raw state dict to the current schema version.
+
+        Applies the steps in :data:`_STATE_MIGRATIONS` in sequence from the
+        on-disk ``schema_version`` up to :data:`CURRENT_SCHEMA_VERSION`, then
+        stamps the current version onto the result. State written before schema
+        versioning existed (no ``schema_version`` key) is treated as version 1 —
+        the initial schema. A *present* but malformed marker is rejected rather
+        than assumed to be version 1.
+
+        Rejecting state written by a *newer* version is deliberate: pydantic
+        would otherwise silently drop the unknown fields and then destroy them
+        on the next save, so a forward-incompatible resume must fail loudly.
+
+        Args:
+            data: The raw state dict parsed from ``state.json``.
+
+        Returns:
+            The migrated state dict, tagged with the current schema version.
+
+        Raises:
+            StateValidationError: If the state was written by a newer schema
+                version, or no migration path exists from the on-disk version.
+        """
+        # Non-mapping JSON (a bare list/number/string) is left untouched so the
+        # downstream ``TaskState(**data)`` surfaces the corruption as it would
+        # without migration, instead of an AttributeError on ``.get`` here.
+        if not isinstance(data, dict):
+            return data
+
+        # Only an *absent* marker proves legacy version 1 — the field simply did
+        # not exist before schema versioning. A *present* but malformed marker
+        # ("abc", 0, a float, or a bool) is corruption: treating it as version 1
+        # could apply the wrong migrations and silently discard forward-schema
+        # fields, so reject it loudly instead.
+        if "schema_version" not in data:
+            version = 1
+        else:
+            raw_version = data["schema_version"]
+            if isinstance(raw_version, bool) or not isinstance(raw_version, int) or raw_version < 1:
+                raise StateValidationError(
+                    "State file has an invalid schema version",
+                    invalid_fields=["schema_version: expected a positive integer"],
+                )
+            version = raw_version
+
+        if version > CURRENT_SCHEMA_VERSION:
+            raise StateValidationError(
+                f"State schema version {version} is newer than the supported "
+                f"version {CURRENT_SCHEMA_VERSION}",
+                invalid_fields=[
+                    "schema_version: written by a newer claude-task-master; "
+                    "upgrade it or run 'clean' to start fresh"
+                ],
+            )
+
+        while version < CURRENT_SCHEMA_VERSION:
+            migrate = _STATE_MIGRATIONS.get(version)
+            if migrate is None:
+                raise StateValidationError(
+                    f"No migration path from state schema version {version} to "
+                    f"{CURRENT_SCHEMA_VERSION}",
+                    invalid_fields=["schema_version: unmigratable state"],
+                )
+            data = migrate(data)
+            version += 1
+
+        data["schema_version"] = CURRENT_SCHEMA_VERSION
+        return data
+
     def _validate_transition(self, current_status: str, new_status: str) -> None:
         """Validate that a state transition is allowed.
 
@@ -457,28 +648,17 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
             raise InvalidStateTransitionError(current_status, new_status)
 
     def _atomic_write_json(self, path: Path, data: dict) -> None:
-        """Atomically write JSON data to a file using a temp file.
+        """Atomically and durably write JSON data to a file.
+
+        Delegates to the shared :func:`atomic_write_json` helper, which writes
+        to a temp file, fsyncs it, renames it over the target, then fsyncs the
+        parent directory so a crash cannot leave a truncated ``state.json``.
 
         Args:
             path: The target file path.
             data: The data to write as JSON.
         """
-        path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Write to a temp file in the same directory, then rename
-        fd, temp_path = tempfile.mkstemp(dir=path.parent, prefix=".tmp_", suffix=".json")
-        try:
-            with open(fd, "w") as f:
-                json.dump(data, f, indent=2)
-            # Atomic rename
-            shutil.move(temp_path, path)
-        except Exception:
-            # Clean up temp file on error
-            try:
-                Path(temp_path).unlink()
-            except Exception:
-                pass  # Temp file cleanup is best-effort
-            raise
+        atomic_write_json(path, data)
 
     # Backup/recovery methods (_attempt_recovery, _create_backup, create_state_backup,
     # cleanup_on_success, _cleanup_old_logs) are inherited from BackupRecoveryMixin
@@ -629,8 +809,11 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
 
     # Backup/Recovery Methods are inherited from BackupRecoveryMixin:
     # - _attempt_recovery(original_error: Exception) -> TaskState | None
+    # - find_recoverable_state(reference_time: datetime | None = None) -> TaskState | None
     # - _create_backup(file_path: Path, suffix: str = "") -> Path | None
     # - create_state_backup() -> Path | None
+    # - _regular_backups() -> list[Path]
+    # - _rotate_backups(keep: int) -> None
     # - cleanup_on_success(run_id: str) -> None
     # - _cleanup_old_logs(max_logs: int = 10) -> None
 

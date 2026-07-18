@@ -1,11 +1,10 @@
 """Tests for logger timing functionality."""
 
-import json
 from pathlib import Path
 
 import pytest
 
-from claude_task_master.core.logger import LogFormat, LogLevel, TaskLogger
+from claude_task_master.core.logger import LogFormat, LogLevel, TaskLogger, read_json_log
 
 
 @pytest.fixture
@@ -51,14 +50,11 @@ class TestTaskTiming:
         # Log task timing
         logger.log_task_timing(task_index=0, duration_seconds=125.5)
 
-        # Flush JSON entries
-        logger._flush_json()
-
-        # Read and parse JSON content
-        content = json.loads(log_file.read_text())
+        # Entries are appended immediately as JSON Lines; read them back.
+        entries = read_json_log(log_file)
 
         # Find the task_timing entry
-        timing_entry = next((e for e in content if e["type"] == "task_timing"), None)
+        timing_entry = next((e for e in entries if e["type"] == "task_timing"), None)
         assert timing_entry is not None
         assert timing_entry["task_index"] == 0
         assert timing_entry["duration_seconds"] == 125.5
@@ -123,14 +119,11 @@ class TestPRTiming:
             ci_wait_seconds=300.0,
         )
 
-        # Flush JSON entries
-        logger._flush_json()
-
-        # Read and parse JSON content
-        content = json.loads(log_file.read_text())
+        # Entries are appended immediately as JSON Lines; read them back.
+        entries = read_json_log(log_file)
 
         # Find the pr_timing entry
-        timing_entry = next((e for e in content if e["type"] == "pr_timing"), None)
+        timing_entry = next((e for e in entries if e["type"] == "pr_timing"), None)
         assert timing_entry is not None
         assert timing_entry["pr_number"] == 42
         assert timing_entry["total_seconds"] == 600.0
