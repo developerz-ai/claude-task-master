@@ -11,6 +11,9 @@ from typing import IO, Literal
 
 from pydantic import BaseModel, ValidationError
 
+# Import single-instance session-lock helpers
+from claude_task_master.core import session_lock
+
 # Import shared durable atomic-write helper
 from claude_task_master.core.atomic_io import atomic_write_json
 
@@ -231,55 +234,91 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
         return self.state_dir / "backups"
 
     def acquire_session_lock(self) -> bool:
-        """Acquire session lock by writing PID file.
+        """Acquire the single-instance session lock.
+
+        Atomically creates the ``.pid`` lock file with ``O_CREAT | O_EXCL`` so
+        two concurrent ``claudetm`` processes can never both acquire it (the old
+        check-then-write left a race window). The critical section is serialized
+        under the state file lock so a stale lock left by a crashed process is
+        reclaimed by at most one racer at a time. A recorded pid+start-time lets
+        a lock held by a dead or PID-recycled process be reclaimed rather than
+        blocking forever.
 
         Returns:
-            True if lock acquired, False if another session is active.
+            True if the lock was acquired, False if another live session holds it
+            (or the lock could not be written).
         """
-        if self.is_session_active():
-            return False
         try:
-            self._pid_file.parent.mkdir(parents=True, exist_ok=True)
-            self._pid_file.write_text(str(os.getpid()))
-            return True
-        except OSError:
+            with file_lock(self._lock_file, timeout=self.LOCK_TIMEOUT):
+                return self._acquire_session_lock_locked()
+        except StateLockError:
+            # Another process is actively holding the state lock — treat the
+            # state directory as in use by another session.
             return False
+
+    def _acquire_session_lock_locked(self) -> bool:
+        """Acquire the PID lock while holding the state file lock.
+
+        Returns:
+            True if the lock was acquired, False otherwise.
+        """
+        self._pid_file.parent.mkdir(parents=True, exist_ok=True)
+        payload = session_lock.serialize_owner(session_lock.current_owner())
+
+        # Initial create plus one stale-lock reclaim. Because the whole section
+        # runs under the exclusive state lock, one retry always suffices: no
+        # other process can recreate the file between our removal and re-create.
+        for _ in range(2):
+            try:
+                fd = os.open(self._pid_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            except FileExistsError:
+                owner = session_lock.read_owner(self._pid_file)
+                if owner is not None and owner.pid == os.getpid():
+                    return True  # We already hold the lock.
+                if owner is not None and session_lock.is_owner_running(owner):
+                    return False  # Another live session holds it.
+                # Stale, PID-recycled, or corrupt lock — remove it and retry.
+                self._remove_pid_file()
+                continue
+            except OSError:
+                return False
+
+            try:
+                with os.fdopen(fd, "w", encoding="ascii") as f:
+                    f.write(payload)
+            except OSError:
+                self._remove_pid_file()
+                return False
+            return True
+        return False
 
     def release_session_lock(self) -> None:
-        """Release session lock by removing PID file."""
-        try:
-            if self._pid_file.exists():
-                # Only remove if we own the lock
-                try:
-                    pid = int(self._pid_file.read_text().strip())
-                    if pid == os.getpid():
-                        self._pid_file.unlink()
-                except (ValueError, OSError):
-                    pass  # Ignore errors reading own PID - will be cleaned up
-        except OSError:
-            pass  # Ignore errors when PID file doesn't exist
+        """Release the session lock, only if this process still owns it."""
+        owner = session_lock.read_owner(self._pid_file)
+        # A live process's PID is unique, so a matching PID means the lock is
+        # ours — never remove a lock a different (or recycled) process holds.
+        if owner is not None and owner.pid == os.getpid():
+            self._remove_pid_file()
 
     def is_session_active(self) -> bool:
-        """Check if another session is actively using this state.
+        """Check if another live session is using this state directory.
 
         Returns:
-            True if another process is using this state directory.
+            True if a *different* process holds a live lock. A missing, stale,
+            PID-recycled, or corrupt lock reads as inactive. This is a read-only
+            probe; stale locks are reclaimed by :meth:`acquire_session_lock`.
         """
-        if not self._pid_file.exists():
+        owner = session_lock.read_owner(self._pid_file)
+        if owner is None or owner.pid == os.getpid():
             return False
+        return session_lock.is_owner_running(owner)
+
+    def _remove_pid_file(self) -> None:
+        """Best-effort removal of the PID lock file."""
         try:
-            pid = int(self._pid_file.read_text().strip())
-            # Check if process is still running (signal 0 = existence check)
-            os.kill(pid, 0)
-            # Process exists - check if it's not us
-            return pid != os.getpid()
-        except (ValueError, OSError, ProcessLookupError):
-            # Invalid PID or process not running - clean up stale PID file
-            try:
-                self._pid_file.unlink()
-            except OSError:
-                pass  # Stale PID file cleanup is best-effort
-            return False
+            self._pid_file.unlink(missing_ok=True)
+        except OSError:
+            pass  # Concurrent removal or permissions — best effort.
 
     def is_safe_to_delete(self) -> bool:
         """Check if state directory can be safely deleted.

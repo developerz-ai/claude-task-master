@@ -1,6 +1,9 @@
 """Tests for state manager."""
 
 import json
+import os
+import subprocess
+import sys
 import threading
 import time
 from datetime import datetime
@@ -8,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+from claude_task_master.core import session_lock
+from claude_task_master.core.session_lock import LockOwner
 from claude_task_master.core.state import (
     RESUMABLE_STATUSES,
     TERMINAL_STATUSES,
@@ -1469,6 +1474,138 @@ class TestFileLocking:
         assert len(errors) == 0, f"Errors during concurrent access: {errors}"
         # All threads should have completed
         assert len(results) == 5
+
+
+# =============================================================================
+# Session Lock Tests
+# =============================================================================
+
+
+def _reaped_pid() -> int:
+    """Spawn a trivial child, reap it, and return its now-dead PID."""
+    proc = subprocess.Popen([sys.executable, "-c", ""])
+    proc.wait()
+    return proc.pid
+
+
+def _pid_is_running(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+class TestSessionLock:
+    """Tests for the single-instance PID session lock."""
+
+    def test_acquire_creates_pid_file_with_owner(self, state_manager):
+        """Acquiring the lock writes this process's identity to the PID file."""
+        assert state_manager.acquire_session_lock() is True
+
+        owner = session_lock.read_owner(state_manager._pid_file)
+        assert owner is not None
+        assert owner.pid == os.getpid()
+
+    def test_acquire_is_idempotent_for_same_process(self, state_manager):
+        """Re-acquiring from the same process succeeds without a second file."""
+        assert state_manager.acquire_session_lock() is True
+        assert state_manager.acquire_session_lock() is True
+        assert state_manager._pid_file.exists()
+
+    def test_release_removes_owned_lock(self, state_manager):
+        """Releasing removes a lock owned by this process."""
+        state_manager.acquire_session_lock()
+        state_manager.release_session_lock()
+        assert not state_manager._pid_file.exists()
+
+    def test_release_leaves_foreign_lock_intact(self, state_manager):
+        """Releasing never removes a lock held by another process."""
+        foreign = LockOwner(pid=os.getppid(), start_time=None)
+        state_manager._pid_file.write_text(session_lock.serialize_owner(foreign))
+
+        state_manager.release_session_lock()
+
+        assert state_manager._pid_file.exists()
+
+    def test_is_session_active_false_without_lock(self, state_manager):
+        """No lock file means no active session."""
+        assert state_manager.is_session_active() is False
+
+    def test_is_session_active_false_for_own_lock(self, state_manager):
+        """Our own lock is not counted as another active session."""
+        state_manager.acquire_session_lock()
+        assert state_manager.is_session_active() is False
+
+    def test_is_session_active_true_for_live_foreign_lock(self, state_manager):
+        """A live foreign owner is reported as an active session."""
+        foreign = LockOwner(
+            pid=os.getppid(), start_time=session_lock.read_process_start_time(os.getppid())
+        )
+        state_manager._pid_file.write_text(session_lock.serialize_owner(foreign))
+
+        assert state_manager.is_session_active() is True
+
+    def test_acquire_fails_against_live_foreign_lock(self, state_manager):
+        """A live foreign session blocks acquisition and its lock is preserved."""
+        foreign = LockOwner(
+            pid=os.getppid(), start_time=session_lock.read_process_start_time(os.getppid())
+        )
+        payload = session_lock.serialize_owner(foreign)
+        state_manager._pid_file.write_text(payload)
+
+        assert state_manager.acquire_session_lock() is False
+        # The foreign lock must be untouched.
+        assert state_manager._pid_file.read_text() == payload
+
+    def test_acquire_reclaims_stale_dead_lock(self, state_manager):
+        """A lock owned by a dead process is reclaimed."""
+        dead = _reaped_pid()
+        if _pid_is_running(dead):
+            pytest.skip("PID was reused before assertion")
+        state_manager._pid_file.write_text(
+            session_lock.serialize_owner(LockOwner(pid=dead, start_time=None))
+        )
+
+        assert state_manager.acquire_session_lock() is True
+        owner = session_lock.read_owner(state_manager._pid_file)
+        assert owner is not None and owner.pid == os.getpid()
+
+    def test_acquire_reclaims_corrupt_lock(self, state_manager):
+        """A corrupt lock file is reclaimed rather than blocking forever."""
+        state_manager._pid_file.write_text("not-valid-json")
+
+        assert state_manager.acquire_session_lock() is True
+        owner = session_lock.read_owner(state_manager._pid_file)
+        assert owner is not None and owner.pid == os.getpid()
+
+    @pytest.mark.skipif(
+        session_lock.read_process_start_time(os.getpid()) is None,
+        reason="process start times unavailable (no /proc)",
+    )
+    def test_acquire_reclaims_recycled_pid_lock(self, state_manager):
+        """A lock whose PID was recycled (start-time mismatch) is reclaimed."""
+        ppid = os.getppid()
+        start = session_lock.read_process_start_time(ppid)
+        assert start is not None
+        # Same live PID, but a start time that does not match the live process.
+        recycled = LockOwner(pid=ppid, start_time=start + 1000.0)
+        state_manager._pid_file.write_text(session_lock.serialize_owner(recycled))
+
+        assert state_manager.acquire_session_lock() is True
+        owner = session_lock.read_owner(state_manager._pid_file)
+        assert owner is not None and owner.pid == os.getpid()
+
+    def test_initialize_blocks_live_foreign_session(self, state_manager):
+        """initialize refuses to start when another live session holds the lock."""
+        state_manager.state_dir.mkdir(parents=True, exist_ok=True)
+        foreign = LockOwner(
+            pid=os.getppid(), start_time=session_lock.read_process_start_time(os.getppid())
+        )
+        state_manager._pid_file.write_text(session_lock.serialize_owner(foreign))
+
+        with pytest.raises(StateError, match="[Aa]nother"):
+            state_manager.initialize(goal="Test", model="sonnet", options=TaskOptions())
 
 
 # =============================================================================
