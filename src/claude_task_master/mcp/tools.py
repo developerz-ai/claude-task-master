@@ -7,6 +7,7 @@ of the MCP server wrapper.
 from __future__ import annotations
 
 import shutil
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -293,12 +294,19 @@ def get_logs(
 
     Args:
         work_dir: Working directory for the server.
-        tail: Number of lines to return from the end of the log.
+        tail: Number of lines to return from the end of the log (must be >= 1).
         state_dir: Optional custom state directory path.
 
     Returns:
         Dictionary containing log content or error.
     """
+    # Validate tail parameter
+    if tail < 1:
+        return LogsResult(
+            success=False,
+            error="tail must be >= 1",
+        ).model_dump()
+
     state_path = Path(state_dir) if state_dir else work_dir / ".claude-task-master"
     state_manager = StateManager(state_dir=state_path)
 
@@ -318,10 +326,11 @@ def get_logs(
                 error="No log file found",
             ).model_dump()
 
+        # Use deque to efficiently read only the last N lines
         with open(log_file) as f:
-            lines = f.readlines()
+            lines = deque(f, maxlen=tail)
 
-        log_content = "".join(lines[-tail:])
+        log_content = "".join(lines)
 
         return LogsResult(
             success=True,

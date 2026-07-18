@@ -43,6 +43,7 @@ import json
 import logging
 import shutil
 import time
+from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -430,11 +431,12 @@ def create_info_router() -> APIRouter:
                     ).model_dump(),
                 )
 
+            # Use deque to efficiently read only the last N lines
             with open(log_file) as f:
-                lines = f.readlines()
+                lines = deque(f, maxlen=tail)
 
             # Return last N lines
-            log_content = "".join(lines[-tail:])
+            log_content = "".join(lines)
 
             return LogsResponse(
                 success=True,

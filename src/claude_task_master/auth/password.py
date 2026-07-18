@@ -230,7 +230,11 @@ def verify_password_plaintext(plain_password: str, expected_password: str) -> bo
     if not plain_password or not expected_password:
         return False
 
-    return secrets.compare_digest(plain_password, expected_password)
+    # Compare UTF-8 bytes for consistent handling of non-ASCII characters
+    return secrets.compare_digest(
+        plain_password.encode("utf-8"),
+        expected_password.encode("utf-8"),
+    )
 
 
 # =============================================================================
