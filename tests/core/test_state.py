@@ -8,12 +8,15 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from claude_task_master.core import session_lock
+from claude_task_master.core import state as state_module
 from claude_task_master.core.session_lock import LockOwner
 from claude_task_master.core.state import (
+    CURRENT_SCHEMA_VERSION,
     RESUMABLE_STATUSES,
     TERMINAL_STATUSES,
     VALID_STATUSES,
@@ -2497,3 +2500,120 @@ class TestPRTrackingStateFields:
         loaded = initialized_state_manager.load_state()
         assert loaded.prs_created == 5
         assert loaded.prs_merged == 3
+
+
+class TestSchemaVersionMigration:
+    """Tests for state schema versioning and _migrate_state."""
+
+    def test_new_state_defaults_to_current_version(self, sample_task_options):
+        """A freshly constructed TaskState carries the current schema version."""
+        state = TaskState(
+            status="planning",
+            created_at="2025-01-15T12:00:00",
+            updated_at="2025-01-15T12:00:00",
+            run_id="20250115-120000",
+            model="sonnet",
+            options=TaskOptions(**sample_task_options),
+        )
+        assert state.schema_version == CURRENT_SCHEMA_VERSION
+
+    def test_saved_state_persists_schema_version(self, initialized_state_manager):
+        """save_state writes schema_version into state.json."""
+        state = initialized_state_manager.load_state()
+        initialized_state_manager.save_state(state)
+
+        on_disk = json.loads(initialized_state_manager.state_file.read_text())
+        assert on_disk["schema_version"] == CURRENT_SCHEMA_VERSION
+
+    def test_legacy_state_without_version_loads_as_current(self, state_dir, sample_state_file):
+        """State written before versioning (no key) loads stamped as current."""
+        # The sample_state_file fixture writes a dict with no schema_version.
+        assert "schema_version" not in json.loads(sample_state_file.read_text())
+
+        manager = StateManager(state_dir)
+        state = manager.load_state()
+        assert state.schema_version == CURRENT_SCHEMA_VERSION
+
+    def test_newer_schema_version_rejected(self, state_dir, sample_task_state):
+        """State from a newer schema version fails loudly, not silently dropped."""
+        sample_task_state["schema_version"] = CURRENT_SCHEMA_VERSION + 1
+        (state_dir / "state.json").write_text(json.dumps(sample_task_state))
+
+        manager = StateManager(state_dir)
+        with pytest.raises(StateValidationError) as exc_info:
+            manager.load_state()
+        assert "newer" in str(exc_info.value).lower()
+
+    @pytest.mark.parametrize("bad_version", ["abc", 0, -3, 1.5, None])
+    def test_malformed_version_treated_as_baseline(self, state_dir, sample_task_state, bad_version):
+        """A missing/garbled schema_version is treated as the initial schema, not an error."""
+        sample_task_state["schema_version"] = bad_version
+        (state_dir / "state.json").write_text(json.dumps(sample_task_state))
+
+        manager = StateManager(state_dir)
+        state = manager.load_state()
+        assert state.schema_version == CURRENT_SCHEMA_VERSION
+
+    def test_migrate_state_non_dict_passthrough(self):
+        """_migrate_state leaves non-mapping JSON untouched for downstream handling."""
+        bad_input: Any = [1, 2, 3]
+        result: Any = StateManager._migrate_state(bad_input)
+        assert result == [1, 2, 3]
+
+    def test_migrate_state_is_idempotent_at_current_version(self, sample_task_state):
+        """Migrating already-current state only stamps the version, nothing else."""
+        sample_task_state["schema_version"] = CURRENT_SCHEMA_VERSION
+        migrated = StateManager._migrate_state(dict(sample_task_state))
+        assert migrated == sample_task_state
+
+    def test_migration_steps_applied_in_sequence(self, monkeypatch, sample_task_state):
+        """_migrate_state runs each step from the on-disk version up to current."""
+        calls: list[str] = []
+
+        def bump_to_2(data):
+            calls.append("1->2")
+            return {**data, "marker": "v2"}
+
+        def bump_to_3(data):
+            calls.append("2->3")
+            return {**data, "marker": "v3"}
+
+        monkeypatch.setattr(state_module, "CURRENT_SCHEMA_VERSION", 3)
+        monkeypatch.setattr(state_module, "_STATE_MIGRATIONS", {1: bump_to_2, 2: bump_to_3})
+
+        sample_task_state["schema_version"] = 1
+        migrated = StateManager._migrate_state(sample_task_state)
+
+        assert calls == ["1->2", "2->3"]
+        assert migrated["schema_version"] == 3
+        assert migrated["marker"] == "v3"
+
+    def test_migration_skips_already_applied_steps(self, monkeypatch, sample_task_state):
+        """Only migrations newer than the on-disk version run."""
+        calls: list[str] = []
+
+        def bump_to_2(data):
+            calls.append("1->2")
+            return data
+
+        def bump_to_3(data):
+            calls.append("2->3")
+            return data
+
+        monkeypatch.setattr(state_module, "CURRENT_SCHEMA_VERSION", 3)
+        monkeypatch.setattr(state_module, "_STATE_MIGRATIONS", {1: bump_to_2, 2: bump_to_3})
+
+        sample_task_state["schema_version"] = 2
+        StateManager._migrate_state(sample_task_state)
+
+        assert calls == ["2->3"]
+
+    def test_missing_migration_path_raises(self, monkeypatch, sample_task_state):
+        """A gap in the migration table fails loudly rather than loading stale data."""
+        monkeypatch.setattr(state_module, "CURRENT_SCHEMA_VERSION", 2)
+        monkeypatch.setattr(state_module, "_STATE_MIGRATIONS", {})
+
+        sample_task_state["schema_version"] = 1
+        with pytest.raises(StateValidationError) as exc_info:
+            StateManager._migrate_state(sample_task_state)
+        assert "migration path" in str(exc_info.value).lower()

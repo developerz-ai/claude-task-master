@@ -3,11 +3,11 @@
 import fcntl
 import json
 import os
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import IO, Literal
+from typing import IO, Any, Literal
 
 from pydantic import BaseModel, ValidationError
 
@@ -60,6 +60,7 @@ __all__ = [
     "TERMINAL_STATUSES",
     "RESUMABLE_STATUSES",
     "VALID_TRANSITIONS",
+    "CURRENT_SCHEMA_VERSION",
     # Classes
     "TaskOptions",
     "TaskState",
@@ -116,9 +117,32 @@ WorkflowStageType = Literal[
 ]
 
 
+# =============================================================================
+# State schema versioning
+# =============================================================================
+
+#: Current on-disk state schema version. Bump by one whenever a change to
+#: :class:`TaskState` cannot be absorbed by pydantic defaults alone (a renamed
+#: or removed field, or a field whose meaning changed) and register the matching
+#: upgrade step in :data:`_STATE_MIGRATIONS`.
+CURRENT_SCHEMA_VERSION = 1
+
+#: Ordered state migrations keyed by *source* version: ``_STATE_MIGRATIONS[n]``
+#: takes a raw version-``n`` state dict and returns a version-``n+1`` dict.
+#: :meth:`StateManager._migrate_state` applies them in sequence from the on-disk
+#: version up to :data:`CURRENT_SCHEMA_VERSION`. Empty at version 1 — there is no
+#: earlier format to upgrade from yet.
+_STATE_MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {}
+
+
 class TaskState(BaseModel):
     """Machine-readable state."""
 
+    # On-disk schema version, written on every save and checked on load by
+    # ``StateManager._migrate_state``. State from an older version is migrated
+    # forward; state from a newer version is rejected rather than letting
+    # pydantic silently drop its unknown fields and then destroy them on save.
+    schema_version: int = CURRENT_SCHEMA_VERSION
     status: StatusType  # planning|working|blocked|paused|stopped|success|failed
     workflow_stage: WorkflowStageType | None = None  # PR lifecycle stage
     current_task_index: int = 0
@@ -484,6 +508,12 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
                 recoverable=False,
             )
 
+        # Migrate the raw dict to the current schema version before pydantic
+        # validation. Older state is upgraded in place; state from a newer
+        # version is rejected here rather than having its unknown fields
+        # silently dropped and then destroyed on the next save.
+        data = self._migrate_state(data)
+
         # Validate and parse the state data
         try:
             return TaskState(**data)
@@ -503,6 +533,65 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
                 missing_fields=missing_fields if missing_fields else None,
                 invalid_fields=invalid_fields if invalid_fields else None,
             ) from e
+
+    @staticmethod
+    def _migrate_state(data: dict[str, Any]) -> dict[str, Any]:
+        """Migrate a raw state dict to the current schema version.
+
+        Applies the steps in :data:`_STATE_MIGRATIONS` in sequence from the
+        on-disk ``schema_version`` up to :data:`CURRENT_SCHEMA_VERSION`, then
+        stamps the current version onto the result. State written before schema
+        versioning existed (no ``schema_version`` key), or with a missing or
+        malformed marker, is treated as version 1 — the initial schema.
+
+        Rejecting state written by a *newer* version is deliberate: pydantic
+        would otherwise silently drop the unknown fields and then destroy them
+        on the next save, so a forward-incompatible resume must fail loudly.
+
+        Args:
+            data: The raw state dict parsed from ``state.json``.
+
+        Returns:
+            The migrated state dict, tagged with the current schema version.
+
+        Raises:
+            StateValidationError: If the state was written by a newer schema
+                version, or no migration path exists from the on-disk version.
+        """
+        # Non-mapping JSON (a bare list/number/string) is left untouched so the
+        # downstream ``TaskState(**data)`` surfaces the corruption as it would
+        # without migration, instead of an AttributeError on ``.get`` here.
+        if not isinstance(data, dict):
+            return data
+
+        raw_version = data.get("schema_version", 1)
+        # A missing or garbled marker is treated as the initial schema rather
+        # than aborting the load: the field simply did not exist before this.
+        version = raw_version if isinstance(raw_version, int) and raw_version >= 1 else 1
+
+        if version > CURRENT_SCHEMA_VERSION:
+            raise StateValidationError(
+                f"State schema version {version} is newer than the supported "
+                f"version {CURRENT_SCHEMA_VERSION}",
+                invalid_fields=[
+                    "schema_version: written by a newer claude-task-master; "
+                    "upgrade it or run 'clean' to start fresh"
+                ],
+            )
+
+        while version < CURRENT_SCHEMA_VERSION:
+            migrate = _STATE_MIGRATIONS.get(version)
+            if migrate is None:
+                raise StateValidationError(
+                    f"No migration path from state schema version {version} to "
+                    f"{CURRENT_SCHEMA_VERSION}",
+                    invalid_fields=["schema_version: unmigratable state"],
+                )
+            data = migrate(data)
+            version += 1
+
+        data["schema_version"] = CURRENT_SCHEMA_VERSION
+        return data
 
     def _validate_transition(self, current_status: str, new_status: str) -> None:
         """Validate that a state transition is allowed.
