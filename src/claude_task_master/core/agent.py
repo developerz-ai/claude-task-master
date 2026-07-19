@@ -276,6 +276,32 @@ class AgentWrapper:
             coding_style=coding_style,
         )
 
+    def run_release_check(
+        self,
+        prompt: str,
+        model_override: ModelType | None = None,
+    ) -> dict[str, Any]:
+        """Run a verify-only post-merge release check (no create-PR contract).
+
+        The release check must NOT go through ``run_work_session``: that wraps
+        the prompt in the create-PR contract, which contradicts the verify-only
+        ``RELEASE_CHECK: PASS/FAIL/SKIP`` marker and lets the check silently
+        default to SKIP (never FAIL). See ``AgentPhaseExecutor.run_release_check``.
+
+        Args:
+            prompt: The fully-built release verification prompt.
+            model_override: Optional model to use (Sonnet for speed).
+
+        Returns:
+            Dict with 'output', 'success', 'subtype', and 'model_used' keys.
+
+        Delegates to AgentPhaseExecutor for implementation.
+        """
+        return self._phase_executor.run_release_check(
+            prompt=prompt,
+            model_override=model_override,
+        )
+
     def verify_success_criteria(
         self, criteria: str, context: str = "", tasks_summary: str = ""
     ) -> dict[str, Any]:

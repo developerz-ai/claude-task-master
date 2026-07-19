@@ -1387,8 +1387,14 @@ End with: TASK COMPLETE"""
         console.info(f"Verifying release for PR #{state.current_pr or '?'}...")
 
         try:
-            result = self.agent.run_work_session(
-                task_description=prompt,
+            # Verify-only: run the release prompt directly, NOT via
+            # run_work_session. The work session wraps it in the create-PR
+            # contract ("push + open a PR, don't finish without a PR URL"),
+            # which contradicts the verify-only RELEASE_CHECK marker — the
+            # model then drops the marker and parse_release_check_result
+            # defaults to SKIP, so a release check could never FAIL.
+            result = self.agent.run_release_check(
+                prompt,
                 model_override=ModelType.SONNET,  # Sonnet for speed
             )
             output = result.get("output", "")

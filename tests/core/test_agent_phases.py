@@ -757,6 +757,130 @@ class TestAgentWrapperRunWorkSession:
 
 
 # =============================================================================
+# AgentWrapper run_release_check Tests
+# =============================================================================
+
+
+class TestAgentWrapperRunReleaseCheck:
+    """Tests for run_release_check — the verify-only post-merge release check."""
+
+    @pytest.fixture
+    def agent_with_mock(self, temp_dir):
+        """Create an AgentWrapper with mocked methods."""
+        mock_sdk = MagicMock()
+        mock_sdk.query = AsyncMock()
+        mock_sdk.ClaudeAgentOptions = MagicMock()
+
+        with patch.dict("sys.modules", {"claude_agent_sdk": mock_sdk}):
+            agent = AgentWrapper(
+                access_token="test-token",
+                model=ModelType.SONNET,
+                working_dir=str(temp_dir),
+            )
+        return agent
+
+    def test_run_release_check_returns_required_keys(self, agent_with_mock):
+        """Returns the same dict shape as run_work_session."""
+        with patch(
+            "claude_task_master.core.agent_phases.run_async_with_cleanup",
+            return_value="RELEASE_CHECK: PASS",
+        ):
+            result = agent_with_mock.run_release_check("check the deploy")
+
+        assert result["output"] == "RELEASE_CHECK: PASS"
+        assert "success" in result
+        assert "subtype" in result
+        assert "model_used" in result
+
+    def test_run_release_check_uses_verification_tools_not_working(self, agent_with_mock):
+        """The check runs with verification tools (no Edit/Write), so the agent
+        structurally cannot open a junk PR — the core fix for the create-PR
+        contract leaking into release verification."""
+        from claude_task_master.core.agent_models import get_tools_for_phase
+
+        run_query = MagicMock()
+        agent_with_mock._phase_executor.query_executor.run_query = run_query
+        with patch(
+            "claude_task_master.core.agent_phases.run_async_with_cleanup",
+            return_value="RELEASE_CHECK: PASS",
+        ):
+            agent_with_mock.run_release_check("check the deploy")
+
+        tools = run_query.call_args.kwargs["tools"]
+        assert tools == get_tools_for_phase("verification")
+        assert "Edit" not in tools
+        assert "Write" not in tools
+
+    def test_run_release_check_passes_prompt_verbatim(self, agent_with_mock):
+        """The prompt is executed as-is — NOT wrapped in build_work_prompt (which
+        would inject the create-PR contract that contradicts RELEASE_CHECK)."""
+        prompt = "You are in RELEASE VERIFICATION mode. Output RELEASE_CHECK: PASS/FAIL/SKIP"
+        run_query = MagicMock()
+        agent_with_mock._phase_executor.query_executor.run_query = run_query
+        with patch(
+            "claude_task_master.core.agent_phases.run_async_with_cleanup",
+            return_value="RELEASE_CHECK: FAIL",
+        ):
+            agent_with_mock.run_release_check(prompt)
+
+        sent = run_query.call_args.kwargs["prompt"]
+        assert sent == prompt
+        assert "Create PR" not in sent
+        assert "TASK COMPLETE" not in sent
+
+    def test_run_release_check_forwards_model_override(self, agent_with_mock):
+        """model_override is forwarded to the query executor."""
+        run_query = MagicMock()
+        agent_with_mock._phase_executor.query_executor.run_query = run_query
+        with patch(
+            "claude_task_master.core.agent_phases.run_async_with_cleanup",
+            return_value="RELEASE_CHECK: SKIP",
+        ):
+            agent_with_mock.run_release_check("check", model_override=ModelType.SONNET)
+
+        assert run_query.call_args.kwargs["model_override"] == ModelType.SONNET
+
+    def test_run_release_check_reports_failure_on_error_result(self, agent_with_mock):
+        """A budget/turn-capped release check (ResultMessage.is_error=True) reports
+        success=False rather than hardcoding True."""
+        proc = agent_with_mock._message_processor
+
+        def fake_run(coro):
+            coro.close()  # avoid 'coroutine was never awaited' warning
+            proc.last_result_is_error = True
+            proc.last_result_subtype = "error_max_turns"
+            return "partial"
+
+        with patch(
+            "claude_task_master.core.agent_phases.run_async_with_cleanup",
+            side_effect=fake_run,
+        ):
+            result = agent_with_mock.run_release_check("check")
+
+        assert result["success"] is False
+        assert result["subtype"] == "error_max_turns"
+
+    def test_run_release_check_resets_prior_error_before_query(self, agent_with_mock):
+        """A stale error from a previous session must not leak into the check."""
+        proc = agent_with_mock._message_processor
+        proc.last_result_is_error = True
+        proc.last_result_subtype = "error_max_budget_usd"
+
+        def fake_run(coro):
+            coro.close()  # avoid 'coroutine was never awaited' warning
+            return "RELEASE_CHECK: PASS"
+
+        with patch(
+            "claude_task_master.core.agent_phases.run_async_with_cleanup",
+            side_effect=fake_run,
+        ):
+            result = agent_with_mock.run_release_check("check")
+
+        assert result["success"] is True
+        assert result["subtype"] is None
+
+
+# =============================================================================
 # AgentWrapper verify_success_criteria Tests
 # =============================================================================
 

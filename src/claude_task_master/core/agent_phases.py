@@ -361,6 +361,67 @@ class AgentPhaseExecutor:
             "model_used": (model_override or self.model).value,
         }
 
+    def run_release_check(
+        self,
+        prompt: str,
+        model_override: ModelType | None = None,
+    ) -> dict[str, Any]:
+        """Run a verify-only post-merge release check.
+
+        Unlike ``run_work_session``, this does NOT wrap ``prompt`` in the
+        create-PR contract. The release check is a read-only verification that
+        must terminate with a ``RELEASE_CHECK: PASS/FAIL/SKIP`` marker. Routing
+        it through ``run_work_session`` buries that instruction inside a work
+        prompt whose outer contract demands "push + open a PR, don't finish
+        without a PR URL" — a contradiction that makes the model drop the
+        marker (``parse_release_check_result`` then defaults to SKIP, so the
+        check can never FAIL) or open a junk PR. This runs the already-built
+        prompt directly, and with verification-only tools (Read/Glob/Grep/Bash,
+        no Edit/Write) so opening a PR is structurally impossible.
+
+        Args:
+            prompt: The fully-built release verification prompt (see
+                ``build_release_check_prompt``).
+            model_override: Optional model to use (callers pass Sonnet for
+                speed); falls back to the executor's default model.
+
+        Returns:
+            Dict with 'output', 'success', 'subtype', and 'model_used' keys —
+            the same shape as ``run_work_session``.
+        """
+        # Reset terminal-result capture so a prior session's outcome cannot
+        # leak into this session's derived success.
+        if self.message_processor is not None:
+            self.message_processor.reset_result_state()
+
+        # Run the prompt directly with verification tools (read + bash for
+        # gh/curl/migration checks) — no create-PR wrapper, no write tools.
+        result = run_async_with_cleanup(
+            self.query_executor.run_query(
+                prompt=prompt,
+                tools=self.get_tools_for_phase("verification"),
+                model_override=model_override,
+                get_model_name_func=self.get_model_name_func,
+                get_agents_func=self.get_agents_func,
+                process_message_func=self.process_message_func,
+            )
+        )
+
+        # Derive success from the SDK's terminal ResultMessage (see
+        # run_work_session) rather than assuming it.
+        success = True
+        subtype: str | None = None
+        if self.message_processor is not None:
+            success = not self.message_processor.last_result_is_error
+            subtype = self.message_processor.last_result_subtype
+
+        return {
+            "output": result,
+            "success": success,
+            "subtype": subtype,
+            "model_used": (model_override or self.model).value,
+        }
+
     def verify_success_criteria(
         self, criteria: str, context: str = "", tasks_summary: str = ""
     ) -> dict[str, Any]:

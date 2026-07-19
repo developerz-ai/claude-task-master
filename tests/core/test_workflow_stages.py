@@ -39,6 +39,11 @@ def mock_agent():
     """Create a mock agent wrapper."""
     agent = MagicMock()
     agent.run_work_session = MagicMock(return_value={"output": "Fixed", "success": True})
+    # Release verification runs through run_release_check (verify-only, no PR
+    # contract), separate from run_work_session used by work/fix sessions.
+    agent.run_release_check = MagicMock(
+        return_value={"output": "RELEASE_CHECK: PASS", "success": True}
+    )
     return agent
 
 
@@ -2368,6 +2373,80 @@ class TestPRHeadBranchResolution:
 # =============================================================================
 
 
+class TestReleasingStageVerifyOnlyContract:
+    """Release verification must run verify-only — NOT wrapped in the create-PR
+    contract — so the RELEASE_CHECK marker survives and the check can FAIL."""
+
+    @pytest.fixture
+    def _release_state(self, state_manager, basic_task_state, mock_github_client, mock_pr_status):
+        """Persist a release guide + plan and wire a merged PR ready for release."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan("- [ ] Task 1")
+        state_manager.save_release_guide("# Release\n\n1. Check /health returns 200")
+        basic_task_state.options.auto_merge = True
+        basic_task_state.options.enable_release = True
+        basic_task_state.current_pr = 42
+        mock_github_client.get_pr_status.return_value = mock_pr_status
+        return basic_task_state
+
+    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
+    @patch("claude_task_master.core.workflow_stages.console")
+    def test_releasing_uses_release_check_not_work_session(
+        self, mock_console, mock_sleep, workflow_handler, mock_agent, _release_state
+    ):
+        """handle_releasing_stage routes through run_release_check (verify-only),
+        never run_work_session (which carries the create-PR contract)."""
+        from claude_task_master.core.agent import ModelType
+
+        mock_sleep.return_value = True
+
+        workflow_handler.handle_releasing_stage(_release_state)
+
+        mock_agent.run_release_check.assert_called_once()
+        mock_agent.run_work_session.assert_not_called()
+        # Sonnet for speed, and the built release-verification prompt is passed.
+        call = mock_agent.run_release_check.call_args
+        assert call.kwargs["model_override"] == ModelType.SONNET
+        prompt = call.args[0]
+        assert "RELEASE VERIFICATION" in prompt
+
+    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
+    @patch("claude_task_master.core.workflow_stages.console")
+    def test_release_check_can_fail(
+        self, mock_console, mock_sleep, workflow_handler, mock_agent, _release_state
+    ):
+        """A FAIL marker transitions to release_fix — proving the check is not
+        silently swallowed into SKIP the way the work-session wrapper caused."""
+        mock_sleep.return_value = True
+        mock_agent.run_release_check.return_value = {
+            "output": "RELEASE_CHECK: FAIL — /health returned 500",
+            "success": True,
+        }
+
+        result = workflow_handler.handle_releasing_stage(_release_state)
+
+        assert result is None
+        assert _release_state.workflow_stage == "release_fix"
+
+    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
+    @patch("claude_task_master.core.workflow_stages.console")
+    def test_release_check_pass_advances(
+        self, mock_console, mock_sleep, workflow_handler, mock_agent, _release_state
+    ):
+        """A PASS marker advances to the next task."""
+        mock_sleep.return_value = True
+        mock_agent.run_release_check.return_value = {
+            "output": "RELEASE_CHECK: PASS",
+            "success": True,
+        }
+
+        result = workflow_handler.handle_releasing_stage(_release_state)
+
+        assert result is None
+        assert _release_state.workflow_stage == "working"
+        assert _release_state.current_task_index == 1
+
+
 class TestReleaseFixCounterPersistence:
     """release_fix_attempts must survive the fix-PR merge so the 5-attempt cap stays reachable."""
 
@@ -2420,7 +2499,9 @@ class TestReleaseFixCounterPersistence:
         basic_task_state.current_pr = 42
         mock_github_client.get_pr_status.return_value = mock_pr_status
         mock_sleep.return_value = True
-        mock_agent.run_work_session.return_value = {
+        # Release verification (run_release_check) fails; the fix session
+        # (run_work_session) keeps its default success return.
+        mock_agent.run_release_check.return_value = {
             "output": "RELEASE_CHECK: FAIL — health endpoint 500",
             "success": True,
         }
@@ -2452,14 +2533,14 @@ class TestReleaseFixCounterPersistence:
         assert basic_task_state.workflow_stage == "releasing"
 
         # 6th verification failure hits the cap: advance WITHOUT another fix cycle
-        agent_calls_before = mock_agent.run_work_session.call_count
+        release_checks_before = mock_agent.run_release_check.call_count
         result = workflow_handler.handle_releasing_stage(basic_task_state)
         assert result is None
         assert basic_task_state.workflow_stage == "working"
         assert basic_task_state.release_fix_attempts == 0  # reset by _advance_to_next_task
         assert basic_task_state.current_task_index == 1
         # One final verification runs, then the cap blocks any further fix cycle
-        assert mock_agent.run_work_session.call_count == agent_calls_before + 1
+        assert mock_agent.run_release_check.call_count == release_checks_before + 1
 
     @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
     @patch("claude_task_master.core.workflow_stages.console")
@@ -2495,7 +2576,7 @@ class TestReleaseFixCounterPersistence:
         assert basic_task_state.release_fix_attempts == 2
 
         # Release verification now passes: advance resets the counter
-        mock_agent.run_work_session.return_value = {
+        mock_agent.run_release_check.return_value = {
             "output": "RELEASE_CHECK: PASS",
             "success": True,
         }
