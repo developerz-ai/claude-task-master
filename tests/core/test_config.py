@@ -141,11 +141,25 @@ class TestToolsConfig:
     """Tests for ToolsConfig model."""
 
     def test_default_values(self) -> None:
-        """Test that ToolsConfig defaults to all tools allowed (empty lists)."""
+        """Test that ToolsConfig defaults to restricted read-only planning/verification."""
         config = ToolsConfig()
-        assert config.planning == []
-        assert config.verification == []
+        assert config.planning == ["Read", "Glob", "Grep", "WebFetch", "WebSearch"]
+        assert config.verification == ["Read", "Glob", "Grep", "Bash"]
+        # Working keeps empty default = all tools allowed for implementation.
         assert config.working == []
+
+    def test_planning_default_excludes_mutation_tools(self) -> None:
+        """Test that planning default cannot write, edit, or run Bash by default."""
+        config = ToolsConfig()
+        for forbidden in ("Write", "Edit", "MultiEdit", "Bash", "NotebookEdit"):
+            assert forbidden not in config.planning
+
+    def test_defaults_are_independent_instances(self) -> None:
+        """Test that mutable list defaults are not shared across instances."""
+        first = ToolsConfig()
+        second = ToolsConfig()
+        first.planning.append("Bash")
+        assert "Bash" not in second.planning
 
     def test_custom_tools(self) -> None:
         """Test that ToolsConfig accepts custom tool lists."""
@@ -177,7 +191,7 @@ class TestClaudeTaskMasterConfig:
         assert config.api.anthropic_api_key is None
         assert config.models.sonnet == "claude-sonnet-5"
         assert config.git.target_branch == "main"
-        assert config.tools.planning == []
+        assert config.tools.planning == ["Read", "Glob", "Grep", "WebFetch", "WebSearch"]
 
     def test_full_custom_config(self) -> None:
         """Test creating a fully custom configuration."""
@@ -332,17 +346,17 @@ class TestUtilityFunctions:
         assert get_model_name(config, "invalid") == "claude-sonnet-5"
 
     def test_get_tools_for_phase_planning(self) -> None:
-        """Test get_tools_for_phase returns correct tools for planning."""
+        """Test get_tools_for_phase returns restricted read-only tools for planning."""
         config = ClaudeTaskMasterConfig()
         tools = get_tools_for_phase(config, "planning")
-        assert tools == []  # Empty means all tools allowed
+        assert tools == ["Read", "Glob", "Grep", "WebFetch", "WebSearch"]
         assert get_tools_for_phase(config, "PLANNING") == tools
 
     def test_get_tools_for_phase_verification(self) -> None:
-        """Test get_tools_for_phase returns correct tools for verification."""
+        """Test get_tools_for_phase returns read + Bash tools for verification."""
         config = ClaudeTaskMasterConfig()
         tools = get_tools_for_phase(config, "verification")
-        assert tools == []  # Empty means all tools allowed
+        assert tools == ["Read", "Glob", "Grep", "Bash"]
 
     def test_get_tools_for_phase_working(self) -> None:
         """Test get_tools_for_phase returns empty list for working."""

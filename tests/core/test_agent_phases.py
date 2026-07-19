@@ -58,10 +58,16 @@ class TestAgentWrapperGetToolsForPhase:
                 model=ModelType.SONNET,
             )
 
-    def test_all_phases_allow_all_tools(self, agent):
-        """Test all phases default to all tools allowed (empty list)."""
-        assert agent.get_tools_for_phase("planning") == []
-        assert agent.get_tools_for_phase("verification") == []
+    def test_phase_defaults_restrict_planning_and_verification(self, agent):
+        """Test planning/verification default to read-only sets; working = all tools."""
+        assert agent.get_tools_for_phase("planning") == [
+            "Read",
+            "Glob",
+            "Grep",
+            "WebFetch",
+            "WebSearch",
+        ]
+        assert agent.get_tools_for_phase("verification") == ["Read", "Glob", "Grep", "Bash"]
         assert agent.get_tools_for_phase("working") == []
 
     def test_unknown_phase_returns_working_tools(self, agent):
@@ -645,9 +651,9 @@ class TestAgentWrapperVerifySuccessCriteria:
         assert result is not None
 
     def test_verify_success_criteria_uses_verification_tools(self, agent_with_mock):
-        """Test verify_success_criteria uses verification tools (all tools allowed)."""
+        """Test verify_success_criteria uses the read + Bash verification tool set."""
         tools = agent_with_mock.get_tools_for_phase("verification")
-        assert tools == []  # Empty = all tools allowed
+        assert tools == ["Read", "Glob", "Grep", "Bash"]
 
 
 # =============================================================================

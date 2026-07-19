@@ -558,10 +558,16 @@ class TestPhaseToolRestrictions:
                 working_dir=str(temp_dir),
             )
 
-    def test_all_phases_allow_all_tools(self, agent):
-        """Verify all phases default to all tools allowed (empty list)."""
-        assert agent.get_tools_for_phase("planning") == []
-        assert agent.get_tools_for_phase("verification") == []
+    def test_phase_defaults_restrict_planning_and_verification(self, agent):
+        """Verify planning/verification default to restricted read-only tool sets."""
+        assert agent.get_tools_for_phase("planning") == [
+            "Read",
+            "Glob",
+            "Grep",
+            "WebFetch",
+            "WebSearch",
+        ]
+        assert agent.get_tools_for_phase("verification") == ["Read", "Glob", "Grep", "Bash"]
         assert agent.get_tools_for_phase("working") == []
 
     def test_case_insensitive_phase_matching(self, agent):
@@ -575,5 +581,10 @@ class TestPhaseToolRestrictions:
         tools_upper = agent.get_tools_for_phase("PLANNING")
         tools_mixed = agent.get_tools_for_phase("Planning")
 
-        # All should return the same result (empty = all tools)
-        assert tools_upper == tools_lower == tools_mixed == []
+        # All should return the same (restricted read-only) planning tool set
+        assert (
+            tools_upper
+            == tools_lower
+            == tools_mixed
+            == ["Read", "Glob", "Grep", "WebFetch", "WebSearch"]
+        )

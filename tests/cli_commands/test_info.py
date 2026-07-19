@@ -299,11 +299,22 @@ class TestStatusFunction:
         state_file = info_state_dir / "state.json"
         state_file.write_text(json.dumps(state_data))
 
-        with patch.object(StateManager, "STATE_DIR", info_state_dir):
+        # Patch the config lookup so the display is deterministic regardless of
+        # any ambient config.json in the working directory.
+        with (
+            patch.object(StateManager, "STATE_DIR", info_state_dir),
+            patch.object(
+                info,
+                "get_tools_for_phase",
+                return_value=["Read", "Glob", "Grep", "WebFetch", "WebSearch"],
+            ),
+        ):
             info.status()
 
         calls = [str(call) for call in mock_console.print.call_args_list]
-        assert any("Read, Glob, Grep, Bash (read-only mode)" in str(call) for call in calls)
+        assert any(
+            "Read, Glob, Grep, WebFetch, WebSearch (read-only mode)" in str(call) for call in calls
+        )
 
     def test_status_shows_tools_working(
         self,

@@ -238,7 +238,7 @@ def get_tools_for_phase(
     Example:
         >>> tools = get_tools_for_phase("planning")
         >>> print(tools)
-        ["Read", "Glob", "Grep", "Bash"]
+        ["Read", "Glob", "Grep", "WebFetch", "WebSearch"]
 
         >>> # With custom config
         >>> config = get_config()
