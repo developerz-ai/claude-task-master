@@ -2124,3 +2124,72 @@ class TestRunGhCommandRateLimit:
             github_client._run_gh_command(["gh", "api", "x"])
 
         mock_sleep.assert_called_once_with(3.0)
+
+    def test_abuse_detection_stderr_triggers_backoff(self, github_client) -> None:
+        """The 'abuse detection' stderr marker triggers the retry loop."""
+        rate_limited = MagicMock(
+            returncode=1, stderr="You have triggered an abuse detection mechanism", stdout=""
+        )
+        success = MagicMock(returncode=0, stderr="", stdout="done")
+        with (
+            patch("subprocess.run", side_effect=[rate_limited, success]) as mock_run,
+            patch.object(github_client_module.time, "sleep"),
+            patch("claude_task_master.core.console.warning"),
+        ):
+            result = github_client._run_gh_command(["gh", "api", "x"])
+
+        assert result.stdout == "done"
+        assert mock_run.call_count == 2
+
+    def test_too_many_requests_stderr_triggers_backoff(self, github_client) -> None:
+        """The 'too many requests' / HTTP 429 stderr marker triggers the retry loop."""
+        rate_limited = MagicMock(returncode=1, stderr="HTTP 429 Too Many Requests", stdout="")
+        success = MagicMock(returncode=0, stderr="", stdout="ok")
+        with (
+            patch("subprocess.run", side_effect=[rate_limited, success]) as mock_run,
+            patch.object(github_client_module.time, "sleep"),
+            patch("claude_task_master.core.console.warning"),
+        ):
+            result = github_client._run_gh_command(["gh", "api", "x"])
+
+        assert result.stdout == "ok"
+        assert mock_run.call_count == 2
+
+    def test_backoff_delay_grows_with_attempt_number(self, github_client) -> None:
+        """Sleep duration is longer for later retry attempts (exponential growth)."""
+        rate_limited = MagicMock(returncode=1, stderr="secondary rate limit", stdout="")
+        success = MagicMock(returncode=0, stderr="", stdout="ok")
+
+        # Three rate-limited responses then one success
+        with (
+            patch(
+                "subprocess.run", side_effect=[rate_limited, rate_limited, rate_limited, success]
+            ),
+            patch.object(github_client_module.time, "sleep") as mock_sleep,
+            patch("claude_task_master.core.console.warning"),
+            # Pin jitter to zero so delays are deterministic
+            patch.object(github_client_module.random, "uniform", return_value=0.0),
+        ):
+            github_client._run_gh_command(["gh", "api", "x"])
+
+        # Three sleeps: attempt 0, 1, 2
+        assert mock_sleep.call_count == 3
+        delays = [call.args[0] for call in mock_sleep.call_args_list]
+        # Each delay must be strictly greater than the previous (exponential growth)
+        assert delays[0] < delays[1] < delays[2]
+
+    def test_check_false_rate_limit_still_retried(self, github_client) -> None:
+        """Rate-limit retries fire even when check=False; final error result is returned."""
+        rate_limited = MagicMock(returncode=1, stderr="API rate limit exceeded", stdout="")
+        success = MagicMock(returncode=0, stderr="", stdout="data")
+        with (
+            patch("subprocess.run", side_effect=[rate_limited, success]) as mock_run,
+            patch.object(github_client_module.time, "sleep"),
+            patch("claude_task_master.core.console.warning"),
+        ):
+            # check=False: should not raise, should return the success result
+            result = github_client._run_gh_command(["gh", "api", "x"], check=False)
+
+        assert result.returncode == 0
+        assert result.stdout == "data"
+        assert mock_run.call_count == 2
