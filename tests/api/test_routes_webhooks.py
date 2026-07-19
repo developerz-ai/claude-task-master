@@ -319,6 +319,17 @@ class TestUpdateWebhook:
         data = response.json()
         assert data["has_secret"] is False
 
+    def test_update_webhook_no_updates(self, api_client, webhooks_file):
+        """Test updating a webhook with no fields provided returns 400."""
+        update_data = {}
+
+        response = api_client.put("/webhooks/wh_abc12345_def67890", json=update_data)
+        assert response.status_code == 400
+
+        data = response.json()
+        assert data["error"] == "validation_error"
+        assert "At least one field" in data["message"]
+
 
 # =============================================================================
 # Delete Webhook Tests

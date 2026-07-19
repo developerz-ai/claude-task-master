@@ -852,9 +852,23 @@ def create_webhooks_router() -> APIRouter:
 
         Returns:
             WebhookResponse with updated webhook configuration.
+
+        Raises:
+            400: If no fields are provided for update.
         """
         if not is_auth_enabled():
             return _auth_required_response()
+
+        # Validate that at least one field is provided for update
+        if not update_request.has_updates():
+            return JSONResponse(
+                status_code=400,
+                content=WebhookErrorResponse(
+                    error="validation_error",
+                    message="At least one field must be provided for update",
+                ).model_dump(),
+            )
+
         try:
             # Lookup, conflict-check, and field updates all run under the
             # registry lock so a racing update cannot be silently overwritten.

@@ -31,10 +31,7 @@ from claude_task_master.webhooks.client import (
     WebhookDeliveryResult,
     WebhookTimeoutError,
 )
-from claude_task_master.webhooks.config import (
-    WebhookConfig,
-    WebhooksConfig,
-)
+from claude_task_master.webhooks.config import WebhookConfig
 from claude_task_master.webhooks.events import (
     EventType,
     PRCreatedEvent,
@@ -63,7 +60,6 @@ __all__ = [
     "WebhookTimeoutError",
     # Config
     "WebhookConfig",
-    "WebhooksConfig",
     # Events
     "EventType",
     "WebhookEvent",
