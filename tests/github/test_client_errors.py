@@ -526,12 +526,16 @@ class TestErrorRecoveryAndEdgeCases:
             ]
         )
         with patch("subprocess.run") as mock_run:
+            # Call 1: git rev-parse (branch detection); Call 2: gh run list.
+            # The only run succeeded, so no failed run exists and — with no green
+            # fallback — no log fetch happens.
             mock_run.side_effect = [
+                MagicMock(returncode=0, stdout="main", stderr=""),
                 MagicMock(returncode=0, stdout=runs_response, stderr=""),
-                MagicMock(returncode=0, stdout="", stderr=""),  # No failed logs
             ]
-            github_client.get_failed_run_logs()
-            # Should use latest run as fallback
+            result = github_client.get_failed_run_logs()
+            # No failed run → reports none found, without fetching any logs.
+            assert "No workflow runs found" in result
             assert mock_run.call_count == 2
 
     def test_get_failed_run_logs_without_run_id_no_runs(self, github_client):

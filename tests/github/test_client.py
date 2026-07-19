@@ -626,6 +626,15 @@ class TestGitHubClientGetPRStatus:
 # =============================================================================
 
 
+def _ndjson(objects: list) -> str:
+    """Serialize objects as NDJSON (one JSON value per line).
+
+    Mirrors ``gh api --paginate --jq '.[]'`` output, which emits one compact
+    JSON object per line rather than a single JSON array.
+    """
+    return "\n".join(json.dumps(obj) for obj in objects)
+
+
 def _make_rest_comment_client(
     comment_id: int, user: str, body: str, path: str | None, line: int | None
 ) -> dict:
@@ -674,7 +683,7 @@ class TestGitHubClientGetPRComments:
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
                 mock_run.side_effect = [
-                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=_ndjson(rest_comments), stderr=""),
                     MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
                 ]
                 comments = github_client.get_pr_comments(123, only_unresolved=True)
@@ -695,7 +704,7 @@ class TestGitHubClientGetPRComments:
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
                 mock_run.side_effect = [
-                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=_ndjson(rest_comments), stderr=""),
                     MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
                 ]
                 comments = github_client.get_pr_comments(123, only_unresolved=False)
@@ -717,7 +726,7 @@ class TestGitHubClientGetPRComments:
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
                 mock_run.side_effect = [
-                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=_ndjson(rest_comments), stderr=""),
                     MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
                 ]
                 comments = github_client.get_pr_comments(1)
@@ -737,7 +746,7 @@ class TestGitHubClientGetPRComments:
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
                 mock_run.side_effect = [
-                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=_ndjson(rest_comments), stderr=""),
                     MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
                 ]
                 comments = github_client.get_pr_comments(1)
@@ -756,7 +765,7 @@ class TestGitHubClientGetPRComments:
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
                 mock_run.side_effect = [
-                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=_ndjson(rest_comments), stderr=""),
                     MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
                 ]
                 comments = github_client.get_pr_comments(1)
@@ -776,7 +785,7 @@ class TestGitHubClientGetPRComments:
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
                 mock_run.side_effect = [
-                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=_ndjson(rest_comments), stderr=""),
                     MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
                 ]
                 comments = github_client.get_pr_comments(1)
@@ -793,7 +802,7 @@ class TestGitHubClientGetPRComments:
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
                 mock_run.side_effect = [
-                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=_ndjson(rest_comments), stderr=""),
                     MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
                 ]
                 comments = github_client.get_pr_comments(1)
@@ -812,7 +821,7 @@ class TestGitHubClientGetPRComments:
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
                 mock_run.side_effect = [
-                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=_ndjson(rest_comments), stderr=""),
                     MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
                 ]
                 comments = github_client.get_pr_comments(1)
@@ -830,7 +839,7 @@ class TestGitHubClientGetPRComments:
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
                 mock_run.side_effect = [
-                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=_ndjson(rest_comments), stderr=""),
                     MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
                 ]
                 # Should not raise, just return formatted output
@@ -1454,7 +1463,7 @@ class TestGitHubClientEdgeCases:
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
                 mock_run.side_effect = [
-                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=_ndjson(rest_comments), stderr=""),
                     MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
                 ]
                 # Should not raise, just return formatted output
@@ -1845,15 +1854,18 @@ test-job\t  at test_file.py:42"""
             ]
         )
         with patch("subprocess.run") as mock_run:
-            # First call returns workflow runs, second returns logs
+            # Call 1: git rev-parse (branch detection in _find_failed_run_id)
+            # Call 2: gh run list (get_workflow_runs)
+            # Call 3: gh run view --log-failed (fetch logs)
             mock_run.side_effect = [
+                MagicMock(returncode=0, stdout="main", stderr=""),
                 MagicMock(returncode=0, stdout=workflow_runs_response, stderr=""),
                 MagicMock(returncode=0, stdout=log_output, stderr=""),
             ]
             result = github_client.get_failed_run_logs()
 
-            # Check that second call (log fetch) has correct args
-            call_args = mock_run.call_args_list[1][0][0]
+            # Check that the log fetch (3rd call) has correct args
+            call_args = mock_run.call_args_list[2][0][0]
             assert "gh" in call_args
             assert "run" in call_args
             assert "view" in call_args

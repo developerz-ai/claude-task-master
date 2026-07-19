@@ -521,17 +521,23 @@ class TestGitHubClientGetRequiredStatusChecks:
                 assert "timed out" in str(exc_info.value)
 
     def test_get_required_status_checks_rate_limit_raises(self, github_client):
-        """Test that a rate limit error propagates as GitHubError with the stderr message."""
-        with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
-            with patch("subprocess.run") as mock_run:
-                mock_run.return_value = MagicMock(
-                    returncode=1,
-                    stdout="",
-                    stderr="API rate limit exceeded for user ID 123.",
-                )
-                with pytest.raises(GitHubError) as exc_info:
-                    github_client.get_required_status_checks("main")
-                assert "API rate limit exceeded" in str(exc_info.value)
+        """Test that a persistent rate limit propagates as GitHubError after retries."""
+        with (
+            patch.object(github_client, "_get_repo_info", return_value="owner/repo"),
+            patch("subprocess.run") as mock_run,
+            # A rate-limit stderr triggers _run_gh_command's backoff/retry loop;
+            # patch sleep so the exhausted-retry path runs instantly.
+            patch("claude_task_master.github.client.time.sleep"),
+            patch("claude_task_master.core.console.warning"),
+        ):
+            mock_run.return_value = MagicMock(
+                returncode=1,
+                stdout="",
+                stderr="API rate limit exceeded for user ID 123.",
+            )
+            with pytest.raises(GitHubError) as exc_info:
+                github_client.get_required_status_checks("main")
+            assert "API rate limit exceeded" in str(exc_info.value)
 
     def test_get_required_status_checks_error_includes_branch_name(self, github_client):
         """Test that propagated errors mention the base branch that was queried."""
