@@ -27,7 +27,6 @@ Example:
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -415,149 +414,11 @@ class WebhookConfig(BaseModel):
 
 
 # =============================================================================
-# Multi-Webhook Configuration
-# =============================================================================
-
-
-class WebhooksConfig(BaseModel):
-    """Configuration for multiple webhook endpoints.
-
-    Supports configuring multiple webhooks with shared or individual settings.
-    Useful for sending events to multiple destinations with different filters.
-
-    Attributes:
-        webhooks: List of individual webhook configurations.
-        global_secret: Default secret applied to webhooks without their own secret.
-        global_headers: Headers applied to all webhook requests.
-
-    Example:
-        >>> config = WebhooksConfig(
-        ...     webhooks=[
-        ...         WebhookConfig(url="https://api1.example.com/webhook"),
-        ...         WebhookConfig(
-        ...             url="https://api2.example.com/webhook",
-        ...             events=[EventType.PR_CREATED],
-        ...         ),
-        ...     ],
-        ...     global_secret="shared-secret",
-        ... )
-    """
-
-    webhooks: list[WebhookConfig] = Field(
-        default_factory=list,
-        description="List of webhook configurations.",
-    )
-    global_secret: str | None = Field(
-        default=None,
-        description="Default secret for webhooks without their own secret.",
-    )
-    global_headers: dict[str, str] = Field(
-        default_factory=dict,
-        description="Headers applied to all webhook requests.",
-    )
-
-    def get_enabled_webhooks(self) -> list[WebhookConfig]:
-        """Get only enabled webhook configurations.
-
-        Returns:
-            List of enabled WebhookConfig instances.
-        """
-        return [w for w in self.webhooks if w.enabled]
-
-    def get_webhooks_for_event(self, event_type: EventType | str) -> list[WebhookConfig]:
-        """Get webhooks that should receive a specific event.
-
-        Args:
-            event_type: The event type to check.
-
-        Returns:
-            List of enabled webhooks subscribed to this event.
-        """
-        return [w for w in self.webhooks if w.enabled and w.should_send_event(event_type)]
-
-    def add_webhook(self, webhook: WebhookConfig) -> None:
-        """Add a webhook configuration.
-
-        Args:
-            webhook: The webhook configuration to add.
-        """
-        self.webhooks.append(webhook)
-
-    def remove_webhook(self, url: str) -> bool:
-        """Remove a webhook by URL.
-
-        Args:
-            url: The URL of the webhook to remove.
-
-        Returns:
-            True if a webhook was removed, False otherwise.
-        """
-        original_count = len(self.webhooks)
-        self.webhooks = [w for w in self.webhooks if w.url != url]
-        return len(self.webhooks) < original_count
-
-    def apply_global_settings(self) -> None:
-        """Apply global settings to webhooks that don't have their own.
-
-        Updates webhooks in-place to use global_secret if they don't
-        have a secret, and merges global_headers with webhook headers.
-        """
-        for webhook in self.webhooks:
-            # Apply global secret if webhook doesn't have one
-            if webhook.secret is None and self.global_secret:
-                webhook.secret = self.global_secret
-
-            # Merge global headers (webhook headers take precedence)
-            if self.global_headers:
-                merged = {**self.global_headers, **webhook.headers}
-                webhook.headers = merged
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> WebhooksConfig:
-        """Create WebhooksConfig from a dictionary.
-
-        Args:
-            data: Dictionary with webhooks configuration.
-
-        Returns:
-            Configured WebhooksConfig instance.
-        """
-        return cls(**data)
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary for serialization.
-
-        Returns:
-            Dictionary representation with webhook configs as dicts.
-        """
-        return {
-            "webhooks": [w.to_dict() for w in self.webhooks],
-            "global_secret": self.global_secret,
-            "global_headers": self.global_headers,
-        }
-
-    def __len__(self) -> int:
-        """Return the number of configured webhooks."""
-        return len(self.webhooks)
-
-    def iter_webhooks(self) -> Iterator[WebhookConfig]:
-        """Iterate over webhook configurations.
-
-        Use this instead of __iter__ since BaseModel has a conflicting __iter__.
-
-        Returns:
-            Iterator over WebhookConfig instances.
-        """
-        return iter(self.webhooks)
-
-
-# =============================================================================
 # Exports
 # =============================================================================
 
 __all__ = [
     "WebhookConfig",
-    "WebhooksConfig",
     "DEFAULT_TIMEOUT",
     "DEFAULT_MAX_RETRIES",
     "DEFAULT_RETRY_DELAY",

@@ -164,9 +164,12 @@ class WebhookEvent:
         run_id: The orchestrator run ID (optional, for correlation).
     """
 
-    # Note: event_type is set by subclasses in __post_init__
-    # We use a placeholder that will be overwritten
-    event_type: EventType = field(default=EventType.TASK_STARTED)
+    # ``event_type`` is abstract: it is NOT an __init__ parameter and has no
+    # default. Every concrete subclass assigns it in its own __post_init__ before
+    # calling super().__post_init__(). Instantiating the base directly (or a
+    # subclass that forgets to set it) leaves it unset, which __post_init__ turns
+    # into a loud TypeError rather than silently mislabelling the event.
+    event_type: EventType = field(init=False)
     event_id: str = field(default_factory=_generate_event_id)
     timestamp: str = field(default_factory=_current_timestamp)
     run_id: str | None = None
@@ -186,10 +189,25 @@ class WebhookEvent:
         }
 
     def __post_init__(self) -> None:
-        """Validate and normalize event data after initialization."""
-        # Ensure event_type is an EventType instance
-        if isinstance(self.event_type, str):
-            self.event_type = EventType.from_string(self.event_type)
+        """Validate and normalize event data after initialization.
+
+        Raises:
+            TypeError: If ``event_type`` was never assigned — i.e. ``WebhookEvent``
+                was instantiated directly, or a subclass failed to set it. The
+                base class is abstract and must not produce an untyped event.
+        """
+        # Concrete subclasses assign event_type before calling super(); if it is
+        # still unset the caller used the abstract base incorrectly.
+        event_type = getattr(self, "event_type", None)
+        if event_type is None:
+            raise TypeError(
+                "WebhookEvent is abstract: event_type must be set by a concrete "
+                "event subclass or via create_event(); do not instantiate "
+                "WebhookEvent directly."
+            )
+        # Ensure event_type is an EventType instance.
+        if isinstance(event_type, str):
+            self.event_type = EventType.from_string(event_type)
 
 
 # =============================================================================
