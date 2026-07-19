@@ -268,6 +268,35 @@ FAILURE LOGS:
         except OSError:
             pass  # Best effort - don't fail if we can't save
 
+    def unmark_threads_addressed(self, pr_number: int, thread_ids: list[str]) -> None:
+        """Remove specific thread IDs from the addressed set.
+
+        Used when a human re-engages a previously-addressed thread: the thread
+        is pruned so its new feedback re-surfaces to the agent instead of being
+        permanently suppressed.
+
+        Args:
+            pr_number: The PR number.
+            thread_ids: Thread IDs to remove from the addressed set.
+        """
+        if not thread_ids:
+            return
+
+        existing = self.get_addressed_threads(pr_number)
+        remaining = existing - set(thread_ids)
+        if remaining == existing:
+            return  # Nothing to prune.
+
+        pr_dir = self.get_pr_dir(pr_number)
+        addressed_file = pr_dir / "addressed_threads.json"
+
+        # Persist durably (temp file + fsync + atomic rename), mirroring
+        # mark_threads_addressed.
+        try:
+            atomic_write_json(addressed_file, {"thread_ids": list(remaining)})
+        except OSError:
+            pass  # Best effort - don't fail if we can't save.
+
     def clear_addressed_threads(self, pr_number: int) -> None:
         """Clear the addressed threads tracking for a PR.
 

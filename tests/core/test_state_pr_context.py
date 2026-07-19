@@ -269,6 +269,32 @@ class TestAddressedThreadsTracking:
         addressed_file = pr_dir / "addressed_threads.json"
         assert not addressed_file.exists()
 
+    def test_unmark_threads_addressed_prunes_specific_ids(
+        self, state_manager: StateManager
+    ) -> None:
+        """Test that unmark_threads_addressed removes only the given IDs."""
+        state_manager.mark_threads_addressed(123, ["thread_1", "thread_2", "thread_3"])
+
+        state_manager.unmark_threads_addressed(123, ["thread_2"])
+
+        assert state_manager.get_addressed_threads(123) == {"thread_1", "thread_3"}
+
+    def test_unmark_threads_addressed_empty_list_noop(self, state_manager: StateManager) -> None:
+        """Test that unmarking an empty list leaves the set unchanged."""
+        state_manager.mark_threads_addressed(123, ["thread_1"])
+
+        state_manager.unmark_threads_addressed(123, [])
+
+        assert state_manager.get_addressed_threads(123) == {"thread_1"}
+
+    def test_unmark_threads_addressed_unknown_ids_noop(self, state_manager: StateManager) -> None:
+        """Test that unmarking IDs that aren't tracked is a no-op."""
+        state_manager.mark_threads_addressed(123, ["thread_1"])
+
+        state_manager.unmark_threads_addressed(123, ["not_tracked"])
+
+        assert state_manager.get_addressed_threads(123) == {"thread_1"}
+
     def test_clear_addressed_threads_removes_tracking(self, state_manager: StateManager) -> None:
         """Test that clear_addressed_threads removes the tracking file."""
         state_manager.mark_threads_addressed(123, ["thread_1", "thread_2"])

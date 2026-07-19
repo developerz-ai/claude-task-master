@@ -11,6 +11,8 @@ The client uses composition via mixins:
 - CIOperationsMixin: Workflow runs, CI status, and logs
 """
 
+import random
+import re
 import subprocess
 import time
 from enum import StrEnum
@@ -33,6 +35,82 @@ AUTO_MERGE_CONFIRM_ATTEMPTS = 6
 
 # Seconds between auto-merge confirmation polls
 AUTO_MERGE_CONFIRM_DELAY = 10
+
+# Rate-limit handling: GitHub answers primary/secondary rate limits with HTTP
+# 403/429, which gh surfaces on stderr. We retry with backoff so a long CI wait
+# neither hammers a throttled API nor fails spuriously on a transient limit.
+RATE_LIMIT_MAX_RETRIES = 5
+RATE_LIMIT_BASE_DELAY = 2.0  # seconds; grows exponentially per attempt
+RATE_LIMIT_MAX_DELAY = 60.0  # cap for any single backoff sleep
+
+# Substrings GitHub uses in its 403/429 rate-limit / abuse responses.
+_RATE_LIMIT_MARKERS = (
+    "rate limit exceeded",
+    "secondary rate limit",
+    "abuse detection",
+    "http 429",
+    "too many requests",
+)
+
+# Matches a "Retry-After: <seconds>" hint when gh echoes the response header.
+_RETRY_AFTER_RE = re.compile(r"retry[-\s]?after:?\s*(\d+)", re.IGNORECASE)
+
+
+def _is_rate_limit_error(stderr: str) -> bool:
+    """Return True if gh stderr indicates a GitHub rate limit (403/429).
+
+    Args:
+        stderr: Captured stderr from a failed gh command.
+
+    Returns:
+        True when the message matches a known rate-limit marker.
+    """
+    if not stderr:
+        return False
+    lowered = stderr.lower()
+    return any(marker in lowered for marker in _RATE_LIMIT_MARKERS)
+
+
+def _parse_retry_after(stderr: str) -> float | None:
+    """Extract a Retry-After delay (seconds) from gh stderr, if present.
+
+    Args:
+        stderr: Captured stderr from a failed gh command.
+
+    Returns:
+        The Retry-After value in seconds, or None when absent/unparseable.
+    """
+    if not stderr:
+        return None
+    match = _RETRY_AFTER_RE.search(stderr)
+    if not match:
+        return None
+    try:
+        return float(match.group(1))
+    except ValueError:
+        return None
+
+
+def _compute_rate_limit_delay(attempt: int, retry_after: float | None) -> float:
+    """Compute how long to sleep before retrying a rate-limited command.
+
+    Honors an explicit Retry-After value when GitHub provides one; otherwise
+    uses exponential backoff with equal jitter to avoid synchronized retries
+    across concurrent instances.
+
+    Args:
+        attempt: Zero-based retry attempt number.
+        retry_after: Server-provided Retry-After delay in seconds, if any.
+
+    Returns:
+        Delay in seconds, capped at RATE_LIMIT_MAX_DELAY.
+    """
+    if retry_after is not None and retry_after > 0:
+        return min(retry_after, RATE_LIMIT_MAX_DELAY)
+    backoff = min(RATE_LIMIT_BASE_DELAY * (2**attempt), RATE_LIMIT_MAX_DELAY)
+    # Equal jitter: half fixed, half random → delay in [backoff/2, backoff].
+    half = backoff / 2
+    return float(half + random.uniform(0, half))
 
 
 class AutoMergeResult(StrEnum):
@@ -98,6 +176,10 @@ class GitHubClient(PROperationsMixin, CIOperationsMixin):
         """Run a gh CLI command with proper timeout and error handling.
 
         This is the core command execution method used by all GitHub operations.
+        On a GitHub 403/429 rate-limit response it retries with backoff (honoring
+        Retry-After when present), bounded by RATE_LIMIT_MAX_RETRIES. A rate limit
+        means the request was rejected before executing, so retrying is safe for
+        every command, including merges.
 
         Args:
             cmd: Command and arguments to run (e.g., ["gh", "pr", "list"]).
@@ -113,31 +195,47 @@ class GitHubClient(PROperationsMixin, CIOperationsMixin):
             GitHubTimeoutError: If command times out.
             GitHubError: If command fails and check=True.
         """
-        try:
-            result = subprocess.run(
-                cmd,
-                timeout=timeout,
-                check=False,  # We'll handle errors ourselves
-                capture_output=capture_output,
-                text=True,
-                cwd=cwd,
-            )
-
-            if check and result.returncode != 0:
-                error_msg = (
-                    result.stderr.strip()
-                    if result.stderr
-                    else f"Command failed with exit code {result.returncode}"
+        attempt = 0
+        while True:
+            try:
+                result = subprocess.run(
+                    cmd,
+                    timeout=timeout,
+                    check=False,  # We'll handle errors ourselves
+                    capture_output=capture_output,
+                    text=True,
+                    cwd=cwd,
                 )
-                raise GitHubError(error_msg, command=cmd, exit_code=result.returncode)
+            except subprocess.TimeoutExpired as e:
+                raise GitHubTimeoutError(
+                    f"Command timed out after {timeout}s: {' '.join(cmd)}",
+                    command=cmd,
+                ) from e
+
+            if result.returncode != 0:
+                stderr = result.stderr or ""
+                if attempt < RATE_LIMIT_MAX_RETRIES and _is_rate_limit_error(stderr):
+                    delay = _compute_rate_limit_delay(attempt, _parse_retry_after(stderr))
+                    # Lazy import avoids a github<->core import cycle at module load.
+                    from ..core import console
+
+                    console.warning(
+                        f"GitHub rate limit hit; retrying in {delay:.1f}s "
+                        f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
+                    )
+                    time.sleep(delay)
+                    attempt += 1
+                    continue
+
+                if check:
+                    error_msg = (
+                        stderr.strip()
+                        if stderr
+                        else f"Command failed with exit code {result.returncode}"
+                    )
+                    raise GitHubError(error_msg, command=cmd, exit_code=result.returncode)
 
             return result
-
-        except subprocess.TimeoutExpired as e:
-            raise GitHubTimeoutError(
-                f"Command timed out after {timeout}s: {' '.join(cmd)}",
-                command=cmd,
-            ) from e
 
     def _check_gh_cli(self) -> None:
         """Check if gh CLI is installed and authenticated.

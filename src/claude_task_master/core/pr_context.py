@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import shutil
+from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from . import console
@@ -14,6 +16,39 @@ if TYPE_CHECKING:
 
 
 from ..github.ci_logs import CILogDownloader
+
+# Prefix marking PR conversation (issue-level) comments. These live on the
+# issues endpoint and are NOT resolvable review threads, so they are tracked
+# by a synthetic ``issue_comment_<id>`` key in the addressed-threads set.
+_CONVERSATION_THREAD_PREFIX = "issue_comment_"
+
+# Max resolveReviewThread mutations aliased into a single GraphQL request.
+MUTATION_BATCH_SIZE = 20
+
+
+@dataclass(frozen=True)
+class _ThreadState:
+    """Snapshot of a review thread's resolution status and latest author.
+
+    Attributes:
+        is_resolved: Whether the thread is resolved on GitHub.
+        last_comment_author: Login of the most recent comment's author, or
+            None when it cannot be determined.
+    """
+
+    is_resolved: bool
+    last_comment_author: str | None
+
+
+def _conversation_thread_key(comment_id: object) -> str:
+    """Build the synthetic addressed-set key for a conversation comment."""
+    return f"{_CONVERSATION_THREAD_PREFIX}{comment_id}"
+
+
+def _chunks(items: list[str], size: int) -> Iterator[list[str]]:
+    """Yield successive ``size``-length chunks from ``items``."""
+    for start in range(0, len(items), size):
+        yield items[start : start + size]
 
 
 class PRContextManager:
@@ -224,6 +259,13 @@ class PRContextManager:
                     }
                 )
 
+            # Also surface PR *conversation* (issue-level) comments — human
+            # "please also change X" feedback that lives on the issues endpoint
+            # and would otherwise be invisible to the pipeline.
+            comments.extend(
+                self._fetch_conversation_comments(repo_info, pr_number, addressed_threads)
+            )
+
             # Clear old comments only after a successful fetch — preserves
             # existing data if any API call above fails.
             comments_dir = pr_dir / "comments"
@@ -240,6 +282,80 @@ class PRContextManager:
         except Exception as e:
             console.warning(f"Could not save PR comments: {e}")
             return 0
+
+    def _fetch_conversation_comments(
+        self, repo_info: str, pr_number: int, addressed_threads: set[str]
+    ) -> list[dict[str, object]]:
+        """Fetch PR conversation (issue-level) comments as actionable items.
+
+        PR conversation comments live on the ``/issues/{n}/comments`` endpoint,
+        separate from inline review comments. They are not part of resolvable
+        review threads, so each is tracked by a synthetic
+        ``issue_comment_<id>`` key in the addressed-threads set to avoid
+        re-surfacing feedback the agent has already handled.
+
+        Failures are swallowed (returning an empty list) so that missing
+        conversation comments never abort the primary review-comment save.
+
+        Args:
+            repo_info: Repository in ``owner/name`` form.
+            pr_number: The PR number.
+            addressed_threads: Set of already-addressed thread/comment keys.
+
+        Returns:
+            List of actionable conversation-comment dicts.
+        """
+        try:
+            result = self.github_client._run_gh_command(
+                [
+                    "gh",
+                    "api",
+                    "--paginate",
+                    "--jq",
+                    ".[]",
+                    f"repos/{repo_info}/issues/{pr_number}/comments",
+                ],
+                timeout=60,
+            )
+        except Exception as e:
+            console.warning(f"Could not fetch conversation comments: {e}")
+            return []
+
+        conversation: list[dict[str, object]] = []
+        for line in result.stdout.splitlines():
+            if not line.strip():
+                continue
+            try:
+                comment = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            comment_id = comment.get("id")
+            if comment_id is None:
+                continue
+
+            thread_key = _conversation_thread_key(comment_id)
+            if thread_key in addressed_threads:
+                continue  # Already handled in a prior cycle.
+
+            body = comment.get("body", "")
+            author = comment.get("user", {}).get("login", "unknown")
+            if self._is_non_actionable_comment(author, body):
+                continue
+
+            conversation.append(
+                {
+                    "thread_id": thread_key,
+                    "comment_id": str(comment_id),
+                    "author": author,
+                    "body": body,
+                    "path": None,
+                    "line": None,
+                    "is_resolved": False,
+                }
+            )
+
+        return conversation
 
     def _get_resolved_status_map(self, repo_info: str, pr_number: int) -> dict[int, bool]:
         """Get resolved status for all comments from GraphQL.
@@ -363,8 +479,9 @@ class PRContextManager:
 
             console.info(f"Posting replies to {len(resolutions)} comments...")
 
-            # Track successfully addressed thread IDs
+            # Track successfully addressed thread IDs and threads to resolve.
             addressed_thread_ids: list[str] = []
+            threads_to_resolve: list[str] = []
 
             for resolution in resolutions:
                 thread_id = resolution.get("thread_id")
@@ -374,22 +491,21 @@ class PRContextManager:
                 if not thread_id:
                     continue
 
-                # Skip threads we've already replied to
-                if thread_id in already_addressed:
-                    # Still resolve if not yet resolved on GitHub (prevents infinite loop)
-                    if thread_id not in already_resolved and action in ("fixed", "explained"):
-                        try:
-                            self.resolve_thread(thread_id)
-                            console.detail(
-                                f"  Resolved previously-replied thread {thread_id[:20]}..."
-                            )
-                        except Exception as resolve_err:
-                            console.warning(f"  Failed to resolve thread: {resolve_err}")
-                    else:
-                        console.detail(f"  Thread {thread_id[:20]}... already replied, skipping")
+                # Conversation (issue-level) comments aren't resolvable review
+                # threads: acknowledge by marking addressed and skip the thread
+                # reply/resolve GraphQL API (which would fail on a synthetic ID).
+                if thread_id.startswith(_CONVERSATION_THREAD_PREFIX):
+                    if thread_id not in already_addressed:
+                        addressed_thread_ids.append(thread_id)
                     continue
 
-                already_resolved_on_github = thread_id in already_resolved
+                # Already replied to — skip. Resolving addressed-but-unresolved
+                # threads is handled by resolve_addressed_threads, which only
+                # resolves threads whose last comment is ours (never a thread a
+                # human re-opened).
+                if thread_id in already_addressed:
+                    console.detail(f"  Thread {thread_id[:20]}... already replied, skipping")
+                    continue
 
                 # Build reply message - keep it short
                 action_prefix = {
@@ -404,18 +520,20 @@ class PRContextManager:
                     self._post_thread_reply(thread_id, reply_body)
                     console.detail(f"  Posted reply to thread {thread_id[:20]}...")
 
-                    # Mark this thread as addressed so we don't re-download it
+                    # Mark this thread as addressed so we don't re-download it.
                     addressed_thread_ids.append(thread_id)
 
-                    # Resolve thread if action is "fixed" or "explained" and not already resolved
-                    if action in ("fixed", "explained") and not already_resolved_on_github:
-                        try:
-                            self.resolve_thread(thread_id)
-                            console.detail(f"  Resolved thread {thread_id[:20]}...")
-                        except Exception as resolve_err:
-                            console.warning(f"  Failed to resolve thread: {resolve_err}")
+                    # Queue for resolution if fixed/explained and not already
+                    # resolved on GitHub; the queue is resolved in aliased
+                    # batches below instead of one request per thread.
+                    if action in ("fixed", "explained") and thread_id not in already_resolved:
+                        threads_to_resolve.append(thread_id)
                 except Exception as e:
                     console.warning(f"  Failed to post reply: {e}")
+
+            # Resolve all queued threads in a few aliased GraphQL requests.
+            if threads_to_resolve:
+                self._resolve_threads_batched(threads_to_resolve)
 
             # Persist addressed thread IDs to avoid re-downloading them
             if addressed_thread_ids:
@@ -496,10 +614,12 @@ class PRContextManager:
         )
 
     def resolve_addressed_threads(self, pr_number: int | None) -> int:
-        """Resolve threads that were already addressed but not yet resolved on GitHub.
+        """Resolve addressed-but-unresolved threads whose last comment is ours.
 
-        This prevents infinite loops where the system keeps re-running the agent
-        for threads that were replied to but failed to resolve.
+        Prevents infinite re-processing of threads we replied to but failed to
+        resolve. Threads where a human commented *after* our reply are left open
+        and pruned from the addressed set, so their new feedback re-surfaces to
+        the agent on the next fetch instead of being force-resolved away.
 
         Args:
             pr_number: The PR number.
@@ -511,23 +631,30 @@ class PRContextManager:
             return 0
 
         try:
-            already_resolved = self._get_resolved_thread_ids(pr_number)
+            viewer_login, states = self._get_thread_states(pr_number)
             already_addressed = self.state_manager.get_addressed_threads(pr_number)
 
-            # Find threads that were addressed (replied to) but not resolved
-            unresolved_addressed = already_addressed - already_resolved
-            if not unresolved_addressed:
-                return 0
+            to_resolve: list[str] = []
+            to_prune: list[str] = []
+            for thread_id in already_addressed:
+                if thread_id.startswith(_CONVERSATION_THREAD_PREFIX):
+                    continue  # Conversation comments aren't review threads.
+                state = states.get(thread_id)
+                if state is None or state.is_resolved:
+                    continue  # Gone or already resolved — nothing to do.
+                # Only auto-resolve when our own reply is the last comment. If a
+                # human replied after us they re-engaged the thread: leave it
+                # open and prune it so save_pr_comments re-surfaces the feedback.
+                if viewer_login and state.last_comment_author == viewer_login:
+                    to_resolve.append(thread_id)
+                else:
+                    to_prune.append(thread_id)
 
-            resolved_count = 0
-            for thread_id in unresolved_addressed:
-                try:
-                    self.resolve_thread(thread_id)
-                    resolved_count += 1
-                    console.detail(f"  Resolved addressed thread {thread_id[:20]}...")
-                except Exception as e:
-                    console.warning(f"  Failed to resolve thread {thread_id[:20]}...: {e}")
+            if to_prune:
+                self.state_manager.unmark_threads_addressed(pr_number, to_prune)
+                console.detail(f"Pruned {len(to_prune)} re-opened thread(s) from addressed set")
 
+            resolved_count = self._resolve_threads_batched(to_resolve)
             if resolved_count:
                 console.info(f"Resolved {resolved_count} previously-addressed threads")
             return resolved_count
@@ -539,14 +666,32 @@ class PRContextManager:
     def _get_resolved_thread_ids(self, pr_number: int) -> set[str]:
         """Get IDs of threads that are already resolved on GitHub.
 
-        Paginates through all review threads to handle PRs with > 100 threads.
-
         Args:
             pr_number: The PR number.
 
         Returns:
             Set of thread IDs that are already resolved.
         """
+        _, states = self._get_thread_states(pr_number)
+        return {thread_id for thread_id, state in states.items() if state.is_resolved}
+
+    def _get_thread_states(self, pr_number: int) -> tuple[str | None, dict[str, _ThreadState]]:
+        """Fetch each review thread's resolution status and last-comment author.
+
+        Also returns the authenticated viewer's login so callers can tell
+        whether the most recent comment on a thread is the bot's own reply.
+        Paginates through all review threads to handle PRs with > 100 threads.
+
+        Args:
+            pr_number: The PR number.
+
+        Returns:
+            Tuple of ``(viewer_login, {thread_id: _ThreadState})``. viewer_login
+            is None when it cannot be determined.
+        """
+        viewer_login: str | None = None
+        states: dict[str, _ThreadState] = {}
+
         try:
             repo_info = self.github_client._get_repo_info()
             owner, repo = repo_info.split("/")
@@ -554,6 +699,7 @@ class PRContextManager:
             # $cursor is nullable; omit it on the first page.
             query = """
             query($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
+              viewer { login }
               repository(owner: $owner, name: $repo) {
                 pullRequest(number: $pr) {
                   reviewThreads(first: 100, after: $cursor) {
@@ -561,6 +707,7 @@ class PRContextManager:
                     nodes {
                       id
                       isResolved
+                      comments(last: 1) { nodes { author { login } } }
                     }
                   }
                 }
@@ -568,9 +715,7 @@ class PRContextManager:
             }
             """
 
-            resolved_ids: set[str] = set()
             cursor: str | None = None
-
             while True:
                 cmd = [
                     "gh",
@@ -591,24 +736,88 @@ class PRContextManager:
                 result = self.github_client._run_gh_command(cmd, timeout=30)
                 data = json.loads(result.stdout)
 
-                pr = data["data"]["repository"]["pullRequest"]
+                payload = data.get("data") or {}
+                viewer_login = (payload.get("viewer") or {}).get("login") or viewer_login
+                pr = payload["repository"]["pullRequest"]
                 threads_data = pr.get("reviewThreads", {})
-                threads = threads_data.get("nodes", [])
                 page_info = threads_data.get("pageInfo", {})
 
-                for t in threads:
-                    if t.get("isResolved"):
-                        resolved_ids.add(t["id"])
+                for thread in threads_data.get("nodes", []):
+                    thread_id = thread.get("id")
+                    if not thread_id:
+                        continue
+                    last_author: str | None = None
+                    comment_nodes = thread.get("comments", {}).get("nodes", [])
+                    if comment_nodes:
+                        last_author = (comment_nodes[-1].get("author") or {}).get("login")
+                    states[thread_id] = _ThreadState(
+                        is_resolved=bool(thread.get("isResolved")),
+                        last_comment_author=last_author,
+                    )
 
                 if not page_info.get("hasNextPage"):
                     break
                 cursor = page_info.get("endCursor")
 
-            return resolved_ids
-
         except Exception as e:
-            console.warning(f"Could not fetch resolved threads: {e}")
-            return set()
+            console.warning(f"Could not fetch thread states: {e}")
+
+        return viewer_login, states
+
+    def _resolve_threads_batched(self, thread_ids: list[str]) -> int:
+        """Resolve multiple review threads using aliased GraphQL mutations.
+
+        Threads are resolved in batches of ``MUTATION_BATCH_SIZE`` within a
+        single request each. If a batch request fails (e.g. one invalid ID),
+        it falls back to resolving that batch's threads individually so one bad
+        thread doesn't block the rest. ``resolveReviewThread`` is idempotent,
+        so retrying is safe.
+
+        Args:
+            thread_ids: Review-thread IDs to resolve.
+
+        Returns:
+            Number of threads resolved.
+        """
+        resolved = 0
+        for batch in _chunks(thread_ids, MUTATION_BATCH_SIZE):
+            try:
+                self._run_resolve_batch(batch)
+                resolved += len(batch)
+                for thread_id in batch:
+                    console.detail(f"  Resolved addressed thread {thread_id[:20]}...")
+            except Exception:
+                # Batch failed — resolve individually so one bad ID isn't fatal.
+                for thread_id in batch:
+                    try:
+                        self.resolve_thread(thread_id)
+                        resolved += 1
+                        console.detail(f"  Resolved addressed thread {thread_id[:20]}...")
+                    except Exception as e:
+                        console.warning(f"  Failed to resolve thread {thread_id[:20]}...: {e}")
+        return resolved
+
+    def _run_resolve_batch(self, thread_ids: list[str]) -> None:
+        """Resolve a batch of threads in one aliased GraphQL mutation request.
+
+        Args:
+            thread_ids: Review-thread IDs to resolve in a single request.
+        """
+        if not thread_ids:
+            return
+
+        var_decls = ", ".join(f"$t{i}: ID!" for i in range(len(thread_ids)))
+        fields = "\n  ".join(
+            f"r{i}: resolveReviewThread(input: {{threadId: $t{i}}}) {{ thread {{ isResolved }} }}"
+            for i in range(len(thread_ids))
+        )
+        mutation = f"mutation({var_decls}) {{\n  {fields}\n}}"
+
+        cmd = ["gh", "api", "graphql", "-f", f"query={mutation}"]
+        for i, thread_id in enumerate(thread_ids):
+            cmd.extend(["-f", f"t{i}={thread_id}"])
+
+        self.github_client._run_gh_command(cmd, timeout=30)
 
     def _is_non_actionable_comment(self, author: str, body: str) -> bool:
         """Check if a comment is non-actionable (bot status, summary, etc).

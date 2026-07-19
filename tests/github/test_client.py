@@ -9,6 +9,8 @@ import pytest
 
 import claude_task_master.github.client as github_client_module
 from claude_task_master.github.client import (
+    RATE_LIMIT_MAX_DELAY,
+    RATE_LIMIT_MAX_RETRIES,
     AutoMergeResult,
     GitHubAuthError,
     GitHubClient,
@@ -17,6 +19,9 @@ from claude_task_master.github.client import (
     GitHubNotFoundError,
     GitHubTimeoutError,
     PRStatus,
+    _compute_rate_limit_delay,
+    _is_rate_limit_error,
+    _parse_retry_after,
 )
 
 # =============================================================================
@@ -2016,3 +2021,106 @@ class TestGitHubClientWaitForCI:
 
             assert success is False
             assert "failed" in message.lower()
+
+
+# =============================================================================
+# Rate-limit backoff Tests
+# =============================================================================
+
+
+class TestRateLimitHelpers:
+    """Tests for the rate-limit detection and backoff helper functions."""
+
+    def test_is_rate_limit_error_detects_markers(self) -> None:
+        """Test that known 403/429 rate-limit messages are detected."""
+        assert _is_rate_limit_error("HTTP 403: API rate limit exceeded for user X")
+        assert _is_rate_limit_error("You have exceeded a secondary rate limit")
+        assert _is_rate_limit_error("You have triggered an abuse detection mechanism")
+        assert _is_rate_limit_error("HTTP 429 Too Many Requests")
+
+    def test_is_rate_limit_error_ignores_other_errors(self) -> None:
+        """Test that unrelated errors are not treated as rate limits."""
+        assert not _is_rate_limit_error("fatal: not a git repository")
+        assert not _is_rate_limit_error("")
+
+    def test_parse_retry_after_extracts_seconds(self) -> None:
+        """Test that a Retry-After hint is parsed from stderr."""
+        assert _parse_retry_after("Retry-After: 42") == 42.0
+        assert _parse_retry_after("please retry after 7 seconds") == 7.0
+
+    def test_parse_retry_after_absent(self) -> None:
+        """Test that missing Retry-After yields None."""
+        assert _parse_retry_after("some other error") is None
+        assert _parse_retry_after("") is None
+
+    def test_compute_delay_honors_retry_after(self) -> None:
+        """Test that an explicit Retry-After is used and capped."""
+        assert _compute_rate_limit_delay(0, 5.0) == 5.0
+        assert _compute_rate_limit_delay(3, 999.0) == RATE_LIMIT_MAX_DELAY
+
+    def test_compute_delay_backoff_grows_and_is_bounded(self) -> None:
+        """Test exponential backoff with equal jitter (jitter pinned to 0)."""
+        with patch.object(github_client_module.random, "uniform", return_value=0.0):
+            # attempt 0: backoff=2, half=1 → 1.0; attempt 2: backoff=8, half=4 → 4.0
+            assert _compute_rate_limit_delay(0, None) == 1.0
+            assert _compute_rate_limit_delay(2, None) == 4.0
+        # Jitter keeps the delay within [backoff/2, backoff].
+        with patch.object(github_client_module.random, "uniform", return_value=1.0):
+            assert _compute_rate_limit_delay(0, None) == 2.0
+
+
+class TestRunGhCommandRateLimit:
+    """Tests for rate-limit retry behavior inside _run_gh_command."""
+
+    def test_retries_then_succeeds(self, github_client) -> None:
+        """Test that a rate-limited command is retried and eventually succeeds."""
+        rate_limited = MagicMock(returncode=1, stderr="API rate limit exceeded", stdout="")
+        success = MagicMock(returncode=0, stderr="", stdout="ok")
+        with (
+            patch("subprocess.run", side_effect=[rate_limited, success]) as mock_run,
+            patch.object(github_client_module.time, "sleep") as mock_sleep,
+            patch("claude_task_master.core.console.warning"),
+        ):
+            result = github_client._run_gh_command(["gh", "api", "x"])
+
+        assert result.stdout == "ok"
+        assert mock_run.call_count == 2
+        mock_sleep.assert_called_once()
+
+    def test_gives_up_after_max_retries(self, github_client) -> None:
+        """Test that a persistent rate limit raises after the retry budget."""
+        rate_limited = MagicMock(returncode=1, stderr="secondary rate limit", stdout="")
+        with (
+            patch("subprocess.run", return_value=rate_limited) as mock_run,
+            patch.object(github_client_module.time, "sleep") as mock_sleep,
+            patch("claude_task_master.core.console.warning"),
+        ):
+            with pytest.raises(GitHubError):
+                github_client._run_gh_command(["gh", "api", "x"])
+
+        assert mock_run.call_count == RATE_LIMIT_MAX_RETRIES + 1
+        assert mock_sleep.call_count == RATE_LIMIT_MAX_RETRIES
+
+    def test_non_rate_limit_error_not_retried(self, github_client) -> None:
+        """Test that ordinary failures are not retried."""
+        failed = MagicMock(returncode=1, stderr="fatal: not found", stdout="")
+        with patch("subprocess.run", return_value=failed) as mock_run:
+            with pytest.raises(GitHubError):
+                github_client._run_gh_command(["gh", "api", "x"])
+
+        assert mock_run.call_count == 1
+
+    def test_honors_retry_after_delay(self, github_client) -> None:
+        """Test that the Retry-After value drives the sleep duration."""
+        rate_limited = MagicMock(
+            returncode=1, stderr="rate limit exceeded\nRetry-After: 3", stdout=""
+        )
+        success = MagicMock(returncode=0, stderr="", stdout="ok")
+        with (
+            patch("subprocess.run", side_effect=[rate_limited, success]),
+            patch.object(github_client_module.time, "sleep") as mock_sleep,
+            patch("claude_task_master.core.console.warning"),
+        ):
+            github_client._run_gh_command(["gh", "api", "x"])
+
+        mock_sleep.assert_called_once_with(3.0)
