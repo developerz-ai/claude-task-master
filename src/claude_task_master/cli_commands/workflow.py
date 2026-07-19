@@ -253,6 +253,9 @@ def start(
             console.print(f"[red]Invalid webhook configuration: {e}[/red]")
             raise typer.Exit(1) from None
 
+    # Acquired once the state dir is known (after the exists() check) and always
+    # released in the finally, even if setup fails before the lock is taken.
+    state_manager: StateManager | None = None
     try:
         # Initialize configuration (creates config.json with defaults if missing)
         working_dir = Path.cwd()
@@ -266,6 +269,18 @@ def start(
         if state_manager.exists():
             console.print(
                 "[red]Error: Task already exists. Use 'resume' to continue or 'clean' to start fresh.[/red]"
+            )
+            raise typer.Exit(1)
+
+        # Guard against concurrent runs: acquire the single-instance session lock
+        # before loading credentials or touching shared state. Two simultaneous
+        # `claudetm start` runs would otherwise corrupt state.json, duplicate PRs,
+        # and race OAuth refresh-token rotation. Held for the whole run and freed
+        # by the finally. (Pairs with the O_EXCL PID lock in core/state.py.)
+        if not state_manager.acquire_session_lock():
+            console.print("[red]Error: Another claudetm session is active for this project.[/red]")
+            console.print(
+                "[dim]Wait for it to finish, or run 'claudetm clean -f' to force cleanup.[/dim]"
             )
             raise typer.Exit(1)
 
@@ -362,6 +377,12 @@ def start(
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1) from None
+    finally:
+        # Release the session lock on every exit path (success, pause, block,
+        # error). A no-op if we never acquired it or the orchestrator's
+        # cleanup_on_success already released it.
+        if state_manager is not None:
+            state_manager.release_session_lock()
 
 
 def resume(
@@ -406,6 +427,9 @@ def resume(
     """
     console.print("[bold blue]Resuming task...[/bold blue]")
 
+    # Acquired after validate_for_resume and always released in the finally,
+    # even if setup fails before the lock is taken.
+    state_manager: StateManager | None = None
     try:
         # Initialize configuration (loads existing config.json or uses defaults)
         working_dir = Path.cwd()
@@ -455,6 +479,19 @@ def resume(
                 if e.details:
                     console.print(f"[dim]{e.details}[/dim]")
                 raise typer.Exit(1) from None
+
+        # Guard against concurrent runs: acquire the single-instance session lock
+        # now that the task is known resumable. Placed after validation so a no-op
+        # resume of an already-finished task exits cleanly without taking the lock.
+        # Two concurrent resumes would otherwise both drive the work loop —
+        # corrupting state, duplicating PRs, racing OAuth refresh-token rotation.
+        # Held for the whole run and freed by the finally.
+        if not state_manager.acquire_session_lock():
+            console.print("[red]Error: Another claudetm session is active for this project.[/red]")
+            console.print(
+                "[dim]Wait for it to finish, or run 'claudetm clean -f' to force cleanup.[/dim]"
+            )
+            raise typer.Exit(1)
 
         # Toggle admin force-merge. It is persisted so the retry loop (each blocked-merge
         # cycle re-enters the merge stage and re-reads state) keeps the override active, but
@@ -579,6 +616,12 @@ def resume(
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1) from None
+    finally:
+        # Release the session lock on every exit path. A no-op if we never
+        # acquired it (e.g. a terminal-state resume) or the orchestrator's
+        # cleanup_on_success already released it.
+        if state_manager is not None:
+            state_manager.release_session_lock()
 
 
 def register_workflow_commands(app: typer.Typer) -> None:
