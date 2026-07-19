@@ -231,23 +231,40 @@ def _get_job_status_emoji(job_status: str) -> str:
 
 
 def _find_failed_run_id(client: GitHubClientProtocol) -> int | None:
-    """Find the ID of the latest failed workflow run.
+    """Find the ID of the latest failed workflow run on the current branch.
+
+    Scopes the search to the current git branch to avoid picking up
+    failures from unrelated branches.  Does NOT fall back to a green
+    (passing) run — returns ``None`` when no failed run exists.
 
     Args:
         client: The GitHub client instance.
 
     Returns:
-        Run ID if found, None otherwise.
+        Run ID of the most recent failed run, or None if none found.
     """
-    runs = client.get_workflow_runs(limit=5)
+    # Determine current branch so we only look at runs for this branch.
+    branch: str | None = None
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=5,
+        )
+        branch = result.stdout.strip() or None
+    except Exception:
+        pass  # Fall back to no branch filter if git is unavailable
+
+    runs = client.get_workflow_runs(limit=10, branch=branch)
     failed_run = next(
         (r for r in runs if r.conclusion in ("failure", "cancelled")),
         None,
     )
     if failed_run:
         return int(failed_run.id)
-    elif runs:
-        return int(runs[0].id)  # Use latest run as fallback
+    # No green fallback: only return an ID when a genuinely failed run exists.
     return None
 
 

@@ -9,6 +9,8 @@ import pytest
 
 import claude_task_master.github.client as github_client_module
 from claude_task_master.github.client import (
+    RATE_LIMIT_MAX_DELAY,
+    RATE_LIMIT_MAX_RETRIES,
     AutoMergeResult,
     GitHubAuthError,
     GitHubClient,
@@ -17,6 +19,9 @@ from claude_task_master.github.client import (
     GitHubNotFoundError,
     GitHubTimeoutError,
     PRStatus,
+    _compute_rate_limit_delay,
+    _is_rate_limit_error,
+    _parse_retry_after,
 )
 
 # =============================================================================
@@ -621,6 +626,15 @@ class TestGitHubClientGetPRStatus:
 # =============================================================================
 
 
+def _ndjson(objects: list) -> str:
+    """Serialize objects as NDJSON (one JSON value per line).
+
+    Mirrors ``gh api --paginate --jq '.[]'`` output, which emits one compact
+    JSON object per line rather than a single JSON array.
+    """
+    return "\n".join(json.dumps(obj) for obj in objects)
+
+
 def _make_rest_comment_client(
     comment_id: int, user: str, body: str, path: str | None, line: int | None
 ) -> dict:
@@ -669,7 +683,7 @@ class TestGitHubClientGetPRComments:
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
                 mock_run.side_effect = [
-                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=_ndjson(rest_comments), stderr=""),
                     MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
                 ]
                 comments = github_client.get_pr_comments(123, only_unresolved=True)
@@ -690,7 +704,7 @@ class TestGitHubClientGetPRComments:
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
                 mock_run.side_effect = [
-                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=_ndjson(rest_comments), stderr=""),
                     MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
                 ]
                 comments = github_client.get_pr_comments(123, only_unresolved=False)
@@ -712,7 +726,7 @@ class TestGitHubClientGetPRComments:
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
                 mock_run.side_effect = [
-                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=_ndjson(rest_comments), stderr=""),
                     MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
                 ]
                 comments = github_client.get_pr_comments(1)
@@ -732,7 +746,7 @@ class TestGitHubClientGetPRComments:
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
                 mock_run.side_effect = [
-                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=_ndjson(rest_comments), stderr=""),
                     MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
                 ]
                 comments = github_client.get_pr_comments(1)
@@ -751,7 +765,7 @@ class TestGitHubClientGetPRComments:
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
                 mock_run.side_effect = [
-                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=_ndjson(rest_comments), stderr=""),
                     MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
                 ]
                 comments = github_client.get_pr_comments(1)
@@ -771,7 +785,7 @@ class TestGitHubClientGetPRComments:
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
                 mock_run.side_effect = [
-                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=_ndjson(rest_comments), stderr=""),
                     MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
                 ]
                 comments = github_client.get_pr_comments(1)
@@ -788,7 +802,7 @@ class TestGitHubClientGetPRComments:
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
                 mock_run.side_effect = [
-                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=_ndjson(rest_comments), stderr=""),
                     MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
                 ]
                 comments = github_client.get_pr_comments(1)
@@ -807,7 +821,7 @@ class TestGitHubClientGetPRComments:
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
                 mock_run.side_effect = [
-                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=_ndjson(rest_comments), stderr=""),
                     MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
                 ]
                 comments = github_client.get_pr_comments(1)
@@ -825,7 +839,7 @@ class TestGitHubClientGetPRComments:
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
                 mock_run.side_effect = [
-                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=_ndjson(rest_comments), stderr=""),
                     MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
                 ]
                 # Should not raise, just return formatted output
@@ -1220,8 +1234,8 @@ class TestGitHubClientGetRepoInfo:
                 result = github_client._get_repo_info()
                 assert result == "owner/repo"
 
-    def test_get_repo_info_various_formats(self, github_client):
-        """Test repo info with various owner/repo formats."""
+    def test_get_repo_info_various_formats(self):
+        """Test repo info with various owner/repo formats (fresh client per case)."""
         test_cases = [
             "simple/repo",
             "organization-name/repo-name",
@@ -1229,14 +1243,47 @@ class TestGitHubClientGetRepoInfo:
             "CamelCase/RepoName",
         ]
         for expected in test_cases:
+            # Fresh client per iteration so the cache is empty each time.
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(returncode=0)
+                client = GitHubClient()
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = MagicMock(
                     returncode=0,
                     stdout=f"{expected}\n",
                     stderr="",
                 )
-                result = github_client._get_repo_info()
+                result = client._get_repo_info()
                 assert result == expected
+
+    def test_get_repo_info_caches_result(self, github_client):
+        """Second call with same cwd uses cache — subprocess called only once."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="owner/repo\n",
+                stderr="",
+            )
+            result1 = github_client._get_repo_info()
+            result2 = github_client._get_repo_info()
+
+        assert result1 == "owner/repo"
+        assert result2 == "owner/repo"
+        mock_run.assert_called_once()  # subprocess invoked only on the first call
+
+    def test_get_repo_info_different_cwd_not_cached(self, github_client):
+        """Different cwd values bypass the per-cwd cache and fetch separately."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout="owner/repo-a\n", stderr=""),
+                MagicMock(returncode=0, stdout="owner/repo-b\n", stderr=""),
+            ]
+            result_a = github_client._get_repo_info(cwd="/path/a")
+            result_b = github_client._get_repo_info(cwd="/path/b")
+
+        assert result_a == "owner/repo-a"
+        assert result_b == "owner/repo-b"
+        assert mock_run.call_count == 2
 
     def test_get_repo_info_not_in_git_repo(self, github_client):
         """Test repo info when not in a git repository."""
@@ -1416,7 +1463,7 @@ class TestGitHubClientEdgeCases:
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
                 mock_run.side_effect = [
-                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=_ndjson(rest_comments), stderr=""),
                     MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
                 ]
                 # Should not raise, just return formatted output
@@ -1807,15 +1854,18 @@ test-job\t  at test_file.py:42"""
             ]
         )
         with patch("subprocess.run") as mock_run:
-            # First call returns workflow runs, second returns logs
+            # Call 1: git rev-parse (branch detection in _find_failed_run_id)
+            # Call 2: gh run list (get_workflow_runs)
+            # Call 3: gh run view --log-failed (fetch logs)
             mock_run.side_effect = [
+                MagicMock(returncode=0, stdout="main", stderr=""),
                 MagicMock(returncode=0, stdout=workflow_runs_response, stderr=""),
                 MagicMock(returncode=0, stdout=log_output, stderr=""),
             ]
             result = github_client.get_failed_run_logs()
 
-            # Check that second call (log fetch) has correct args
-            call_args = mock_run.call_args_list[1][0][0]
+            # Check that the log fetch (3rd call) has correct args
+            call_args = mock_run.call_args_list[2][0][0]
             assert "gh" in call_args
             assert "run" in call_args
             assert "view" in call_args
@@ -1983,3 +2033,175 @@ class TestGitHubClientWaitForCI:
 
             assert success is False
             assert "failed" in message.lower()
+
+
+# =============================================================================
+# Rate-limit backoff Tests
+# =============================================================================
+
+
+class TestRateLimitHelpers:
+    """Tests for the rate-limit detection and backoff helper functions."""
+
+    def test_is_rate_limit_error_detects_markers(self) -> None:
+        """Test that known 403/429 rate-limit messages are detected."""
+        assert _is_rate_limit_error("HTTP 403: API rate limit exceeded for user X")
+        assert _is_rate_limit_error("You have exceeded a secondary rate limit")
+        assert _is_rate_limit_error("You have triggered an abuse detection mechanism")
+        assert _is_rate_limit_error("HTTP 429 Too Many Requests")
+
+    def test_is_rate_limit_error_ignores_other_errors(self) -> None:
+        """Test that unrelated errors are not treated as rate limits."""
+        assert not _is_rate_limit_error("fatal: not a git repository")
+        assert not _is_rate_limit_error("")
+
+    def test_parse_retry_after_extracts_seconds(self) -> None:
+        """Test that a Retry-After hint is parsed from stderr."""
+        assert _parse_retry_after("Retry-After: 42") == 42.0
+        assert _parse_retry_after("please retry after 7 seconds") == 7.0
+
+    def test_parse_retry_after_absent(self) -> None:
+        """Test that missing Retry-After yields None."""
+        assert _parse_retry_after("some other error") is None
+        assert _parse_retry_after("") is None
+
+    def test_compute_delay_honors_retry_after(self) -> None:
+        """Test that an explicit Retry-After is used and capped."""
+        assert _compute_rate_limit_delay(0, 5.0) == 5.0
+        assert _compute_rate_limit_delay(3, 999.0) == RATE_LIMIT_MAX_DELAY
+
+    def test_compute_delay_backoff_grows_and_is_bounded(self) -> None:
+        """Test exponential backoff with equal jitter (jitter pinned to 0)."""
+        with patch.object(github_client_module.random, "uniform", return_value=0.0):
+            # attempt 0: backoff=2, half=1 → 1.0; attempt 2: backoff=8, half=4 → 4.0
+            assert _compute_rate_limit_delay(0, None) == 1.0
+            assert _compute_rate_limit_delay(2, None) == 4.0
+        # Jitter keeps the delay within [backoff/2, backoff].
+        with patch.object(github_client_module.random, "uniform", return_value=1.0):
+            assert _compute_rate_limit_delay(0, None) == 2.0
+
+
+class TestRunGhCommandRateLimit:
+    """Tests for rate-limit retry behavior inside _run_gh_command."""
+
+    def test_retries_then_succeeds(self, github_client) -> None:
+        """Test that a rate-limited command is retried and eventually succeeds."""
+        rate_limited = MagicMock(returncode=1, stderr="API rate limit exceeded", stdout="")
+        success = MagicMock(returncode=0, stderr="", stdout="ok")
+        with (
+            patch("subprocess.run", side_effect=[rate_limited, success]) as mock_run,
+            patch.object(github_client_module.time, "sleep") as mock_sleep,
+            patch("claude_task_master.core.console.warning"),
+        ):
+            result = github_client._run_gh_command(["gh", "api", "x"])
+
+        assert result.stdout == "ok"
+        assert mock_run.call_count == 2
+        mock_sleep.assert_called_once()
+
+    def test_gives_up_after_max_retries(self, github_client) -> None:
+        """Test that a persistent rate limit raises after the retry budget."""
+        rate_limited = MagicMock(returncode=1, stderr="secondary rate limit", stdout="")
+        with (
+            patch("subprocess.run", return_value=rate_limited) as mock_run,
+            patch.object(github_client_module.time, "sleep") as mock_sleep,
+            patch("claude_task_master.core.console.warning"),
+        ):
+            with pytest.raises(GitHubError):
+                github_client._run_gh_command(["gh", "api", "x"])
+
+        assert mock_run.call_count == RATE_LIMIT_MAX_RETRIES + 1
+        assert mock_sleep.call_count == RATE_LIMIT_MAX_RETRIES
+
+    def test_non_rate_limit_error_not_retried(self, github_client) -> None:
+        """Test that ordinary failures are not retried."""
+        failed = MagicMock(returncode=1, stderr="fatal: not found", stdout="")
+        with patch("subprocess.run", return_value=failed) as mock_run:
+            with pytest.raises(GitHubError):
+                github_client._run_gh_command(["gh", "api", "x"])
+
+        assert mock_run.call_count == 1
+
+    def test_honors_retry_after_delay(self, github_client) -> None:
+        """Test that the Retry-After value drives the sleep duration."""
+        rate_limited = MagicMock(
+            returncode=1, stderr="rate limit exceeded\nRetry-After: 3", stdout=""
+        )
+        success = MagicMock(returncode=0, stderr="", stdout="ok")
+        with (
+            patch("subprocess.run", side_effect=[rate_limited, success]),
+            patch.object(github_client_module.time, "sleep") as mock_sleep,
+            patch("claude_task_master.core.console.warning"),
+        ):
+            github_client._run_gh_command(["gh", "api", "x"])
+
+        mock_sleep.assert_called_once_with(3.0)
+
+    def test_abuse_detection_stderr_triggers_backoff(self, github_client) -> None:
+        """The 'abuse detection' stderr marker triggers the retry loop."""
+        rate_limited = MagicMock(
+            returncode=1, stderr="You have triggered an abuse detection mechanism", stdout=""
+        )
+        success = MagicMock(returncode=0, stderr="", stdout="done")
+        with (
+            patch("subprocess.run", side_effect=[rate_limited, success]) as mock_run,
+            patch.object(github_client_module.time, "sleep"),
+            patch("claude_task_master.core.console.warning"),
+        ):
+            result = github_client._run_gh_command(["gh", "api", "x"])
+
+        assert result.stdout == "done"
+        assert mock_run.call_count == 2
+
+    def test_too_many_requests_stderr_triggers_backoff(self, github_client) -> None:
+        """The 'too many requests' / HTTP 429 stderr marker triggers the retry loop."""
+        rate_limited = MagicMock(returncode=1, stderr="HTTP 429 Too Many Requests", stdout="")
+        success = MagicMock(returncode=0, stderr="", stdout="ok")
+        with (
+            patch("subprocess.run", side_effect=[rate_limited, success]) as mock_run,
+            patch.object(github_client_module.time, "sleep"),
+            patch("claude_task_master.core.console.warning"),
+        ):
+            result = github_client._run_gh_command(["gh", "api", "x"])
+
+        assert result.stdout == "ok"
+        assert mock_run.call_count == 2
+
+    def test_backoff_delay_grows_with_attempt_number(self, github_client) -> None:
+        """Sleep duration is longer for later retry attempts (exponential growth)."""
+        rate_limited = MagicMock(returncode=1, stderr="secondary rate limit", stdout="")
+        success = MagicMock(returncode=0, stderr="", stdout="ok")
+
+        # Three rate-limited responses then one success
+        with (
+            patch(
+                "subprocess.run", side_effect=[rate_limited, rate_limited, rate_limited, success]
+            ),
+            patch.object(github_client_module.time, "sleep") as mock_sleep,
+            patch("claude_task_master.core.console.warning"),
+            # Pin jitter to zero so delays are deterministic
+            patch.object(github_client_module.random, "uniform", return_value=0.0),
+        ):
+            github_client._run_gh_command(["gh", "api", "x"])
+
+        # Three sleeps: attempt 0, 1, 2
+        assert mock_sleep.call_count == 3
+        delays = [call.args[0] for call in mock_sleep.call_args_list]
+        # Each delay must be strictly greater than the previous (exponential growth)
+        assert delays[0] < delays[1] < delays[2]
+
+    def test_check_false_rate_limit_still_retried(self, github_client) -> None:
+        """Rate-limit retries fire even when check=False; final error result is returned."""
+        rate_limited = MagicMock(returncode=1, stderr="API rate limit exceeded", stdout="")
+        success = MagicMock(returncode=0, stderr="", stdout="data")
+        with (
+            patch("subprocess.run", side_effect=[rate_limited, success]) as mock_run,
+            patch.object(github_client_module.time, "sleep"),
+            patch("claude_task_master.core.console.warning"),
+        ):
+            # check=False: should not raise, should return the success result
+            result = github_client._run_gh_command(["gh", "api", "x"], check=False)
+
+        assert result.returncode == 0
+        assert result.stdout == "data"
+        assert mock_run.call_count == 2

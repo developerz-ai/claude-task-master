@@ -250,8 +250,14 @@ class TestGitHubClientGetRepoInfo:
                 result = github_client._get_repo_info()
                 assert result == "owner/repo"
 
-    def test_get_repo_info_various_formats(self, github_client):
-        """Test repo info with various owner/repo formats."""
+    def test_get_repo_info_various_formats(self):
+        """Test repo info with various owner/repo formats.
+
+        A fresh client is created per iteration because _get_repo_info memoizes
+        results; sharing a single instance would return the cached first value.
+        """
+        from claude_task_master.github.client import GitHubClient
+
         test_cases = [
             "simple/repo",
             "organization-name/repo-name",
@@ -265,7 +271,8 @@ class TestGitHubClientGetRepoInfo:
                     stdout=f"{expected}\n",
                     stderr="",
                 )
-                result = github_client._get_repo_info()
+                client = GitHubClient()
+                result = client._get_repo_info()
                 assert result == expected
 
     def test_get_repo_info_not_in_git_repo(self, github_client):
@@ -531,8 +538,14 @@ class TestGitHubClientMergeEdgeCases:
             result = github_client._get_repo_info()
             assert result == ""
 
-    def test_get_repo_info_with_special_chars(self, github_client):
-        """Test repo info with special characters in name."""
+    def test_get_repo_info_with_special_chars(self):
+        """Test repo info with special characters in name.
+
+        A fresh client is created per iteration because _get_repo_info memoizes
+        results; sharing a single instance would return the cached first value.
+        """
+        from claude_task_master.github.client import GitHubClient
+
         test_cases = [
             "org-with-dash/repo.with.dots",
             "org123/repo456",
@@ -545,7 +558,8 @@ class TestGitHubClientMergeEdgeCases:
                     stdout=f"{expected}\n",
                     stderr="",
                 )
-                result = github_client._get_repo_info()
+                client = GitHubClient()
+                result = client._get_repo_info()
                 assert result == expected
 
     def test_merge_retry_after_transient_failure(self, github_client):

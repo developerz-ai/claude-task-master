@@ -95,6 +95,7 @@ class WorkflowStageHandler:
                                 check=True,
                                 capture_output=True,
                                 text=True,
+                                timeout=30,
                             )
                             console.info(f"Checked out PR branch {head_branch}")
                         except subprocess.CalledProcessError as e:
@@ -116,6 +117,7 @@ class WorkflowStageHandler:
                 check=True,
                 capture_output=True,
                 text=True,
+                timeout=15,
             )
             return result.stdout.strip() or None
         except Exception:
@@ -140,12 +142,14 @@ class WorkflowStageHandler:
                 check=True,
                 capture_output=True,
                 text=True,
+                timeout=30,
             )
             subprocess.run(
                 ["git", "pull"],
                 check=True,
                 capture_output=True,
                 text=True,
+                timeout=120,
             )
             return True
         except subprocess.CalledProcessError as e:
@@ -162,6 +166,7 @@ class WorkflowStageHandler:
                     check=True,
                     capture_output=True,
                     text=True,
+                    timeout=15,
                 )
                 if status.stdout.strip():
                     console.info("Stashing uncommitted changes...")
@@ -171,6 +176,7 @@ class WorkflowStageHandler:
                             check=True,
                             capture_output=True,
                             text=True,
+                            timeout=30,
                         )
                     except subprocess.CalledProcessError as stash_error:
                         console.warning(f"Failed to stash uncommitted changes: {stash_error}")
@@ -181,6 +187,7 @@ class WorkflowStageHandler:
                         check=False,
                         capture_output=True,
                         text=True,
+                        timeout=15,
                     ).stdout.strip()
                     console.warning(
                         f"Uncommitted changes were STASHED as "
@@ -194,12 +201,14 @@ class WorkflowStageHandler:
                     check=True,
                     capture_output=True,
                     text=True,
+                    timeout=30,
                 )
                 subprocess.run(
                     ["git", "pull"],
                     check=True,
                     capture_output=True,
                     text=True,
+                    timeout=120,
                 )
                 console.success("Recovery successful (changes stashed)")
                 return True
@@ -216,6 +225,7 @@ class WorkflowStageHandler:
                 check=True,
                 capture_output=True,
                 text=True,
+                timeout=15,
             )
             console.success(f"Deleted local branch {branch}")
         except subprocess.CalledProcessError as e:
@@ -247,6 +257,10 @@ class WorkflowStageHandler:
         # Instance-level (not persisted) so state.py stays untouched; entries are
         # reset when the PR merges/closes or mergeability resolves.
         self._merge_unknown_attempts: dict[int, int] = {}
+        # Branch-protection cache: maps base_branch → frozenset of required check names.
+        # Fetched once per branch per handler lifetime; branch-protection rules don't
+        # change between CI polls, so a per-wait fetch is pure N+1 waste.
+        self._required_checks_cache: dict[str, set[str]] = {}
 
     def _emit_ci_event(
         self,
@@ -439,13 +453,18 @@ class WorkflowStageHandler:
                 self.state_manager.save_state(state)
                 return 1
 
-            # Get required checks from branch protection. Fetch failures raise
-            # (GitHubError/GitHubTimeoutError) rather than returning an empty
-            # list, and the except below treats that as "unknown — keep waiting"
-            # instead of "zero required checks".
-            required_checks = set(
-                self.github_client.get_required_status_checks(pr_status.base_branch)
-            )
+            # Get required checks from branch protection (cached per base branch).
+            # Fetch failures raise (GitHubError/GitHubTimeoutError) rather than
+            # returning an empty list, and the except below treats that as
+            # "unknown — keep waiting" instead of "zero required checks".
+            # Branch-protection rules don't change during a CI wait, so we only
+            # fetch once per base branch to avoid one `gh api` call per poll.
+            base_branch = pr_status.base_branch
+            if base_branch not in self._required_checks_cache:
+                self._required_checks_cache[base_branch] = set(
+                    self.github_client.get_required_status_checks(base_branch)
+                )
+            required_checks = self._required_checks_cache[base_branch]
             # Use _get_check_name to handle both CheckRun (name) and StatusContext (context)
             reported_checks = {
                 self._get_check_name(check)

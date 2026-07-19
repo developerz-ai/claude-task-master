@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import shutil
-import subprocess
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any
@@ -22,6 +21,7 @@ import pytest
 
 from claude_task_master.core.pr_context import PRContextManager
 from claude_task_master.core.state import StateManager
+from claude_task_master.github.exceptions import GitHubError
 
 # =============================================================================
 # Test Fixtures
@@ -55,9 +55,29 @@ def pr_context_manager(
     return PRContextManager(state_manager, mock_github_client)
 
 
-def make_graphql_response(threads: list[dict[str, Any]]) -> dict[str, Any]:
-    """Helper to create GraphQL response structure for old format."""
-    return {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": threads}}}}}
+def make_graphql_response(
+    threads: list[dict[str, Any]], viewer: str | None = None
+) -> dict[str, Any]:
+    """Helper to create a review-threads GraphQL response.
+
+    Each thread dict may include a ``comments`` key carrying last-comment
+    author info; pass ``viewer`` to populate the authenticated-user login used
+    for bot-last-comment detection in _get_thread_states.
+    """
+    data: dict[str, Any] = {"repository": {"pullRequest": {"reviewThreads": {"nodes": threads}}}}
+    if viewer is not None:
+        data["viewer"] = {"login": viewer}
+    return {"data": data}
+
+
+def make_thread_node(
+    thread_id: str, is_resolved: bool, last_author: str | None = None
+) -> dict[str, Any]:
+    """Build a reviewThreads node with an optional last-comment author."""
+    node: dict[str, Any] = {"id": thread_id, "isResolved": is_resolved}
+    if last_author is not None:
+        node["comments"] = {"nodes": [{"author": {"login": last_author}}]}
+    return node
 
 
 def make_rest_comment(
@@ -71,6 +91,15 @@ def make_rest_comment(
         "path": path,
         "line": line,
     }
+
+
+def comments_to_ndjson(comments: list[dict[str, Any]]) -> str:
+    """Convert a list of REST comment dicts to NDJSON format.
+
+    Matches the output of ``gh api --paginate --jq '.[]'`` for the
+    PR comments endpoint.
+    """
+    return "\n".join(json.dumps(c) for c in comments)
 
 
 def make_resolved_status_response(resolved_map: dict[int, tuple[bool, str]]) -> dict[str, Any]:
@@ -174,29 +203,24 @@ class TestSaveCIFailures:
             ]
         )
 
-        # Mock subprocess calls for CILogDownloader
+        # Repo info goes through github_client; CILogDownloader still uses subprocess
+        mock_github_client._get_repo_info.return_value = "owner/repo"
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                # gh repo view
-                MagicMock(returncode=0, stdout="owner/repo", stderr=""),
-                # gh api .../jobs (get jobs list)
+                # gh api .../jobs via --paginate --jq '.jobs[]' → NDJSON
                 MagicMock(
                     returncode=0,
                     stdout=json.dumps(
                         {
-                            "jobs": [
-                                {
-                                    "id": 1,
-                                    "name": "test-job",
-                                    "status": "completed",
-                                    "conclusion": "failure",
-                                }
-                            ]
+                            "id": 1,
+                            "name": "test-job",
+                            "status": "completed",
+                            "conclusion": "failure",
                         }
                     ),
                     stderr="",
                 ),
-                # gh api .../jobs/1/logs (download logs)
+                # gh api .../jobs/1/logs (download logs) — via CILogDownloader
                 MagicMock(
                     returncode=0,
                     stdout=b"Test error output\n##[error]Test failed",
@@ -236,22 +260,19 @@ class TestSaveCIFailures:
             ]
         )
 
-        # Mock subprocess calls
+        # Repo info goes through github_client; CILogDownloader still uses subprocess
+        mock_github_client._get_repo_info.return_value = "owner/repo"
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                MagicMock(returncode=0, stdout="owner/repo", stderr=""),
+                # NDJSON: one job object per line
                 MagicMock(
                     returncode=0,
                     stdout=json.dumps(
                         {
-                            "jobs": [
-                                {
-                                    "id": 1,
-                                    "name": "build-job",
-                                    "status": "completed",
-                                    "conclusion": "failure",
-                                }
-                            ]
+                            "id": 1,
+                            "name": "build-job",
+                            "status": "completed",
+                            "conclusion": "failure",
                         }
                     ),
                     stderr="",
@@ -274,39 +295,14 @@ class TestSaveCIFailures:
         state_manager: StateManager,
         mock_github_client: MagicMock,
     ) -> None:
-        """Test graceful handling when log retrieval fails."""
-        mock_github_client.get_workflow_runs.return_value = [
-            MagicMock(id=12345, name="CI", status="completed", conclusion="failure")
-        ]
+        """Test graceful handling when check details have no run URL (no run_id extracted)."""
+        # check_details has no URL → run_id is None → save_ci_failures returns early
+        # CILogDownloader is never invoked, so no subprocess calls are made.
         mock_github_client.get_pr_status.return_value = MagicMock(
             check_details=[{"name": "test", "conclusion": "FAILURE"}]
         )
 
-        # Mock subprocess to fail on log download
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = [
-                MagicMock(returncode=0, stdout="feat/test-branch", stderr=""),
-                MagicMock(returncode=0, stdout="owner/repo", stderr=""),
-                MagicMock(
-                    returncode=0,
-                    stdout=json.dumps(
-                        {
-                            "jobs": [
-                                {
-                                    "id": 1,
-                                    "name": "test",
-                                    "status": "completed",
-                                    "conclusion": "failure",
-                                }
-                            ]
-                        }
-                    ),
-                    stderr="",
-                ),
-                subprocess.CalledProcessError(returncode=1, cmd="gh api", stderr="Network error"),
-            ]
-
-            pr_context_manager.save_ci_failures(123, _also_save_comments=False)
+        pr_context_manager.save_ci_failures(123, _also_save_comments=False)
 
         # Should handle gracefully - CI dir may not have files due to error
         pr_dir = state_manager.get_pr_dir(123)
@@ -339,42 +335,87 @@ class TestSaveCIFailures:
 class TestSavePRComments:
     """Tests for save_pr_comments method."""
 
-    def test_returns_early_for_none_pr(self, pr_context_manager: PRContextManager) -> None:
+    def test_returns_early_for_none_pr(
+        self, pr_context_manager: PRContextManager, mock_github_client: MagicMock
+    ) -> None:
         """Test that save_pr_comments returns early when pr_number is None."""
-        with patch("subprocess.run") as mock_run:
-            pr_context_manager.save_pr_comments(None)
-            mock_run.assert_not_called()
+        pr_context_manager.save_pr_comments(None)
+        mock_github_client._get_repo_info.assert_not_called()
+        mock_github_client._run_gh_command.assert_not_called()
 
-    def test_clears_old_comments(
+    def test_clears_old_comments_on_successful_fetch(
         self,
         pr_context_manager: PRContextManager,
         state_manager: StateManager,
+        mock_github_client: MagicMock,
     ) -> None:
-        """Test that old comments are cleared before saving new ones."""
-        # Setup: create old comments
+        """Test that old comment files are cleared after a successful fetch.
+
+        Individual comment files in comments/ are deleted.  The summary file
+        is also deleted and then recreated fresh by state_manager, so we verify
+        old content is gone (the stale file is replaced, not preserved).
+        """
+        # Setup: create old stale comment data
+        pr_dir = state_manager.get_pr_dir(123)
+        comments_dir = pr_dir / "comments"
+        comments_dir.mkdir(parents=True)
+        old_file = comments_dir / "old_comment.txt"
+        old_file.write_text("Old stale comment")
+        summary_file = pr_dir / "comments_summary.txt"
+        summary_file.write_text("Stale summary from previous run")
+
+        # Mock a successful empty fetch (REST returns nothing, GraphQL returns no threads)
+        mock_github_client._get_repo_info.return_value = "owner/repo"
+        rest_result = MagicMock()
+        rest_result.stdout = ""  # empty NDJSON → no comments
+        graphql_result = MagicMock()
+        graphql_result.stdout = json.dumps(
+            {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": []}}}}}
+        )
+        # 3rd call = conversation (issue-level) comments; empty here.
+        mock_github_client._run_gh_command.side_effect = [
+            rest_result,
+            graphql_result,
+            MagicMock(stdout=""),
+        ]
+
+        pr_context_manager.save_pr_comments(123, _also_save_ci=False)
+
+        # Old individual comment files must be gone
+        assert not old_file.exists()
+        # The summary is regenerated by state_manager (old content replaced)
+        if summary_file.exists():
+            assert "Stale summary from previous run" not in summary_file.read_text()
+
+    def test_preserves_old_comments_on_fetch_failure(
+        self,
+        pr_context_manager: PRContextManager,
+        state_manager: StateManager,
+        mock_github_client: MagicMock,
+    ) -> None:
+        """Test that old comments are preserved when the fetch fails."""
         pr_dir = state_manager.get_pr_dir(123)
         comments_dir = pr_dir / "comments"
         comments_dir.mkdir(parents=True)
         old_file = comments_dir / "old_comment.txt"
         old_file.write_text("Old comment")
-        summary_file = pr_dir / "comments_summary.txt"
-        summary_file.write_text("Old summary")
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = Exception("Stop after cleanup")
-            pr_context_manager.save_pr_comments(123)
+        mock_github_client._get_repo_info.return_value = "owner/repo"
+        mock_github_client._run_gh_command.side_effect = GitHubError("network error")
 
-        # Old files should be gone
-        assert not old_file.exists()
-        assert not summary_file.exists()
+        pr_context_manager.save_pr_comments(123, _also_save_ci=False)
+
+        # Old file must still exist — fetch failed so we keep the previous data
+        assert old_file.exists()
 
     def test_fetches_and_saves_comments(
         self,
         pr_context_manager: PRContextManager,
         state_manager: StateManager,
+        mock_github_client: MagicMock,
     ) -> None:
         """Test fetching and saving PR comments via REST API + GraphQL."""
-        # REST API returns all comments
+        # REST API returns all comments (as NDJSON — one object per line)
         rest_comments = [
             make_rest_comment(
                 1, "reviewer", "Please fix this issue in the code.", "src/main.py", 42
@@ -383,15 +424,19 @@ class TestSavePRComments:
         # GraphQL returns resolved status
         resolved_response = make_resolved_status_response({1: (False, "thread_1")})
 
-        with patch("subprocess.run") as mock_run:
-            # Calls: 1) repo info, 2) REST API comments, 3) GraphQL resolved status
-            mock_run.side_effect = [
-                MagicMock(stdout="owner/repo\n"),
-                MagicMock(stdout=json.dumps(rest_comments)),
-                MagicMock(stdout=json.dumps(resolved_response)),
-            ]
+        mock_github_client._get_repo_info.return_value = "owner/repo"
+        rest_result = MagicMock()
+        rest_result.stdout = comments_to_ndjson(rest_comments)
+        graphql_result = MagicMock()
+        graphql_result.stdout = json.dumps(resolved_response)
+        # 3rd call = conversation (issue-level) comments; empty here.
+        mock_github_client._run_gh_command.side_effect = [
+            rest_result,
+            graphql_result,
+            MagicMock(stdout=""),
+        ]
 
-            pr_context_manager.save_pr_comments(123)
+        pr_context_manager.save_pr_comments(123, _also_save_ci=False)
 
         # Verify comments were saved
         pr_dir = state_manager.get_pr_dir(123)
@@ -402,9 +447,10 @@ class TestSavePRComments:
         self,
         pr_context_manager: PRContextManager,
         state_manager: StateManager,
+        mock_github_client: MagicMock,
     ) -> None:
         """Test that resolved comments are skipped."""
-        # REST API returns all comments
+        # REST API returns all comments (NDJSON)
         rest_comments = [
             make_rest_comment(1, "reviewer", "Already resolved comment", "src/main.py", 42),
             make_rest_comment(
@@ -419,14 +465,19 @@ class TestSavePRComments:
             }
         )
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = [
-                MagicMock(stdout="owner/repo\n"),
-                MagicMock(stdout=json.dumps(rest_comments)),
-                MagicMock(stdout=json.dumps(resolved_response)),
-            ]
+        mock_github_client._get_repo_info.return_value = "owner/repo"
+        rest_result = MagicMock()
+        rest_result.stdout = comments_to_ndjson(rest_comments)
+        graphql_result = MagicMock()
+        graphql_result.stdout = json.dumps(resolved_response)
+        # 3rd call = conversation (issue-level) comments; empty here.
+        mock_github_client._run_gh_command.side_effect = [
+            rest_result,
+            graphql_result,
+            MagicMock(stdout=""),
+        ]
 
-            pr_context_manager.save_pr_comments(123)
+        pr_context_manager.save_pr_comments(123, _also_save_ci=False)
 
         pr_dir = state_manager.get_pr_dir(123)
         comments_dir = pr_dir / "comments"
@@ -442,12 +493,13 @@ class TestSavePRComments:
         self,
         pr_context_manager: PRContextManager,
         state_manager: StateManager,
+        mock_github_client: MagicMock,
     ) -> None:
         """Test that already-addressed threads are skipped."""
         # Mark a thread as addressed
         state_manager.mark_threads_addressed(123, ["thread_addressed"])
 
-        # REST API returns all comments
+        # REST API returns all comments (NDJSON)
         rest_comments = [
             make_rest_comment(1, "reviewer", "Already addressed comment text", "src/main.py", 42),
             make_rest_comment(
@@ -462,14 +514,19 @@ class TestSavePRComments:
             }
         )
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = [
-                MagicMock(stdout="owner/repo\n"),
-                MagicMock(stdout=json.dumps(rest_comments)),
-                MagicMock(stdout=json.dumps(resolved_response)),
-            ]
+        mock_github_client._get_repo_info.return_value = "owner/repo"
+        rest_result = MagicMock()
+        rest_result.stdout = comments_to_ndjson(rest_comments)
+        graphql_result = MagicMock()
+        graphql_result.stdout = json.dumps(resolved_response)
+        # 3rd call = conversation (issue-level) comments; empty here.
+        mock_github_client._run_gh_command.side_effect = [
+            rest_result,
+            graphql_result,
+            MagicMock(stdout=""),
+        ]
 
-            pr_context_manager.save_pr_comments(123)
+        pr_context_manager.save_pr_comments(123, _also_save_ci=False)
 
         pr_dir = state_manager.get_pr_dir(123)
         comments_dir = pr_dir / "comments"
@@ -481,17 +538,136 @@ class TestSavePRComments:
         assert "New comment" in content
         assert "Already addressed" not in content
 
-    def test_handles_subprocess_error(
+    def test_handles_gh_command_error(
         self,
         pr_context_manager: PRContextManager,
+        mock_github_client: MagicMock,
     ) -> None:
-        """Test graceful handling of subprocess errors."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = subprocess.CalledProcessError(1, "gh")
+        """Test graceful handling of gh command errors."""
+        mock_github_client._run_gh_command.side_effect = GitHubError("mock error")
 
-            with patch("claude_task_master.core.pr_context.console") as mock_console:
-                pr_context_manager.save_pr_comments(123)
-                mock_console.warning.assert_called()
+        with patch("claude_task_master.core.pr_context.console") as mock_console:
+            pr_context_manager.save_pr_comments(123)
+            mock_console.warning.assert_called()
+
+
+# =============================================================================
+# Conversation (issue-level) comment Tests
+# =============================================================================
+
+
+class TestConversationComments:
+    """Tests for surfacing PR conversation (issue-level) comments."""
+
+    def _setup(
+        self,
+        mock_github_client: MagicMock,
+        conversation: list[dict[str, Any]],
+    ) -> None:
+        """Wire the 3 gh calls: empty review comments, empty threads, conversation."""
+        mock_github_client._get_repo_info.return_value = "owner/repo"
+        rest_result = MagicMock()
+        rest_result.stdout = ""  # no inline review comments
+        graphql_result = MagicMock()
+        graphql_result.stdout = json.dumps(make_resolved_status_response({}))
+        conv_result = MagicMock()
+        conv_result.stdout = comments_to_ndjson(conversation)
+        mock_github_client._run_gh_command.side_effect = [
+            rest_result,
+            graphql_result,
+            conv_result,
+        ]
+
+    def test_surfaces_actionable_conversation_comment(
+        self,
+        pr_context_manager: PRContextManager,
+        state_manager: StateManager,
+        mock_github_client: MagicMock,
+    ) -> None:
+        """Test that an issue-level 'please also change X' comment is saved."""
+        conversation = [
+            {
+                "id": 999,
+                "user": {"login": "human"},
+                "body": "Please also add tests for the edge cases.",
+            }
+        ]
+        self._setup(mock_github_client, conversation)
+
+        pr_context_manager.save_pr_comments(123, _also_save_ci=False)
+
+        comments_dir = state_manager.get_pr_dir(123) / "comments"
+        files = list(comments_dir.glob("*.txt"))
+        assert len(files) == 1
+        assert "Please also add tests" in files[0].read_text()
+
+    def test_skips_addressed_conversation_comment(
+        self,
+        pr_context_manager: PRContextManager,
+        state_manager: StateManager,
+        mock_github_client: MagicMock,
+    ) -> None:
+        """Test that a conversation comment already addressed is not re-surfaced."""
+        state_manager.mark_threads_addressed(123, ["issue_comment_999"])
+        conversation = [
+            {
+                "id": 999,
+                "user": {"login": "human"},
+                "body": "Please also add tests for the edge cases.",
+            }
+        ]
+        self._setup(mock_github_client, conversation)
+
+        pr_context_manager.save_pr_comments(123, _also_save_ci=False)
+
+        comments_dir = state_manager.get_pr_dir(123) / "comments"
+        assert list(comments_dir.glob("*.txt")) == []
+
+    def test_filters_non_actionable_conversation_comment(
+        self,
+        pr_context_manager: PRContextManager,
+        state_manager: StateManager,
+        mock_github_client: MagicMock,
+    ) -> None:
+        """Test that short/bot conversation comments are filtered out."""
+        conversation = [
+            {"id": 1, "user": {"login": "human"}, "body": "LGTM"},  # too short
+        ]
+        self._setup(mock_github_client, conversation)
+
+        pr_context_manager.save_pr_comments(123, _also_save_ci=False)
+
+        comments_dir = state_manager.get_pr_dir(123) / "comments"
+        assert list(comments_dir.glob("*.txt")) == []
+
+    def test_conversation_fetch_failure_is_non_fatal(
+        self,
+        pr_context_manager: PRContextManager,
+        state_manager: StateManager,
+        mock_github_client: MagicMock,
+    ) -> None:
+        """Test that a conversation-fetch error doesn't lose review comments."""
+        mock_github_client._get_repo_info.return_value = "owner/repo"
+        rest_result = MagicMock()
+        rest_result.stdout = comments_to_ndjson(
+            [make_rest_comment(1, "reviewer", "Please fix this real issue here.", "a.py", 3)]
+        )
+        graphql_result = MagicMock()
+        graphql_result.stdout = json.dumps(make_resolved_status_response({1: (False, "thread_1")}))
+        # 3rd call (conversation fetch) fails — must be swallowed.
+        mock_github_client._run_gh_command.side_effect = [
+            rest_result,
+            graphql_result,
+            GitHubError("conversation fetch failed"),
+        ]
+
+        with patch("claude_task_master.core.pr_context.console"):
+            pr_context_manager.save_pr_comments(123, _also_save_ci=False)
+
+        comments_dir = state_manager.get_pr_dir(123) / "comments"
+        files = list(comments_dir.glob("*.txt"))
+        assert len(files) == 1
+        assert "Please fix this real issue" in files[0].read_text()
 
 
 # =============================================================================
@@ -534,10 +710,51 @@ class TestPostCommentReplies:
         pr_context_manager.post_comment_replies(123)
         # Should complete without errors
 
+    def test_conversation_comment_marked_addressed_without_thread_mutation(
+        self,
+        pr_context_manager: PRContextManager,
+        state_manager: StateManager,
+        mock_github_client: MagicMock,
+    ) -> None:
+        """Conversation ids are acknowledged without a review-thread GraphQL call."""
+        pr_dir = state_manager.get_pr_dir(123)
+        resolve_file = pr_dir / "resolve-comments.json"
+        resolve_file.write_text(
+            json.dumps(
+                {
+                    "resolutions": [
+                        {
+                            "thread_id": "issue_comment_555",
+                            "action": "fixed",
+                            "message": "Added the requested tests",
+                        }
+                    ]
+                }
+            )
+        )
+
+        mock_github_client._get_repo_info.return_value = "owner/repo"
+        graphql_result = MagicMock()
+        graphql_result.stdout = json.dumps(make_graphql_response([]))
+        mock_github_client._run_gh_command.return_value = graphql_result
+
+        with patch("claude_task_master.core.pr_context.console"):
+            pr_context_manager.post_comment_replies(123)
+
+        # No reply/resolve mutation issued for a synthetic conversation id.
+        all_cmds = [
+            call.args[0] for call in mock_github_client._run_gh_command.call_args_list if call.args
+        ]
+        assert not any("addPullRequestReviewThreadReply" in str(cmd) for cmd in all_cmds)
+        assert not any("resolveReviewThread" in str(cmd) for cmd in all_cmds)
+        # Marked addressed so it isn't re-surfaced next cycle.
+        assert "issue_comment_555" in state_manager.get_addressed_threads(123)
+
     def test_posts_replies_to_threads(
         self,
         pr_context_manager: PRContextManager,
         state_manager: StateManager,
+        mock_github_client: MagicMock,
     ) -> None:
         """Test posting replies to comment threads."""
         pr_dir = state_manager.get_pr_dir(123)
@@ -556,23 +773,25 @@ class TestPostCommentReplies:
             )
         )
 
-        with patch("subprocess.run") as mock_run:
-            # First call: get resolved threads (repo info)
-            # Second call: get resolved threads (graphql)
-            # Third call: post reply
-            # Fourth call: resolve thread
-            mock_run.return_value = MagicMock(stdout=json.dumps(make_graphql_response([])))
+        # _get_resolved_thread_ids: 1 graphql call
+        # _post_thread_reply: 1 mutation call
+        # resolve_thread: 1 mutation call
+        mock_github_client._get_repo_info.return_value = "owner/repo"
+        gh_result = MagicMock()
+        gh_result.stdout = json.dumps(make_graphql_response([]))
+        mock_github_client._run_gh_command.return_value = gh_result
 
-            with patch("claude_task_master.core.pr_context.console"):
-                pr_context_manager.post_comment_replies(123)
+        with patch("claude_task_master.core.pr_context.console"):
+            pr_context_manager.post_comment_replies(123)
 
-        # Verify GraphQL mutation was called (to post reply)
-        assert mock_run.call_count >= 2
+        # Verify mutations were called (graphql query + post reply + resolve)
+        assert mock_github_client._run_gh_command.call_count >= 2
 
     def test_posts_reply_but_skips_resolve_for_already_resolved_threads(
         self,
         pr_context_manager: PRContextManager,
         state_manager: StateManager,
+        mock_github_client: MagicMock,
     ) -> None:
         """Test that already resolved threads still get a reply but skip resolve."""
         pr_dir = state_manager.get_pr_dir(123)
@@ -595,24 +814,26 @@ class TestPostCommentReplies:
             [{"id": "thread_already_resolved", "isResolved": True}]
         )
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = [
-                MagicMock(stdout="owner/repo\n"),  # repo info
-                MagicMock(stdout=json.dumps(resolved_response)),  # get resolved
-                MagicMock(stdout="{}"),  # post reply (still posts)
-            ]
+        mock_github_client._get_repo_info.return_value = "owner/repo"
+        graphql_result = MagicMock()
+        graphql_result.stdout = json.dumps(resolved_response)
+        reply_result = MagicMock()
+        reply_result.stdout = "{}"
+        # 1: get_resolved graphql, 2: post reply (thread already resolved → no 3rd resolve call)
+        mock_github_client._run_gh_command.side_effect = [graphql_result, reply_result]
 
-            with patch("claude_task_master.core.pr_context.console"):
-                pr_context_manager.post_comment_replies(123)
+        with patch("claude_task_master.core.pr_context.console"):
+            pr_context_manager.post_comment_replies(123)
 
-            # Should have 3 calls: repo info, get resolved, post reply
-            # No resolve call since thread is already resolved
-            assert mock_run.call_count == 3
+        # Should have 2 calls: get resolved, post reply
+        # No resolve call since thread is already resolved on GitHub
+        assert mock_github_client._run_gh_command.call_count == 2
 
     def test_resolves_thread_on_fixed_action(
         self,
         pr_context_manager: PRContextManager,
         state_manager: StateManager,
+        mock_github_client: MagicMock,
     ) -> None:
         """Test that threads are resolved when action is 'fixed'."""
         pr_dir = state_manager.get_pr_dir(123)
@@ -631,20 +852,22 @@ class TestPostCommentReplies:
             )
         )
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(stdout=json.dumps(make_graphql_response([])))
+        mock_github_client._get_repo_info.return_value = "owner/repo"
+        gh_result = MagicMock()
+        gh_result.stdout = json.dumps(make_graphql_response([]))
+        mock_github_client._run_gh_command.return_value = gh_result
 
-            with patch("claude_task_master.core.pr_context.console"):
-                pr_context_manager.post_comment_replies(123)
+        with patch("claude_task_master.core.pr_context.console"):
+            pr_context_manager.post_comment_replies(123)
 
-        # Should have made calls to resolve the thread
-        # (repo info, get resolved, post reply, resolve thread)
-        assert mock_run.call_count >= 3
+        # Should have 3 calls: get resolved (graphql query), post reply, resolve thread
+        assert mock_github_client._run_gh_command.call_count >= 3
 
     def test_marks_threads_addressed(
         self,
         pr_context_manager: PRContextManager,
         state_manager: StateManager,
+        mock_github_client: MagicMock,
     ) -> None:
         """Test that addressed threads are marked in state."""
         pr_dir = state_manager.get_pr_dir(123)
@@ -663,11 +886,13 @@ class TestPostCommentReplies:
             )
         )
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(stdout=json.dumps(make_graphql_response([])))
+        mock_github_client._get_repo_info.return_value = "owner/repo"
+        gh_result = MagicMock()
+        gh_result.stdout = json.dumps(make_graphql_response([]))
+        mock_github_client._run_gh_command.return_value = gh_result
 
-            with patch("claude_task_master.core.pr_context.console"):
-                pr_context_manager.post_comment_replies(123)
+        with patch("claude_task_master.core.pr_context.console"):
+            pr_context_manager.post_comment_replies(123)
 
         # Verify thread was marked as addressed
         addressed = state_manager.get_addressed_threads(123)
@@ -677,6 +902,7 @@ class TestPostCommentReplies:
         self,
         pr_context_manager: PRContextManager,
         state_manager: StateManager,
+        mock_github_client: MagicMock,
     ) -> None:
         """Test that threads are resolved when action is 'explained'."""
         pr_dir = state_manager.get_pr_dir(123)
@@ -695,23 +921,27 @@ class TestPostCommentReplies:
             )
         )
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(stdout=json.dumps(make_graphql_response([])))
+        mock_github_client._get_repo_info.return_value = "owner/repo"
+        gh_result = MagicMock()
+        gh_result.stdout = json.dumps(make_graphql_response([]))
+        mock_github_client._run_gh_command.return_value = gh_result
 
-            with patch("claude_task_master.core.pr_context.console"):
-                pr_context_manager.post_comment_replies(123)
+        with patch("claude_task_master.core.pr_context.console"):
+            pr_context_manager.post_comment_replies(123)
 
-        # Should have made calls to resolve the thread
-        # (repo info, get resolved, post reply, resolve thread)
-        assert mock_run.call_count >= 3
-        # Verify resolveReviewThread was called
-        args = [str(call) for call in mock_run.call_args_list]
-        assert any("resolveReviewThread" in str(a) for a in args)
+        # Should have at least 3 calls: get resolved (graphql query), post reply, resolve thread
+        assert mock_github_client._run_gh_command.call_count >= 3
+        # Verify resolveReviewThread was called via _run_gh_command
+        all_cmd_args = [
+            call.args[0] for call in mock_github_client._run_gh_command.call_args_list if call.args
+        ]
+        assert any("resolveReviewThread" in str(cmd) for cmd in all_cmd_args)
 
     def test_deletes_resolve_file_after_processing(
         self,
         pr_context_manager: PRContextManager,
         state_manager: StateManager,
+        mock_github_client: MagicMock,
     ) -> None:
         """Test that resolve-comments.json is deleted after processing."""
         pr_dir = state_manager.get_pr_dir(123)
@@ -730,11 +960,13 @@ class TestPostCommentReplies:
             )
         )
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(stdout=json.dumps(make_graphql_response([])))
+        mock_github_client._get_repo_info.return_value = "owner/repo"
+        gh_result = MagicMock()
+        gh_result.stdout = json.dumps(make_graphql_response([]))
+        mock_github_client._run_gh_command.return_value = gh_result
 
-            with patch("claude_task_master.core.pr_context.console"):
-                pr_context_manager.post_comment_replies(123)
+        with patch("claude_task_master.core.pr_context.console"):
+            pr_context_manager.post_comment_replies(123)
 
         assert not resolve_file.exists()
 
@@ -742,6 +974,7 @@ class TestPostCommentReplies:
         self,
         pr_context_manager: PRContextManager,
         state_manager: StateManager,
+        mock_github_client: MagicMock,
     ) -> None:
         """Test graceful handling when posting reply fails."""
         pr_dir = state_manager.get_pr_dir(123)
@@ -760,22 +993,18 @@ class TestPostCommentReplies:
             )
         )
 
-        call_count = 0
+        mock_github_client._get_repo_info.return_value = "owner/repo"
+        graphql_result = MagicMock()
+        graphql_result.stdout = json.dumps(make_graphql_response([]))
+        # First call (_get_resolved_thread_ids) succeeds; second call (_post_thread_reply) fails
+        mock_github_client._run_gh_command.side_effect = [
+            graphql_result,
+            GitHubError("post reply failed"),
+        ]
 
-        def side_effect(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count <= 2:  # First two calls succeed (repo info, get resolved)
-                return MagicMock(stdout=json.dumps(make_graphql_response([])))
-            # Third call (post reply) fails
-            raise subprocess.CalledProcessError(1, "gh")
-
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = side_effect
-
-            with patch("claude_task_master.core.pr_context.console") as mock_console:
-                pr_context_manager.post_comment_replies(123)
-                mock_console.warning.assert_called()
+        with patch("claude_task_master.core.pr_context.console") as mock_console:
+            pr_context_manager.post_comment_replies(123)
+            mock_console.warning.assert_called()
 
 
 # =============================================================================
@@ -786,16 +1015,15 @@ class TestPostCommentReplies:
 class TestPostThreadReply:
     """Tests for _post_thread_reply method."""
 
-    def test_posts_reply_via_graphql(self, pr_context_manager: PRContextManager) -> None:
-        """Test that reply is posted via GraphQL mutation."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock()
+    def test_posts_reply_via_graphql(
+        self, pr_context_manager: PRContextManager, mock_github_client: MagicMock
+    ) -> None:
+        """Test that reply is posted via GraphQL mutation through github_client."""
+        pr_context_manager._post_thread_reply("thread_id_123", "Reply body")
 
-            pr_context_manager._post_thread_reply("thread_id_123", "Reply body")
-
-        mock_run.assert_called_once()
-        call_args = mock_run.call_args
-        args = call_args[0][0]
+        mock_github_client._run_gh_command.assert_called_once()
+        call_args = mock_github_client._run_gh_command.call_args
+        args = call_args[0][0]  # First positional arg is the cmd list
 
         assert "gh" in args
         assert "graphql" in args
@@ -803,13 +1031,14 @@ class TestPostThreadReply:
         assert any("mutation" in str(a) for a in args)
         assert any("thread_id_123" in str(a) for a in args)
 
-    def test_raises_on_subprocess_error(self, pr_context_manager: PRContextManager) -> None:
-        """Test that subprocess errors are raised."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = subprocess.CalledProcessError(1, "gh")
+    def test_raises_on_gh_command_error(
+        self, pr_context_manager: PRContextManager, mock_github_client: MagicMock
+    ) -> None:
+        """Test that gh command errors are raised."""
+        mock_github_client._run_gh_command.side_effect = GitHubError("mock error")
 
-            with pytest.raises(subprocess.CalledProcessError):
-                pr_context_manager._post_thread_reply("thread_id", "body")
+        with pytest.raises(GitHubError):
+            pr_context_manager._post_thread_reply("thread_id", "body")
 
 
 # =============================================================================
@@ -828,52 +1057,57 @@ class TestResolveAddressedThreads:
         self,
         pr_context_manager: PRContextManager,
         state_manager: StateManager,
+        mock_github_client: MagicMock,
     ) -> None:
-        """Test that addressed but unresolved threads get resolved."""
+        """Test that addressed threads whose last comment is ours get resolved."""
         # Mark threads as addressed
         state_manager.mark_threads_addressed(123, ["thread_1", "thread_2"])
 
+        # thread_2 is unresolved and our reply ("bot-user") is the last comment.
         resolved_response = make_graphql_response(
             [
-                {"id": "thread_1", "isResolved": True},  # already resolved
-                {"id": "thread_2", "isResolved": False},  # addressed but NOT resolved
-            ]
+                make_thread_node("thread_1", True),  # already resolved
+                make_thread_node("thread_2", False, last_author="bot-user"),
+            ],
+            viewer="bot-user",
         )
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = [
-                MagicMock(stdout="owner/repo\n"),  # repo info
-                MagicMock(stdout=json.dumps(resolved_response)),  # get resolved
-                MagicMock(stdout="{}"),  # resolve thread_2
-            ]
+        mock_github_client._get_repo_info.return_value = "owner/repo"
+        graphql_result = MagicMock()
+        graphql_result.stdout = json.dumps(resolved_response)
+        resolve_result = MagicMock()
+        resolve_result.stdout = "{}"
+        # 1st call: get thread states graphql; 2nd call: batched resolve of thread_2
+        mock_github_client._run_gh_command.side_effect = [graphql_result, resolve_result]
 
-            with patch("claude_task_master.core.pr_context.console"):
-                result = pr_context_manager.resolve_addressed_threads(123)
+        with patch("claude_task_master.core.pr_context.console"):
+            result = pr_context_manager.resolve_addressed_threads(123)
 
         assert result == 1
-        # Should have called resolve for thread_2 only
-        resolve_call = mock_run.call_args_list[2]
-        assert any("resolveReviewThread" in str(a) for a in resolve_call[0][0])
-        assert any("thread_2" in str(a) for a in resolve_call[0][0])
+        # Should have batch-resolved thread_2 only (2nd _run_gh_command call)
+        resolve_call = mock_github_client._run_gh_command.call_args_list[1]
+        cmd = resolve_call[0][0]
+        assert any("resolveReviewThread" in str(a) for a in cmd)
+        assert any("thread_2" in str(a) for a in cmd)
 
     def test_returns_zero_when_all_already_resolved(
         self,
         pr_context_manager: PRContextManager,
         state_manager: StateManager,
+        mock_github_client: MagicMock,
     ) -> None:
         """Test returns 0 when all addressed threads are already resolved."""
         state_manager.mark_threads_addressed(123, ["thread_1"])
 
         resolved_response = make_graphql_response([{"id": "thread_1", "isResolved": True}])
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = [
-                MagicMock(stdout="owner/repo\n"),
-                MagicMock(stdout=json.dumps(resolved_response)),
-            ]
+        mock_github_client._get_repo_info.return_value = "owner/repo"
+        graphql_result = MagicMock()
+        graphql_result.stdout = json.dumps(resolved_response)
+        mock_github_client._run_gh_command.return_value = graphql_result
 
-            with patch("claude_task_master.core.pr_context.console"):
-                result = pr_context_manager.resolve_addressed_threads(123)
+        with patch("claude_task_master.core.pr_context.console"):
+            result = pr_context_manager.resolve_addressed_threads(123)
 
         assert result == 0
 
@@ -881,34 +1115,78 @@ class TestResolveAddressedThreads:
         self,
         pr_context_manager: PRContextManager,
         state_manager: StateManager,
+        mock_github_client: MagicMock,
     ) -> None:
         """Test that resolve failures are handled gracefully."""
         state_manager.mark_threads_addressed(123, ["thread_1"])
 
-        resolved_response = make_graphql_response([{"id": "thread_1", "isResolved": False}])
+        # thread_1 is bot-last so a resolve is attempted (then fails).
+        resolved_response = make_graphql_response(
+            [make_thread_node("thread_1", False, last_author="bot-user")],
+            viewer="bot-user",
+        )
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = [
-                MagicMock(stdout="owner/repo\n"),
-                MagicMock(stdout=json.dumps(resolved_response)),
-                subprocess.CalledProcessError(1, "gh"),  # resolve fails
-            ]
+        mock_github_client._get_repo_info.return_value = "owner/repo"
+        graphql_result = MagicMock()
+        graphql_result.stdout = json.dumps(resolved_response)
+        # Batched resolve fails, then the per-thread fallback also fails — both
+        # must be caught gracefully, resolving nothing.
+        mock_github_client._run_gh_command.side_effect = [
+            graphql_result,
+            GitHubError("batch resolve failed"),
+            GitHubError("fallback resolve failed"),
+        ]
 
-            with patch("claude_task_master.core.pr_context.console"):
-                result = pr_context_manager.resolve_addressed_threads(123)
+        with patch("claude_task_master.core.pr_context.console"):
+            result = pr_context_manager.resolve_addressed_threads(123)
 
         assert result == 0
 
-
-class TestPostCommentRepliesResolvesAlreadyAddressed:
-    """Tests for the fix where already-addressed threads still get resolved."""
-
-    def test_resolves_already_addressed_but_unresolved_thread(
+    def test_prunes_thread_when_human_replied_last(
         self,
         pr_context_manager: PRContextManager,
         state_manager: StateManager,
+        mock_github_client: MagicMock,
     ) -> None:
-        """Test that threads already replied to but not resolved get resolved."""
+        """Human re-opened threads are left open and pruned, never force-resolved."""
+        state_manager.mark_threads_addressed(123, ["thread_reopened"])
+
+        # Unresolved, but the last comment is a human's (not our bot login).
+        resolved_response = make_graphql_response(
+            [make_thread_node("thread_reopened", False, last_author="human-reviewer")],
+            viewer="bot-user",
+        )
+
+        mock_github_client._get_repo_info.return_value = "owner/repo"
+        graphql_result = MagicMock()
+        graphql_result.stdout = json.dumps(resolved_response)
+        # Only the states query runs — no resolve mutation for a re-opened thread.
+        mock_github_client._run_gh_command.return_value = graphql_result
+
+        with patch("claude_task_master.core.pr_context.console"):
+            result = pr_context_manager.resolve_addressed_threads(123)
+
+        assert result == 0
+        assert mock_github_client._run_gh_command.call_count == 1
+        # Pruned from the addressed set so its new feedback re-surfaces.
+        assert "thread_reopened" not in state_manager.get_addressed_threads(123)
+
+
+class TestPostCommentRepliesResolvesAlreadyAddressed:
+    """Tests for how post_comment_replies treats already-addressed threads."""
+
+    def test_skips_already_addressed_thread_deferring_resolution(
+        self,
+        pr_context_manager: PRContextManager,
+        state_manager: StateManager,
+        mock_github_client: MagicMock,
+    ) -> None:
+        """Already-addressed threads are skipped, not re-replied or resolved.
+
+        Resolving addressed-but-unresolved threads is handled separately by
+        resolve_addressed_threads (which only resolves threads whose last
+        comment is ours), so post_comment_replies must not touch them.
+        """
         # Mark thread as addressed
         state_manager.mark_threads_addressed(123, ["thread_unresolved"])
 
@@ -931,25 +1209,26 @@ class TestPostCommentRepliesResolvesAlreadyAddressed:
         # thread_unresolved is NOT in resolved set
         resolved_response = make_graphql_response([])
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = [
-                MagicMock(stdout="owner/repo\n"),  # repo info
-                MagicMock(stdout=json.dumps(resolved_response)),  # get resolved (empty)
-                MagicMock(stdout="{}"),  # resolve thread
-            ]
+        mock_github_client._get_repo_info.return_value = "owner/repo"
+        graphql_result = MagicMock()
+        graphql_result.stdout = json.dumps(resolved_response)
+        mock_github_client._run_gh_command.return_value = graphql_result
 
-            with patch("claude_task_master.core.pr_context.console"):
-                pr_context_manager.post_comment_replies(123)
+        with patch("claude_task_master.core.pr_context.console"):
+            pr_context_manager.post_comment_replies(123)
 
-        # Should have called resolve (3rd call)
-        assert mock_run.call_count == 3
-        resolve_call = mock_run.call_args_list[2]
-        assert any("resolveReviewThread" in str(a) for a in resolve_call[0][0])
+        # Only 1 call: get thread states. No reply, no resolve — deferred.
+        assert mock_github_client._run_gh_command.call_count == 1
+        all_cmds = [
+            call.args[0] for call in mock_github_client._run_gh_command.call_args_list if call.args
+        ]
+        assert not any("resolveReviewThread" in str(cmd) for cmd in all_cmds)
 
     def test_skips_already_addressed_and_resolved_thread(
         self,
         pr_context_manager: PRContextManager,
         state_manager: StateManager,
+        mock_github_client: MagicMock,
     ) -> None:
         """Test that threads already replied to AND resolved are fully skipped."""
         state_manager.mark_threads_addressed(123, ["thread_done"])
@@ -972,17 +1251,17 @@ class TestPostCommentRepliesResolvesAlreadyAddressed:
 
         resolved_response = make_graphql_response([{"id": "thread_done", "isResolved": True}])
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = [
-                MagicMock(stdout="owner/repo\n"),
-                MagicMock(stdout=json.dumps(resolved_response)),
-            ]
+        mock_github_client._get_repo_info.return_value = "owner/repo"
+        graphql_result = MagicMock()
+        graphql_result.stdout = json.dumps(resolved_response)
+        # Only 1 call: get resolved. Thread is already addressed AND resolved → nothing more.
+        mock_github_client._run_gh_command.return_value = graphql_result
 
-            with patch("claude_task_master.core.pr_context.console"):
-                pr_context_manager.post_comment_replies(123)
+        with patch("claude_task_master.core.pr_context.console"):
+            pr_context_manager.post_comment_replies(123)
 
-        # Only 2 calls: repo info + get resolved. No reply, no resolve.
-        assert mock_run.call_count == 2
+        # Only 1 call: get resolved. No reply, no resolve.
+        assert mock_github_client._run_gh_command.call_count == 1
 
 
 # =============================================================================
@@ -993,16 +1272,15 @@ class TestPostCommentRepliesResolvesAlreadyAddressed:
 class TestResolveThread:
     """Tests for resolve_thread method."""
 
-    def test_resolves_thread_via_graphql(self, pr_context_manager: PRContextManager) -> None:
-        """Test that thread is resolved via GraphQL mutation."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock()
+    def test_resolves_thread_via_graphql(
+        self, pr_context_manager: PRContextManager, mock_github_client: MagicMock
+    ) -> None:
+        """Test that thread is resolved via GraphQL mutation through github_client."""
+        pr_context_manager.resolve_thread("thread_to_resolve")
 
-            pr_context_manager.resolve_thread("thread_to_resolve")
-
-        mock_run.assert_called_once()
-        call_args = mock_run.call_args
-        args = call_args[0][0]
+        mock_github_client._run_gh_command.assert_called_once()
+        call_args = mock_github_client._run_gh_command.call_args
+        args = call_args[0][0]  # First positional arg is the cmd list
 
         assert "gh" in args
         assert "graphql" in args
@@ -1010,13 +1288,14 @@ class TestResolveThread:
         assert any("resolveReviewThread" in str(a) for a in args)
         assert any("thread_to_resolve" in str(a) for a in args)
 
-    def test_raises_on_subprocess_error(self, pr_context_manager: PRContextManager) -> None:
-        """Test that subprocess errors are raised."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = subprocess.CalledProcessError(1, "gh")
+    def test_raises_on_gh_command_error(
+        self, pr_context_manager: PRContextManager, mock_github_client: MagicMock
+    ) -> None:
+        """Test that gh command errors are raised."""
+        mock_github_client._run_gh_command.side_effect = GitHubError("mock error")
 
-            with pytest.raises(subprocess.CalledProcessError):
-                pr_context_manager.resolve_thread("thread_id")
+        with pytest.raises(GitHubError):
+            pr_context_manager.resolve_thread("thread_id")
 
 
 # =============================================================================
@@ -1027,7 +1306,9 @@ class TestResolveThread:
 class TestGetResolvedThreadIds:
     """Tests for _get_resolved_thread_ids method."""
 
-    def test_returns_resolved_thread_ids(self, pr_context_manager: PRContextManager) -> None:
+    def test_returns_resolved_thread_ids(
+        self, pr_context_manager: PRContextManager, mock_github_client: MagicMock
+    ) -> None:
         """Test that resolved thread IDs are returned."""
         graphql_response = make_graphql_response(
             [
@@ -1037,38 +1318,39 @@ class TestGetResolvedThreadIds:
             ]
         )
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = [
-                MagicMock(stdout="owner/repo\n"),  # repo info
-                MagicMock(stdout=json.dumps(graphql_response)),  # graphql query
-            ]
+        mock_github_client._get_repo_info.return_value = "owner/repo"
+        graphql_result = MagicMock()
+        graphql_result.stdout = json.dumps(graphql_response)
+        mock_github_client._run_gh_command.return_value = graphql_result
 
-            result = pr_context_manager._get_resolved_thread_ids(123)
+        result = pr_context_manager._get_resolved_thread_ids(123)
 
         assert result == {"thread_1", "thread_3"}
         assert "thread_2" not in result
 
-    def test_returns_empty_on_error(self, pr_context_manager: PRContextManager) -> None:
+    def test_returns_empty_on_error(
+        self, pr_context_manager: PRContextManager, mock_github_client: MagicMock
+    ) -> None:
         """Test that empty set is returned on error."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = subprocess.CalledProcessError(1, "gh")
+        mock_github_client._get_repo_info.side_effect = GitHubError("mock error")
 
-            with patch("claude_task_master.core.pr_context.console"):
-                result = pr_context_manager._get_resolved_thread_ids(123)
+        with patch("claude_task_master.core.pr_context.console"):
+            result = pr_context_manager._get_resolved_thread_ids(123)
 
         assert result == set()
 
-    def test_returns_empty_for_no_threads(self, pr_context_manager: PRContextManager) -> None:
+    def test_returns_empty_for_no_threads(
+        self, pr_context_manager: PRContextManager, mock_github_client: MagicMock
+    ) -> None:
         """Test that empty set is returned when no threads exist."""
         graphql_response = make_graphql_response([])
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = [
-                MagicMock(stdout="owner/repo\n"),
-                MagicMock(stdout=json.dumps(graphql_response)),
-            ]
+        mock_github_client._get_repo_info.return_value = "owner/repo"
+        graphql_result = MagicMock()
+        graphql_result.stdout = json.dumps(graphql_response)
+        mock_github_client._run_gh_command.return_value = graphql_result
 
-            result = pr_context_manager._get_resolved_thread_ids(123)
+        result = pr_context_manager._get_resolved_thread_ids(123)
 
         assert result == set()
 
@@ -1173,6 +1455,7 @@ class TestActionEmojiMapping:
         self,
         pr_context_manager: PRContextManager,
         state_manager: StateManager,
+        mock_github_client: MagicMock,
         action: str,
         expected_prefix: str,
     ) -> None:
@@ -1193,28 +1476,30 @@ class TestActionEmojiMapping:
             )
         )
 
+        # Capture body from _run_gh_command call for _post_thread_reply
         posted_body = None
 
-        def capture_post(*args, **kwargs):
+        def capture_run_gh(cmd, **kwargs):
             nonlocal posted_body
-            cmd = args[0]
-            # Look for body parameter
+            # Look for body= in the command args (mutation call for post reply)
             for i, arg in enumerate(cmd):
-                if arg == "body=" or (isinstance(arg, str) and "body=" in arg):
-                    # Extract body from next arg or same arg
-                    if "body=" in arg:
-                        posted_body = arg.split("body=", 1)[1]
-                    elif i + 1 < len(cmd):
-                        posted_body = cmd[i + 1]
-            return MagicMock(stdout=json.dumps(make_graphql_response([])))
+                if isinstance(arg, str) and "body=" in arg:
+                    posted_body = arg.split("body=", 1)[1]
+                    break
+                elif arg == "-F" and i + 1 < len(cmd) and "body=" in cmd[i + 1]:
+                    posted_body = cmd[i + 1].split("body=", 1)[1]
+                    break
+            result = MagicMock()
+            result.stdout = json.dumps(make_graphql_response([]))
+            return result
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = capture_post
+        mock_github_client._get_repo_info.return_value = "owner/repo"
+        mock_github_client._run_gh_command.side_effect = capture_run_gh
 
-            with patch("claude_task_master.core.pr_context.console"):
-                pr_context_manager.post_comment_replies(123)
+        with patch("claude_task_master.core.pr_context.console"):
+            pr_context_manager.post_comment_replies(123)
 
-        # Verify the action prefix was included in reply
+        # Verify the action prefix was included in the posted reply body
         assert expected_prefix in (posted_body or "")
 
 
@@ -1241,13 +1526,18 @@ class TestPRContextIntegration:
         ]
         resolved_response = make_resolved_status_response({1: (False, "thread_review")})
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = [
-                MagicMock(stdout="owner/repo\n"),
-                MagicMock(stdout=json.dumps(rest_comments)),
-                MagicMock(stdout=json.dumps(resolved_response)),
-            ]
-            pr_context_manager.save_pr_comments(123)
+        mock_github_client._get_repo_info.return_value = "owner/repo"
+        rest_result = MagicMock()
+        rest_result.stdout = comments_to_ndjson(rest_comments)
+        graphql_result = MagicMock()
+        graphql_result.stdout = json.dumps(resolved_response)
+        # 3rd call = conversation (issue-level) comments; empty here.
+        mock_github_client._run_gh_command.side_effect = [
+            rest_result,
+            graphql_result,
+            MagicMock(stdout=""),
+        ]
+        pr_context_manager.save_pr_comments(123)
 
         # Verify comments were saved
         context = state_manager.load_pr_context(123)
@@ -1270,12 +1560,14 @@ class TestPRContextIntegration:
             )
         )
 
-        # Step 3: Post replies
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(stdout=json.dumps(make_graphql_response([])))
+        # Step 3: Post replies — reset the mock for the post_comment_replies calls
+        mock_github_client._run_gh_command.reset_mock(side_effect=True)
+        gh_result = MagicMock()
+        gh_result.stdout = json.dumps(make_graphql_response([]))
+        mock_github_client._run_gh_command.return_value = gh_result
 
-            with patch("claude_task_master.core.pr_context.console"):
-                pr_context_manager.post_comment_replies(123)
+        with patch("claude_task_master.core.pr_context.console"):
+            pr_context_manager.post_comment_replies(123)
 
         # Verify thread was marked as addressed
         addressed = state_manager.get_addressed_threads(123)
@@ -1302,29 +1594,19 @@ class TestPRContextIntegration:
             ]
         )
 
-        # Save CI failures with subprocess mocks
+        # Save CI failures — repo info goes through github_client, CILogDownloader uses subprocess
+        mock_github_client._get_repo_info.return_value = "owner/repo"
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                # gh repo view
-                MagicMock(returncode=0, stdout="owner/repo\n", stderr=""),
-                # gh api .../jobs
+                # gh api .../jobs --paginate --jq '.jobs[]' → NDJSON (one job per line)
                 MagicMock(
                     returncode=0,
                     stdout=json.dumps(
-                        {
-                            "jobs": [
-                                {
-                                    "id": 1,
-                                    "name": "tests",
-                                    "status": "completed",
-                                    "conclusion": "failure",
-                                }
-                            ]
-                        }
+                        {"id": 1, "name": "tests", "status": "completed", "conclusion": "failure"}
                     ),
                     stderr="",
                 ),
-                # gh api .../jobs/1/logs
+                # gh api .../jobs/1/logs — via CILogDownloader
                 MagicMock(returncode=0, stdout=b"pytest failed\n##[error]Test error", stderr=b""),
             ]
             pr_context_manager.save_ci_failures(123, _also_save_comments=False)
@@ -1335,13 +1617,17 @@ class TestPRContextIntegration:
         ]
         resolved_response = make_resolved_status_response({1: (False, "thread_1")})
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = [
-                MagicMock(stdout="owner/repo\n", stderr=""),
-                MagicMock(stdout=json.dumps(rest_comments), stderr=""),
-                MagicMock(stdout=json.dumps(resolved_response), stderr=""),
-            ]
-            pr_context_manager.save_pr_comments(123, _also_save_ci=False)
+        rest_result = MagicMock()
+        rest_result.stdout = comments_to_ndjson(rest_comments)
+        graphql_result = MagicMock()
+        graphql_result.stdout = json.dumps(resolved_response)
+        # 3rd call = conversation (issue-level) comments; empty here.
+        mock_github_client._run_gh_command.side_effect = [
+            rest_result,
+            graphql_result,
+            MagicMock(stdout=""),
+        ]
+        pr_context_manager.save_pr_comments(123, _also_save_ci=False)
 
         # Verify both are in context
         context = state_manager.load_pr_context(123)

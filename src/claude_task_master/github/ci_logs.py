@@ -7,6 +7,7 @@ GitHub Actions jobs without truncation or ZIP extraction.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +15,19 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     pass
+
+# Compiled regex for detecting error lines in CI logs.
+# Uses word boundaries (\b) to avoid false positives from substrings like FAILSAFE.
+_ERROR_RE = re.compile(
+    r"##\[error\]"  # GitHub Actions error annotation (may follow a timestamp)
+    r"|\bFAILED\b"  # Word-bounded FAILED (pytest, etc.)
+    r"|\bFailed\b"  # Word-bounded Failed
+    r"|Exit status \d"  # Process exit code (e.g. "Exit status 1")
+    r"|\bAssertionError\b"  # Python assertion errors
+    r"|Error: "  # "Error: " with trailing space (avoids "nonterminalError:")
+    r"|error: "  # lowercase "error: " with trailing space
+    r"|ERROR: "  # All-caps "ERROR: " with trailing space
+)
 
 
 @dataclass
@@ -77,7 +91,14 @@ class CILogDownloader:
 
         try:
             result = subprocess.run(
-                ["gh", "api", f"repos/{self.repo}/actions/runs/{run_id}/jobs"],
+                [
+                    "gh",
+                    "api",
+                    "--paginate",
+                    "--jq",
+                    ".jobs[]",
+                    f"repos/{self.repo}/actions/runs/{run_id}/jobs",
+                ],
                 capture_output=True,
                 text=True,
                 check=True,
@@ -88,8 +109,8 @@ class CILogDownloader:
         except subprocess.CalledProcessError as e:
             raise GitHubError(f"Failed to get jobs: {e.stderr}") from e
 
-        data = json.loads(result.stdout)
-        jobs = data.get("jobs", [])
+        # Parse NDJSON: --paginate --jq '.jobs[]' emits one JSON object per line
+        jobs = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
 
         # Filter to only failed jobs (exclude cancelled - those were intentionally stopped)
         failed_jobs = []
@@ -196,24 +217,16 @@ class CILogDownloader:
     def _is_error_line(self, line: str) -> bool:
         """Check if a line indicates an error.
 
+        Uses word-bounded patterns to avoid false positives from substrings
+        such as ``FAILSAFE`` or ``##[error]`` embedded mid-word.
+
         Args:
             line: Log line to check.
 
         Returns:
-            True if line contains error indicators.
+            True if line contains a recognised error indicator.
         """
-        error_indicators = [
-            "##[error]",
-            "Exit status",
-            "Error:",
-            "error:",
-            "ERROR:",
-            "FAIL",
-            "Failed",
-            "AssertionError",
-        ]
-
-        return any(indicator in line for indicator in error_indicators)
+        return bool(_ERROR_RE.search(line))
 
     def download_failed_run_logs(
         self,

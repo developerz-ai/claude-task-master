@@ -521,17 +521,23 @@ class TestGitHubClientGetRequiredStatusChecks:
                 assert "timed out" in str(exc_info.value)
 
     def test_get_required_status_checks_rate_limit_raises(self, github_client):
-        """Test that a rate limit error propagates as GitHubError with the stderr message."""
-        with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
-            with patch("subprocess.run") as mock_run:
-                mock_run.return_value = MagicMock(
-                    returncode=1,
-                    stdout="",
-                    stderr="API rate limit exceeded for user ID 123.",
-                )
-                with pytest.raises(GitHubError) as exc_info:
-                    github_client.get_required_status_checks("main")
-                assert "API rate limit exceeded" in str(exc_info.value)
+        """Test that a persistent rate limit propagates as GitHubError after retries."""
+        with (
+            patch.object(github_client, "_get_repo_info", return_value="owner/repo"),
+            patch("subprocess.run") as mock_run,
+            # A rate-limit stderr triggers _run_gh_command's backoff/retry loop;
+            # patch sleep so the exhausted-retry path runs instantly.
+            patch("claude_task_master.github.client.time.sleep"),
+            patch("claude_task_master.core.console.warning"),
+        ):
+            mock_run.return_value = MagicMock(
+                returncode=1,
+                stdout="",
+                stderr="API rate limit exceeded for user ID 123.",
+            )
+            with pytest.raises(GitHubError) as exc_info:
+                github_client.get_required_status_checks("main")
+            assert "API rate limit exceeded" in str(exc_info.value)
 
     def test_get_required_status_checks_error_includes_branch_name(self, github_client):
         """Test that propagated errors mention the base branch that was queried."""
@@ -1100,6 +1106,16 @@ def _make_rest_comment(
     }
 
 
+def _comments_to_ndjson(comments: list[dict]) -> str:
+    """Convert REST comment list to NDJSON (one object per line).
+
+    Matches the output of ``gh api --paginate --jq '.[]'``.
+    """
+    import json as _json
+
+    return "\n".join(_json.dumps(c) for c in comments)
+
+
 def _make_graphql_resolved_response(resolved_map: dict[int, bool]) -> dict:
     """Helper to create GraphQL resolved status response."""
     nodes = []
@@ -1129,7 +1145,7 @@ class TestGitHubClientGetPRComments:
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
                 mock_run.side_effect = [
-                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=_comments_to_ndjson(rest_comments), stderr=""),
                     MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
                 ]
                 comments = github_client.get_pr_comments(123, only_unresolved=True)
@@ -1150,7 +1166,7 @@ class TestGitHubClientGetPRComments:
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
                 mock_run.side_effect = [
-                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=_comments_to_ndjson(rest_comments), stderr=""),
                     MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
                 ]
                 comments = github_client.get_pr_comments(123, only_unresolved=False)
@@ -1170,7 +1186,7 @@ class TestGitHubClientGetPRComments:
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
                 mock_run.side_effect = [
-                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=_comments_to_ndjson(rest_comments), stderr=""),
                     MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
                 ]
                 comments = github_client.get_pr_comments(1)
@@ -1191,7 +1207,7 @@ class TestGitHubClientGetPRComments:
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
                 mock_run.side_effect = [
-                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=_comments_to_ndjson(rest_comments), stderr=""),
                     MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
                 ]
                 comments = github_client.get_pr_comments(1)
@@ -1210,7 +1226,7 @@ class TestGitHubClientGetPRComments:
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
                 mock_run.side_effect = [
-                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=_comments_to_ndjson(rest_comments), stderr=""),
                     MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
                 ]
                 comments = github_client.get_pr_comments(1)
@@ -1230,7 +1246,7 @@ class TestGitHubClientGetPRComments:
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
                 mock_run.side_effect = [
-                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=_comments_to_ndjson(rest_comments), stderr=""),
                     MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
                 ]
                 comments = github_client.get_pr_comments(1)
@@ -1247,7 +1263,7 @@ class TestGitHubClientGetPRComments:
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
                 mock_run.side_effect = [
-                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=_comments_to_ndjson(rest_comments), stderr=""),
                     MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
                 ]
                 comments = github_client.get_pr_comments(1)
@@ -1266,7 +1282,7 @@ class TestGitHubClientGetPRComments:
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
                 mock_run.side_effect = [
-                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=_comments_to_ndjson(rest_comments), stderr=""),
                     MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
                 ]
                 comments = github_client.get_pr_comments(1)
@@ -1284,7 +1300,7 @@ class TestGitHubClientGetPRComments:
         with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
             with patch("subprocess.run") as mock_run:
                 mock_run.side_effect = [
-                    MagicMock(returncode=0, stdout=json.dumps(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=_comments_to_ndjson(rest_comments), stderr=""),
                     MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
                 ]
                 # Should not raise, just return formatted output
@@ -1361,3 +1377,366 @@ class TestCwdThreading:
 
         call_kwargs = mock_run.call_args[1]
         assert call_kwargs.get("cwd") is None
+
+
+# =============================================================================
+# _get_comment_resolved_map pagination (2-page comments)
+# =============================================================================
+
+
+def _make_graphql_threads_page(
+    threads: list[tuple[int, bool]],
+    has_next: bool,
+    cursor: str | None = None,
+) -> dict:
+    """Build a GraphQL reviewThreads page response.
+
+    Args:
+        threads: List of (comment_db_id, is_resolved) tuples for this page.
+        has_next: Whether there is a following page.
+        cursor: The endCursor value to return (only meaningful when has_next=True).
+    """
+    nodes = [
+        {
+            "isResolved": resolved,
+            "comments": {"nodes": [{"databaseId": db_id}]},
+        }
+        for db_id, resolved in threads
+    ]
+    return {
+        "data": {
+            "repository": {
+                "pullRequest": {
+                    "reviewThreads": {
+                        "pageInfo": {"hasNextPage": has_next, "endCursor": cursor},
+                        "nodes": nodes,
+                    }
+                }
+            }
+        }
+    }
+
+
+class TestGetCommentResolvedMapPagination:
+    """Tests for _get_comment_resolved_map pagination (2-page comments)."""
+
+    def test_single_page_no_pagination(self, github_client):
+        """Single-page response issues exactly one GraphQL call."""
+        from claude_task_master.github.client_pr import _get_comment_resolved_map
+
+        page = _make_graphql_threads_page([(1, False), (2, True)], has_next=False)
+
+        with patch.object(
+            github_client,
+            "_run_gh_command",
+            return_value=MagicMock(returncode=0, stdout=json.dumps(page), stderr=""),
+        ) as mock_cmd:
+            resolved_map = _get_comment_resolved_map(github_client, "owner/repo", 7)
+
+        assert resolved_map == {1: False, 2: True}
+        assert mock_cmd.call_count == 1
+
+    def test_two_page_pagination_fetches_second_page(self, github_client):
+        """When hasNextPage=True the second page is fetched with the cursor."""
+        from claude_task_master.github.client_pr import _get_comment_resolved_map
+
+        page1 = _make_graphql_threads_page([(101, False)], has_next=True, cursor="abc123")
+        page2 = _make_graphql_threads_page([(102, True)], has_next=False)
+
+        with patch.object(
+            github_client,
+            "_run_gh_command",
+            side_effect=[
+                MagicMock(returncode=0, stdout=json.dumps(page1), stderr=""),
+                MagicMock(returncode=0, stdout=json.dumps(page2), stderr=""),
+            ],
+        ) as mock_cmd:
+            resolved_map = _get_comment_resolved_map(github_client, "owner/repo", 42)
+
+        # Both pages' comments merged into one map
+        assert resolved_map == {101: False, 102: True}
+        assert mock_cmd.call_count == 2
+
+    def test_second_page_cursor_passed_in_command(self, github_client):
+        """The cursor from page 1 is sent as -f cursor=<value> in the page-2 call."""
+        from claude_task_master.github.client_pr import _get_comment_resolved_map
+
+        page1 = _make_graphql_threads_page([(1, False)], has_next=True, cursor="cursor-xyz")
+        page2 = _make_graphql_threads_page([(2, True)], has_next=False)
+
+        calls: list[list[str]] = []
+
+        def capture(cmd: list[str], **_kwargs: object) -> MagicMock:
+            calls.append(list(cmd))
+            page = page1 if len(calls) == 1 else page2
+            return MagicMock(returncode=0, stdout=json.dumps(page), stderr="")
+
+        with patch.object(github_client, "_run_gh_command", side_effect=capture):
+            _get_comment_resolved_map(github_client, "owner/repo", 99)
+
+        assert len(calls) == 2
+        # Page 1 must NOT include -f cursor=...
+        page1_cmd = calls[0]
+        assert not any("cursor=" in arg for arg in page1_cmd)
+        # Page 2 must include -f cursor=cursor-xyz
+        page2_cmd = calls[1]
+        assert "-f" in page2_cmd
+        cursor_args = [a for a in page2_cmd if a.startswith("cursor=")]
+        assert cursor_args == ["cursor=cursor-xyz"]
+
+    def test_two_page_comments_are_deduplicated_correctly(self, github_client):
+        """Comments appearing on both pages with conflicting resolved-status use the last-seen value."""
+        from claude_task_master.github.client_pr import _get_comment_resolved_map
+
+        # Comment 50 appears on page 1 as unresolved and does NOT appear on page 2.
+        page1 = _make_graphql_threads_page([(50, False), (51, True)], has_next=True, cursor="pg2")
+        page2 = _make_graphql_threads_page([(52, False)], has_next=False)
+
+        with patch.object(
+            github_client,
+            "_run_gh_command",
+            side_effect=[
+                MagicMock(returncode=0, stdout=json.dumps(page1), stderr=""),
+                MagicMock(returncode=0, stdout=json.dumps(page2), stderr=""),
+            ],
+        ):
+            resolved_map = _get_comment_resolved_map(github_client, "owner/repo", 1)
+
+        assert resolved_map[50] is False
+        assert resolved_map[51] is True
+        assert resolved_map[52] is False
+
+    def test_graphql_error_on_first_page_returns_empty(self, github_client):
+        """A GraphQL error on the first page returns an empty map (graceful degradation)."""
+        from claude_task_master.github.client_pr import _get_comment_resolved_map
+
+        error_response = {"errors": [{"message": "Something went wrong"}]}
+
+        with patch.object(
+            github_client,
+            "_run_gh_command",
+            return_value=MagicMock(returncode=0, stdout=json.dumps(error_response), stderr=""),
+        ):
+            resolved_map = _get_comment_resolved_map(github_client, "owner/repo", 1)
+
+        assert resolved_map == {}
+
+    def test_get_pr_comments_integrates_two_page_resolved_map(self, github_client):
+        """get_pr_comments correctly filters unresolved comments across a 2-page thread map."""
+        rest_comments = [
+            _make_rest_comment(101, "alice", "Fix the loop", "src/core.py", 10),
+            _make_rest_comment(102, "bob", "LGTM", "src/core.py", 20),
+        ]
+        # Resolved status comes from two GraphQL pages
+        page1 = _make_graphql_threads_page([(101, False)], has_next=True, cursor="next")
+        page2 = _make_graphql_threads_page([(102, True)], has_next=False)
+
+        with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
+            with patch("subprocess.run") as mock_run:
+                # Call 1: REST comment list, Calls 2-3: GraphQL pages 1 and 2
+                mock_run.side_effect = [
+                    MagicMock(returncode=0, stdout=_comments_to_ndjson(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=json.dumps(page1), stderr=""),
+                    MagicMock(returncode=0, stdout=json.dumps(page2), stderr=""),
+                ]
+                comments = github_client.get_pr_comments(123, only_unresolved=True)
+
+        # Comment 101 (unresolved) should be included, 102 (resolved) should not
+        assert "alice" in comments
+        assert "Fix the loop" in comments
+        assert "bob" not in comments
+        assert "LGTM" not in comments
+
+
+# =============================================================================
+# 51-check contexts pagination warning (hasNextPage=True on CI contexts)
+# =============================================================================
+
+
+def _make_pr_status_response_with_checks(check_count: int, has_next_page: bool) -> dict:
+    """Build a GraphQL PR status response with the specified number of CheckRun nodes.
+
+    Args:
+        check_count: How many CheckRun nodes to include.
+        has_next_page: Value for contexts.pageInfo.hasNextPage.
+    """
+    check_nodes = [
+        {
+            "__typename": "CheckRun",
+            "name": f"check-{i}",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "detailsUrl": f"https://example.com/check/{i}",
+        }
+        for i in range(check_count)
+    ]
+    return {
+        "data": {
+            "repository": {
+                "pullRequest": {
+                    "state": "OPEN",
+                    "mergeable": "MERGEABLE",
+                    "mergeStateStatus": "CLEAN",
+                    "baseRefName": "main",
+                    "title": "Test PR",
+                    "url": "https://github.com/owner/repo/pull/1",
+                    "headRefName": "feature",
+                    "mergedAt": None,
+                    "commits": {
+                        "nodes": [
+                            {
+                                "commit": {
+                                    "statusCheckRollup": {
+                                        "state": "SUCCESS",
+                                        "contexts": {
+                                            "pageInfo": {"hasNextPage": has_next_page},
+                                            "nodes": check_nodes,
+                                        },
+                                    }
+                                }
+                            }
+                        ]
+                    },
+                    "reviewThreads": {
+                        "pageInfo": {"hasNextPage": False},
+                        "nodes": [],
+                    },
+                }
+            }
+        }
+    }
+
+
+class TestPRStatusContextsPagination:
+    """Tests for get_pr_status behaviour when CI contexts have hasNextPage=True."""
+
+    def test_51_checks_issues_warning(self, github_client, caplog):
+        """get_pr_status logs a warning when contexts.hasNextPage is True."""
+        import logging
+
+        response = _make_pr_status_response_with_checks(51, has_next_page=True)
+
+        with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(
+                    returncode=0, stdout=json.dumps(response), stderr=""
+                )
+                with caplog.at_level(logging.WARNING):
+                    status = github_client.get_pr_status(1)
+
+        assert status.ci_state == "SUCCESS"
+        assert len(status.check_details) == 51
+        assert any(
+            ">100" in rec.message or "some checks" in rec.message.lower() for rec in caplog.records
+        ), "Expected a warning about truncated check contexts"
+
+    def test_51_checks_all_counted_as_passed(self, github_client):
+        """All 51 visible checks count toward checks_passed when all succeed."""
+        response = _make_pr_status_response_with_checks(51, has_next_page=True)
+
+        with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(
+                    returncode=0, stdout=json.dumps(response), stderr=""
+                )
+                status = github_client.get_pr_status(1)
+
+        assert status.checks_passed == 51
+        assert status.checks_failed == 0
+
+    def test_no_warning_when_has_next_page_false(self, github_client, caplog):
+        """No warning is emitted when contexts.hasNextPage is False."""
+        import logging
+
+        response = _make_pr_status_response_with_checks(3, has_next_page=False)
+
+        with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(
+                    returncode=0, stdout=json.dumps(response), stderr=""
+                )
+                with caplog.at_level(logging.WARNING):
+                    status = github_client.get_pr_status(1)
+
+        assert len(status.check_details) == 3
+        assert not any(">100" in rec.message for rec in caplog.records)
+
+    def test_mixed_conclusions_with_has_next_page(self, github_client):
+        """Checks with mixed conclusions are counted correctly even when hasNextPage=True."""
+        # Build response with 2 SUCCESS, 1 FAILURE, 1 IN_PROGRESS
+        check_nodes = [
+            {
+                "__typename": "CheckRun",
+                "name": "pass-1",
+                "status": "COMPLETED",
+                "conclusion": "SUCCESS",
+                "detailsUrl": "https://example.com/1",
+            },
+            {
+                "__typename": "CheckRun",
+                "name": "pass-2",
+                "status": "COMPLETED",
+                "conclusion": "SUCCESS",
+                "detailsUrl": "https://example.com/2",
+            },
+            {
+                "__typename": "CheckRun",
+                "name": "fail-1",
+                "status": "COMPLETED",
+                "conclusion": "FAILURE",
+                "detailsUrl": "https://example.com/3",
+            },
+            {
+                "__typename": "CheckRun",
+                "name": "pending-1",
+                "status": "IN_PROGRESS",
+                "conclusion": None,
+                "detailsUrl": None,
+            },
+        ]
+        response = {
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "state": "OPEN",
+                        "mergeable": "MERGEABLE",
+                        "mergeStateStatus": "CLEAN",
+                        "baseRefName": "main",
+                        "title": "Mixed",
+                        "url": "https://github.com/owner/repo/pull/2",
+                        "headRefName": "feature",
+                        "mergedAt": None,
+                        "commits": {
+                            "nodes": [
+                                {
+                                    "commit": {
+                                        "statusCheckRollup": {
+                                            "state": "FAILURE",
+                                            "contexts": {
+                                                "pageInfo": {"hasNextPage": True},
+                                                "nodes": check_nodes,
+                                            },
+                                        }
+                                    }
+                                }
+                            ]
+                        },
+                        "reviewThreads": {
+                            "pageInfo": {"hasNextPage": False},
+                            "nodes": [],
+                        },
+                    }
+                }
+            }
+        }
+
+        with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(
+                    returncode=0, stdout=json.dumps(response), stderr=""
+                )
+                status = github_client.get_pr_status(2)
+
+        assert status.checks_passed == 2
+        assert status.checks_failed == 1
+        assert status.checks_pending == 1

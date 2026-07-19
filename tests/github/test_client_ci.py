@@ -394,7 +394,11 @@ test-job\t  at test_file.py:42"""
             assert "AssertionError" in logs
 
     def test_get_failed_run_logs_without_run_id(self, github_client):
-        """Test getting logs for latest failed run."""
+        """Test getting logs for latest failed run.
+
+        _find_failed_run_id now calls ``git rev-parse`` first (branch scoping),
+        then ``gh run list``, then we fetch the logs.
+        """
         log_output = "build\tCompilation failed"
         workflow_runs_response = json.dumps(
             [
@@ -410,20 +414,23 @@ test-job\t  at test_file.py:42"""
             ]
         )
         with patch("subprocess.run") as mock_run:
-            # First call returns workflow runs, second returns logs
+            # Call 1: git rev-parse --abbrev-ref HEAD (branch detection in _find_failed_run_id)
+            # Call 2: gh run list --branch main (get_workflow_runs)
+            # Call 3: gh run view --log-failed (fetch logs)
             mock_run.side_effect = [
+                MagicMock(returncode=0, stdout="main", stderr=""),
                 MagicMock(returncode=0, stdout=workflow_runs_response, stderr=""),
                 MagicMock(returncode=0, stdout=log_output, stderr=""),
             ]
             result = github_client.get_failed_run_logs()
 
-            # Check that second call (log fetch) has correct args
-            call_args = mock_run.call_args_list[1][0][0]
-            assert "gh" in call_args
-            assert "run" in call_args
-            assert "view" in call_args
-            assert "123" in call_args  # Run ID
-            assert "--log-failed" in call_args
+            # Verify the log fetch call used the correct run ID
+            log_call_args = mock_run.call_args_list[2][0][0]
+            assert "gh" in log_call_args
+            assert "run" in log_call_args
+            assert "view" in log_call_args
+            assert "123" in log_call_args  # Run ID
+            assert "--log-failed" in log_call_args
             assert result == log_output
 
     def test_get_failed_run_logs_truncates_long_output(self, github_client):
@@ -764,3 +771,150 @@ class TestWorkflowRunModel:
                 event="push",
             )
             assert run.status == status
+
+
+# =============================================================================
+# _find_failed_run_id — mixed green/red run-id selection
+# =============================================================================
+
+
+def _make_run(run_id: int, conclusion: str | None, branch: str = "main") -> WorkflowRun:
+    """Build a minimal WorkflowRun fixture.
+
+    Args:
+        run_id: Unique run identifier.
+        conclusion: Workflow conclusion (e.g. "success", "failure", "cancelled", None).
+        branch: The head branch for the run.
+    """
+    return WorkflowRun(
+        id=run_id,
+        name="CI",
+        status="completed" if conclusion is not None else "in_progress",
+        conclusion=conclusion,
+        url=f"https://github.com/owner/repo/actions/runs/{run_id}",
+        head_branch=branch,
+        event="push",
+    )
+
+
+class TestFindFailedRunIdMixedRuns:
+    """Tests for _find_failed_run_id with mixed pass/fail/in-progress runs."""
+
+    def test_picks_failed_run_from_mixed_list(self, github_client):
+        """Returns the first failed run even when green runs precede it in the list."""
+        from claude_task_master.github.client_ci import _find_failed_run_id
+
+        runs = [
+            _make_run(1, "success"),
+            _make_run(2, "failure"),
+            _make_run(3, "success"),
+        ]
+
+        with patch("subprocess.run") as mock_subprocess:
+            mock_subprocess.return_value = MagicMock(returncode=0, stdout="main", stderr="")
+            with patch.object(github_client, "get_workflow_runs", return_value=runs):
+                run_id = _find_failed_run_id(github_client)
+
+        assert run_id == 2
+
+    def test_returns_none_when_all_runs_are_green(self, github_client):
+        """Returns None when every run in the list has conclusion=success."""
+        from claude_task_master.github.client_ci import _find_failed_run_id
+
+        runs = [_make_run(i, "success") for i in range(1, 6)]
+
+        with patch("subprocess.run") as mock_subprocess:
+            mock_subprocess.return_value = MagicMock(returncode=0, stdout="main", stderr="")
+            with patch.object(github_client, "get_workflow_runs", return_value=runs):
+                run_id = _find_failed_run_id(github_client)
+
+        assert run_id is None
+
+    def test_returns_none_when_no_runs(self, github_client):
+        """Returns None when the workflow run list is empty."""
+        from claude_task_master.github.client_ci import _find_failed_run_id
+
+        with patch("subprocess.run") as mock_subprocess:
+            mock_subprocess.return_value = MagicMock(returncode=0, stdout="main", stderr="")
+            with patch.object(github_client, "get_workflow_runs", return_value=[]):
+                run_id = _find_failed_run_id(github_client)
+
+        assert run_id is None
+
+    def test_cancelled_conclusion_counts_as_failed(self, github_client):
+        """A cancelled run is treated the same as a failed run."""
+        from claude_task_master.github.client_ci import _find_failed_run_id
+
+        runs = [
+            _make_run(10, "success"),
+            _make_run(11, "cancelled"),
+        ]
+
+        with patch("subprocess.run") as mock_subprocess:
+            mock_subprocess.return_value = MagicMock(returncode=0, stdout="main", stderr="")
+            with patch.object(github_client, "get_workflow_runs", return_value=runs):
+                run_id = _find_failed_run_id(github_client)
+
+        assert run_id == 11
+
+    def test_picks_first_failed_not_second(self, github_client):
+        """When multiple failed runs exist, the first one in the list is returned."""
+        from claude_task_master.github.client_ci import _find_failed_run_id
+
+        runs = [
+            _make_run(20, "failure"),
+            _make_run(21, "failure"),
+        ]
+
+        with patch("subprocess.run") as mock_subprocess:
+            mock_subprocess.return_value = MagicMock(returncode=0, stdout="main", stderr="")
+            with patch.object(github_client, "get_workflow_runs", return_value=runs):
+                run_id = _find_failed_run_id(github_client)
+
+        assert run_id == 20
+
+    def test_does_not_fall_back_to_green_run(self, github_client):
+        """Green runs are never selected as a fallback when no failed run exists."""
+        from claude_task_master.github.client_ci import _find_failed_run_id
+
+        runs = [_make_run(30, "success"), _make_run(31, "skipped")]
+
+        with patch("subprocess.run") as mock_subprocess:
+            mock_subprocess.return_value = MagicMock(returncode=0, stdout="main", stderr="")
+            with patch.object(github_client, "get_workflow_runs", return_value=runs):
+                run_id = _find_failed_run_id(github_client)
+
+        assert run_id is None
+
+    def test_branch_scoped_to_current_branch(self, github_client):
+        """_find_failed_run_id scopes the run list to the current git branch."""
+        from claude_task_master.github.client_ci import _find_failed_run_id
+
+        captured_kwargs: dict = {}
+
+        def fake_get_runs(limit: int, branch: str | None = None) -> list[WorkflowRun]:
+            captured_kwargs["branch"] = branch
+            return []
+
+        with patch("subprocess.run") as mock_subprocess:
+            mock_subprocess.return_value = MagicMock(returncode=0, stdout="feat/my-pr", stderr="")
+            with patch.object(github_client, "get_workflow_runs", side_effect=fake_get_runs):
+                _find_failed_run_id(github_client)
+
+        assert captured_kwargs.get("branch") == "feat/my-pr"
+
+    def test_in_progress_run_not_selected(self, github_client):
+        """An in-progress run (conclusion=None) is never selected as a failed run."""
+        from claude_task_master.github.client_ci import _find_failed_run_id
+
+        runs = [
+            _make_run(40, None),  # in_progress, no conclusion yet
+            _make_run(41, "success"),
+        ]
+
+        with patch("subprocess.run") as mock_subprocess:
+            mock_subprocess.return_value = MagicMock(returncode=0, stdout="main", stderr="")
+            with patch.object(github_client, "get_workflow_runs", return_value=runs):
+                run_id = _find_failed_run_id(github_client)
+
+        assert run_id is None
