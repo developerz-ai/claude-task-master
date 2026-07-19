@@ -79,6 +79,23 @@ class TestShutdownManagerSignalHandlers:
             # Should have called signal.signal again with original handler
             assert mock_signal.call_count >= 2
 
+    def test_unregister_restores_sig_dfl_when_original_none(self):
+        """unregister restores SIG_DFL (not None) when the original was None.
+
+        signal.signal returns None for a handler not installed from Python;
+        None cannot be passed back to signal.signal, so unregister must fall
+        back to SIG_DFL rather than leaving our handler wedged in place.
+        """
+        manager = ShutdownManager()
+        with patch("signal.signal") as mock_signal:
+            mock_signal.return_value = None  # no Python handler previously installed
+            manager.register()
+            mock_signal.reset_mock()
+            manager.unregister()
+            assert mock_signal.call_count == len(manager.HANDLED_SIGNALS)
+            for call in mock_signal.call_args_list:
+                assert call.args[1] is signal.SIG_DFL
+
 
 class TestShutdownManagerCallbacks:
     """Tests for callback registration and execution."""
@@ -154,6 +171,30 @@ class TestShutdownManagerInterruptibleSleep:
         thread.join()
         assert result is False
         assert elapsed < 0.5  # Should have stopped well before 1 second
+
+    def test_interruptible_sleep_wakes_immediately_on_event(self):
+        """interruptible_sleep wakes the instant the Event is set.
+
+        With a long check_interval a busy-poll implementation would block for
+        up to a full interval before noticing; blocking on Event.wait returns
+        as soon as the shutdown Event is set.
+        """
+        manager = ShutdownManager()
+
+        def interrupt_soon():
+            time.sleep(0.02)
+            manager.request_shutdown("test")
+
+        thread = threading.Thread(target=interrupt_soon)
+        thread.start()
+
+        start = time.time()
+        result = manager.interruptible_sleep(5.0, check_interval=1.0)
+        elapsed = time.time() - start
+
+        thread.join()
+        assert result is False
+        assert elapsed < 0.5  # woke on the Event, not after the 1s check_interval
 
 
 class TestShutdownManagerWaitForShutdown:
@@ -319,10 +360,18 @@ class TestSignalHandlerBehavior:
         assert manager.shutdown_requested
         assert manager.shutdown_reason == "SIGINT"
 
-    def test_signal_handler_runs_callbacks(self):
-        """Test that signal handler runs callbacks."""
+    def test_signal_handler_does_not_run_callbacks(self):
+        """Signal handler only sets the Event; callbacks are NOT run in-handler.
+
+        run_callbacks acquires a non-reentrant lock, so running it from the
+        async-signal handler could self-deadlock if a signal lands while the
+        main thread already holds that lock. Callbacks run from the polling
+        side instead.
+        """
         manager = ShutdownManager()
         callback = MagicMock()
         manager.add_callback(callback)
         manager._signal_handler(signal.SIGTERM, None)
-        callback.assert_called_once()
+        assert manager.shutdown_requested
+        assert manager.shutdown_reason == "SIGTERM"
+        callback.assert_not_called()
