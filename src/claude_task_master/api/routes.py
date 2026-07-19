@@ -75,7 +75,6 @@ from claude_task_master.api.models import (
 )
 from claude_task_master.api.routes_repo import create_repo_router
 from claude_task_master.api.routes_webhooks import create_webhooks_router
-from claude_task_master.core.agent import ModelType
 from claude_task_master.core.credentials import CredentialManager
 from claude_task_master.core.services import ServiceOutcome, TaskService
 from claude_task_master.core.state import StateManager, TaskOptions
@@ -1007,19 +1006,8 @@ def create_task_router() -> APIRouter:
             )
 
         try:
-            # Validate model type
-            try:
-                ModelType(task_init.model)
-            except ValueError:
-                return JSONResponse(
-                    status_code=400,
-                    content=ErrorResponse(
-                        error="invalid_model",
-                        message=f"Invalid model '{task_init.model}'",
-                        detail="Model must be one of: opus, sonnet, haiku",
-                        suggestion="Use 'opus', 'sonnet', or 'haiku'",
-                    ).model_dump(),
-                )
+            # The model is validated by TaskInitRequest.model's field validator
+            # (the single validate_model path), so it is guaranteed valid here.
 
             # Load credentials to verify we can authenticate
             try:

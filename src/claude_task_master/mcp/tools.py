@@ -13,6 +13,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from claude_task_master.auth.password import is_auth_enabled
+from claude_task_master.core.agent_models import validate_model
 from claude_task_master.core.services import ServiceOutcome, TaskService
 from claude_task_master.core.state import (
     StateManager,
@@ -506,6 +507,11 @@ def initialize_task(
     Returns:
         Dictionary indicating success with run_id or failure.
     """
+    try:
+        validate_model(model)
+    except ValueError as e:
+        return StartTaskResult(success=False, message=str(e)).model_dump()
+
     options = TaskOptions(
         auto_merge=auto_merge,
         enable_release=enable_release,
@@ -1751,6 +1757,19 @@ def plan_repo(
 
     goal = goal.strip()
 
+    # Validate the model up front through the shared path so an unknown name
+    # fails fast with a clear error instead of being silently coerced to Opus.
+    try:
+        model_type = validate_model(model)
+    except ValueError as e:
+        return PlanRepoResult(
+            success=False,
+            message=str(e),
+            work_dir=str(work_path),
+            goal=goal,
+            error="invalid_model",
+        ).model_dump()
+
     # Initialize state manager for this repo
     state_path = work_path / ".claude-task-master"
     state_manager = StateManager(state_dir=state_path)
@@ -1776,28 +1795,20 @@ def plan_repo(
     try:
         # Import credentials and agent here to avoid circular imports
         from claude_task_master.core.agent import AgentWrapper
-        from claude_task_master.core.agent_models import ModelType
         from claude_task_master.core.credentials import CredentialManager
 
         # Get valid access token
         cred_manager = CredentialManager()
         access_token = cred_manager.get_valid_token()
 
-        # Map model string to ModelType
-        model_map = {
-            "opus": ModelType.OPUS,
-            "sonnet": ModelType.SONNET,
-            "haiku": ModelType.HAIKU,
-        }
-        model_type = model_map.get(model.lower(), ModelType.OPUS)
-
-        # Initialize task state
+        # Initialize task state. The model was validated above; persist its
+        # canonical identifier.
         options = TaskOptions(
             auto_merge=False,  # Plan-only mode
             max_sessions=1,
             pause_on_pr=True,
         )
-        state = state_manager.initialize(goal=goal, model=model, options=options)
+        state = state_manager.initialize(goal=goal, model=model_type.value, options=options)
 
         # Update status to planning
         state.status = "planning"

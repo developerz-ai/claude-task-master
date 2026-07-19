@@ -21,6 +21,7 @@ from claude_task_master.core.agent_models import (
     ToolConfig,
     get_fallback_chain,
     parse_task_complexity,
+    validate_model,
 )
 
 # =============================================================================
@@ -64,6 +65,38 @@ class TestModelType:
         expected = {"SONNET", "OPUS", "FABLE", "HAIKU", "SONNET_1M"}
         actual = {m.name for m in ModelType}
         assert actual == expected
+
+
+class TestValidateModel:
+    """Tests for the shared validate_model validation path."""
+
+    def test_accepts_every_model_type(self):
+        """validate_model accepts every ModelType value and returns the enum."""
+        for model in ModelType:
+            assert validate_model(model.value) is model
+
+    def test_accepts_fable_and_sonnet_1m(self):
+        """validate_model accepts fable and sonnet_1m (the previously-missed pair)."""
+        assert validate_model("fable") is ModelType.FABLE
+        assert validate_model("sonnet_1m") is ModelType.SONNET_1M
+
+    def test_rejects_unknown_model(self):
+        """validate_model raises ValueError naming the offending model."""
+        with pytest.raises(ValueError, match="Invalid model 'gpt-4'"):
+            validate_model("gpt-4")
+
+    def test_error_lists_every_valid_option(self):
+        """The rejection message lists every valid identifier."""
+        with pytest.raises(ValueError) as exc_info:
+            validate_model("bogus")
+        message = str(exc_info.value)
+        for model in ModelType:
+            assert model.value in message
+
+    def test_is_case_sensitive(self):
+        """validate_model does not silently accept differently-cased names."""
+        with pytest.raises(ValueError):
+            validate_model("Opus")
 
 
 # =============================================================================

@@ -82,6 +82,30 @@ def _validate_within_workspace(value: str) -> str:
     return value
 
 
+def _validate_model_field(value: str) -> str:
+    """Validate *value* against the shared model registry.
+
+    Routes the REST request models through the one
+    :func:`~claude_task_master.core.agent_models.validate_model` path, so the API
+    accepts exactly the identifiers the rest of the system does (every
+    ``ModelType`` value) instead of a hard-coded ``opus|sonnet|haiku`` regex that
+    silently rejected ``fable`` and ``sonnet_1m``.
+
+    Args:
+        value: The user-supplied model identifier.
+
+    Returns:
+        The original value, unchanged, when it names a recognised model.
+
+    Raises:
+        ValueError: If the model is not recognised (surfaced as HTTP 422).
+    """
+    from claude_task_master.core.agent_models import validate_model
+
+    validate_model(value)
+    return value
+
+
 # =============================================================================
 # Enums
 # =============================================================================
@@ -285,9 +309,15 @@ class TaskInitRequest(BaseModel):
     )
     model: str = Field(
         default="opus",
-        pattern="^(opus|sonnet|haiku)$",
-        description="Model to use (opus, sonnet, haiku)",
+        description="Model to use (opus, sonnet, fable, haiku, sonnet_1m)",
     )
+
+    @field_validator("model")
+    @classmethod
+    def _check_model(cls, value: str) -> str:
+        """Reject models outside the shared model registry."""
+        return _validate_model_field(value)
+
     auto_merge: bool = Field(
         default=True,
         description="Whether to auto-merge PRs when approved",
@@ -447,8 +477,7 @@ class PlanRepoRequest(BaseModel):
     )
     model: str = Field(
         default="opus",
-        pattern="^(opus|sonnet|haiku)$",
-        description="Model to use for planning (opus, sonnet, haiku)",
+        description="Model to use for planning (opus, sonnet, fable, haiku, sonnet_1m)",
     )
 
     @field_validator("work_dir")
@@ -456,6 +485,12 @@ class PlanRepoRequest(BaseModel):
     def _confine_work_dir(cls, v: str) -> str:
         """Reject work directories that escape the workspace base."""
         return _validate_within_workspace(v)
+
+    @field_validator("model")
+    @classmethod
+    def _check_model(cls, value: str) -> str:
+        """Reject models outside the shared model registry."""
+        return _validate_model_field(value)
 
 
 # =============================================================================

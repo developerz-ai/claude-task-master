@@ -152,6 +152,42 @@ def test_post_task_init_haiku_model(api_client_empty_state, api_empty_state_dir)
     assert state["model"] == "haiku"
 
 
+def test_post_task_init_fable_model(api_client_empty_state, api_empty_state_dir):
+    """Task init accepts fable (previously rejected by the opus|sonnet|haiku regex)."""
+    assert not api_empty_state_dir.exists()
+
+    response = api_client_empty_state.post(
+        "/task/init",
+        json={
+            "goal": "Test with fable",
+            "model": "fable",
+        },
+    )
+
+    assert response.status_code == 200
+    state_file = api_empty_state_dir / "state.json"
+    state = json.loads(state_file.read_text())
+    assert state["model"] == "fable"
+
+
+def test_post_task_init_sonnet_1m_model(api_client_empty_state, api_empty_state_dir):
+    """Task init accepts sonnet_1m (previously rejected by the opus|sonnet|haiku regex)."""
+    assert not api_empty_state_dir.exists()
+
+    response = api_client_empty_state.post(
+        "/task/init",
+        json={
+            "goal": "Test with sonnet_1m",
+            "model": "sonnet_1m",
+        },
+    )
+
+    assert response.status_code == 200
+    state_file = api_empty_state_dir / "state.json"
+    state = json.loads(state_file.read_text())
+    assert state["model"] == "sonnet_1m"
+
+
 def test_post_task_init_with_pause_on_pr(api_client_empty_state, api_empty_state_dir):
     """Test task initialization with pause_on_pr enabled."""
     assert not api_empty_state_dir.exists()
