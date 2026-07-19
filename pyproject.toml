@@ -172,6 +172,7 @@ markers = [
     "integration: marks tests as integration tests (require external services)",
     "unit: marks tests as unit tests",
     "property: marks tests as property-based tests using Hypothesis",
+    "real_sdk: marks tests that require a real Claude Agent SDK / live credentials (opt-in via CLAUDETM_REAL_SDK=1)",
 ]
 
 # Hypothesis settings for property-based tests
