@@ -1819,7 +1819,6 @@ def plan_repo(
             access_token=access_token,
             model=model_type,
             working_dir=str(work_path),
-            enable_safety_hooks=True,
         )
 
         # Route planning through the Planner so plan-only mode receives the same

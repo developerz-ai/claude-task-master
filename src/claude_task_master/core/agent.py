@@ -1,8 +1,7 @@
 """Agent Wrapper - Encapsulates all Claude Agent SDK interactions.
 
-This module provides single-turn queries via `query()` for planning and
-verification phases. For multi-turn conversations within task groups,
-see the `conversation` module which uses `ClaudeSDKClient`.
+This module provides single-turn queries via `query()` for planning,
+verification, and working phases.
 """
 
 from typing import TYPE_CHECKING, Any
@@ -29,7 +28,6 @@ from .rate_limit import RateLimitConfig
 from .subagents import get_agents_for_working_dir
 
 if TYPE_CHECKING:
-    from .hooks import HookMatcher
     from .logger import TaskLogger
 
 # Re-export for backward compatibility
@@ -50,8 +48,6 @@ class AgentWrapper:
         model: ModelType,
         working_dir: str = ".",
         rate_limit_config: RateLimitConfig | None = None,
-        hooks: dict[str, list["HookMatcher"]] | None = None,
-        enable_safety_hooks: bool = True,
         logger: "TaskLogger | None" = None,
         circuit_breaker_config: CircuitBreakerConfig | None = None,
         max_budget_usd: float | None = None,
@@ -63,8 +59,6 @@ class AgentWrapper:
             model: The Claude model to use.
             working_dir: Working directory for file operations.
             rate_limit_config: Rate limiting configuration. Uses defaults if None.
-            hooks: Optional pre-configured hooks dictionary for ClaudeAgentOptions.
-            enable_safety_hooks: If True and hooks is None, create default safety hooks.
             logger: Optional TaskLogger for capturing tool usage and responses.
             circuit_breaker_config: Optional circuit breaker config for fault tolerance.
             max_budget_usd: Optional per-session spending cap in USD.
@@ -77,8 +71,6 @@ class AgentWrapper:
         self.model = model
         self.working_dir = working_dir
         self.rate_limit_config = rate_limit_config or RateLimitConfig.default()
-        self.hooks = hooks
-        self.enable_safety_hooks = enable_safety_hooks
         self.logger = logger
         self.max_budget_usd = max_budget_usd
 
@@ -95,7 +87,7 @@ class AgentWrapper:
         # (known bug in Claude Code). Safety is enforced via bypassPermissions
         # mode with allowed_tools restrictions per phase instead.
         # Pass empty dict (not None) to explicitly override defaults from settings.
-        self.hooks = {}
+        self.hooks: dict[str, Any] = {}
 
         # Initialize message processor (delegated for SRP)
         self._message_processor = MessageProcessor(logger=self.logger)
@@ -126,24 +118,6 @@ class AgentWrapper:
 
         # Note: The Claude Agent SDK will automatically use credentials from
         # ~/.claude/.credentials.json if no ANTHROPIC_API_KEY is set
-
-    def _init_default_hooks(self) -> None:
-        """Initialize default safety and audit hooks.
-
-        This method is called when hooks are not explicitly provided and
-        enable_safety_hooks is True. It sets up basic safety controls.
-        """
-        try:
-            from .hooks import create_default_hooks
-
-            self.hooks = create_default_hooks(
-                enable_safety=True,
-                enable_audit=False,  # Audit logging is handled by TaskLogger
-                enable_progress=False,  # Progress tracking is handled by orchestrator
-            )
-        except ImportError:
-            # If hooks module fails to import, continue without hooks
-            self.hooks = None
 
     def _import_sdk(self) -> None:
         """Import and initialize the Claude Agent SDK.

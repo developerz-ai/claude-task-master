@@ -113,11 +113,7 @@ class WorkSessionError(TaskRunnerError):
 class TaskRunner:
     """Executes individual tasks from the plan.
 
-    Supports two execution modes:
-    1. **Single-turn mode** (default): Each task runs in isolation using AgentWrapper
-    2. **Conversation mode**: Tasks in same PR share a conversation via ConversationManager
-
-    Conversation mode is faster and provides better context continuity within PRs.
+    Supports single-turn mode: each task runs in isolation using AgentWrapper.
     """
 
     def __init__(
@@ -227,8 +223,7 @@ class TaskRunner:
     def run_work_session(self, state: TaskState) -> str:
         """Run a single work session.
 
-        If a ConversationManager is available, uses conversation mode for tasks
-        within the same PR. Otherwise, falls back to single-turn mode.
+        Runs the current task via the agent wrapper.
 
         Args:
             state: Current task state.

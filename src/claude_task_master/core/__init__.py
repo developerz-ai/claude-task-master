@@ -31,15 +31,6 @@ from claude_task_master.core.agent_models import (
 )
 from claude_task_master.core.agent_phases import AgentPhaseExecutor
 from claude_task_master.core.agent_query import AgentQueryExecutor
-from claude_task_master.core.checkpoint import (
-    Checkpoint,
-    CheckpointError,
-    CheckpointingOptions,
-    CheckpointManager,
-    CheckpointNotFoundError,
-    CheckpointRewindError,
-    get_checkpointing_env,
-)
 from claude_task_master.core.circuit_breaker import (
     CircuitBreaker,
     CircuitBreakerConfig,
@@ -99,28 +90,11 @@ from claude_task_master.core.credentials import (
     TokenRefreshError,
     TokenRefreshHTTPError,
 )
-from claude_task_master.core.hooks import (
-    AuditLogger,
-    DangerousPattern,
-    HookMatcher,
-    HookResult,
-    ProgressTracker,
-    SafetyHooks,
-    create_default_hooks,
-)
 from claude_task_master.core.orchestrator import (
     MaxSessionsReachedError,
     OrchestratorError,
     StateRecoveryError,
     WorkLoopOrchestrator,
-)
-from claude_task_master.core.parallel import (
-    AsyncParallelExecutor,
-    ParallelExecutor,
-    ParallelExecutorConfig,
-    ParallelTask,
-    TaskResult,
-    TaskStatus,
 )
 from claude_task_master.core.plan_updater import PlanUpdater
 from claude_task_master.core.pr_context import PRContextManager
@@ -252,15 +226,6 @@ __all__ = [
     "get_context_window",
     # Rate limit classes
     "RateLimitConfig",
-    # Checkpoint exceptions
-    "CheckpointError",
-    "CheckpointNotFoundError",
-    "CheckpointRewindError",
-    # Checkpoint classes
-    "Checkpoint",
-    "CheckpointManager",
-    "CheckpointingOptions",
-    "get_checkpointing_env",
     # State exceptions
     "StateError",
     "StateNotFoundError",
@@ -305,14 +270,6 @@ __all__ = [
     "add_shutdown_callback",
     "remove_shutdown_callback",
     "interruptible_sleep",
-    # Hook classes
-    "HookMatcher",
-    "HookResult",
-    "DangerousPattern",
-    "SafetyHooks",
-    "AuditLogger",
-    "ProgressTracker",
-    "create_default_hooks",
     # Prompt classes
     "PromptBuilder",
     "PromptSection",
@@ -337,13 +294,6 @@ __all__ = [
     "CircuitBreakerRegistry",
     "CircuitState",
     "get_circuit_breaker",
-    # Parallel executor classes
-    "AsyncParallelExecutor",
-    "ParallelExecutor",
-    "ParallelExecutorConfig",
-    "ParallelTask",
-    "TaskResult",
-    "TaskStatus",
     # Execution tracker classes
     "ExecutionTracker",
     "ProgressState",
