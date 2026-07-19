@@ -24,11 +24,11 @@ classifiers = [
 ]
 
 dependencies = [
-    "claude-agent-sdk>=0.2.116",
-    "typer>=0.22.0",
-    "pydantic>=2.12.0",
-    "rich>=14.3.2",
-    "httpx>=0.28.0",
+    "claude-agent-sdk>=0.2.116,<0.3",
+    "typer>=0.22.0,<1",
+    "pydantic>=2.12.0,<3",
+    "rich>=14.3.2,<16",
+    "httpx>=0.28.0,<1",
 ]
 
 [project.urls]
@@ -201,12 +201,3 @@ exclude_lines = [
 show_missing = true
 precision = 2
 
-[tool.uv.workspace]
-members = [
-    "tmp/test-project-1",
-]
-
-[dependency-groups]
-dev = [
-    "pytest-timeout>=2.4.0",
-]

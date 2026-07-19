@@ -44,25 +44,28 @@ jobs:
       - name: Run mypy
         run: mypy .
 
-  # Unit tests - fast, Python 3.12 only
+  # Unit tests - fast, Python 3.12 and 3.13
   test-unit:
     name: Unit Tests
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 15
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v6
 
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 
       - name: Install dependencies
         run: |
-          uv pip install --system -e ".[dev,api]"
+          uv pip install --system -e ".[all]"
 
       - name: Run unit tests
         run: |
@@ -97,20 +100,23 @@ jobs:
     name: Integration Tests
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 15
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v6
 
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 
       - name: Install dependencies
         run: |
-          uv pip install --system -e ".[dev,api]"
+          uv pip install --system -e ".[all]"
 
       - name: Run integration tests
         run: |
@@ -143,20 +149,23 @@ jobs:
     name: Property-based Tests (Hypothesis)
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 15
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v6
 
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 
       - name: Install dependencies
         run: |
-          uv pip install --system -e ".[dev,api]"
+          uv pip install --system -e ".[all]"
 
       - name: Run property-based tests
         run: |
@@ -274,7 +283,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
 
       - name: Install package
-        run: uv pip install --system -e ".[dev,api]"
+        run: uv pip install --system -e ".[all]"
 
       - name: Test CLI help command
         run: claudetm --help
