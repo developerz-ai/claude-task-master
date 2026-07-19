@@ -18,12 +18,10 @@ from __future__ import annotations
 
 import logging
 import os
-from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-import anyio
-
+from claude_task_master.core.services import RepoService
 from claude_task_master.mcp import tools
 
 if TYPE_CHECKING:
@@ -48,6 +46,10 @@ except ImportError:
     check_auth_config = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
+
+# Stateless service centralising repo path-confinement and thread-offloading,
+# shared with the REST transport.
+_repo_service = RepoService()
 
 # Security: Default host for network transports
 MCP_HOST = os.getenv("CLAUDETM_MCP_HOST", "127.0.0.1")
@@ -493,9 +495,10 @@ def create_server(
             clone_repo("git@github.com:user/project.git", branch="develop")
             clone_repo("https://github.com/user/project", target_dir="/custom/path")
         """
-        # Offload the blocking subprocess work to a thread so the MCP event
-        # loop is never frozen during a (potentially minutes-long) clone.
-        return await anyio.to_thread.run_sync(partial(tools.clone_repo, url, target_dir, branch))
+        # RepoService offloads the blocking subprocess work to a thread so the
+        # MCP event loop is never frozen during a (potentially minutes-long)
+        # clone; ``data`` is the underlying tool dict, forwarded verbatim.
+        return (await _repo_service.clone(url, target_dir, branch)).data
 
     @mcp.tool()
     async def setup_repo(
@@ -534,11 +537,10 @@ def create_server(
             setup_repo("/home/user/workspace/claude-task-master/my-project")
             setup_repo("~/workspace/claude-task-master/python-app")
         """
-        # Offload the blocking subprocess work to a thread so the MCP event
-        # loop is never frozen during dependency installation / setup scripts.
-        return await anyio.to_thread.run_sync(
-            partial(tools.setup_repo, repo_dir, run_setup_scripts=run_setup_scripts)
-        )
+        # RepoService offloads the blocking subprocess work to a thread so the
+        # MCP event loop is never frozen during dependency installation / setup
+        # scripts; ``data`` is the underlying tool dict, forwarded verbatim.
+        return (await _repo_service.setup(repo_dir, run_setup_scripts=run_setup_scripts)).data
 
     @mcp.tool()
     async def plan_repo(
@@ -577,10 +579,11 @@ def create_server(
             plan_repo("/home/user/workspace/project", "Add user authentication")
             plan_repo("~/workspace/my-app", "Fix the login bug", model="sonnet")
         """
-        # Offload to a thread: keeps the MCP event loop responsive and lets the
-        # agent's ``run_async_with_cleanup`` drive its own loop in a thread that
-        # has none running, avoiding the running-loop RuntimeError.
-        return await anyio.to_thread.run_sync(partial(tools.plan_repo, repo_dir, goal, model))
+        # RepoService offloads to a thread: keeps the MCP event loop responsive
+        # and lets the agent's ``run_async_with_cleanup`` drive its own loop in a
+        # thread that has none, avoiding the running-loop RuntimeError; ``data``
+        # is the underlying tool dict, forwarded verbatim.
+        return (await _repo_service.plan(repo_dir, goal, model)).data
 
     # =============================================================================
     # Resource Wrappers

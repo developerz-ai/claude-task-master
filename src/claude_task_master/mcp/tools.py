@@ -7,18 +7,13 @@ of the MCP server wrapper.
 from __future__ import annotations
 
 import shutil
-from collections import deque
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
 
 from claude_task_master.auth.password import is_auth_enabled
-from claude_task_master.core.control import (
-    ControlManager,
-    ControlOperationNotAllowedError,
-    NoActiveTaskError,
-)
+from claude_task_master.core.services import ServiceOutcome, TaskService
 from claude_task_master.core.state import (
     StateManager,
     TaskOptions,
@@ -199,6 +194,33 @@ class DeleteCodingStyleResult(BaseModel):
 # =============================================================================
 
 
+def _state_path_for(work_dir: Path, state_dir: str | None) -> Path:
+    """Resolve the state directory for a tool call.
+
+    Args:
+        work_dir: Working directory for the server.
+        state_dir: Optional explicit state directory path.
+
+    Returns:
+        The state directory path: ``state_dir`` if given, else
+        ``work_dir/.claude-task-master``.
+    """
+    return Path(state_dir) if state_dir else work_dir / ".claude-task-master"
+
+
+def _task_service(work_dir: Path, state_dir: str | None) -> TaskService:
+    """Build a :class:`TaskService` bound to the resolved state directory.
+
+    Args:
+        work_dir: Working directory for the server.
+        state_dir: Optional explicit state directory path.
+
+    Returns:
+        A task service operating on the resolved state directory.
+    """
+    return TaskService(StateManager(state_dir=_state_path_for(work_dir, state_dir)))
+
+
 def get_status(
     work_dir: Path,
     state_dir: str | None = None,
@@ -212,36 +234,29 @@ def get_status(
     Returns:
         Dictionary containing task status information.
     """
-    state_path = Path(state_dir) if state_dir else work_dir / ".claude-task-master"
-    state_manager = StateManager(state_dir=state_path)
+    result = _task_service(work_dir, state_dir).get_status()
 
-    if not state_manager.exists():
+    if result.outcome is ServiceOutcome.NOT_FOUND:
         return {
             "success": False,
             "error": "No active task found",
             "suggestion": "Use start_task to begin a new task",
         }
+    if not result.success:
+        return {"success": False, "error": result.error}
 
-    try:
-        state = state_manager.load_state()
-        goal = state_manager.load_goal()
-
-        return TaskStatus(
-            goal=goal,
-            status=state.status,
-            model=state.model,
-            current_task_index=state.current_task_index,
-            session_count=state.session_count,
-            run_id=state.run_id,
-            current_pr=state.current_pr,
-            workflow_stage=state.workflow_stage,
-            options=state.options.model_dump(),
-        ).model_dump()
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e),
-        }
+    state = result.data["state"]
+    return TaskStatus(
+        goal=result.data["goal"],
+        status=state.status,
+        model=state.model,
+        current_task_index=state.current_task_index,
+        session_count=state.session_count,
+        run_id=state.run_id,
+        current_pr=state.current_pr,
+        workflow_stage=state.workflow_stage,
+        options=state.options.model_dump(),
+    ).model_dump()
 
 
 def get_plan(
@@ -257,32 +272,14 @@ def get_plan(
     Returns:
         Dictionary containing the plan content or error.
     """
-    state_path = Path(state_dir) if state_dir else work_dir / ".claude-task-master"
-    state_manager = StateManager(state_dir=state_path)
+    result = _task_service(work_dir, state_dir).get_plan()
 
-    if not state_manager.exists():
-        return {
-            "success": False,
-            "error": "No active task found",
-        }
+    if result.outcome is ServiceOutcome.NOT_FOUND:
+        return {"success": False, "error": result.message or "No active task found"}
+    if not result.success:
+        return {"success": False, "error": result.error}
 
-    try:
-        plan = state_manager.load_plan()
-        if not plan:
-            return {
-                "success": False,
-                "error": "No plan found",
-            }
-
-        return {
-            "success": True,
-            "plan": plan,
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e),
-        }
+    return {"success": True, "plan": result.data["plan"]}
 
 
 def get_logs(
@@ -300,48 +297,22 @@ def get_logs(
     Returns:
         Dictionary containing log content or error.
     """
-    # Validate tail parameter
-    if tail < 1:
-        return LogsResult(
-            success=False,
-            error="tail must be >= 1",
-        ).model_dump()
+    result = _task_service(work_dir, state_dir).get_logs(tail)
 
-    state_path = Path(state_dir) if state_dir else work_dir / ".claude-task-master"
-    state_manager = StateManager(state_dir=state_path)
-
-    if not state_manager.exists():
-        return LogsResult(
-            success=False,
-            error="No active task found",
-        ).model_dump()
-
-    try:
-        state = state_manager.load_state()
-        log_file = state_manager.get_log_file(state.run_id)
-
-        if not log_file.exists():
-            return LogsResult(
-                success=False,
-                error="No log file found",
-            ).model_dump()
-
-        # Use deque to efficiently read only the last N lines
-        with open(log_file) as f:
-            lines = deque(f, maxlen=tail)
-
-        log_content = "".join(lines)
-
+    if result.success:
         return LogsResult(
             success=True,
-            log_content=log_content,
-            log_file=str(log_file),
+            log_content=result.data["log_content"],
+            log_file=result.data["log_file"],
         ).model_dump()
-    except Exception as e:
+
+    if result.outcome is ServiceOutcome.INVALID:
+        return LogsResult(success=False, error=result.error).model_dump()
+    if result.outcome is ServiceOutcome.NOT_FOUND:
         return LogsResult(
-            success=False,
-            error=str(e),
+            success=False, error=result.message or "No active task found"
         ).model_dump()
+    return LogsResult(success=False, error=result.error).model_dump()
 
 
 def get_progress(
@@ -357,33 +328,16 @@ def get_progress(
     Returns:
         Dictionary containing progress content or error.
     """
-    state_path = Path(state_dir) if state_dir else work_dir / ".claude-task-master"
-    state_manager = StateManager(state_dir=state_path)
+    result = _task_service(work_dir, state_dir).get_progress()
 
-    if not state_manager.exists():
-        return {
-            "success": False,
-            "error": "No active task found",
-        }
+    if result.outcome is ServiceOutcome.NOT_FOUND:
+        return {"success": False, "error": result.message or "No active task found"}
+    if not result.success:
+        return {"success": False, "error": result.error}
 
-    try:
-        progress = state_manager.load_progress()
-        if not progress:
-            return {
-                "success": True,
-                "progress": None,
-                "message": "No progress recorded yet",
-            }
-
-        return {
-            "success": True,
-            "progress": progress,
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e),
-        }
+    if result.data["progress"] is None:
+        return {"success": True, "progress": None, "message": result.message}
+    return {"success": True, "progress": result.data["progress"]}
 
 
 def get_context(
@@ -399,26 +353,14 @@ def get_context(
     Returns:
         Dictionary containing context content or error.
     """
-    state_path = Path(state_dir) if state_dir else work_dir / ".claude-task-master"
-    state_manager = StateManager(state_dir=state_path)
+    result = _task_service(work_dir, state_dir).get_context()
 
-    if not state_manager.exists():
-        return {
-            "success": False,
-            "error": "No active task found",
-        }
+    if result.outcome is ServiceOutcome.NOT_FOUND:
+        return {"success": False, "error": result.message or "No active task found"}
+    if not result.success:
+        return {"success": False, "error": result.error}
 
-    try:
-        context = state_manager.load_context()
-        return {
-            "success": True,
-            "context": context or "",
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e),
-        }
+    return {"success": True, "context": result.data["context"] or ""}
 
 
 def delete_coding_style(
@@ -438,38 +380,34 @@ def delete_coding_style(
     Returns:
         Dictionary indicating success or failure with deletion status.
     """
-    state_path = Path(state_dir) if state_dir else work_dir / ".claude-task-master"
-    state_manager = StateManager(state_dir=state_path)
+    result = _task_service(work_dir, state_dir).delete_coding_style()
 
-    if not state_manager.exists():
+    if result.outcome is ServiceOutcome.NOT_FOUND:
         return DeleteCodingStyleResult(
             success=False,
             message="No task state found",
             deleted=False,
             error="No active task found. Initialize a task first.",
         ).model_dump()
-
-    try:
-        deleted = state_manager.delete_coding_style()
-        if deleted:
-            return DeleteCodingStyleResult(
-                success=True,
-                message="Coding style guide deleted successfully",
-                deleted=True,
-            ).model_dump()
-        else:
-            return DeleteCodingStyleResult(
-                success=True,
-                message="Coding style guide did not exist",
-                deleted=False,
-            ).model_dump()
-    except Exception as e:
+    if not result.success:
         return DeleteCodingStyleResult(
             success=False,
-            message=f"Failed to delete coding style guide: {e}",
+            message=f"Failed to delete coding style guide: {result.error}",
             deleted=False,
-            error=str(e),
+            error=result.error,
         ).model_dump()
+
+    if result.data["deleted"]:
+        return DeleteCodingStyleResult(
+            success=True,
+            message="Coding style guide deleted successfully",
+            deleted=True,
+        ).model_dump()
+    return DeleteCodingStyleResult(
+        success=True,
+        message="Coding style guide did not exist",
+        deleted=False,
+    ).model_dump()
 
 
 def clean_task(
@@ -489,6 +427,8 @@ def clean_task(
     """
     # Confine the cleanup target to work_dir: clean_task rmtree's the state
     # directory, so an unconstrained state_dir would allow arbitrary tree deletion.
+    # This confinement is MCP-specific (relative to the server's work_dir), so it
+    # stays here rather than in the transport-neutral service.
     if state_dir is not None:
         candidate = Path(state_dir).expanduser().resolve()
         work_base = Path(work_dir).expanduser().resolve()
@@ -503,44 +443,39 @@ def clean_task(
         state_path = candidate
     else:
         state_path = work_dir / ".claude-task-master"
-    state_manager = StateManager(state_dir=state_path)
 
-    if not state_manager.exists():
+    result = TaskService(StateManager(state_dir=state_path)).clean(force=force)
+
+    # MCP treats "nothing to clean" as a benign success.
+    if result.outcome is ServiceOutcome.NOT_FOUND:
         return CleanResult(
             success=True,
             message="No task state found to clean",
             files_removed=False,
         ).model_dump()
-
-    # Check for active session
-    if state_manager.is_session_active() and not force:
+    if result.outcome is ServiceOutcome.INVALID:
         return CleanResult(
             success=False,
-            message="Another claudetm session is active. Use force=True to override.",
+            message=result.message,
             files_removed=False,
         ).model_dump()
+    if not result.success:
+        return CleanResult(
+            success=False,
+            message=f"Failed to clean task state: {result.error}",
+        ).model_dump()
 
-    try:
-        # Release session lock before cleanup
-        state_manager.release_session_lock()
-
-        if state_manager.state_dir.exists():
-            shutil.rmtree(state_manager.state_dir)
-            return CleanResult(
-                success=True,
-                message="Task state cleaned successfully",
-                files_removed=True,
-            ).model_dump()
+    if result.data["files_removed"]:
         return CleanResult(
             success=True,
-            message="State directory did not exist",
-            files_removed=False,
+            message="Task state cleaned successfully",
+            files_removed=True,
         ).model_dump()
-    except Exception as e:
-        return CleanResult(
-            success=False,
-            message=f"Failed to clean task state: {e}",
-        ).model_dump()
+    return CleanResult(
+        success=True,
+        message="State directory did not exist",
+        files_removed=False,
+    ).model_dump()
 
 
 def initialize_task(
@@ -571,37 +506,34 @@ def initialize_task(
     Returns:
         Dictionary indicating success with run_id or failure.
     """
-    state_path = Path(state_dir) if state_dir else work_dir / ".claude-task-master"
-    state_manager = StateManager(state_dir=state_path)
+    options = TaskOptions(
+        auto_merge=auto_merge,
+        enable_release=enable_release,
+        enable_verification=enable_verification,
+        max_sessions=max_sessions,
+        max_prs=max_prs,
+        pause_on_pr=pause_on_pr,
+    )
+    result = _task_service(work_dir, state_dir).init_task(goal, model, options)
 
-    if state_manager.exists():
+    if result.outcome is ServiceOutcome.CONFLICT:
         return StartTaskResult(
             success=False,
             message="Task already exists. Use clean_task first or resume the existing task.",
         ).model_dump()
-
-    try:
-        options = TaskOptions(
-            auto_merge=auto_merge,
-            enable_release=enable_release,
-            enable_verification=enable_verification,
-            max_sessions=max_sessions,
-            max_prs=max_prs,
-            pause_on_pr=pause_on_pr,
-        )
-        state = state_manager.initialize(goal=goal, model=model, options=options)
-
-        return StartTaskResult(
-            success=True,
-            message=f"Task initialized successfully with goal: {goal}",
-            run_id=state.run_id,
-            status=state.status,
-        ).model_dump()
-    except Exception as e:
+    if not result.success:
         return StartTaskResult(
             success=False,
-            message=f"Failed to initialize task: {e}",
+            message=f"Failed to initialize task: {result.error}",
         ).model_dump()
+
+    state = result.data["state"]
+    return StartTaskResult(
+        success=True,
+        message=f"Task initialized successfully with goal: {goal}",
+        run_id=state.run_id,
+        status=state.status,
+    ).model_dump()
 
 
 def list_tasks(
@@ -617,50 +549,20 @@ def list_tasks(
     Returns:
         Dictionary containing list of tasks with status.
     """
-    state_path = Path(state_dir) if state_dir else work_dir / ".claude-task-master"
-    state_manager = StateManager(state_dir=state_path)
+    result = _task_service(work_dir, state_dir).list_tasks()
 
-    if not state_manager.exists():
-        return {
-            "success": False,
-            "error": "No active task found",
-        }
+    if result.outcome is ServiceOutcome.NOT_FOUND:
+        return {"success": False, "error": result.message or "No active task found"}
+    if not result.success:
+        return {"success": False, "error": result.error}
 
-    try:
-        plan = state_manager.load_plan()
-        if not plan:
-            return {
-                "success": False,
-                "error": "No plan found",
-            }
-
-        from claude_task_master.core.task_group import parse_tasks_with_groups
-
-        parsed_tasks, _ = parse_tasks_with_groups(plan)
-        tasks = [
-            {
-                "task": t.description,
-                "completed": t.is_complete,
-                "context": t.context_lines,
-                "group": t.group_name,
-            }
-            for t in parsed_tasks
-        ]
-
-        state = state_manager.load_state()
-
-        return {
-            "success": True,
-            "tasks": tasks,
-            "total": len(tasks),
-            "completed": sum(1 for t in tasks if t["completed"]),
-            "current_index": state.current_task_index,
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e),
-        }
+    return {
+        "success": True,
+        "tasks": result.data["tasks"],
+        "total": result.data["total"],
+        "completed": result.data["completed"],
+        "current_index": result.data["current_index"],
+    }
 
 
 def health_check(
@@ -725,35 +627,33 @@ def pause_task(
     Returns:
         Dictionary indicating success or failure with status details.
     """
-    state_path = Path(state_dir) if state_dir else work_dir / ".claude-task-master"
-    state_manager = StateManager(state_dir=state_path)
-    control_manager = ControlManager(state_manager=state_manager)
+    result = _task_service(work_dir, state_dir).pause(reason=reason)
 
-    try:
-        result = control_manager.pause(reason=reason)
-        return PauseTaskResult(
-            success=True,
-            message=result.message,
-            previous_status=result.previous_status,
-            new_status=result.new_status,
-            reason=reason,
-        ).model_dump()
-    except NoActiveTaskError:
+    if result.outcome is ServiceOutcome.NOT_FOUND:
         return PauseTaskResult(
             success=False,
             message="No active task found. Initialize a task first.",
         ).model_dump()
-    except ControlOperationNotAllowedError as e:
+    if result.outcome is ServiceOutcome.INVALID:
         return PauseTaskResult(
             success=False,
-            message=e.message,
-            previous_status=e.current_status,
+            message=result.message,
+            previous_status=result.data.get("previous_status"),
         ).model_dump()
-    except Exception as e:
+    if not result.success:
         return PauseTaskResult(
             success=False,
-            message=f"Failed to pause task: {e}",
+            message=f"Failed to pause task: {result.error}",
         ).model_dump()
+
+    control_result = result.data["result"]
+    return PauseTaskResult(
+        success=True,
+        message=control_result.message,
+        previous_status=control_result.previous_status,
+        new_status=control_result.new_status,
+        reason=reason,
+    ).model_dump()
 
 
 def stop_task(
@@ -777,36 +677,34 @@ def stop_task(
     Returns:
         Dictionary indicating success or failure with status details.
     """
-    state_path = Path(state_dir) if state_dir else work_dir / ".claude-task-master"
-    state_manager = StateManager(state_dir=state_path)
-    control_manager = ControlManager(state_manager=state_manager)
+    result = _task_service(work_dir, state_dir).stop(reason=reason, cleanup=cleanup)
 
-    try:
-        result = control_manager.stop(reason=reason, cleanup=cleanup)
-        return StopTaskResult(
-            success=True,
-            message=result.message,
-            previous_status=result.previous_status,
-            new_status=result.new_status,
-            reason=reason,
-            cleanup=cleanup,
-        ).model_dump()
-    except NoActiveTaskError:
+    if result.outcome is ServiceOutcome.NOT_FOUND:
         return StopTaskResult(
             success=False,
             message="No active task found. Nothing to stop.",
         ).model_dump()
-    except ControlOperationNotAllowedError as e:
+    if result.outcome is ServiceOutcome.INVALID:
         return StopTaskResult(
             success=False,
-            message=e.message,
-            previous_status=e.current_status,
+            message=result.message,
+            previous_status=result.data.get("previous_status"),
         ).model_dump()
-    except Exception as e:
+    if not result.success:
         return StopTaskResult(
             success=False,
-            message=f"Failed to stop task: {e}",
+            message=f"Failed to stop task: {result.error}",
         ).model_dump()
+
+    control_result = result.data["result"]
+    return StopTaskResult(
+        success=True,
+        message=control_result.message,
+        previous_status=control_result.previous_status,
+        new_status=control_result.new_status,
+        reason=reason,
+        cleanup=cleanup,
+    ).model_dump()
 
 
 def resume_task(
@@ -826,34 +724,32 @@ def resume_task(
     Returns:
         Dictionary indicating success or failure with status details.
     """
-    state_path = Path(state_dir) if state_dir else work_dir / ".claude-task-master"
-    state_manager = StateManager(state_dir=state_path)
-    control_manager = ControlManager(state_manager=state_manager)
+    result = _task_service(work_dir, state_dir).resume()
 
-    try:
-        result = control_manager.resume()
-        return ResumeTaskResult(
-            success=True,
-            message=result.message,
-            previous_status=result.previous_status,
-            new_status=result.new_status,
-        ).model_dump()
-    except NoActiveTaskError:
+    if result.outcome is ServiceOutcome.NOT_FOUND:
         return ResumeTaskResult(
             success=False,
             message="No active task found. Initialize a task first.",
         ).model_dump()
-    except ControlOperationNotAllowedError as e:
+    if result.outcome is ServiceOutcome.INVALID:
         return ResumeTaskResult(
             success=False,
-            message=e.message,
-            previous_status=e.current_status,
+            message=result.message,
+            previous_status=result.data.get("previous_status"),
         ).model_dump()
-    except Exception as e:
+    if not result.success:
         return ResumeTaskResult(
             success=False,
-            message=f"Failed to resume task: {e}",
+            message=f"Failed to resume task: {result.error}",
         ).model_dump()
+
+    control_result = result.data["result"]
+    return ResumeTaskResult(
+        success=True,
+        message=control_result.message,
+        previous_status=control_result.previous_status,
+        new_status=control_result.new_status,
+    ).model_dump()
 
 
 def update_config(
@@ -891,10 +787,6 @@ def update_config(
     Returns:
         Dictionary indicating success or failure with updated config details.
     """
-    state_path = Path(state_dir) if state_dir else work_dir / ".claude-task-master"
-    state_manager = StateManager(state_dir=state_path)
-    control_manager = ControlManager(state_manager=state_manager)
-
     # Build kwargs from provided options (only non-None values)
     kwargs: dict[str, bool | int | str | None] = {}
     if auto_merge is not None:
@@ -926,32 +818,35 @@ def update_config(
             error="At least one configuration option must be specified",
         ).model_dump()
 
-    try:
-        result = control_manager.update_config(**kwargs)
-        return UpdateConfigResult(
-            success=True,
-            message=result.message,
-            updated=result.details.get("updated") if result.details else None,
-            current=result.details.get("current") if result.details else None,
-        ).model_dump()
-    except NoActiveTaskError:
+    result = _task_service(work_dir, state_dir).update_config(**kwargs)
+
+    if result.outcome is ServiceOutcome.NOT_FOUND:
         return UpdateConfigResult(
             success=False,
             message="No active task found. Initialize a task first.",
             error="No task state exists",
         ).model_dump()
-    except ValueError as e:
+    if result.outcome is ServiceOutcome.INVALID:
         return UpdateConfigResult(
             success=False,
-            message=str(e),
+            message=result.message,
             error="Invalid configuration option",
         ).model_dump()
-    except Exception as e:
+    if not result.success:
         return UpdateConfigResult(
             success=False,
-            message=f"Failed to update configuration: {e}",
-            error=str(e),
+            message=f"Failed to update configuration: {result.error}",
+            error=result.error,
         ).model_dump()
+
+    control_result = result.data["result"]
+    details = control_result.details
+    return UpdateConfigResult(
+        success=True,
+        message=control_result.message,
+        updated=details.get("updated") if details else None,
+        current=details.get("current") if details else None,
+    ).model_dump()
 
 
 # =============================================================================

@@ -41,9 +41,7 @@ from __future__ import annotations
 
 import json
 import logging
-import shutil
 import time
-from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -78,8 +76,8 @@ from claude_task_master.api.models import (
 from claude_task_master.api.routes_repo import create_repo_router
 from claude_task_master.api.routes_webhooks import create_webhooks_router
 from claude_task_master.core.agent import ModelType
-from claude_task_master.core.control import ControlManager
 from claude_task_master.core.credentials import CredentialManager
+from claude_task_master.core.services import ServiceOutcome, TaskService
 from claude_task_master.core.state import StateManager, TaskOptions
 
 if TYPE_CHECKING:
@@ -130,6 +128,18 @@ def _get_state_manager(request: Request) -> StateManager:
     working_dir: Path = getattr(request.app.state, "working_dir", Path.cwd())
     state_dir = working_dir / ".claude-task-master"
     return StateManager(state_dir=state_dir)
+
+
+def _get_task_service(request: Request) -> TaskService:
+    """Build a :class:`TaskService` for the app's working directory.
+
+    Args:
+        request: The FastAPI request object.
+
+    Returns:
+        A task service bound to the request's state directory.
+    """
+    return TaskService(_get_state_manager(request))
 
 
 def _get_webhook_status(request: Request) -> WebhookStatusInfo | None:
@@ -220,9 +230,10 @@ def create_info_router() -> APIRouter:
             404: If no active task exists.
             500: If an error occurs loading state.
         """
-        state_manager = _get_state_manager(request)
+        service = _get_task_service(request)
+        status_result = service.get_status()
 
-        if not state_manager.exists():
+        if status_result.outcome is ServiceOutcome.NOT_FOUND:
             return JSONResponse(
                 status_code=404,
                 content=ErrorResponse(
@@ -231,14 +242,24 @@ def create_info_router() -> APIRouter:
                     suggestion="Start a new task with 'claudetm start <goal>'",
                 ).model_dump(),
             )
+        if not status_result.success:
+            logger.error("Error loading task status")
+            return JSONResponse(
+                status_code=500,
+                content=ErrorResponse(
+                    error="internal_error",
+                    message="Failed to load task status",
+                    detail=status_result.error,
+                ).model_dump(),
+            )
 
         try:
-            state = state_manager.load_state()
-            goal = state_manager.load_goal()
+            state = status_result.data["state"]
+            goal = status_result.data["goal"]
 
             # Calculate task progress from plan
             tasks_info: TaskProgressInfo | None = None
-            plan = state_manager.load_plan()
+            plan = service.state_manager.load_plan()
             if plan:
                 tasks = _parse_plan_tasks(plan)
                 completed = sum(1 for _, done, _ in tasks if done)
@@ -334,22 +355,10 @@ def create_info_router() -> APIRouter:
             404: If no active task or plan exists.
             500: If an error occurs loading the plan.
         """
-        state_manager = _get_state_manager(request)
+        result = _get_task_service(request).get_plan()
 
-        if not state_manager.exists():
-            return JSONResponse(
-                status_code=404,
-                content=ErrorResponse(
-                    error="not_found",
-                    message="No active task found",
-                    suggestion="Start a new task with 'claudetm start <goal>'",
-                ).model_dump(),
-            )
-
-        try:
-            plan = state_manager.load_plan()
-
-            if not plan:
+        if result.outcome is ServiceOutcome.NOT_FOUND:
+            if result.message == "No plan found":
                 return JSONResponse(
                     status_code=404,
                     content=ErrorResponse(
@@ -358,19 +367,26 @@ def create_info_router() -> APIRouter:
                         suggestion="Task may still be in planning phase",
                     ).model_dump(),
                 )
-
-            return PlanResponse(success=True, plan=plan)
-
-        except Exception as e:
-            logger.exception("Error loading task plan")
+            return JSONResponse(
+                status_code=404,
+                content=ErrorResponse(
+                    error="not_found",
+                    message="No active task found",
+                    suggestion="Start a new task with 'claudetm start <goal>'",
+                ).model_dump(),
+            )
+        if not result.success:
+            logger.error("Error loading task plan: %s", result.error)
             return JSONResponse(
                 status_code=500,
                 content=ErrorResponse(
                     error="internal_error",
                     message="Failed to load task plan",
-                    detail=str(e),
+                    detail=result.error,
                 ).model_dump(),
             )
+
+        return PlanResponse(success=True, plan=result.data["plan"])
 
     @router.get(
         "/logs",
@@ -405,23 +421,10 @@ def create_info_router() -> APIRouter:
             404: If no active task or log file exists.
             500: If an error occurs reading logs.
         """
-        state_manager = _get_state_manager(request)
+        result = _get_task_service(request).get_logs(tail)
 
-        if not state_manager.exists():
-            return JSONResponse(
-                status_code=404,
-                content=ErrorResponse(
-                    error="not_found",
-                    message="No active task found",
-                    suggestion="Start a new task with 'claudetm start <goal>'",
-                ).model_dump(),
-            )
-
-        try:
-            state = state_manager.load_state()
-            log_file = state_manager.get_log_file(state.run_id)
-
-            if not log_file.exists():
+        if result.outcome is ServiceOutcome.NOT_FOUND:
+            if result.message == "No log file found":
                 return JSONResponse(
                     status_code=404,
                     content=ErrorResponse(
@@ -430,30 +433,30 @@ def create_info_router() -> APIRouter:
                         suggestion="Task may not have started execution yet",
                     ).model_dump(),
                 )
-
-            # Use deque to efficiently read only the last N lines
-            with open(log_file) as f:
-                lines = deque(f, maxlen=tail)
-
-            # Return last N lines
-            log_content = "".join(lines)
-
-            return LogsResponse(
-                success=True,
-                log_content=log_content,
-                log_file=str(log_file),
+            return JSONResponse(
+                status_code=404,
+                content=ErrorResponse(
+                    error="not_found",
+                    message="No active task found",
+                    suggestion="Start a new task with 'claudetm start <goal>'",
+                ).model_dump(),
             )
-
-        except Exception as e:
-            logger.exception("Error loading logs")
+        if not result.success:
+            logger.error("Error loading logs: %s", result.error)
             return JSONResponse(
                 status_code=500,
                 content=ErrorResponse(
                     error="internal_error",
                     message="Failed to load logs",
-                    detail=str(e),
+                    detail=result.error,
                 ).model_dump(),
             )
+
+        return LogsResponse(
+            success=True,
+            log_content=result.data["log_content"],
+            log_file=result.data["log_file"],
+        )
 
     @router.get(
         "/progress",
@@ -478,9 +481,9 @@ def create_info_router() -> APIRouter:
             404: If no active task exists.
             500: If an error occurs loading progress.
         """
-        state_manager = _get_state_manager(request)
+        result = _get_task_service(request).get_progress()
 
-        if not state_manager.exists():
+        if result.outcome is ServiceOutcome.NOT_FOUND:
             return JSONResponse(
                 status_code=404,
                 content=ErrorResponse(
@@ -489,29 +492,24 @@ def create_info_router() -> APIRouter:
                     suggestion="Start a new task with 'claudetm start <goal>'",
                 ).model_dump(),
             )
-
-        try:
-            progress = state_manager.load_progress()
-
-            if not progress:
-                return ProgressResponse(
-                    success=True,
-                    progress=None,
-                    message="No progress recorded yet",
-                )
-
-            return ProgressResponse(success=True, progress=progress)
-
-        except Exception as e:
-            logger.exception("Error loading progress")
+        if not result.success:
+            logger.error("Error loading progress: %s", result.error)
             return JSONResponse(
                 status_code=500,
                 content=ErrorResponse(
                     error="internal_error",
                     message="Failed to load progress",
-                    detail=str(e),
+                    detail=result.error,
                 ).model_dump(),
             )
+
+        if result.data["progress"] is None:
+            return ProgressResponse(
+                success=True,
+                progress=None,
+                message="No progress recorded yet",
+            )
+        return ProgressResponse(success=True, progress=result.data["progress"])
 
     @router.get(
         "/context",
@@ -536,9 +534,9 @@ def create_info_router() -> APIRouter:
             404: If no active task exists.
             500: If an error occurs loading context.
         """
-        state_manager = _get_state_manager(request)
+        result = _get_task_service(request).get_context()
 
-        if not state_manager.exists():
+        if result.outcome is ServiceOutcome.NOT_FOUND:
             return JSONResponse(
                 status_code=404,
                 content=ErrorResponse(
@@ -547,28 +545,19 @@ def create_info_router() -> APIRouter:
                     suggestion="Start a new task with 'claudetm start <goal>'",
                 ).model_dump(),
             )
-
-        try:
-            context = state_manager.load_context()
-
-            if not context:
-                return ContextResponse(
-                    success=True,
-                    context=None,
-                )
-
-            return ContextResponse(success=True, context=context)
-
-        except Exception as e:
-            logger.exception("Error loading context")
+        if not result.success:
+            logger.error("Error loading context: %s", result.error)
             return JSONResponse(
                 status_code=500,
                 content=ErrorResponse(
                     error="internal_error",
                     message="Failed to load context",
-                    detail=str(e),
+                    detail=result.error,
                 ).model_dump(),
             )
+
+        context = result.data["context"]
+        return ContextResponse(success=True, context=context if context else None)
 
     @router.get(
         "/health",
@@ -640,9 +629,9 @@ def create_info_router() -> APIRouter:
             404: If no active task exists.
             500: If an error occurs during deletion.
         """
-        state_manager = _get_state_manager(request)
+        result = _get_task_service(request).delete_coding_style()
 
-        if not state_manager.exists():
+        if result.outcome is ServiceOutcome.NOT_FOUND:
             return JSONResponse(
                 status_code=404,
                 content=ErrorResponse(
@@ -651,33 +640,28 @@ def create_info_router() -> APIRouter:
                     suggestion="Start a new task with 'claudetm start <goal>'",
                 ).model_dump(),
             )
-
-        try:
-            file_existed = state_manager.delete_coding_style()
-
-            if file_existed:
-                return DeleteCodingStyleResponse(
-                    success=True,
-                    message="Coding style file deleted successfully",
-                    file_existed=True,
-                )
-            else:
-                return DeleteCodingStyleResponse(
-                    success=True,
-                    message="Coding style file did not exist",
-                    file_existed=False,
-                )
-
-        except Exception as e:
-            logger.exception("Error deleting coding style file")
+        if not result.success:
+            logger.error("Error deleting coding style file: %s", result.error)
             return JSONResponse(
                 status_code=500,
                 content=ErrorResponse(
                     error="internal_error",
                     message="Failed to delete coding style file",
-                    detail=str(e),
+                    detail=result.error,
                 ).model_dump(),
             )
+
+        if result.data["deleted"]:
+            return DeleteCodingStyleResponse(
+                success=True,
+                message="Coding style file deleted successfully",
+                file_existed=True,
+            )
+        return DeleteCodingStyleResponse(
+            success=True,
+            message="Coding style file did not exist",
+            file_existed=False,
+        )
 
     return router
 
@@ -736,9 +720,11 @@ def create_control_router() -> APIRouter:
             400: If the task cannot be stopped in its current state.
             500: If an error occurs during the operation.
         """
-        state_manager = _get_state_manager(request)
+        result = _get_task_service(request).stop(
+            reason=stop_request.reason, cleanup=stop_request.cleanup
+        )
 
-        if not state_manager.exists():
+        if result.outcome is ServiceOutcome.NOT_FOUND:
             return JSONResponse(
                 status_code=404,
                 content=ErrorResponse(
@@ -747,43 +733,35 @@ def create_control_router() -> APIRouter:
                     suggestion="Start a new task with 'claudetm start <goal>'",
                 ).model_dump(),
             )
-
-        try:
-            # Create control manager and perform stop operation
-            control = ControlManager(state_manager=state_manager)
-            result = control.stop(reason=stop_request.reason, cleanup=stop_request.cleanup)
-
-            return ControlResponse(
-                success=result.success,
-                message=result.message,
-                operation=result.operation,
-                previous_status=result.previous_status,
-                new_status=result.new_status,
-                details=result.details,
+        if result.outcome is ServiceOutcome.INVALID:
+            return JSONResponse(
+                status_code=400,
+                content=ErrorResponse(
+                    error="invalid_operation",
+                    message=result.message,
+                    suggestion="Task may be in a terminal state or already stopped",
+                ).model_dump(),
             )
-
-        except Exception as e:
-            logger.exception("Error stopping task")
-
-            # Check if it's a known control error
-            if "Cannot stop task" in str(e):
-                return JSONResponse(
-                    status_code=400,
-                    content=ErrorResponse(
-                        error="invalid_operation",
-                        message=str(e),
-                        suggestion="Task may be in a terminal state or already stopped",
-                    ).model_dump(),
-                )
-
+        if not result.success:
+            logger.error("Error stopping task: %s", result.error)
             return JSONResponse(
                 status_code=500,
                 content=ErrorResponse(
                     error="internal_error",
                     message="Failed to stop task",
-                    detail=str(e),
+                    detail=result.error,
                 ).model_dump(),
             )
+
+        control_result = result.data["result"]
+        return ControlResponse(
+            success=control_result.success,
+            message=control_result.message,
+            operation=control_result.operation,
+            previous_status=control_result.previous_status,
+            new_status=control_result.new_status,
+            details=control_result.details,
+        )
 
     @router.post(
         "/control/resume",
@@ -812,9 +790,9 @@ def create_control_router() -> APIRouter:
             400: If the task cannot be resumed in its current state.
             500: If an error occurs during the operation.
         """
-        state_manager = _get_state_manager(request)
+        result = _get_task_service(request).resume()
 
-        if not state_manager.exists():
+        if result.outcome is ServiceOutcome.NOT_FOUND:
             return JSONResponse(
                 status_code=404,
                 content=ErrorResponse(
@@ -823,43 +801,35 @@ def create_control_router() -> APIRouter:
                     suggestion="Start a new task with 'claudetm start <goal>'",
                 ).model_dump(),
             )
-
-        try:
-            # Create control manager and perform resume operation
-            control = ControlManager(state_manager=state_manager)
-            result = control.resume()
-
-            return ControlResponse(
-                success=result.success,
-                message=result.message,
-                operation=result.operation,
-                previous_status=result.previous_status,
-                new_status=result.new_status,
-                details=result.details,
+        if result.outcome is ServiceOutcome.INVALID:
+            return JSONResponse(
+                status_code=400,
+                content=ErrorResponse(
+                    error="invalid_operation",
+                    message=result.message,
+                    suggestion="Task may be in a terminal state or already running",
+                ).model_dump(),
             )
-
-        except Exception as e:
-            logger.exception("Error resuming task")
-
-            # Check if it's a known control error
-            if "Cannot resume task" in str(e):
-                return JSONResponse(
-                    status_code=400,
-                    content=ErrorResponse(
-                        error="invalid_operation",
-                        message=str(e),
-                        suggestion="Task may be in a terminal state or already running",
-                    ).model_dump(),
-                )
-
+        if not result.success:
+            logger.error("Error resuming task: %s", result.error)
             return JSONResponse(
                 status_code=500,
                 content=ErrorResponse(
                     error="internal_error",
                     message="Failed to resume task",
-                    detail=str(e),
+                    detail=result.error,
                 ).model_dump(),
             )
+
+        control_result = result.data["result"]
+        return ControlResponse(
+            success=control_result.success,
+            message=control_result.message,
+            operation=control_result.operation,
+            previous_status=control_result.previous_status,
+            new_status=control_result.new_status,
+            details=control_result.details,
+        )
 
     @router.patch(
         "/config",
@@ -927,44 +897,46 @@ def create_control_router() -> APIRouter:
                 ).model_dump(),
             )
 
-        try:
-            # Create control manager and perform config update
-            control = ControlManager(state_manager=state_manager)
+        result = TaskService(state_manager).update_config(**config_update.to_update_dict())
 
-            # Convert config update to kwargs dictionary
-            update_kwargs = config_update.to_update_dict()
-            result = control.update_config(**update_kwargs)
-
-            return ControlResponse(
-                success=result.success,
-                message=result.message,
-                operation=result.operation,
-                previous_status=result.previous_status,
-                new_status=result.new_status,
-                details=result.details,
+        if result.outcome is ServiceOutcome.NOT_FOUND:
+            return JSONResponse(
+                status_code=404,
+                content=ErrorResponse(
+                    error="not_found",
+                    message="No active task found",
+                    suggestion="Start a new task with 'claudetm start <goal>'",
+                ).model_dump(),
             )
-
-        except ValueError as e:
-            logger.exception("Invalid configuration update")
+        if result.outcome is ServiceOutcome.INVALID:
             return JSONResponse(
                 status_code=400,
                 content=ErrorResponse(
                     error="invalid_configuration",
                     message="Invalid configuration option",
-                    detail=str(e),
+                    detail=result.error,
                 ).model_dump(),
             )
-
-        except Exception as e:
-            logger.exception("Error updating configuration")
+        if not result.success:
+            logger.error("Error updating configuration: %s", result.error)
             return JSONResponse(
                 status_code=500,
                 content=ErrorResponse(
                     error="internal_error",
                     message="Failed to update configuration",
-                    detail=str(e),
+                    detail=result.error,
                 ).model_dump(),
             )
+
+        control_result = result.data["result"]
+        return ControlResponse(
+            success=control_result.success,
+            message=control_result.message,
+            operation=control_result.operation,
+            previous_status=control_result.previous_status,
+            new_status=control_result.new_status,
+            details=control_result.details,
+        )
 
     return router
 
@@ -1079,10 +1051,31 @@ def create_task_router() -> APIRouter:
                 log_format="text",  # Default to text
                 pr_per_task=False,  # Default to False
             )
-            state = state_manager.initialize(
-                goal=task_init.goal, model=task_init.model, options=options
+            init_result = TaskService(state_manager).init_task(
+                task_init.goal, task_init.model, options
             )
 
+            if init_result.outcome is ServiceOutcome.CONFLICT:
+                return JSONResponse(
+                    status_code=400,
+                    content=ErrorResponse(
+                        error="task_exists",
+                        message="A task already exists",
+                        suggestion="Use DELETE /task to remove the existing task first",
+                    ).model_dump(),
+                )
+            if not init_result.success:
+                logger.error("Error initializing task: %s", init_result.error)
+                return JSONResponse(
+                    status_code=500,
+                    content=ErrorResponse(
+                        error="internal_error",
+                        message="Failed to initialize task",
+                        detail=init_result.error,
+                    ).model_dump(),
+                )
+
+            state = init_result.data["state"]
             logger.info(f"Task initialized with run_id: {state.run_id}")
 
             return TaskInitResponse(
@@ -1126,9 +1119,11 @@ def create_task_router() -> APIRouter:
             404: If no active task exists.
             500: If an error occurs during deletion.
         """
-        state_manager = _get_state_manager(request)
+        # DELETE always removes the task (force=True): unlike the MCP clean tool
+        # it does not gate on an active session, it releases the lock and deletes.
+        result = _get_task_service(request).clean(force=True)
 
-        if not state_manager.exists():
+        if result.outcome is ServiceOutcome.NOT_FOUND:
             return JSONResponse(
                 status_code=404,
                 content=ErrorResponse(
@@ -1137,42 +1132,22 @@ def create_task_router() -> APIRouter:
                     suggestion="No task to delete",
                 ).model_dump(),
             )
-
-        try:
-            # Check if session is active
-            is_active = state_manager.is_session_active()
-
-            if is_active:
-                logger.warning("Deleting task while session is active")
-                # Release session lock before deletion
-                state_manager.release_session_lock()
-
-            # Remove state directory
-            state_dir = state_manager.state_dir
-            if state_dir.exists():
-                shutil.rmtree(state_dir)
-                logger.info(f"Task state deleted: {state_dir}")
-                files_removed = True
-            else:
-                logger.warning(f"State directory not found: {state_dir}")
-                files_removed = False
-
-            return TaskDeleteResponse(
-                success=True,
-                message="Task deleted successfully",
-                files_removed=files_removed,
-            )
-
-        except Exception as e:
-            logger.exception("Error deleting task")
+        if not result.success:
+            logger.error("Error deleting task: %s", result.error)
             return JSONResponse(
                 status_code=500,
                 content=ErrorResponse(
                     error="internal_error",
                     message="Failed to delete task",
-                    detail=str(e),
+                    detail=result.error,
                 ).model_dump(),
             )
+
+        return TaskDeleteResponse(
+            success=True,
+            message="Task deleted successfully",
+            files_removed=result.data["files_removed"],
+        )
 
     return router
 
