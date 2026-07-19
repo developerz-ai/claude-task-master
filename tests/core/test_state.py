@@ -1741,9 +1741,10 @@ class TestStateBackup:
 
     def test_multiple_backups_have_unique_names(self, initialized_state_manager):
         """Test that multiple backups have unique names."""
-        time.sleep(0.01)  # Ensure different timestamps
+        # No sleep needed: _create_backup appends a sequence number when the
+        # second-resolution timestamp is the same, so back-to-back calls always
+        # produce distinct filenames.
         backup1 = initialized_state_manager.create_state_backup()
-        time.sleep(1.1)  # Ensure different timestamp in seconds
         backup2 = initialized_state_manager.create_state_backup()
 
         assert backup1 != backup2

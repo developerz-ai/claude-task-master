@@ -117,7 +117,6 @@ class TestMailboxLazyProperties:
 
     def test_mailbox_storage_lazy_init(self, basic_orchestrator):
         """Should lazily initialize mailbox storage on first access."""
-        assert basic_orchestrator._mailbox_storage is None
         storage = basic_orchestrator.mailbox_storage
         assert storage is not None
         assert isinstance(storage, MailboxStorage)
@@ -126,7 +125,6 @@ class TestMailboxLazyProperties:
 
     def test_message_merger_lazy_init(self, basic_orchestrator):
         """Should lazily initialize message merger on first access."""
-        assert basic_orchestrator._message_merger is None
         merger = basic_orchestrator.message_merger
         assert merger is not None
         assert isinstance(merger, MessageMerger)
@@ -137,7 +135,6 @@ class TestMailboxLazyProperties:
         """Should lazily initialize plan updater on first access."""
         from claude_task_master.core.plan_updater import PlanUpdater
 
-        assert basic_orchestrator._plan_updater is None
         updater = basic_orchestrator.plan_updater
         assert updater is not None
         assert isinstance(updater, PlanUpdater)

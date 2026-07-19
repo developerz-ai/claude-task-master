@@ -154,10 +154,6 @@ python_functions = ["test_*"]
 addopts = [
     "-v",
     "--strict-markers",
-    "--cov=claude_task_master",
-    "--cov-report=term-missing",
-    "--cov-report=html:coverage_html",
-    "--cov-report=xml:coverage.xml",
     "--timeout=2",
 ]
 asyncio_mode = "auto"
@@ -170,8 +166,6 @@ filterwarnings = [
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests (require external services)",
-    "unit: marks tests as unit tests",
-    "property: marks tests as property-based tests using Hypothesis",
     "real_sdk: marks tests that require a real Claude Agent SDK / live credentials (opt-in via CLAUDETM_REAL_SDK=1)",
 ]
 

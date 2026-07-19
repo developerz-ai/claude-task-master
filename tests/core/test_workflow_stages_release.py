@@ -102,7 +102,9 @@ def workflow_handler(mock_agent, state_manager, mock_github_client, mock_pr_cont
 
 
 @pytest.fixture
-def release_ready(state_manager: MagicMock, task_state: TaskState, mock_github_client: MagicMock) -> TaskState:
+def release_ready(
+    state_manager: MagicMock, task_state: TaskState, mock_github_client: MagicMock
+) -> TaskState:
     """Persist a release guide + minimal plan so handle_releasing_stage can run."""
     state_manager.state_dir.mkdir(exist_ok=True)
     state_manager.save_plan("- [ ] Task 1")
