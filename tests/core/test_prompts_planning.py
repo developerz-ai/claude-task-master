@@ -915,3 +915,81 @@ class TestFunctionSignature:
         """Test goal can be passed as keyword argument."""
         result = build_planning_prompt(goal="My Goal")
         assert "My Goal" in result
+
+    def test_max_prs_is_optional(self) -> None:
+        """max_prs parameter should be optional with None default."""
+        import inspect
+
+        sig = inspect.signature(build_planning_prompt)
+        params = sig.parameters
+        assert "max_prs" in params
+        assert params["max_prs"].default is None
+
+
+# =============================================================================
+# PR Limit (--prs flag) Tests
+# =============================================================================
+
+
+class TestPRLimitSection:
+    """Tests for the max_prs / PR Limit section of the planning prompt."""
+
+    def test_no_pr_limit_when_max_prs_none(self) -> None:
+        """When max_prs is None, no PR limit constraint should appear in the prompt."""
+        result = build_planning_prompt("Goal", max_prs=None)
+        assert "PR Limit" not in result
+        assert "Maximum" not in result or "PR(s)" not in result
+
+    def test_pr_limit_section_present_when_max_prs_set(self) -> None:
+        """When max_prs is provided, a PR Limit section must be present."""
+        result = build_planning_prompt("Goal", max_prs=3)
+        assert "PR Limit" in result
+
+    def test_pr_limit_includes_exact_count(self) -> None:
+        """The PR limit section must state the exact number from max_prs."""
+        result = build_planning_prompt("Goal", max_prs=2)
+        assert "2" in result
+        # 'Maximum 2 PR(s)' or similar
+        assert "PR" in result
+
+    def test_pr_limit_max_prs_1(self) -> None:
+        """max_prs=1 must say 'Maximum 1 PR(s)'."""
+        result = build_planning_prompt("Goal", max_prs=1)
+        assert "Maximum 1 PR(s)" in result
+
+    def test_pr_limit_max_prs_5(self) -> None:
+        """max_prs=5 must say 'Maximum 5 PR(s)'."""
+        result = build_planning_prompt("Goal", max_prs=5)
+        assert "Maximum 5 PR(s)" in result
+
+    def test_pr_limit_no_exceptions_language(self) -> None:
+        """The constraint must include strong 'No exceptions' language."""
+        result = build_planning_prompt("Goal", max_prs=2)
+        assert "No exceptions" in result
+
+    def test_pr_limit_zero_not_injected(self) -> None:
+        """max_prs=0 is falsy — no PR Limit section should appear."""
+        result = build_planning_prompt("Goal", max_prs=0)
+        assert "PR Limit" not in result
+
+    def test_pr_limit_does_not_appear_with_default_call(self) -> None:
+        """A plain build_planning_prompt('Goal') call must not have a PR Limit section."""
+        result = build_planning_prompt("Goal")
+        assert "PR Limit" not in result
+
+    def test_pr_limit_keyword_arg_accepted(self) -> None:
+        """max_prs can be passed as a keyword argument."""
+        result = build_planning_prompt(goal="Goal", max_prs=4)
+        assert "Maximum 4 PR(s)" in result
+
+    def test_pr_limit_content_is_string(self) -> None:
+        """The returned prompt with a PR limit is still a string."""
+        result = build_planning_prompt("Goal", max_prs=3)
+        assert isinstance(result, str)
+
+    def test_pr_limit_does_not_remove_other_sections(self) -> None:
+        """Adding a PR limit must not remove other required sections."""
+        result = build_planning_prompt("Goal", max_prs=2)
+        # Core sections must still be present.
+        assert "PR Strategy" in result
+        assert "Success Criteria" in result or "success" in result.lower()

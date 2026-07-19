@@ -759,3 +759,107 @@ All tasks done.
         loaded_plan = state_manager.load_plan()
         assert "- [x]" in loaded_plan
         assert "- [ ]" in loaded_plan
+
+
+# =============================================================================
+# max_prs / --prs flag pass-through tests
+# =============================================================================
+
+
+class TestMaxPrsPassThrough:
+    """Tests that --prs (max_prs) flows from state.options into the planning prompt."""
+
+    def test_max_prs_passed_to_run_planning_phase_when_set(
+        self, planner, mock_agent_wrapper, state_manager
+    ):
+        """When state.options.max_prs is set, it must reach run_planning_phase."""
+        from claude_task_master.core.state import TaskOptions, TaskState
+
+        state_manager.state_dir.mkdir(exist_ok=True)
+        options = TaskOptions(auto_merge=True, max_sessions=10, max_prs=3)
+        import datetime
+
+        now = datetime.datetime.now().isoformat()
+        state = TaskState(
+            status="working",
+            workflow_stage="working",
+            current_task_index=0,
+            session_count=0,
+            created_at=now,
+            updated_at=now,
+            run_id="test",
+            model="sonnet",
+            options=options,
+        )
+        state_manager.save_state(state)
+
+        planner.create_plan("Goal with PR limit")
+
+        call_kwargs = mock_agent_wrapper.run_planning_phase.call_args.kwargs
+        assert call_kwargs.get("max_prs") == 3
+
+    def test_max_prs_none_when_not_set_in_state(self, planner, mock_agent_wrapper, state_manager):
+        """When state.options.max_prs is None, run_planning_phase receives max_prs=None."""
+        from claude_task_master.core.state import TaskOptions, TaskState
+
+        state_manager.state_dir.mkdir(exist_ok=True)
+        options = TaskOptions(auto_merge=True, max_sessions=10)  # max_prs defaults to None
+        import datetime
+
+        now = datetime.datetime.now().isoformat()
+        state = TaskState(
+            status="working",
+            workflow_stage="working",
+            current_task_index=0,
+            session_count=0,
+            created_at=now,
+            updated_at=now,
+            run_id="test",
+            model="sonnet",
+            options=options,
+        )
+        state_manager.save_state(state)
+
+        planner.create_plan("Unlimited PR goal")
+
+        call_kwargs = mock_agent_wrapper.run_planning_phase.call_args.kwargs
+        assert call_kwargs.get("max_prs") is None
+
+    def test_max_prs_1_passed_correctly(self, planner, mock_agent_wrapper, state_manager):
+        """max_prs=1 (single-PR mode) passes through without conversion."""
+        from claude_task_master.core.state import TaskOptions, TaskState
+
+        state_manager.state_dir.mkdir(exist_ok=True)
+        options = TaskOptions(auto_merge=False, max_sessions=5, max_prs=1)
+        import datetime
+
+        now = datetime.datetime.now().isoformat()
+        state = TaskState(
+            status="working",
+            workflow_stage="working",
+            current_task_index=0,
+            session_count=0,
+            created_at=now,
+            updated_at=now,
+            run_id="test",
+            model="sonnet",
+            options=options,
+        )
+        state_manager.save_state(state)
+
+        planner.create_plan("Single PR goal")
+
+        call_kwargs = mock_agent_wrapper.run_planning_phase.call_args.kwargs
+        assert call_kwargs.get("max_prs") == 1
+
+    def test_max_prs_not_passed_when_no_state_file(
+        self, planner, mock_agent_wrapper, state_manager
+    ):
+        """When no state file exists, run_planning_phase is called with max_prs=None."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        # No state file — Planner falls back to max_prs=None
+
+        planner.create_plan("No state goal")
+
+        call_kwargs = mock_agent_wrapper.run_planning_phase.call_args.kwargs
+        assert call_kwargs.get("max_prs") is None
