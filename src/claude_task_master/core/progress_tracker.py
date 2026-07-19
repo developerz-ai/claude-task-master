@@ -49,14 +49,22 @@ class SessionMetrics:
         """Get total tokens used."""
         return self.tokens_input + self.tokens_output
 
+    actual_cost_usd: float | None = None  # Set from ResultMessage.total_cost_usd
+
     @property
     def estimated_cost(self) -> float:
-        """Estimate cost in USD (approximate Claude pricing).
+        """Return actual cost when available, otherwise estimate from token counts.
 
-        Uses Claude Opus 4 rates as the upper-bound estimate; actual cost
-        will be lower for sessions that used Sonnet or Haiku.
-        Rates: $15 / M input tokens, $75 / M output tokens (Opus 4).
+        Actual cost is populated from ``ResultMessage.total_cost_usd`` by
+        ``ExecutionTracker.record_cost``; it is authoritative and covers all
+        token types (including cache reads/writes).  The token-based estimate
+        is a fallback for older SDK versions that omit the field.
+
+        Rates used for the estimate: $15 / M input, $75 / M output (Opus 4
+        upper bound — actual cost is lower for Sonnet/Haiku sessions).
         """
+        if self.actual_cost_usd is not None:
+            return self.actual_cost_usd
         # Approximate pricing for Claude Opus 4 (claude-opus-4-*)
         # Sonnet: ~$3/$15; Haiku: ~$0.25/$1.25 — we use Opus as a conservative
         # upper bound since the default task complexity routes there.
@@ -193,6 +201,32 @@ class ExecutionTracker:
             self._current_session.api_calls += 1
             self._current_session.tokens_input += tokens_in
             self._current_session.tokens_output += tokens_out
+            self._last_progress_time = time.time()
+
+    def record_cost(
+        self,
+        cost_usd: float,
+        tokens_in: int = 0,
+        tokens_out: int = 0,
+    ) -> None:
+        """Record authoritative cost from a ResultMessage.
+
+        Should be called after each session with the values extracted from
+        ``ResultMessage.total_cost_usd`` and ``ResultMessage.usage``.
+        Populates ``SessionMetrics.actual_cost_usd`` so the cost report
+        shows real API charges rather than the token-based estimate.
+
+        Args:
+            cost_usd: Actual cost in USD from ResultMessage.total_cost_usd.
+            tokens_in: Input token count from ResultMessage.usage.
+            tokens_out: Output token count from ResultMessage.usage.
+        """
+        if self._current_session:
+            self._current_session.actual_cost_usd = cost_usd
+            if tokens_in:
+                self._current_session.tokens_input += tokens_in
+            if tokens_out:
+                self._current_session.tokens_output += tokens_out
             self._last_progress_time = time.time()
 
     def record_tool_call(self, tool_name: str) -> None:

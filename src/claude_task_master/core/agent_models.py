@@ -149,6 +149,55 @@ MODEL_FALLBACK_MAP = {
     ModelType.SONNET_1M: ModelType.HAIKU,  # Sonnet 1M → Haiku (not Sonnet — same model ID)
 }
 
+# Direct model → SDK effort-level map (extended-thinking depth).
+#
+# Mirrors the complexity→effort mapping (get_effort_for_complexity) but is keyed
+# by the *resolved* model, so tiers that no complexity routes to still get an
+# effort level. Without this, a reverse-lookup-by-complexity left FABLE (the
+# premium 2x-priced tier) with no matching complexity → effort=None → it ran
+# WITHOUT extended thinking while Opus got "max".
+MODEL_EFFORT_MAP: dict[ModelType, str] = {
+    ModelType.OPUS: "max",  # smartest tier → deepest reasoning (mirrors CODING)
+    ModelType.FABLE: "max",  # premium tier → deepest reasoning
+    ModelType.SONNET: "medium",  # balanced (mirrors GENERAL)
+    ModelType.HAIKU: "low",  # fast/cheap (mirrors QUICK)
+    ModelType.SONNET_1M: "high",  # deep-context debugging/QA (mirrors DEBUGGING_QA)
+}
+
+
+def get_fallback_chain(model: ModelType) -> list[ModelType]:
+    """Build the ordered, cycle-guarded fallback chain for a model.
+
+    Walks ``MODEL_FALLBACK_MAP`` hop-by-hop from ``model``, stopping when a model
+    has no fallback or when a model would repeat. The cycle guard is essential:
+    the map contains the HAIKU↔SONNET pair (HAIKU→SONNET, SONNET→HAIKU), so a
+    naive walk would loop forever. The starting ``model`` is not included.
+
+    Args:
+        model: The primary model to build a fallback chain for.
+
+    Returns:
+        Ordered list of fallback models to try, most-preferred first.
+        Empty only if the model has no fallback mapping at all.
+
+    Example:
+        >>> get_fallback_chain(ModelType.FABLE)
+        [<ModelType.OPUS: 'opus'>, <ModelType.SONNET: 'sonnet'>, <ModelType.HAIKU: 'haiku'>]
+        >>> get_fallback_chain(ModelType.SONNET)
+        [<ModelType.HAIKU: 'haiku'>]
+    """
+    chain: list[ModelType] = []
+    seen: set[ModelType] = {model}
+    current = model
+    while True:
+        nxt = MODEL_FALLBACK_MAP.get(current)
+        if nxt is None or nxt in seen:
+            break
+        chain.append(nxt)
+        seen.add(nxt)
+        current = nxt
+    return chain
+
 
 def get_context_window(
     model: ModelType,
@@ -185,10 +234,20 @@ DEFAULT_COMPACT_THRESHOLD_PERCENT = 0.85  # Compact at 85% usage
 
 
 def parse_task_complexity(task_description: str) -> tuple[TaskComplexity, str]:
-    """Parse task complexity tag from task description.
+    """Parse the complexity routing tag from a task description.
 
-    Looks for [coding], [quick], [general], or [debugging-qa] tags in the task,
-    with or without surrounding backticks.
+    Looks for [coding], [quick], [general], or [debugging-qa] tags, with or
+    without surrounding backticks.
+
+    Tag selection is *anchored*: the routing tag is conventionally the leading
+    or trailing marker on a task line (e.g. ```[coding]` Implement ...``
+    or ``... update docs `[general]```). When several tags appear, a tag
+    anchored to the start or end of the text wins over one buried in prose — so a
+    quoted mention like "avoid `[quick]` hacks, do it right
+    `[coding]`" routes to CODING, not QUICK. If no tag is anchored, the
+    last occurrence wins (the trailing marker is the usual placement). Only the
+    winning tag is stripped (``count=1`` semantics); other occurrences are left
+    intact so prose is preserved.
 
     Args:
         task_description: The task description potentially containing a complexity tag.
@@ -197,26 +256,36 @@ def parse_task_complexity(task_description: str) -> tuple[TaskComplexity, str]:
         Tuple of (TaskComplexity, cleaned_task_description).
         Defaults to CODING if no tag found (prefer smarter model).
     """
-    # Look for complexity tags with or without backticks:
-    # `[coding]` (backtick-wrapped) or [coding] (bare)
+    # Match complexity tags with or without backticks:
+    # `[coding]` (backtick-wrapped) or [coding] (bare).
     pattern = r"`?\[(coding|quick|general|debugging-qa)\]`?"
-    match = re.search(pattern, task_description, re.IGNORECASE)
+    matches = list(re.finditer(pattern, task_description, re.IGNORECASE))
 
-    if match:
-        complexity_str = match.group(1).lower()
-        # Remove the tag from the description
-        cleaned = re.sub(pattern, "", task_description, flags=re.IGNORECASE).strip()
+    if not matches:
+        # Default to CODING (prefer smarter model when uncertain).
+        return TaskComplexity.CODING, task_description
 
-        complexity_map = {
-            "coding": TaskComplexity.CODING,
-            "quick": TaskComplexity.QUICK,
-            "general": TaskComplexity.GENERAL,
-            "debugging-qa": TaskComplexity.DEBUGGING_QA,
-        }
-        return complexity_map.get(complexity_str, TaskComplexity.CODING), cleaned
+    def _is_anchored(m: re.Match[str]) -> bool:
+        """True if the match sits at the start or end of the text (ignoring space)."""
+        before = task_description[: m.start()].strip()
+        after = task_description[m.end() :].strip()
+        return before == "" or after == ""
 
-    # Default to CODING (prefer smarter model when uncertain)
-    return TaskComplexity.CODING, task_description
+    anchored = [m for m in matches if _is_anchored(m)]
+    # Prefer the last anchored tag; otherwise fall back to the last tag overall.
+    chosen = anchored[-1] if anchored else matches[-1]
+
+    complexity_str = chosen.group(1).lower()
+    # Strip only the winning tag's span (count=1); leave prose mentions intact.
+    cleaned = (task_description[: chosen.start()] + task_description[chosen.end() :]).strip()
+
+    complexity_map = {
+        "coding": TaskComplexity.CODING,
+        "quick": TaskComplexity.QUICK,
+        "general": TaskComplexity.GENERAL,
+        "debugging-qa": TaskComplexity.DEBUGGING_QA,
+    }
+    return complexity_map.get(complexity_str, TaskComplexity.CODING), cleaned
 
 
 def get_tools_for_phase(

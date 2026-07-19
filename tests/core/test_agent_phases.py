@@ -10,12 +10,17 @@ This module contains tests for:
 - Phase integration and edge cases
 """
 
+import asyncio
+import threading
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from claude_task_master.core.agent import AgentWrapper, ModelType, ToolConfig
+from claude_task_master.core.agent_phases import _drive_coroutine_on_new_loop
 from claude_task_master.core.config_loader import reset_config
+from claude_task_master.core.shutdown import get_shutdown_manager, reset_shutdown
 
 # =============================================================================
 # ToolConfig Enum Tests
@@ -557,16 +562,71 @@ class TestAgentWrapperRunWorkSession:
         assert "output" in result
         assert "success" in result
 
-    def test_run_work_session_assumes_success(self, agent_with_mock):
-        """Test run_work_session assumes success for MVP."""
-        with patch.object(agent_with_mock, "_run_query", new_callable=AsyncMock) as mock_query:
-            mock_query.return_value = "Done"
-            with patch(
-                "claude_task_master.core.agent_phases.run_async_with_cleanup", return_value="Done"
-            ):
-                result = agent_with_mock.run_work_session("Task")
+    def test_run_work_session_defaults_to_success_without_error(self, agent_with_mock):
+        """With no error ResultMessage captured, success defaults to True.
+
+        This also covers the SDK-bug #30333 lost-ResultMessage path: no terminal
+        result means we trust the accumulated text as success.
+        """
+        agent_with_mock._message_processor.reset_result_state()
+
+        def fake_run(coro):
+            coro.close()  # avoid 'coroutine was never awaited' warning
+            return "Done"
+
+        with patch(
+            "claude_task_master.core.agent_phases.run_async_with_cleanup",
+            side_effect=fake_run,
+        ):
+            result = agent_with_mock.run_work_session("Task")
 
         assert result["success"] is True
+        assert result["subtype"] is None
+
+    def test_run_work_session_reports_failure_on_error_result(self, agent_with_mock):
+        """A budget/turn-capped session (ResultMessage.is_error=True) must report
+        success=False instead of hardcoding True — otherwise the orchestrator
+        would mark half-done work [x]."""
+        proc = agent_with_mock._message_processor
+
+        def fake_run(coro):
+            # Simulate the query stream capturing an error ResultMessage.
+            coro.close()  # avoid 'coroutine was never awaited' warning
+            proc.last_result_is_error = True
+            proc.last_result_subtype = "error_max_budget_usd"
+            return "partial work"
+
+        with patch(
+            "claude_task_master.core.agent_phases.run_async_with_cleanup",
+            side_effect=fake_run,
+        ):
+            result = agent_with_mock.run_work_session("Task")
+
+        assert result["success"] is False
+        assert result["subtype"] == "error_max_budget_usd"
+        assert result["output"] == "partial work"
+
+    def test_run_work_session_resets_prior_error_before_query(self, agent_with_mock):
+        """A stale error from a previous session must not leak: run_work_session
+        resets the processor before the query, so a clean session reports
+        success."""
+        proc = agent_with_mock._message_processor
+        # Leftover error state from an earlier session.
+        proc.last_result_is_error = True
+        proc.last_result_subtype = "error_max_turns"
+
+        def fake_run(coro):
+            coro.close()  # avoid 'coroutine was never awaited' warning
+            return "Done"
+
+        with patch(
+            "claude_task_master.core.agent_phases.run_async_with_cleanup",
+            side_effect=fake_run,
+        ):
+            result = agent_with_mock.run_work_session("Task")
+
+        assert result["success"] is True
+        assert result["subtype"] is None
 
     def test_run_work_session_with_context(self, agent_with_mock):
         """Test run_work_session includes context."""
@@ -1074,3 +1134,76 @@ class TestRunAsyncWithCleanup:
         # The caller's loop is untouched and still drives coroutines.
         assert asyncio.get_running_loop() is not None
         await asyncio.sleep(0)
+
+
+class TestDriveCoroutineShutdownCancellation:
+    """The driver must cancel an in-flight coroutine on a shutdown request.
+
+    This is what makes Ctrl+C interruptible mid-query: the signal handler only
+    sets an Event, and a background watcher cancels the running task so the
+    orchestrator's interrupt path (exit 2) fires promptly instead of the caller
+    blocking on the SDK's ~30-min idle ceiling.
+    """
+
+    def setup_method(self):
+        """Isolate the process-global shutdown manager for each test."""
+        mgr = get_shutdown_manager()
+        mgr.set_durable_stop_check(None)
+        reset_shutdown()
+
+    def teardown_method(self):
+        """Never leave the global manager in a requested/bound state."""
+        mgr = get_shutdown_manager()
+        mgr.set_durable_stop_check(None)
+        reset_shutdown()
+
+    def test_shutdown_request_cancels_inflight_coroutine(self):
+        """A shutdown request cancels the running task and raises KeyboardInterrupt."""
+        observed = {"cancelled": False}
+
+        async def _long() -> str:
+            try:
+                await asyncio.sleep(10)  # stands in for a long streaming turn
+            except asyncio.CancelledError:
+                observed["cancelled"] = True
+                raise
+            return "should-not-return"
+
+        def _fire():
+            time.sleep(0.05)
+            get_shutdown_manager().request_shutdown("SIGINT")
+
+        firer = threading.Thread(target=_fire)
+        firer.start()
+
+        start = time.time()
+        with pytest.raises(KeyboardInterrupt):
+            _drive_coroutine_on_new_loop(_long())
+        elapsed = time.time() - start
+        firer.join()
+
+        assert observed["cancelled"] is True
+        assert elapsed < 1.5  # cancelled promptly, not after the 10s sleep
+
+    def test_normal_completion_unaffected_and_no_lingering_watcher(self):
+        """With no shutdown the coroutine returns normally and the watcher exits."""
+
+        async def _quick() -> str:
+            await asyncio.sleep(0.01)
+            return "ok"
+
+        assert _drive_coroutine_on_new_loop(_quick()) == "ok"
+        # The watcher must not outlive the call (common hot path: no lingering).
+        assert "shutdown-watcher" not in {t.name for t in threading.enumerate()}
+
+    def test_unrelated_cancellation_propagates_as_cancelled(self):
+        """A cancellation not caused by shutdown is not masked as KeyboardInterrupt."""
+
+        async def _self_cancel() -> None:
+            task = asyncio.current_task()
+            assert task is not None
+            task.cancel()
+            await asyncio.sleep(1)  # observe the self-cancellation
+
+        with pytest.raises(asyncio.CancelledError):
+            _drive_coroutine_on_new_loop(_self_cancel())

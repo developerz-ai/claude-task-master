@@ -14,9 +14,12 @@ from claude_task_master.core.agent_models import (
     DEFAULT_COMPACT_THRESHOLD_PERCENT,
     MODEL_CONTEXT_WINDOWS,
     MODEL_CONTEXT_WINDOWS_STANDARD,
+    MODEL_EFFORT_MAP,
+    MODEL_FALLBACK_MAP,
     ModelType,
     TaskComplexity,
     ToolConfig,
+    get_fallback_chain,
     parse_task_complexity,
 )
 
@@ -368,13 +371,120 @@ class TestParseTaskComplexity:
         assert complexity == TaskComplexity.DEBUGGING_QA
         assert cleaned == "Investigate CI failure"
 
-    def test_parse_multiple_tags_uses_first(self):
-        """Test multiple tags uses first match."""
+    def test_parse_prefers_anchored_leading_tag_over_mid_prose(self):
+        """Anchored (leading) tag wins over a tag buried mid-prose."""
         task = "`[quick]` then `[coding]` task"
+        complexity, _ = parse_task_complexity(task)
+
+        # `[quick]` is anchored at the start; `[coding]` is mid-prose → QUICK wins.
+        assert complexity == TaskComplexity.QUICK
+
+    def test_parse_trailing_tag_beats_mid_prose_tag(self):
+        """A quoted prose tag must not beat the real trailing routing tag."""
+        task = "Implement retry logic, avoid `[quick]` hacks `[coding]`"
         complexity, cleaned = parse_task_complexity(task)
 
-        # First match is used
-        assert complexity == TaskComplexity.QUICK
+        # Trailing `[coding]` is anchored; mid-prose `[quick]` is not → CODING wins.
+        assert complexity == TaskComplexity.CODING
+        # Only the winning tag is stripped; the prose mention is preserved.
+        assert "`[quick]`" in cleaned
+        assert "`[coding]`" not in cleaned
+
+    def test_parse_strips_only_winning_tag_count_one(self):
+        """Only the winning tag occurrence is removed (count=1 semantics)."""
+        task = "`[general]` refactor, not a `[general]` rewrite"
+        complexity, cleaned = parse_task_complexity(task)
+
+        assert complexity == TaskComplexity.GENERAL
+        # The leading anchored tag is stripped; the mid-prose duplicate remains.
+        assert cleaned.count("`[general]`") == 1
+
+    def test_parse_falls_back_to_last_when_none_anchored(self):
+        """With no anchored tag, the last occurrence wins."""
+        task = "Do `[quick]` then `[coding]` work now"
+        complexity, _ = parse_task_complexity(task)
+
+        # Neither tag is anchored (text on both sides) → last match (`[coding]`).
+        assert complexity == TaskComplexity.CODING
+
+
+# =============================================================================
+# MODEL_EFFORT_MAP Tests
+# =============================================================================
+
+
+class TestModelEffortMap:
+    """Tests for the direct model → effort-level map."""
+
+    def test_all_models_have_effort(self):
+        """Every ModelType has an effort level (no tier runs without one)."""
+        for model in ModelType:
+            assert model in MODEL_EFFORT_MAP
+            assert MODEL_EFFORT_MAP[model] in {"low", "medium", "high", "max"}
+
+    def test_fable_gets_max_effort(self):
+        """FABLE (premium tier) gets max effort — the bug this map fixes."""
+        assert MODEL_EFFORT_MAP[ModelType.FABLE] == "max"
+
+    def test_opus_gets_max_effort(self):
+        """OPUS (smartest tier) gets max effort."""
+        assert MODEL_EFFORT_MAP[ModelType.OPUS] == "max"
+
+    def test_effort_mirrors_complexity_mapping(self):
+        """Effort per model mirrors the complexity→effort mapping."""
+        for complexity in TaskComplexity:
+            model = TaskComplexity.get_model_for_complexity(complexity)
+            expected = TaskComplexity.get_effort_for_complexity(complexity)
+            assert MODEL_EFFORT_MAP[model] == expected
+
+
+# =============================================================================
+# get_fallback_chain Tests
+# =============================================================================
+
+
+class TestGetFallbackChain:
+    """Tests for the cycle-guarded fallback chain builder."""
+
+    def test_fable_chain_to_haiku(self):
+        """FABLE walks the full documented chain to Haiku."""
+        assert get_fallback_chain(ModelType.FABLE) == [
+            ModelType.OPUS,
+            ModelType.SONNET,
+            ModelType.HAIKU,
+        ]
+
+    def test_opus_chain(self):
+        """OPUS → Sonnet → Haiku."""
+        assert get_fallback_chain(ModelType.OPUS) == [ModelType.SONNET, ModelType.HAIKU]
+
+    def test_sonnet_chain_stops_before_cycle(self):
+        """SONNET → Haiku only; the HAIKU→SONNET back-edge is cut by the guard."""
+        assert get_fallback_chain(ModelType.SONNET) == [ModelType.HAIKU]
+
+    def test_haiku_chain_stops_before_cycle(self):
+        """HAIKU → Sonnet only; does not loop back to Haiku."""
+        assert get_fallback_chain(ModelType.HAIKU) == [ModelType.SONNET]
+
+    def test_sonnet_1m_chain(self):
+        """SONNET_1M → Haiku → Sonnet (then stops before re-Haiku)."""
+        assert get_fallback_chain(ModelType.SONNET_1M) == [ModelType.HAIKU, ModelType.SONNET]
+
+    def test_start_model_never_in_chain(self):
+        """The starting model is never included in its own chain."""
+        for model in ModelType:
+            assert model not in get_fallback_chain(model)
+
+    def test_chain_has_no_duplicates(self):
+        """The cycle guard guarantees no model repeats."""
+        for model in ModelType:
+            chain = get_fallback_chain(model)
+            assert len(chain) == len(set(chain))
+
+    def test_chain_first_hop_matches_fallback_map(self):
+        """The first chain hop equals the single-hop MODEL_FALLBACK_MAP entry."""
+        for model, expected_first in MODEL_FALLBACK_MAP.items():
+            assert get_fallback_chain(model)[0] == expected_first
 
 
 # =============================================================================

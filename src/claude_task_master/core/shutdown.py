@@ -12,7 +12,6 @@ from __future__ import annotations
 import signal
 import sys
 import threading
-import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -138,8 +137,12 @@ class ShutdownManager:
 
             for sig, handler in self._original_handlers.items():
                 try:
-                    if handler is not None:
-                        signal.signal(sig, handler)
+                    # signal.signal returns None for a handler that was not
+                    # installed from Python (e.g. the interpreter default set in
+                    # C). None is not a valid argument to signal.signal, and
+                    # skipping it would leave *our* handler wedged in place, so
+                    # restore SIG_DFL to genuinely hand back default behaviour.
+                    signal.signal(sig, handler if handler is not None else signal.SIG_DFL)
                 except (ValueError, OSError):
                     pass  # Ignore errors restoring handlers (e.g., not in main thread)
 
@@ -216,9 +219,16 @@ class ShutdownManager:
     def interruptible_sleep(self, seconds: float, check_interval: float = 0.1) -> bool:
         """Sleep that can be interrupted by shutdown request.
 
+        Blocks on the shutdown Event rather than busy-sleeping, so an in-process
+        shutdown (SIGINT/SIGTERM/``request_shutdown``) wakes the sleeper the
+        instant it is signalled instead of after the current ``check_interval``
+        elapses. The per-interval slicing is retained so a durable cross-process
+        stop — observable only by polling :attr:`shutdown_requested` — is still
+        noticed within ``check_interval``.
+
         Args:
             seconds: Total time to sleep in seconds.
-            check_interval: How often to check for shutdown (seconds).
+            check_interval: How often to re-check the durable stop (seconds).
 
         Returns:
             True if sleep completed normally, False if interrupted by shutdown.
@@ -228,7 +238,9 @@ class ShutdownManager:
             if self.shutdown_requested:
                 return False
             sleep_time = min(check_interval, remaining)
-            time.sleep(sleep_time)
+            # Returns True immediately when an in-process shutdown is signalled.
+            if self._shutdown_requested.wait(timeout=sleep_time):
+                return False
             remaining -= sleep_time
         return True
 
@@ -246,15 +258,21 @@ class ShutdownManager:
     def _signal_handler(self, signum: int, frame: FrameType | None) -> None:
         """Handle received signals by requesting shutdown.
 
+        Does the minimum that is safe from async-signal context: record the
+        reason and set the shutdown Event. It deliberately does NOT run cleanup
+        callbacks — :meth:`run_callbacks` acquires ``self._lock``, and a signal
+        can be delivered to the main thread while it already holds that
+        non-reentrant lock (mid ``add_callback`` / ``register`` /
+        ``set_durable_stop_check``), which would self-deadlock the interpreter.
+        Observers poll :attr:`shutdown_requested` and run any cleanup from their
+        own (non-signal) context instead.
+
         Args:
             signum: The signal number that was received.
             frame: The current stack frame (unused).
         """
         signal_name = signal.Signals(signum).name
         self.request_shutdown(reason=signal_name)
-
-        # Run cleanup callbacks
-        self.run_callbacks()
 
 
 # =============================================================================

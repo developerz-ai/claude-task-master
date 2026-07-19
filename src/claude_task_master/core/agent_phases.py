@@ -23,12 +23,21 @@ from .prompts import (
     extract_coding_style,
     extract_release_guide,
 )
+from .shutdown import get_shutdown_manager
 
 if TYPE_CHECKING:
+    from .agent_message import MessageProcessor
     from .agent_query import AgentQueryExecutor
     from .logger import TaskLogger
 
 T = TypeVar("T")
+
+# How often the shutdown watcher re-checks for a cancellation request while a
+# coroutine is in flight. Small enough that Ctrl+C (or a durable cross-process
+# stop) interrupts a long streaming turn within a fraction of a second; the
+# wait is on a local Event so a normally-completing turn exits instantly (no
+# lingering thread).
+_SHUTDOWN_POLL_SEC = 0.25
 
 
 def _drive_coroutine_on_new_loop[T](coro: Coroutine[Any, Any, T]) -> T:
@@ -39,6 +48,16 @@ def _drive_coroutine_on_new_loop[T](coro: Coroutine[Any, Any, T]) -> T:
     thread's current loop to ``None`` so a closed loop is never left behind for
     a later ``asyncio.get_event_loop()`` to pick up.
 
+    A background watcher observes the shutdown manager and cancels the in-flight
+    task the moment a shutdown is requested. This is what makes Ctrl+C
+    interruptible mid-query: the signal handler only sets an Event (it must not
+    touch the async loop), and while the task is blocked on a long streaming
+    read nothing else would notice for up to the SDK idle ceiling (~30 min).
+    The watcher cancels from a separate thread via
+    ``loop.call_soon_threadsafe`` (the async-signal-safe way to poke a loop) and
+    the resulting ``CancelledError`` is surfaced as ``KeyboardInterrupt`` so the
+    orchestrator's interrupt path pauses and exits with code 2 promptly.
+
     Args:
         coro: The coroutine to run.
 
@@ -46,17 +65,49 @@ def _drive_coroutine_on_new_loop[T](coro: Coroutine[Any, Any, T]) -> T:
         The result of the coroutine.
 
     Raises:
-        KeyboardInterrupt: Re-raised after cancelling pending tasks.
+        KeyboardInterrupt: On a shutdown request that cancels the task, or a
+            direct Ctrl+C, re-raised after cancelling pending tasks.
     """
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
     main_task = loop.create_task(coro)
 
+    manager = get_shutdown_manager()
+    watcher_done = threading.Event()
+
+    def _cancel_main_task() -> None:
+        # Runs in the loop thread (scheduled via call_soon_threadsafe).
+        if not main_task.done():
+            main_task.cancel()
+
+    def _watch_for_shutdown() -> None:
+        # Wait on the local done-Event so the common (no-interrupt) path exits
+        # the instant the task finishes — no lingering thread. The short poll
+        # bounds how quickly an in-process signal or a durable cross-process
+        # stop is noticed, both surfaced by manager.shutdown_requested.
+        while not watcher_done.wait(timeout=_SHUTDOWN_POLL_SEC):
+            if manager.shutdown_requested:
+                loop.call_soon_threadsafe(_cancel_main_task)
+                return
+
+    watcher = threading.Thread(target=_watch_for_shutdown, name="shutdown-watcher", daemon=True)
+    watcher.start()
+
     try:
         return loop.run_until_complete(main_task)
+    except asyncio.CancelledError as e:
+        # The watcher cancelled the task on a shutdown request. Surface it as
+        # KeyboardInterrupt so the orchestrator's interrupt handling (exit 2)
+        # fires, rather than letting CancelledError escape as an unexpected
+        # error. Guarded on shutdown_requested so an unrelated cancellation
+        # (none exists today) would still propagate faithfully.
+        if manager.shutdown_requested:
+            raise KeyboardInterrupt from e
+        raise
     except KeyboardInterrupt:
-        # Cancel the main task and any pending tasks
+        # Direct Ctrl+C when no shutdown handler is installed (once registered,
+        # our handler suppresses the default KeyboardInterrupt).
         main_task.cancel()
         try:
             # Give tasks a chance to clean up
@@ -75,6 +126,10 @@ def _drive_coroutine_on_new_loop[T](coro: Coroutine[Any, Any, T]) -> T:
         # Re-raise to let caller handle it
         raise
     finally:
+        # Stop the watcher before tearing the loop down so it can never call
+        # call_soon_threadsafe on a closed loop.
+        watcher_done.set()
+        watcher.join(timeout=_SHUTDOWN_POLL_SEC + 1.0)
         try:
             loop.run_until_complete(loop.shutdown_asyncgens())
         except Exception:
@@ -146,6 +201,7 @@ class AgentPhaseExecutor:
         get_model_name_func: Any = None,
         get_agents_func: Any = None,
         process_message_func: Any = None,
+        message_processor: "MessageProcessor | None" = None,
     ):
         """Initialize the phase executor.
 
@@ -156,6 +212,10 @@ class AgentPhaseExecutor:
             get_model_name_func: Function to convert ModelType to API model name.
             get_agents_func: Function to get subagents for working directory.
             process_message_func: Function to process messages from query stream.
+            message_processor: The MessageProcessor whose ``process_message`` is
+                passed as ``process_message_func``. Held so ``run_work_session``
+                can derive session success from the captured terminal
+                ResultMessage. Optional for backward compatibility.
         """
         self.query_executor = query_executor
         self.model = model
@@ -163,6 +223,7 @@ class AgentPhaseExecutor:
         self.get_model_name_func = get_model_name_func
         self.get_agents_func = get_agents_func
         self.process_message_func = process_message_func
+        self.message_processor = message_processor
 
     def run_planning_phase(
         self,
@@ -263,6 +324,11 @@ class AgentPhaseExecutor:
             coding_style=coding_style,
         )
 
+        # Reset terminal-result capture so a prior session's outcome cannot
+        # leak into this session's derived success.
+        if self.message_processor is not None:
+            self.message_processor.reset_result_state()
+
         # Run async query with optional model override
         result = run_async_with_cleanup(
             self.query_executor.run_query(
@@ -275,9 +341,22 @@ class AgentPhaseExecutor:
             )
         )
 
+        # Derive success from the SDK's terminal ResultMessage instead of
+        # assuming it. A budget/turn-capped or mid-execution error leaves
+        # is_error=True; reporting such a half-done session as success would
+        # let the orchestrator mark incomplete work [x]. When no processor is
+        # wired, or the ResultMessage was lost (SDK bug #30333), fall back to
+        # success from the accumulated text.
+        success = True
+        subtype: str | None = None
+        if self.message_processor is not None:
+            success = not self.message_processor.last_result_is_error
+            subtype = self.message_processor.last_result_subtype
+
         return {
             "output": result,
-            "success": True,  # For MVP, assume success
+            "success": success,
+            "subtype": subtype,
             "model_used": (model_override or self.model).value,
         }
 

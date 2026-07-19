@@ -330,6 +330,8 @@ class TestMessageProcessingEdgeCases:
         type(result_message).__name__ = "ResultMessage"
         result_message.result = "Final result"
         result_message.content = None
+        result_message.is_error = False
+        result_message.subtype = "success"
 
         result = agent._message_processor.process_message(result_message, "Should be preserved")
 
@@ -346,6 +348,8 @@ class TestMessageProcessingEdgeCases:
         type(result_message).__name__ = "ResultMessage"
         result_message.result = None
         result_message.content = None
+        result_message.is_error = False
+        result_message.subtype = "success"
 
         result = agent._message_processor.process_message(result_message, "Previous text")
 
@@ -361,6 +365,8 @@ class TestMessageProcessingEdgeCases:
         type(result_message).__name__ = "ResultMessage"
         result_message.result = "Final result"
         result_message.content = None
+        result_message.is_error = False
+        result_message.subtype = "success"
 
         result = agent._message_processor.process_message(result_message, "")
 
@@ -377,6 +383,8 @@ class TestMessageProcessingEdgeCases:
         type(result_message).__name__ = "ResultMessage"
         result_message.result = "VERIFICATION_RESULT: PASS\n\nAll tests passed"
         result_message.content = None
+        result_message.is_error = False
+        result_message.subtype = "success"
 
         result = agent._message_processor.process_message(
             result_message, "Some text without marker"
@@ -384,6 +392,53 @@ class TestMessageProcessingEdgeCases:
 
         # ResultMessage.result is used because it contains verification marker
         assert result == "VERIFICATION_RESULT: PASS\n\nAll tests passed"
+
+    def test_process_message_captures_error_result(self, agent):
+        """An error ResultMessage sets is_error/subtype for success derivation."""
+        result_message = MagicMock()
+        type(result_message).__name__ = "ResultMessage"
+        result_message.is_error = True
+        result_message.subtype = "error_max_budget_usd"
+        result_message.result = None  # error results carry no text
+        result_message.content = None
+        result_message.stop_reason = None
+
+        proc = agent._message_processor
+        proc.reset_result_state()
+        out = proc.process_message(result_message, "half-done work")
+
+        assert proc.last_result_is_error is True
+        assert proc.last_result_subtype == "error_max_budget_usd"
+        # None result must not clobber the accumulated text.
+        assert out == "half-done work"
+
+    def test_process_message_captures_success_result(self, agent):
+        """A successful ResultMessage leaves is_error False and records subtype."""
+        result_message = MagicMock()
+        type(result_message).__name__ = "ResultMessage"
+        result_message.is_error = False
+        result_message.subtype = "success"
+        result_message.result = "final text"
+        result_message.content = None
+        result_message.stop_reason = "end_turn"
+
+        proc = agent._message_processor
+        proc.process_message(result_message, "")
+
+        assert proc.last_result_is_error is False
+        assert proc.last_result_subtype == "success"
+
+    def test_reset_result_state_clears_prior_error(self, agent):
+        """reset_result_state() must clear a prior session's error outcome so it
+        cannot leak into the next query's derived success."""
+        proc = agent._message_processor
+        proc.last_result_is_error = True
+        proc.last_result_subtype = "error_max_turns"
+
+        proc.reset_result_state()
+
+        assert proc.last_result_is_error is False
+        assert proc.last_result_subtype is None
 
 
 # =============================================================================

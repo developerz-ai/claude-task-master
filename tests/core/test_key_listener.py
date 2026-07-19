@@ -165,7 +165,7 @@ class TestKeyListenerStop:
         with patch.object(listener, "_restore_terminal"):
             listener.stop()
 
-        mock_thread.join.assert_called_once_with(timeout=0.1)
+        mock_thread.join.assert_called_once_with(timeout=1.0)
 
     def test_stop_clears_thread_reference(self):
         """Test stop clears the thread reference."""

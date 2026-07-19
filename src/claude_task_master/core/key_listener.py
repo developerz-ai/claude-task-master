@@ -26,6 +26,9 @@ class KeyListener:
         self._thread: threading.Thread | None = None
         self._on_escape = on_escape
         self._original_settings: list | None = None
+        # Protects _original_settings against concurrent access from the
+        # listener thread (_setup_terminal) and stop() (_restore_terminal).
+        self._settings_lock = threading.Lock()
 
     @property
     def escape_pressed(self) -> bool:
@@ -47,12 +50,19 @@ class KeyListener:
         self._thread.start()
 
     def stop(self) -> None:
-        """Stop listening for key presses."""
+        """Stop listening for key presses.
+
+        Sets the stop flag, joins the listener thread (so the thread's
+        finally block runs and clears _original_settings), then restores
+        terminal settings.  Joining before restoring prevents a race where
+        stop() restores settings while the thread's _setup_terminal is still
+        in setcbreak, which would leave the terminal in raw mode.
+        """
         self._running = False
-        self._restore_terminal()
         if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=0.1)
+            self._thread.join(timeout=1.0)
         self._thread = None
+        self._restore_terminal()
 
     def _listen(self) -> None:
         """Listen for key presses (runs in background thread)."""
@@ -65,6 +75,9 @@ class KeyListener:
             # Silently handle any terminal errors
             pass
         finally:
+            # Reset _running so start() is not a no-op after Escape exits
+            # the loop (without stop() ever being called).
+            self._running = False
             self._restore_terminal()
 
     def _setup_terminal(self) -> None:
@@ -74,7 +87,9 @@ class KeyListener:
             import tty
 
             if sys.stdin.isatty():
-                self._original_settings = termios.tcgetattr(sys.stdin)
+                settings = termios.tcgetattr(sys.stdin)
+                with self._settings_lock:
+                    self._original_settings = settings
                 tty.setcbreak(sys.stdin.fileno())
         except ImportError:
             # termios not available (not on Unix)
@@ -85,12 +100,15 @@ class KeyListener:
 
     def _restore_terminal(self) -> None:
         """Restore terminal to original settings."""
+        with self._settings_lock:
+            settings, self._original_settings = self._original_settings, None
+        if settings is None:
+            return
         try:
             import termios
 
-            if self._original_settings and sys.stdin.isatty():
-                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self._original_settings)
-                self._original_settings = None
+            if sys.stdin.isatty():
+                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, settings)
         except ImportError:
             # termios not available (not on Unix)
             pass

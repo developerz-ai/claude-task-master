@@ -30,6 +30,33 @@ class MessageProcessor:
             logger: Optional TaskLogger for capturing tool usage and responses.
         """
         self.logger = logger
+        # Terminal outcome of the most recently processed ResultMessage.
+        # Callers derive session success from this instead of assuming it.
+        # Reset per query via reset_result_state(). Defaults describe "no
+        # terminal result seen yet": is_error=False so a session whose
+        # ResultMessage is lost (SDK bug #30333) is still treated as success
+        # from its accumulated text, matching prior behavior.
+        self.last_result_is_error: bool = False
+        self.last_result_subtype: str | None = None
+        # Actual cost/token data from the most recent ResultMessage.
+        # None until a ResultMessage is processed; stays None when the SDK
+        # omits the field (e.g. error results or older SDK versions).
+        self.last_total_cost_usd: float | None = None
+        self.last_input_tokens: int = 0
+        self.last_output_tokens: int = 0
+
+    def reset_result_state(self) -> None:
+        """Clear captured terminal-result state before a new query.
+
+        A single MessageProcessor is reused across successive queries, so this
+        must run before each query to stop a prior session's error outcome from
+        leaking into the next session's derived success.
+        """
+        self.last_result_is_error = False
+        self.last_result_subtype = None
+        self.last_total_cost_usd = None
+        self.last_input_tokens = 0
+        self.last_output_tokens = 0
 
     def process_message(self, message: Any, result_text: str) -> str:
         """Process a message from the query stream.
@@ -96,6 +123,31 @@ class MessageProcessor:
         # This preserves verification markers (VERIFICATION_RESULT: PASS/FAIL)
         # that may be output in earlier TextBlocks.
         if message_type == "ResultMessage":
+            # Capture the terminal outcome so callers can derive session
+            # success from the SDK instead of hardcoding it. ``is_error`` is
+            # authoritative: it is True for error_max_turns /
+            # error_during_execution / error_max_budget_usd, and for API
+            # errors even when ``subtype`` stays "success".
+            self.last_result_is_error = bool(getattr(message, "is_error", False))
+            self.last_result_subtype = getattr(message, "subtype", None)
+            if self.last_result_is_error:
+                detail = self.last_result_subtype or "unknown"
+                console.warning(f"Session ended with error result: {detail}")
+                if self.logger:
+                    self.logger.log_tool_result("ResultMessage", f"is_error subtype={detail}")
+
+            # Extract actual cost and token usage (SDK v0.1+ ResultMessage fields).
+            # total_cost_usd is the authoritative figure; usage carries per-token
+            # counts for display. Both are optional — older SDK versions or error
+            # results may omit them, so we guard with getattr.
+            cost_usd = getattr(message, "total_cost_usd", None)
+            if cost_usd is not None:
+                self.last_total_cost_usd = float(cost_usd)
+            usage = getattr(message, "usage", None)
+            if usage is not None:
+                self.last_input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
+                self.last_output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
+
             # Log stop_reason for diagnostics (SDK v0.1.46+)
             stop_reason = getattr(message, "stop_reason", None)
             if stop_reason and self.logger:

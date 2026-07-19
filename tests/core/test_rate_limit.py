@@ -1,5 +1,7 @@
 """Tests for rate_limit.py - rate limiting configuration."""
 
+from unittest.mock import patch
+
 import pytest
 from pydantic import ValidationError
 
@@ -112,12 +114,18 @@ class TestRateLimitConfigValidation:
 
 
 class TestRateLimitConfigBackoffCalculation:
-    """Tests for backoff calculation."""
+    """Tests for backoff calculation.
+
+    calculate_backoff() applies decorrelated jitter ([0.5, 1.0] × base).
+    Tests use ``patch("random.random", return_value=1.0)`` to pin the
+    jitter multiplier at 1.0 so assertions match deterministic values.
+    """
 
     def test_calculate_backoff_first_attempt(self):
         """Test backoff time for first retry attempt."""
         config = RateLimitConfig(initial_backoff=1.0, max_backoff=30.0)
-        backoff = config.calculate_backoff(0)
+        with patch("random.random", return_value=1.0):
+            backoff = config.calculate_backoff(0)
         assert backoff == 1.0
 
     def test_calculate_backoff_exponential(self):
@@ -127,11 +135,12 @@ class TestRateLimitConfigBackoffCalculation:
             max_backoff=100.0,
             backoff_multiplier=2.0,
         )
-        assert config.calculate_backoff(0) == 1.0
-        assert config.calculate_backoff(1) == 2.0
-        assert config.calculate_backoff(2) == 4.0
-        assert config.calculate_backoff(3) == 8.0
-        assert config.calculate_backoff(4) == 16.0
+        with patch("random.random", return_value=1.0):
+            assert config.calculate_backoff(0) == 1.0
+            assert config.calculate_backoff(1) == 2.0
+            assert config.calculate_backoff(2) == 4.0
+            assert config.calculate_backoff(3) == 8.0
+            assert config.calculate_backoff(4) == 16.0
 
     def test_calculate_backoff_capped_at_max(self):
         """Test that backoff time is capped at max_backoff."""
@@ -140,12 +149,13 @@ class TestRateLimitConfigBackoffCalculation:
             max_backoff=10.0,
             backoff_multiplier=2.0,
         )
-        assert config.calculate_backoff(0) == 1.0
-        assert config.calculate_backoff(1) == 2.0
-        assert config.calculate_backoff(2) == 4.0
-        assert config.calculate_backoff(3) == 8.0
-        assert config.calculate_backoff(4) == 10.0  # Capped
-        assert config.calculate_backoff(5) == 10.0  # Still capped
+        with patch("random.random", return_value=1.0):
+            assert config.calculate_backoff(0) == 1.0
+            assert config.calculate_backoff(1) == 2.0
+            assert config.calculate_backoff(2) == 4.0
+            assert config.calculate_backoff(3) == 8.0
+            assert config.calculate_backoff(4) == 10.0  # Capped
+            assert config.calculate_backoff(5) == 10.0  # Still capped
 
     def test_calculate_backoff_negative_attempt(self):
         """Test backoff calculation with negative attempt number."""
@@ -159,10 +169,28 @@ class TestRateLimitConfigBackoffCalculation:
             max_backoff=100.0,
             backoff_multiplier=1.5,
         )
-        assert config.calculate_backoff(0) == 2.0
-        assert config.calculate_backoff(1) == 3.0
-        assert config.calculate_backoff(2) == 4.5
-        assert config.calculate_backoff(3) == 6.75
+        with patch("random.random", return_value=1.0):
+            assert config.calculate_backoff(0) == 2.0
+            assert config.calculate_backoff(1) == 3.0
+            assert config.calculate_backoff(2) == 4.5
+            assert config.calculate_backoff(3) == 6.75
+
+    def test_calculate_backoff_jitter_in_range(self):
+        """Test that jitter keeps values within [0.5×base, 1.0×base]."""
+        config = RateLimitConfig(initial_backoff=1.0, max_backoff=30.0)
+        for _ in range(20):
+            backoff = config.calculate_backoff(0)
+            assert 0.5 <= backoff <= 1.0
+
+    def test_calculate_backoff_never_exceeds_max(self):
+        """Test that jitter never pushes value above max_backoff."""
+        config = RateLimitConfig(
+            initial_backoff=1.0,
+            max_backoff=10.0,
+            backoff_multiplier=2.0,
+        )
+        for _ in range(20):
+            assert config.calculate_backoff(10) <= 10.0
 
 
 class TestRateLimitConfigTotalTime:

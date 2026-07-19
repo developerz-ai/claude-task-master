@@ -14,7 +14,8 @@ Exception Hierarchy:
         ├── APITimeoutError - Request timeouts
         ├── APIAuthenticationError - Auth failures
         ├── APIServerError - Server errors (5xx)
-        └── ContentFilterError - Content filtering blocks
+        ├── ContentFilterError - Content filtering blocks
+        └── ModelUnavailableError - Requested model unavailable (fallback-chain recoverable)
 """
 
 
@@ -97,6 +98,20 @@ class APITimeoutError(QueryExecutionError):
         )
 
 
+class StreamStallError(APITimeoutError):
+    """Raised when the SDK stream goes idle beyond the stall timeout.
+
+    A distinct subclass of APITimeoutError so the stream-stall counter can be
+    checked via isinstance() rather than float-equality on the timeout value,
+    which breaks when CLAUDETM_STREAM_IDLE_TIMEOUT_SEC is overridden to the
+    same value used by _classify_api_error's 30.0-second default.
+    """
+
+    def __init__(self, timeout: float, original_error: Exception | None = None):
+        super().__init__(timeout, original_error)
+        self.message = f"Stream idle for {timeout:.0f}s - upstream stall detected"
+
+
 class APIAuthenticationError(QueryExecutionError):
     """Raised when API authentication fails."""
 
@@ -130,6 +145,23 @@ class ContentFilterError(QueryExecutionError):
             "Output blocked by content filtering policy. "
             "Try rephrasing your request or breaking it into smaller tasks. "
             "See: https://privacy.claude.com/en/articles/9205721",
+            original_error,
+        )
+
+
+class ModelUnavailableError(QueryExecutionError):
+    """Raised when the requested model is unavailable (unknown/not-found id).
+
+    This is NOT a transient API-health error and must not be retried against the
+    same model. The query executor recovers by walking the fallback chain
+    (get_fallback_chain) to the next model; it is deliberately excluded from
+    TRANSIENT_ERRORS so it is handled by that dedicated path instead of a plain
+    backoff-retry of the same unavailable model.
+    """
+
+    def __init__(self, original_error: Exception | None = None):
+        super().__init__(
+            "Requested model is unavailable (unknown or not-found model id)",
             original_error,
         )
 
@@ -182,9 +214,11 @@ __all__ = [
     "APIRateLimitError",
     "APIConnectionError",
     "APITimeoutError",
+    "StreamStallError",
     "APIAuthenticationError",
     "APIServerError",
     "ContentFilterError",
+    "ModelUnavailableError",
     "WorkingDirectoryError",
     "ConsecutiveFailuresError",
     "TRANSIENT_ERRORS",

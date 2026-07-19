@@ -165,6 +165,8 @@ class MockClaudeAgentSDK:
         # Yield result message
         mock_result = MagicMock()
         mock_result.result = response
+        mock_result.is_error = False
+        mock_result.subtype = "success"
         type(mock_result).__name__ = "ResultMessage"
 
         yield mock_result
