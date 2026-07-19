@@ -50,61 +50,70 @@ class PRContextManager:
         pr_dir = self.state_manager.get_pr_dir(pr_number)
         ci_dir = pr_dir / "ci"
 
-        # Clear old CI logs to avoid stale data
-        try:
-            if ci_dir.exists():
-                shutil.rmtree(ci_dir)
-        except Exception:
-            pass  # Best effort cleanup
-
         try:
             # Get the latest workflow run for this PR's branch
             pr_status = self.github_client.get_pr_status(pr_number)
 
             # Check if any CI checks failed
+            _failing_conclusions = {"FAILURE", "ERROR", "TIMED_OUT"}
             has_failures = any(
-                (check.get("conclusion") or "").upper() in ("FAILURE", "ERROR")
+                (check.get("conclusion") or "").upper() in _failing_conclusions
                 for check in pr_status.check_details
             )
 
             if not has_failures:
+                # CI is now passing — clear any stale failure logs
+                if ci_dir.exists():
+                    shutil.rmtree(ci_dir)
                 return  # No failures to download
 
-            # Extract run ID from check details URL (more reliable than latest run)
-            run_id = None
-            for check in pr_status.check_details:
+            # Extract run IDs from *failing* checks only (distinct set).
+            # Avoids picking up a passing check's run ID when a different check fails.
+            failing_checks = [
+                check
+                for check in pr_status.check_details
+                if (check.get("conclusion") or "").upper() in _failing_conclusions
+            ]
+            run_ids: set[int] = set()
+            for check in failing_checks:
                 details_url = check.get("url", "")
-                # Extract run ID from URL like: .../actions/runs/123456/job/789
+                # URL format: .../actions/runs/123456/job/789
                 if "/runs/" in details_url:
                     try:
-                        run_id = int(details_url.split("/runs/")[1].split("/")[0])
-                        console.detail(
-                            f"Extracted run ID {run_id} from check: {check.get('name', 'unknown')}"
-                        )
-                        break
+                        run_ids.add(int(details_url.split("/runs/")[1].split("/")[0]))
                     except (IndexError, ValueError):
                         continue
 
-            if not run_id:
+            if not run_ids:
                 # Log available check URLs for debugging
                 check_urls = [
-                    f"{c.get('name', 'unknown')}: {c.get('url', 'N/A')}"
-                    for c in pr_status.check_details[:3]
+                    f"{c.get('name', 'unknown')}: {c.get('url', 'N/A')}" for c in failing_checks[:3]
                 ]
                 console.warning(
-                    f"Could not extract run ID from check details. "
-                    f"Sample checks: {', '.join(check_urls)}"
+                    f"Could not extract run ID from failing checks. "
+                    f"Sample failing checks: {', '.join(check_urls)}"
                 )
                 return
+
+            run_id = max(run_ids)  # Use the most-recent run among failing ones
+            console.detail(
+                f"Extracted run ID {run_id} from failing checks (candidates: {sorted(run_ids)})"
+            )
 
             # Get repository info for CILogDownloader
             console.detail("Getting repository info via gh CLI...")
             repo = self.github_client._get_repo_info()
             console.detail(f"Repository: {repo}")
 
+            downloader = CILogDownloader(repo=repo, timeout=60)
+
             # Download failed job logs using CILogDownloader
             console.detail(f"Downloading CI logs for run {run_id} from {repo}...")
-            downloader = CILogDownloader(repo=repo, timeout=60)
+
+            # Clear old CI logs only after we have confirmed run_id and repo —
+            # preserves existing data if the status/repo calls fail above.
+            if ci_dir.exists():
+                shutil.rmtree(ci_dir)
             ci_dir.mkdir(parents=True, exist_ok=True)
 
             # Download and save logs chunked (20KB per file ~5K tokens)
@@ -154,31 +163,27 @@ class PRContextManager:
         if _also_save_ci:
             self.save_ci_failures(pr_number, _also_save_comments=False)
 
-        # Clear old comments to avoid stale data
-        try:
-            pr_dir = self.state_manager.get_pr_dir(pr_number)
-            comments_dir = pr_dir / "comments"
-            if comments_dir.exists():
-                shutil.rmtree(comments_dir)
-            # Also remove old summary file
-            summary_file = pr_dir / "comments_summary.txt"
-            if summary_file.exists():
-                summary_file.unlink()
-        except Exception:
-            pass  # Best effort cleanup
-
         try:
             # Get repository info
             repo_info = self.github_client._get_repo_info()
+            pr_dir = self.state_manager.get_pr_dir(pr_number)
 
-            # Use REST API to get ALL PR review comments (like tstc)
+            # Use REST API to get ALL PR review comments (paginated).
+            # --paginate concatenates pages; --jq '.[]' emits one object per line (NDJSON).
             result = self.github_client._run_gh_command(
-                ["gh", "api", "--paginate", f"repos/{repo_info}/pulls/{pr_number}/comments"],
+                [
+                    "gh",
+                    "api",
+                    "--paginate",
+                    "--jq",
+                    ".[]",
+                    f"repos/{repo_info}/pulls/{pr_number}/comments",
+                ],
                 timeout=60,
             )
-            all_comments = json.loads(result.stdout)
+            all_comments = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
 
-            # Get resolved status from GraphQL
+            # Get resolved status from GraphQL (paginated)
             resolved_map = self._get_resolved_status_map(repo_info, pr_number)
 
             # Get already-addressed comment IDs to skip them
@@ -219,6 +224,15 @@ class PRContextManager:
                     }
                 )
 
+            # Clear old comments only after a successful fetch — preserves
+            # existing data if any API call above fails.
+            comments_dir = pr_dir / "comments"
+            if comments_dir.exists():
+                shutil.rmtree(comments_dir)
+            summary_file = pr_dir / "comments_summary.txt"
+            if summary_file.exists():
+                summary_file.unlink()
+
             # Save to files
             self.state_manager.save_pr_comments(pr_number, comments)
             return len(comments)
@@ -230,19 +244,24 @@ class PRContextManager:
     def _get_resolved_status_map(self, repo_info: str, pr_number: int) -> dict[int, bool]:
         """Get resolved status for all comments from GraphQL.
 
-        Returns a map of comment_id -> is_resolved.
-        Also stores thread_id for each comment for later lookup.
+        Paginates through all review threads to handle PRs with > 100 threads.
+
+        Returns:
+            Map of comment_id -> is_resolved.
+            Also populates ``self._thread_info`` for thread-ID lookups.
         """
         owner, repo = repo_info.split("/")
 
         # Store thread info: comment_id -> (is_resolved, thread_id)
         self._thread_info: dict[int, tuple[bool, str]] = {}
 
+        # $cursor is nullable; omit it on the first page (gh cli sends null).
         query = """
-        query($owner: String!, $repo: String!, $pr: Int!) {
+        query($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
           repository(owner: $owner, name: $repo) {
             pullRequest(number: $pr) {
-              reviewThreads(first: 100) {
+              reviewThreads(first: 100, after: $cursor) {
+                pageInfo { hasNextPage endCursor }
                 nodes {
                   id
                   isResolved
@@ -258,9 +277,12 @@ class PRContextManager:
         }
         """
 
+        resolved_map: dict[int, bool] = {}
+        cursor: str | None = None
+
         try:
-            result = self.github_client._run_gh_command(
-                [
+            while True:
+                cmd = [
                     "gh",
                     "api",
                     "graphql",
@@ -272,26 +294,35 @@ class PRContextManager:
                     f"repo={repo}",
                     "-F",
                     f"pr={pr_number}",
-                ],
-                timeout=30,
-            )
+                ]
+                if cursor:
+                    cmd.extend(["-f", f"cursor={cursor}"])
 
-            data = json.loads(result.stdout)
-            threads = data["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
+                result = self.github_client._run_gh_command(cmd, timeout=30)
+                data = json.loads(result.stdout)
 
-            resolved_map: dict[int, bool] = {}
-            for thread in threads:
-                thread_id = thread.get("id", "")
-                is_resolved = thread.get("isResolved", False)
-                for comment in thread.get("comments", {}).get("nodes", []):
-                    db_id = comment.get("databaseId")
-                    if db_id:
-                        resolved_map[db_id] = is_resolved
-                        self._thread_info[db_id] = (is_resolved, thread_id)
+                pr = data["data"]["repository"]["pullRequest"]
+                threads_data = pr.get("reviewThreads", {})
+                threads = threads_data.get("nodes", [])
+                page_info = threads_data.get("pageInfo", {})
 
-            return resolved_map
+                for thread in threads:
+                    thread_id = thread.get("id", "")
+                    is_resolved = thread.get("isResolved", False)
+                    for comment in thread.get("comments", {}).get("nodes", []):
+                        db_id = comment.get("databaseId")
+                        if db_id:
+                            resolved_map[db_id] = is_resolved
+                            self._thread_info[db_id] = (is_resolved, thread_id)
+
+                if not page_info.get("hasNextPage"):
+                    break
+                cursor = page_info.get("endCursor")
+
         except Exception:
-            return {}
+            pass
+
+        return resolved_map
 
     def _get_thread_id_for_comment(
         self, comment_id: int, resolved_map: dict[int, bool]
@@ -508,6 +539,8 @@ class PRContextManager:
     def _get_resolved_thread_ids(self, pr_number: int) -> set[str]:
         """Get IDs of threads that are already resolved on GitHub.
 
+        Paginates through all review threads to handle PRs with > 100 threads.
+
         Args:
             pr_number: The PR number.
 
@@ -518,11 +551,13 @@ class PRContextManager:
             repo_info = self.github_client._get_repo_info()
             owner, repo = repo_info.split("/")
 
+            # $cursor is nullable; omit it on the first page.
             query = """
-            query($owner: String!, $repo: String!, $pr: Int!) {
+            query($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
               repository(owner: $owner, name: $repo) {
                 pullRequest(number: $pr) {
-                  reviewThreads(first: 100) {
+                  reviewThreads(first: 100, after: $cursor) {
+                    pageInfo { hasNextPage endCursor }
                     nodes {
                       id
                       isResolved
@@ -533,8 +568,11 @@ class PRContextManager:
             }
             """
 
-            result = self.github_client._run_gh_command(
-                [
+            resolved_ids: set[str] = set()
+            cursor: str | None = None
+
+            while True:
+                cmd = [
                     "gh",
                     "api",
                     "graphql",
@@ -546,14 +584,27 @@ class PRContextManager:
                     f"repo={repo}",
                     "-F",
                     f"pr={pr_number}",
-                ],
-                timeout=30,
-            )
+                ]
+                if cursor:
+                    cmd.extend(["-f", f"cursor={cursor}"])
 
-            data = json.loads(result.stdout)
-            threads = data["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
+                result = self.github_client._run_gh_command(cmd, timeout=30)
+                data = json.loads(result.stdout)
 
-            return {t["id"] for t in threads if t["isResolved"]}
+                pr = data["data"]["repository"]["pullRequest"]
+                threads_data = pr.get("reviewThreads", {})
+                threads = threads_data.get("nodes", [])
+                page_info = threads_data.get("pageInfo", {})
+
+                for t in threads:
+                    if t.get("isResolved"):
+                        resolved_ids.add(t["id"])
+
+                if not page_info.get("hasNextPage"):
+                    break
+                cursor = page_info.get("endCursor")
+
+            return resolved_ids
 
         except Exception as e:
             console.warning(f"Could not fetch resolved threads: {e}")

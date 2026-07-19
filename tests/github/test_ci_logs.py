@@ -22,7 +22,7 @@ def ci_downloader():
 
 @pytest.fixture
 def sample_jobs_response():
-    """Sample API response for jobs list."""
+    """Sample API response for jobs list (raw dict form)."""
     return {
         "jobs": [
             {
@@ -48,6 +48,15 @@ def sample_jobs_response():
 
 
 @pytest.fixture
+def sample_jobs_ndjson(sample_jobs_response):
+    """NDJSON encoding of sample_jobs_response (one job object per line).
+
+    Matches the output of ``gh api --paginate --jq '.jobs[]'``.
+    """
+    return "\n".join(json.dumps(j) for j in sample_jobs_response["jobs"])
+
+
+@pytest.fixture
 def sample_log_content():
     """Sample CI log content with errors."""
     return """2026-02-07T10:00:00Z Setup environment
@@ -69,11 +78,17 @@ class TestGetFailedJobs:
     """Tests for getting failed jobs."""
 
     def test_get_failed_jobs_success(self, ci_downloader, sample_jobs_response):
-        """Test successful retrieval of failed jobs (excludes cancelled)."""
+        """Test successful retrieval of failed jobs (excludes cancelled).
+
+        The API call now uses --paginate --jq '.jobs[]' so stdout is NDJSON
+        (one JSON object per line).
+        """
+        # Build NDJSON output: one job object per line
+        ndjson = "\n".join(json.dumps(j) for j in sample_jobs_response["jobs"])
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0,
-                stdout=json.dumps(sample_jobs_response),
+                stdout=ndjson,
                 stderr="",
             )
 
@@ -87,21 +102,13 @@ class TestGetFailedJobs:
 
     def test_get_failed_jobs_no_failures(self, ci_downloader):
         """Test when no jobs failed."""
-        response = {
-            "jobs": [
-                {
-                    "id": 1,
-                    "name": "Test",
-                    "status": "completed",
-                    "conclusion": "success",
-                }
-            ]
-        }
+        jobs = [{"id": 1, "name": "Test", "status": "completed", "conclusion": "success"}]
+        ndjson = "\n".join(json.dumps(j) for j in jobs)
 
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0,
-                stdout=json.dumps(response),
+                stdout=ndjson,
                 stderr="",
             )
 
@@ -131,21 +138,13 @@ class TestGetFailedJobs:
 
     def test_get_failed_jobs_includes_timed_out(self, ci_downloader):
         """Test that timed_out jobs are included in failed jobs."""
-        response = {
-            "jobs": [
-                {
-                    "id": 1,
-                    "name": "LongTest",
-                    "status": "completed",
-                    "conclusion": "timed_out",
-                }
-            ]
-        }
+        jobs = [{"id": 1, "name": "LongTest", "status": "completed", "conclusion": "timed_out"}]
+        ndjson = "\n".join(json.dumps(j) for j in jobs)
 
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0,
-                stdout=json.dumps(response),
+                stdout=ndjson,
                 stderr="",
             )
 
@@ -329,17 +328,27 @@ Line 2
         assert block.context_after == 0  # No lines after
 
     def test_is_error_line_various_formats(self, ci_downloader):
-        """Test error detection with various formats."""
+        """Test error detection with various formats.
+
+        Word-bounded patterns prevent false positives from substrings like
+        FAILSAFE while still catching FAILED and Failed.
+        """
+        # --- positive matches ---
         assert ci_downloader._is_error_line("##[error]Something")
+        assert ci_downloader._is_error_line("2024-01-01T00:00:00Z ##[error]timestamped")
         assert ci_downloader._is_error_line("Exit status 1")
         assert ci_downloader._is_error_line("Error: something failed")
         assert ci_downloader._is_error_line("error: lowercase")
         assert ci_downloader._is_error_line("ERROR: uppercase")
-        assert ci_downloader._is_error_line("FAIL some test")
+        assert ci_downloader._is_error_line("FAILED tests/test_main.py::test_foo")
         assert ci_downloader._is_error_line("Failed to build")
         assert ci_downloader._is_error_line("AssertionError: expected X")
+        # --- negative matches (no false positives) ---
         assert not ci_downloader._is_error_line("Success")
         assert not ci_downloader._is_error_line("Normal log line")
+        # Bare FAIL (not word-bounded FAILED) should NOT trigger
+        assert not ci_downloader._is_error_line("FAILSAFE triggered")
+        assert not ci_downloader._is_error_line("prefixed_FAIL_suffix")
 
 
 # =============================================================================
@@ -351,28 +360,16 @@ class TestDownloadFailedRunLogs:
     """Tests for downloading all failed run logs."""
 
     def test_download_failed_run_logs_success(
-        self, ci_downloader, sample_jobs_response, sample_log_content, tmp_path
+        self, ci_downloader, sample_jobs_ndjson, sample_log_content, tmp_path
     ):
         """Test successful download of all failed job logs."""
         with patch("subprocess.run") as mock_run:
-            # First call: get jobs
+            # First call: get jobs (NDJSON via --paginate --jq '.jobs[]')
             # Subsequent calls: download logs
             mock_run.side_effect = [
-                MagicMock(
-                    returncode=0,
-                    stdout=json.dumps(sample_jobs_response),
-                    stderr="",
-                ),
-                MagicMock(
-                    returncode=0,
-                    stdout=sample_log_content.encode("utf-8"),
-                    stderr=b"",
-                ),
-                MagicMock(
-                    returncode=0,
-                    stdout=sample_log_content.encode("utf-8"),
-                    stderr=b"",
-                ),
+                MagicMock(returncode=0, stdout=sample_jobs_ndjson, stderr=""),
+                MagicMock(returncode=0, stdout=sample_log_content.encode("utf-8"), stderr=b""),
+                MagicMock(returncode=0, stdout=sample_log_content.encode("utf-8"), stderr=b""),
             ]
 
             logs = ci_downloader.download_failed_run_logs(run_id=123, output_dir=tmp_path)
@@ -390,21 +387,13 @@ class TestDownloadFailedRunLogs:
             assert (lint_dir / "1.log").exists()
 
     def test_download_failed_run_logs_no_output_dir(
-        self, ci_downloader, sample_jobs_response, sample_log_content
+        self, ci_downloader, sample_jobs_ndjson, sample_log_content
     ):
         """Test download without saving to files."""
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                MagicMock(
-                    returncode=0,
-                    stdout=json.dumps(sample_jobs_response),
-                    stderr="",
-                ),
-                MagicMock(
-                    returncode=0,
-                    stdout=sample_log_content.encode("utf-8"),
-                    stderr=b"",
-                ),
+                MagicMock(returncode=0, stdout=sample_jobs_ndjson, stderr=""),
+                MagicMock(returncode=0, stdout=sample_log_content.encode("utf-8"), stderr=b""),
             ]
 
             logs = ci_downloader.download_failed_run_logs(run_id=123)
@@ -415,28 +404,19 @@ class TestDownloadFailedRunLogs:
 
     def test_download_failed_run_logs_no_failures(self, ci_downloader):
         """Test when no jobs failed."""
-        response: dict[str, list] = {"jobs": []}
-
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0,
-                stdout=json.dumps(response),
-                stderr="",
-            )
+            # Empty NDJSON (no lines)
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
             logs = ci_downloader.download_failed_run_logs(run_id=123)
 
             assert len(logs) == 0
 
-    def test_download_failed_run_logs_all_downloads_fail(self, ci_downloader, sample_jobs_response):
+    def test_download_failed_run_logs_all_downloads_fail(self, ci_downloader, sample_jobs_ndjson):
         """Test when all job log downloads fail."""
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                MagicMock(
-                    returncode=0,
-                    stdout=json.dumps(sample_jobs_response),
-                    stderr="",
-                ),
+                MagicMock(returncode=0, stdout=sample_jobs_ndjson, stderr=""),
                 subprocess.CalledProcessError(returncode=1, cmd="gh api", stderr=b"Network error"),
             ]
 
@@ -448,29 +428,13 @@ class TestDownloadFailedRunLogs:
         self, ci_downloader, sample_log_content, tmp_path
     ):
         """Test that job names are sanitized for filenames."""
-        response = {
-            "jobs": [
-                {
-                    "id": 1,
-                    "name": "Test / Linux",
-                    "status": "completed",
-                    "conclusion": "failure",
-                }
-            ]
-        }
+        job = {"id": 1, "name": "Test / Linux", "status": "completed", "conclusion": "failure"}
+        ndjson = json.dumps(job)
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                MagicMock(
-                    returncode=0,
-                    stdout=json.dumps(response),
-                    stderr="",
-                ),
-                MagicMock(
-                    returncode=0,
-                    stdout=sample_log_content.encode("utf-8"),
-                    stderr=b"",
-                ),
+                MagicMock(returncode=0, stdout=ndjson, stderr=""),
+                MagicMock(returncode=0, stdout=sample_log_content.encode("utf-8"), stderr=b""),
             ]
 
             ci_downloader.download_failed_run_logs(run_id=123, output_dir=tmp_path)
@@ -481,7 +445,7 @@ class TestDownloadFailedRunLogs:
             assert (sanitized_dir / "1.log").exists()
 
     def test_download_failed_run_logs_chunks_large_logs(
-        self, ci_downloader, sample_jobs_response, tmp_path
+        self, ci_downloader, sample_jobs_ndjson, tmp_path
     ):
         """Test that large logs are split into chunks by character count."""
         # Create log with ~60KB content (should split into 3 files with max 20KB each)
@@ -490,17 +454,9 @@ class TestDownloadFailedRunLogs:
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                MagicMock(
-                    returncode=0,
-                    stdout=json.dumps(sample_jobs_response),
-                    stderr="",
-                ),
+                MagicMock(returncode=0, stdout=sample_jobs_ndjson, stderr=""),
                 # Only one log download now (Build is cancelled, excluded)
-                MagicMock(
-                    returncode=0,
-                    stdout=large_log.encode("utf-8"),
-                    stderr=b"",
-                ),
+                MagicMock(returncode=0, stdout=large_log.encode("utf-8"), stderr=b""),
             ]
 
             ci_downloader.download_failed_run_logs(
@@ -559,27 +515,13 @@ class TestDownloadFailedRunLogs:
 class TestGetErrorSummary:
     """Tests for error summary generation."""
 
-    def test_get_error_summary_success(
-        self, ci_downloader, sample_jobs_response, sample_log_content
-    ):
+    def test_get_error_summary_success(self, ci_downloader, sample_jobs_ndjson, sample_log_content):
         """Test error summary generation."""
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                MagicMock(
-                    returncode=0,
-                    stdout=json.dumps(sample_jobs_response),
-                    stderr="",
-                ),
-                MagicMock(
-                    returncode=0,
-                    stdout=sample_log_content.encode("utf-8"),
-                    stderr=b"",
-                ),
-                MagicMock(
-                    returncode=0,
-                    stdout=sample_log_content.encode("utf-8"),
-                    stderr=b"",
-                ),
+                MagicMock(returncode=0, stdout=sample_jobs_ndjson, stderr=""),
+                MagicMock(returncode=0, stdout=sample_log_content.encode("utf-8"), stderr=b""),
+                MagicMock(returncode=0, stdout=sample_log_content.encode("utf-8"), stderr=b""),
             ]
 
             summary = ci_downloader.get_error_summary(run_id=123, max_errors_per_job=3)
@@ -591,41 +533,24 @@ class TestGetErrorSummary:
 
     def test_get_error_summary_no_failures(self, ci_downloader):
         """Test summary when no failures."""
-        response: dict[str, list] = {"jobs": []}
-
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0,
-                stdout=json.dumps(response),
-                stderr="",
-            )
+            # Empty NDJSON
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
             summary = ci_downloader.get_error_summary(run_id=123)
 
             assert "No failed jobs found" in summary
 
-    def test_get_error_summary_limits_errors(self, ci_downloader, sample_jobs_response):
+    def test_get_error_summary_limits_errors(self, ci_downloader, sample_jobs_ndjson):
         """Test that summary limits number of errors shown."""
         # Log with many errors
         logs_with_many_errors = "\n".join([f"##[error]Error {i}" for i in range(10)])
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                MagicMock(
-                    returncode=0,
-                    stdout=json.dumps(sample_jobs_response),
-                    stderr="",
-                ),
-                MagicMock(
-                    returncode=0,
-                    stdout=logs_with_many_errors.encode("utf-8"),
-                    stderr=b"",
-                ),
-                MagicMock(
-                    returncode=0,
-                    stdout=logs_with_many_errors.encode("utf-8"),
-                    stderr=b"",
-                ),
+                MagicMock(returncode=0, stdout=sample_jobs_ndjson, stderr=""),
+                MagicMock(returncode=0, stdout=logs_with_many_errors.encode("utf-8"), stderr=b""),
+                MagicMock(returncode=0, stdout=logs_with_many_errors.encode("utf-8"), stderr=b""),
             ]
 
             summary = ci_downloader.get_error_summary(run_id=123, max_errors_per_job=2)

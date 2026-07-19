@@ -265,12 +265,20 @@ class PROperationsMixin:
         # Get repository info
         repo_info = self._get_repo_info()
 
-        # Use REST API to get ALL PR review comments (like tstc)
+        # Use REST API to get ALL PR review comments (like tstc).
+        # --paginate concatenates pages; --jq '.[]' emits one object per line (NDJSON).
         result = self._run_gh_command(
-            ["gh", "api", "--paginate", f"repos/{repo_info}/pulls/{pr_number}/comments"],
+            [
+                "gh",
+                "api",
+                "--paginate",
+                "--jq",
+                ".[]",
+                f"repos/{repo_info}/pulls/{pr_number}/comments",
+            ],
             timeout=60,
         )
-        all_comments = json.loads(result.stdout)
+        all_comments = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
 
         # Get resolved status from GraphQL
         resolved_map = _get_comment_resolved_map(self, repo_info, pr_number)
@@ -284,15 +292,21 @@ def _get_comment_resolved_map(
 ) -> dict[int, bool]:
     """Get resolved status for all comments from GraphQL.
 
-    Returns a map of comment_id (databaseId) -> is_resolved.
+    Paginates through all review threads to handle PRs with > 100 threads.
+
+    Returns:
+        Map of comment_id (databaseId) -> is_resolved.
     """
     owner, repo = repo_info.split("/")
 
+    # $cursor is a nullable String; omit the variable on the first page
+    # (gh cli treats an undefined nullable variable as null).
     query = """
-    query($owner: String!, $repo: String!, $pr: Int!) {
+    query($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
       repository(owner: $owner, name: $repo) {
         pullRequest(number: $pr) {
-          reviewThreads(first: 100) {
+          reviewThreads(first: 100, after: $cursor) {
+            pageInfo { hasNextPage endCursor }
             nodes {
               isResolved
               comments(first: 100) {
@@ -307,9 +321,12 @@ def _get_comment_resolved_map(
     }
     """
 
+    resolved_map: dict[int, bool] = {}
+    cursor: str | None = None
+
     try:
-        result = client._run_gh_command(
-            [
+        while True:
+            cmd = [
                 "gh",
                 "api",
                 "graphql",
@@ -321,30 +338,37 @@ def _get_comment_resolved_map(
                 f"repo={repo}",
                 "-F",
                 f"pr={pr_number}",
-            ],
-            timeout=30,
-        )
+            ]
+            if cursor:
+                cmd.extend(["-f", f"cursor={cursor}"])
 
-        data = json.loads(result.stdout)
+            result = client._run_gh_command(cmd, timeout=30)
+            data = json.loads(result.stdout)
 
-        # Handle GraphQL errors gracefully
-        if "errors" in data or data.get("data") is None:
-            return {}
+            # Handle GraphQL errors gracefully
+            if "errors" in data or data.get("data") is None:
+                break
 
-        pr = data["data"].get("repository", {}).get("pullRequest", {})
-        threads = pr.get("reviewThreads", {}).get("nodes", [])
+            pr = data["data"].get("repository", {}).get("pullRequest", {})
+            threads_obj = pr.get("reviewThreads", {})
+            threads = threads_obj.get("nodes", [])
+            page_info = threads_obj.get("pageInfo", {})
 
-        resolved_map: dict[int, bool] = {}
-        for thread in threads:
-            is_resolved = thread.get("isResolved", False)
-            for comment in thread.get("comments", {}).get("nodes", []):
-                db_id = comment.get("databaseId")
-                if db_id:
-                    resolved_map[db_id] = is_resolved
+            for thread in threads:
+                is_resolved = thread.get("isResolved", False)
+                for comment in thread.get("comments", {}).get("nodes", []):
+                    db_id = comment.get("databaseId")
+                    if db_id:
+                        resolved_map[db_id] = is_resolved
 
-        return resolved_map
+            if not page_info.get("hasNextPage"):
+                break
+            cursor = page_info.get("endCursor")
+
     except (json.JSONDecodeError, KeyError, subprocess.CalledProcessError):
-        return {}
+        pass
+
+    return resolved_map
 
 
 def _build_pr_status_query() -> str:
@@ -366,7 +390,8 @@ def _build_pr_status_query() -> str:
               commit {
                 statusCheckRollup {
                   state
-                  contexts(first: 50) {
+                  contexts(first: 100) {
+                    pageInfo { hasNextPage }
                     nodes {
                       __typename
                       ... on CheckRun {
@@ -387,9 +412,10 @@ def _build_pr_status_query() -> str:
             }
           }
           reviewThreads(first: 100) {
+            pageInfo { hasNextPage }
             nodes {
               isResolved
-              comments(first: 10) {
+              comments(first: 100) {
                 nodes {
                   author { login }
                   body
@@ -415,6 +441,10 @@ def _parse_pr_status_response(pr_number: int, pr_data: dict[str, Any]) -> PRStat
     Returns:
         Parsed PRStatus object.
     """
+    import logging
+
+    _log = logging.getLogger(__name__)
+
     # Parse CI status
     ci_state = "PENDING"
     check_details: list[dict[str, Any]] = []
@@ -425,14 +455,31 @@ def _parse_pr_status_response(pr_number: int, pr_data: dict[str, Any]) -> PRStat
         rollup = commit.get("statusCheckRollup")
         if rollup:
             ci_state = rollup.get("state", "PENDING")
-            contexts = rollup.get("contexts", {}).get("nodes", [])
-            check_details = _parse_check_contexts(contexts)
+            contexts_obj = rollup.get("contexts", {})
+            if contexts_obj.get("pageInfo", {}).get("hasNextPage"):
+                _log.warning(
+                    "PR %d has >100 CI check contexts; some checks may not be reflected",
+                    pr_number,
+                )
+            context_nodes = contexts_obj.get("nodes", [])
+            check_details = _parse_check_contexts(context_nodes)
 
     # Count review threads
-    threads = pr_data["reviewThreads"]["nodes"]
+    threads_obj = pr_data.get("reviewThreads", {})
+    threads_has_next = threads_obj.get("pageInfo", {}).get("hasNextPage", False)
+    threads = threads_obj.get("nodes", [])
     total_threads = len(threads)
     unresolved = sum(1 for thread in threads if not thread["isResolved"])
     resolved = total_threads - unresolved
+
+    # Refuse to report "0 unresolved" when there are pages we haven't fetched —
+    # there may be unresolved threads beyond the first 100.
+    if threads_has_next and unresolved == 0:
+        _log.warning(
+            "PR %d has >100 review threads; unresolved count is a lower bound",
+            pr_number,
+        )
+        unresolved = 1  # Cannot confirm zero with incomplete data
 
     # Count check statuses (GitHub API returns uppercase values)
     checks_passed = sum(

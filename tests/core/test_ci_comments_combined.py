@@ -76,7 +76,7 @@ class TestSaveCIFailuresAlsoSavesComments:
         # save_pr_comments REST + GraphQL calls go through _run_gh_command.
         mock_github_client._get_repo_info.return_value = "owner/repo"
         rest_result = MagicMock()
-        rest_result.stdout = json.dumps([])  # no review comments
+        rest_result.stdout = ""  # no review comments (empty NDJSON)
         graphql_result = MagicMock()
         graphql_result.stdout = json.dumps(
             {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": []}}}}}
@@ -85,19 +85,15 @@ class TestSaveCIFailuresAlsoSavesComments:
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                # CILogDownloader -> gh api .../jobs
+                # CILogDownloader -> gh api --paginate --jq .jobs[] .../jobs (NDJSON)
                 MagicMock(
                     returncode=0,
                     stdout=json.dumps(
                         {
-                            "jobs": [
-                                {
-                                    "id": 1,
-                                    "name": "test",
-                                    "status": "completed",
-                                    "conclusion": "failure",
-                                }
-                            ]
+                            "id": 1,
+                            "name": "test",
+                            "status": "completed",
+                            "conclusion": "failure",
                         }
                     ),
                     stderr="",
@@ -133,7 +129,7 @@ class TestSaveCIFailuresAlsoSavesComments:
         # Repo info + comments go through github_client; CILogDownloader uses subprocess directly.
         mock_github_client._get_repo_info.return_value = "owner/repo"
         rest_result = MagicMock()
-        rest_result.stdout = json.dumps([])
+        rest_result.stdout = ""  # no review comments (empty NDJSON)
         graphql_result = MagicMock()
         graphql_result.stdout = json.dumps(
             {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": []}}}}}
@@ -142,19 +138,15 @@ class TestSaveCIFailuresAlsoSavesComments:
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                # CILogDownloader -> gh api .../jobs
+                # CILogDownloader -> gh api --paginate --jq .jobs[] .../jobs (NDJSON)
                 MagicMock(
                     returncode=0,
                     stdout=json.dumps(
                         {
-                            "jobs": [
-                                {
-                                    "id": 1,
-                                    "name": "test",
-                                    "status": "completed",
-                                    "conclusion": "failure",
-                                }
-                            ]
+                            "id": 1,
+                            "name": "test",
+                            "status": "completed",
+                            "conclusion": "failure",
                         }
                     ),
                     stderr="",
@@ -210,7 +202,7 @@ class TestSavePRCommentsAlsoSavesCI:
         # Repo info + comments go through github_client; CILogDownloader uses subprocess directly.
         mock_github_client._get_repo_info.return_value = "owner/repo"
         rest_result = MagicMock()
-        rest_result.stdout = json.dumps([])
+        rest_result.stdout = ""  # no review comments (empty NDJSON)
         graphql_result = MagicMock()
         graphql_result.stdout = json.dumps(
             {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": []}}}}}
@@ -219,19 +211,15 @@ class TestSavePRCommentsAlsoSavesCI:
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                # CILogDownloader -> gh api .../jobs (for save_ci_failures path)
+                # CILogDownloader -> gh api --paginate --jq .jobs[] .../jobs (NDJSON)
                 MagicMock(
                     returncode=0,
                     stdout=json.dumps(
                         {
-                            "jobs": [
-                                {
-                                    "id": 1,
-                                    "name": "test",
-                                    "status": "completed",
-                                    "conclusion": "failure",
-                                }
-                            ]
+                            "id": 1,
+                            "name": "test",
+                            "status": "completed",
+                            "conclusion": "failure",
                         }
                     ),
                     stderr="",
@@ -255,7 +243,7 @@ class TestSavePRCommentsAlsoSavesCI:
         # All gh calls go through github_client (no subprocess for comments path)
         mock_github_client._get_repo_info.return_value = "owner/repo"
         rest_result = MagicMock()
-        rest_result.stdout = json.dumps([])
+        rest_result.stdout = ""  # no review comments (empty NDJSON)
         graphql_result = MagicMock()
         graphql_result.stdout = json.dumps(
             {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": []}}}}}
@@ -551,63 +539,148 @@ class TestWorkflowStagesCombinedHandling:
 class TestClearingOldData:
     """Tests that old CI and comment data is cleared when saving new data."""
 
-    def test_save_ci_failures_clears_old_ci(
-        self, pr_context: PRContextManager, state_manager: StateManager
+    def test_save_ci_failures_clears_old_ci_after_successful_fetch(
+        self,
+        pr_context: PRContextManager,
+        state_manager: StateManager,
+        mock_github_client: MagicMock,
     ) -> None:
-        """Test that save_ci_failures clears old CI logs."""
-        # Create old CI file
+        """Test that save_ci_failures clears stale CI logs after a successful fetch.
+
+        Clearing happens AFTER the fetch succeeds so existing data is
+        preserved if the GitHub API call fails (new "clear-after" semantics).
+        """
+        # Create stale CI file
         pr_dir = state_manager.get_pr_dir(123)
         ci_dir = pr_dir / "ci"
         ci_dir.mkdir(parents=True, exist_ok=True)
         old_file = ci_dir / "old_failure.txt"
         old_file.write_text("Old failure")
 
+        # PR status has a failing check WITH a URL containing a valid run ID
+        mock_github_client.get_pr_status.return_value = MagicMock(
+            check_details=[
+                {
+                    "name": "test",
+                    "conclusion": "FAILURE",
+                    "url": "https://github.com/owner/repo/actions/runs/99999/job/1",
+                }
+            ]
+        )
+        mock_github_client._get_repo_info.return_value = "owner/repo"
+
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                MagicMock(returncode=0, stdout="owner/repo\n"),
+                # CILogDownloader -> gh api --paginate --jq .jobs[] (NDJSON)
                 MagicMock(
                     returncode=0,
-                    stdout='{"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": []}}}}}',
+                    stdout=json.dumps(
+                        {"id": 1, "name": "test", "status": "completed", "conclusion": "failure"}
+                    ),
+                    stderr="",
                 ),
+                # CILogDownloader -> gh api .../jobs/1/logs
+                MagicMock(returncode=0, stdout=b"##[error]Build failed", stderr=b""),
             ]
 
-            pr_context.save_ci_failures(123)
+            pr_context.save_ci_failures(123, _also_save_comments=False)
 
-            # Old file should be gone (directory recreated)
+            # Old file should be gone — cleared before writing new logs
             assert not old_file.exists()
 
-    def test_save_pr_comments_clears_old_comments(
-        self, pr_context: PRContextManager, state_manager: StateManager
+    def test_save_ci_failures_preserves_old_ci_when_no_run_id(
+        self,
+        pr_context: PRContextManager,
+        state_manager: StateManager,
+        mock_github_client: MagicMock,
     ) -> None:
-        """Test that save_pr_comments clears old comments."""
-        # Create old comment file
+        """Test that stale CI logs are preserved when no run ID can be extracted.
+
+        If the failing check has no URL (or an unrecognised URL format), we
+        return early without clearing so the operator can still see the last
+        known failure logs.
+        """
+        pr_dir = state_manager.get_pr_dir(123)
+        ci_dir = pr_dir / "ci"
+        ci_dir.mkdir(parents=True, exist_ok=True)
+        old_file = ci_dir / "old_failure.txt"
+        old_file.write_text("Old failure")
+
+        # Failing check but NO URL → can't extract run ID
+        mock_github_client.get_pr_status.return_value = MagicMock(
+            check_details=[{"name": "tests", "conclusion": "FAILURE", "status": "COMPLETED"}]
+        )
+
+        pr_context.save_ci_failures(123, _also_save_comments=False)
+
+        # Old data must be preserved — we never got a valid run ID to fetch with
+        assert old_file.exists()
+
+    def test_save_pr_comments_clears_old_comments_after_successful_fetch(
+        self,
+        pr_context: PRContextManager,
+        state_manager: StateManager,
+        mock_github_client: MagicMock,
+    ) -> None:
+        """Test that save_pr_comments clears stale comment files after a successful fetch.
+
+        Clearing happens AFTER the fetch succeeds so existing data is
+        preserved if the GitHub API call fails (new "clear-after" semantics).
+        """
+        # Create old stale data
+        pr_dir = state_manager.get_pr_dir(123)
+        comments_dir = pr_dir / "comments"
+        comments_dir.mkdir(parents=True, exist_ok=True)
+        old_file = comments_dir / "old_comment.txt"
+        old_file.write_text("Old comment")
+        summary_file = pr_dir / "comments_summary.txt"
+        summary_file.write_text("OLD_UNIQUE_CONTENT_MARKER")
+
+        # Properly mock _get_repo_info and _run_gh_command for a successful empty fetch
+        mock_github_client._get_repo_info.return_value = "owner/repo"
+        rest_result = MagicMock()
+        rest_result.stdout = ""  # empty NDJSON → no comments
+        graphql_result = MagicMock()
+        graphql_result.stdout = json.dumps(
+            {
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "reviewThreads": {"pageInfo": {"hasNextPage": False}, "nodes": []}
+                        }
+                    }
+                }
+            }
+        )
+        mock_github_client._run_gh_command.side_effect = [rest_result, graphql_result]
+
+        pr_context.save_pr_comments(123, _also_save_ci=False)
+
+        # Old individual comment files should be gone
+        assert not old_file.exists()
+        # Old summary marker should be gone (replaced by new empty summary)
+        if summary_file.exists():
+            assert "OLD_UNIQUE_CONTENT_MARKER" not in summary_file.read_text()
+
+    def test_save_pr_comments_preserves_old_comments_on_fetch_failure(
+        self,
+        pr_context: PRContextManager,
+        state_manager: StateManager,
+        mock_github_client: MagicMock,
+    ) -> None:
+        """Test that stale comments are preserved when the fetch fails."""
         pr_dir = state_manager.get_pr_dir(123)
         comments_dir = pr_dir / "comments"
         comments_dir.mkdir(parents=True, exist_ok=True)
         old_file = comments_dir / "old_comment.txt"
         old_file.write_text("Old comment")
 
-        # Also create old summary with distinct content
-        summary_file = pr_dir / "comments_summary.txt"
-        summary_file.write_text("OLD_UNIQUE_CONTENT_MARKER")
+        mock_github_client._get_repo_info.side_effect = Exception("API unavailable")
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = [
-                MagicMock(returncode=0, stdout="owner/repo\n"),
-                MagicMock(
-                    returncode=0,
-                    stdout='{"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": []}}}}}',
-                ),
-            ]
+        pr_context.save_pr_comments(123, _also_save_ci=False)
 
-            pr_context.save_pr_comments(123, _also_save_ci=False)
-
-            # Old comment file should be gone (comments dir cleared)
-            assert not old_file.exists()
-            # Summary file should exist but with new content (not the old marker)
-            if summary_file.exists():
-                content = summary_file.read_text()
-                assert "OLD_UNIQUE_CONTENT_MARKER" not in content
+        # Old data must be preserved — fetch failed
+        assert old_file.exists()
 
 
 class TestErrorHandling:
@@ -688,16 +761,15 @@ class TestIntegrationScenarios:
         # Repo info + comments go through github_client; CILogDownloader uses subprocess directly.
         mock_github_client._get_repo_info.return_value = "owner/repo"
         rest_result = MagicMock()
+        # NDJSON: one comment object per line (matches --paginate --jq '.[]')
         rest_result.stdout = json.dumps(
-            [
-                {
-                    "id": 123456,
-                    "user": {"login": "coderabbitai"},
-                    "body": "Consider using a constant for this magic number",
-                    "path": "src/main.py",
-                    "line": 42,
-                }
-            ]
+            {
+                "id": 123456,
+                "user": {"login": "coderabbitai"},
+                "body": "Consider using a constant for this magic number",
+                "path": "src/main.py",
+                "line": 42,
+            }
         )
         graphql_result = MagicMock()
         graphql_result.stdout = json.dumps(
@@ -706,13 +778,14 @@ class TestIntegrationScenarios:
                     "repository": {
                         "pullRequest": {
                             "reviewThreads": {
+                                "pageInfo": {"hasNextPage": False},
                                 "nodes": [
                                     {
                                         "id": "thread_123",
                                         "isResolved": False,
                                         "comments": {"nodes": [{"databaseId": 123456}]},
                                     }
-                                ]
+                                ],
                             }
                         }
                     }
@@ -723,20 +796,11 @@ class TestIntegrationScenarios:
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
-                # CILogDownloader -> gh api .../jobs
+                # CILogDownloader -> gh api --paginate --jq '.jobs[]' (NDJSON: one job per line)
                 MagicMock(
                     returncode=0,
                     stdout=json.dumps(
-                        {
-                            "jobs": [
-                                {
-                                    "id": 1,
-                                    "name": "test",
-                                    "status": "completed",
-                                    "conclusion": "failure",
-                                }
-                            ]
-                        }
+                        {"id": 1, "name": "test", "status": "completed", "conclusion": "failure"}
                     ),
                     stderr="",
                 ),
@@ -773,16 +837,15 @@ class TestIntegrationScenarios:
         # All gh calls go through github_client (no subprocess for comments path)
         mock_github_client._get_repo_info.return_value = "owner/repo"
         rest_result = MagicMock()
+        # NDJSON: one comment object per line (matches --paginate --jq '.[]')
         rest_result.stdout = json.dumps(
-            [
-                {
-                    "id": 789012,
-                    "user": {"login": "reviewer"},
-                    "body": "Please add error handling here",
-                    "path": "src/handler.py",
-                    "line": 100,
-                }
-            ]
+            {
+                "id": 789012,
+                "user": {"login": "reviewer"},
+                "body": "Please add error handling here",
+                "path": "src/handler.py",
+                "line": 100,
+            }
         )
         graphql_result = MagicMock()
         graphql_result.stdout = json.dumps(
@@ -791,13 +854,14 @@ class TestIntegrationScenarios:
                     "repository": {
                         "pullRequest": {
                             "reviewThreads": {
+                                "pageInfo": {"hasNextPage": False},
                                 "nodes": [
                                     {
                                         "id": "thread_456",
                                         "isResolved": False,
                                         "comments": {"nodes": [{"databaseId": 789012}]},
                                     }
-                                ]
+                                ],
                             }
                         }
                     }

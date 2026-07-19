@@ -394,7 +394,11 @@ test-job\t  at test_file.py:42"""
             assert "AssertionError" in logs
 
     def test_get_failed_run_logs_without_run_id(self, github_client):
-        """Test getting logs for latest failed run."""
+        """Test getting logs for latest failed run.
+
+        _find_failed_run_id now calls ``git rev-parse`` first (branch scoping),
+        then ``gh run list``, then we fetch the logs.
+        """
         log_output = "build\tCompilation failed"
         workflow_runs_response = json.dumps(
             [
@@ -410,20 +414,23 @@ test-job\t  at test_file.py:42"""
             ]
         )
         with patch("subprocess.run") as mock_run:
-            # First call returns workflow runs, second returns logs
+            # Call 1: git rev-parse --abbrev-ref HEAD (branch detection in _find_failed_run_id)
+            # Call 2: gh run list --branch main (get_workflow_runs)
+            # Call 3: gh run view --log-failed (fetch logs)
             mock_run.side_effect = [
+                MagicMock(returncode=0, stdout="main", stderr=""),
                 MagicMock(returncode=0, stdout=workflow_runs_response, stderr=""),
                 MagicMock(returncode=0, stdout=log_output, stderr=""),
             ]
             result = github_client.get_failed_run_logs()
 
-            # Check that second call (log fetch) has correct args
-            call_args = mock_run.call_args_list[1][0][0]
-            assert "gh" in call_args
-            assert "run" in call_args
-            assert "view" in call_args
-            assert "123" in call_args  # Run ID
-            assert "--log-failed" in call_args
+            # Verify the log fetch call used the correct run ID
+            log_call_args = mock_run.call_args_list[2][0][0]
+            assert "gh" in log_call_args
+            assert "run" in log_call_args
+            assert "view" in log_call_args
+            assert "123" in log_call_args  # Run ID
+            assert "--log-failed" in log_call_args
             assert result == log_output
 
     def test_get_failed_run_logs_truncates_long_output(self, github_client):
