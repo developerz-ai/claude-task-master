@@ -661,6 +661,26 @@ class TestStopInstructions:
         assert "OUTPUT" in result or "output" in result
         assert "text" in result.lower()
 
+    def test_pins_exact_output_headers(self) -> None:
+        """STOP contract pins the exact headers the parser matches literally."""
+        result = build_planning_prompt("Any goal")
+        assert "`## Task List`" in result
+        assert "`## Success Criteria`" in result
+
+    def test_checkboxes_are_tasks_only_rule(self) -> None:
+        """Contract states checkboxes are for tasks only (not criteria/checks)."""
+        result = build_planning_prompt("Any goal")
+        assert "`- [ ]`" in result
+        lower = result.lower()
+        assert "only for tasks" in lower or "only for tasks." in lower
+
+    def test_release_checks_no_blank_line_rule(self) -> None:
+        """Contract forbids blank lines inside a Release checks block."""
+        result = build_planning_prompt("Any goal")
+        lower = result.lower()
+        assert "release checks" in lower
+        assert "no blank line" in lower
+
 
 # =============================================================================
 # Integration Tests

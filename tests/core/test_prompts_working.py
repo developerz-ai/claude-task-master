@@ -617,10 +617,41 @@ class TestExecutionSection:
         assert "Claude" in result
 
     def test_gitignore_note_present(self) -> None:
-        """Test gitignore note about .claude-task-master is present."""
+        """Test the state dir is noted as kept out of commits (truthfully)."""
         result = build_work_prompt("Any task")
         assert ".claude-task-master" in result
-        assert "gitignored" in result.lower() or "auto" in result.lower()
+        # Excluded via the git pathspec + .git/info/exclude — not a false
+        # "auto-gitignored" claim (no code ever wrote a .gitignore entry).
+        assert "exclude" in result.lower() or "pathspec" in result.lower()
+
+    @staticmethod
+    def _all_execution_modes() -> list[str]:
+        """Render the work prompt in each of the three execution modes."""
+        return [
+            build_work_prompt("Any task", create_pr=True),  # full workflow
+            build_work_prompt("Any task", create_pr=False),  # commit-only
+            build_work_prompt("Any task", push_only=True),  # fix existing PR
+        ]
+
+    def test_git_add_excludes_state_dir_pathspec(self) -> None:
+        """Commit step stages with the state-dir exclusion pathspec."""
+        for result in self._all_execution_modes():
+            assert "git add -A -- ':!.claude-task-master'" in result
+
+    def test_no_false_auto_gitignored_claim(self) -> None:
+        """The debunked 'auto-gitignored' claim is gone from all modes."""
+        for result in self._all_execution_modes():
+            assert "auto-gitignored" not in result
+
+    def test_no_progress_md_echo_instruction(self) -> None:
+        """The stray 'echo >> progress.md' log instruction is removed.
+
+        A relative ``echo >> progress.md`` created a repo-root file that
+        ``git add`` then committed; the orchestrator regenerates progress.md
+        anyway, so the instruction is deleted from every execution mode.
+        """
+        for result in self._all_execution_modes():
+            assert ">> progress.md" not in result
 
 
 # =============================================================================
@@ -755,28 +786,11 @@ class TestCompletionSection:
         assert "End with: `TASK COMPLETE`" in result
 
 
-# =============================================================================
-# Log File Best Practices Tests
-# =============================================================================
-
-
-class TestLogFileBestPractices:
-    """Tests for log file best practices section."""
-
-    def test_log_file_best_practices_present(self) -> None:
-        """Test Log File Best Practices section is present."""
-        result = build_work_prompt("Any task")
-        assert "Log File Best Practices" in result
-
-    def test_append_mode_advice(self) -> None:
-        """Test advice to use APPEND mode."""
-        result = build_work_prompt("Any task")
-        assert "APPEND mode" in result or "append" in result.lower()
-
-    def test_context_bloat_warning(self) -> None:
-        """Test warning about context bloat."""
-        result = build_work_prompt("Any task")
-        assert "context bloat" in result.lower() or "bloat" in result.lower()
+# NOTE: The former "Log File Best Practices" section (an `echo "msg" >>
+# progress.md` instruction) was removed from every execution mode: the relative
+# path created a stray repo-root progress.md that `git add` then committed, and
+# the orchestrator regenerates progress.md anyway. See
+# TestExecutionSection.test_no_progress_md_echo_instruction for the guard.
 
 
 # =============================================================================

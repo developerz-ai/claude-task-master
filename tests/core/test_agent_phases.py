@@ -273,6 +273,47 @@ class TestAgentPhaseExecutorExtractMethods:
         extracted = phase_executor._extract_criteria("")
         assert "All tasks in the task list are completed successfully." in extracted
 
+    def test_extract_plan_strips_planning_complete_marker(self, phase_executor):
+        """_extract_plan removes a trailing PLANNING COMPLETE stop-marker."""
+        result = (
+            "## Task List\n\n- [ ] Task 1\n\n## Success Criteria\n\n1. Tests pass\n\n"
+            "PLANNING COMPLETE\n"
+        )
+        extracted = phase_executor._extract_plan(result)
+        assert "PLANNING COMPLETE" not in extracted
+        assert "## Task List" in extracted
+        assert "1. Tests pass" in extracted
+
+    def test_extract_plan_preserves_marker_free_output(self, phase_executor):
+        """Marker-free planner output is returned byte-for-byte unchanged."""
+        result = "## Task List\n\n- [ ] Task 1\n"
+        assert phase_executor._extract_plan(result) == result
+
+    def test_extract_criteria_strips_planning_complete_marker(self, phase_executor):
+        """_extract_criteria removes a trailing PLANNING COMPLETE stop-marker."""
+        result = (
+            "## Task List\n\n- [ ] Task 1\n\n## Success Criteria\n\n1. Tests pass\n"
+            "2. Lint clean\n\nPLANNING COMPLETE\n"
+        )
+        extracted = phase_executor._extract_criteria(result)
+        assert "PLANNING COMPLETE" not in extracted
+        assert "1. Tests pass" in extracted
+        assert "2. Lint clean" in extracted
+
+    def test_extract_criteria_strips_backtick_wrapped_marker(self, phase_executor):
+        """A backtick-wrapped `PLANNING COMPLETE` marker is also stripped."""
+        result = "## Success Criteria\n\n1. Tests pass\n\n`PLANNING COMPLETE`"
+        extracted = phase_executor._extract_criteria(result)
+        assert "PLANNING COMPLETE" not in extracted
+        assert "1. Tests pass" in extracted
+
+    def test_strip_planning_complete_marker_only_collapses_to_empty(self) -> None:
+        """Marker-only input collapses to '', never a lone newline."""
+        from claude_task_master.core.agent_phases import _strip_planning_complete
+
+        assert _strip_planning_complete("PLANNING COMPLETE") == ""
+        assert _strip_planning_complete("planning complete\n") == ""
+
 
 # =============================================================================
 # AgentPhaseExecutor Extract Session Learnings Tests
@@ -420,14 +461,24 @@ class TestAgentPhaseExecutorParseVerificationResult:
         result = "Verification failed due to errors"
         assert phase_executor._parse_verification_result(result) is False
 
-    def test_parse_generic_success(self, phase_executor):
-        """Test parsing generic 'success' indicator."""
+    def test_bare_success_substring_does_not_pass(self, phase_executor):
+        """A bare 'success' substring is NOT a PASS.
+
+        Previously "success" was a generic positive indicator, so output like
+        "Implementation is a success" (with criteria possibly unmet and no
+        explicit marker) scored PASS. It must not.
+        """
         result = "Implementation is a success"
-        assert phase_executor._parse_verification_result(result) is True
+        assert phase_executor._parse_verification_result(result) is False
+
+    def test_runs_successfully_but_criteria_unmet_fails(self, phase_executor):
+        """'runs successfully but N criteria unmet' must never score PASS."""
+        result = "The suite runs successfully but 2 criteria are unmet"
+        assert phase_executor._parse_verification_result(result) is False
 
     def test_parse_negative_overrides_positive(self, phase_executor):
         """Test negative indicators override positive ones."""
-        result = "Success noted but criteria not met"
+        result = "All criteria met, but one check is not met"
         assert phase_executor._parse_verification_result(result) is False
 
 
@@ -1201,8 +1252,8 @@ Also consider:
 
         assert result["success"] is True
 
-    def test_verification_with_lowercase_success(self, agent):
-        """Test verification detects lowercase 'success'."""
+    def test_verification_bare_success_does_not_pass(self, agent):
+        """A bare 'success' (no marker, no 'all criteria met') is NOT a PASS."""
         with patch.object(agent, "_run_query", new_callable=AsyncMock) as mock_query:
             mock_query.return_value = "The implementation is a success."
             with patch(
@@ -1211,7 +1262,7 @@ Also consider:
             ):
                 result = agent.verify_success_criteria("Tests pass")
 
-        assert result["success"] is True
+        assert result["success"] is False
 
     def test_verification_with_uppercase_criteria_met(self, agent):
         """Test verification detects 'ALL CRITERIA MET'."""

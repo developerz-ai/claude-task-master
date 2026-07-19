@@ -144,11 +144,24 @@ If a PR has no meaningful release checks (e.g., pure refactor, test-only), skip 
         """Define 3-5 measurable criteria (tests pass, lint clean, CI green, PRs merged, specific requirements).""",
     )
 
-    # STOP instruction
+    # STOP instruction — pin the exact output contract the parser depends on.
+    # The plan/criteria parsers match `## Task List` / `## Success Criteria`
+    # literally, treat `- [ ]` lines as tasks, and stop a Release-checks block at
+    # the first blank line. Left unpinned, criteria silently fall back to a
+    # generic default and release checks/tasks desync.
     builder.add_section(
         "STOP",
-        """After task list and criteria, STOP. Do NOT write files or start implementing.
-OUTPUT your plan as text. End with: `PLANNING COMPLETE`""",
+        """After the task list and criteria, STOP. Do NOT write files or start implementing.
+OUTPUT your plan as text (the orchestrator saves it) using these EXACT top-level headers so the parser can read it:
+
+- `## Task List` — every PR group and its tasks
+- `## Success Criteria` — the measurable criteria
+
+Output contract (parsers depend on it):
+- `- [ ]` checkboxes are ONLY for tasks. Success criteria and `**Release checks:**` items are plain `-` bullets — never checkboxes.
+- Inside a `**Release checks:**` block, keep checks on consecutive bullet lines with NO blank line between them (a blank line ends the block).
+
+End with: `PLANNING COMPLETE`""",
     )
 
     return builder.build()

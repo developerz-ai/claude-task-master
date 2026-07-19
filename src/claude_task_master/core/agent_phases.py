@@ -8,6 +8,7 @@ following the Single Responsibility Principle (SRP). It handles:
 """
 
 import asyncio
+import re
 import threading
 from collections.abc import Coroutine
 from typing import TYPE_CHECKING, Any, TypeVar
@@ -32,6 +33,41 @@ if TYPE_CHECKING:
     from .logger import TaskLogger
 
 T = TypeVar("T")
+
+# Trailing ``PLANNING COMPLETE`` stop-marker (optionally wrapped in backticks or
+# bold) that the planning prompt instructs the model to end with. It is a
+# control token for the parser, not plan content — anchored to end-of-string so
+# only a trailing occurrence is stripped and marker-free output is untouched.
+_TRAILING_PLANNING_COMPLETE_RE = re.compile(
+    r"\s*[`*_]*\s*PLANNING\s+COMPLETE\s*[`*_]*\s*$",
+    re.IGNORECASE,
+)
+
+
+def _strip_planning_complete(text: str) -> str:
+    """Strip a trailing ``PLANNING COMPLETE`` marker from planner output.
+
+    The planning prompt tells the model to end with ``PLANNING COMPLETE`` as a
+    stop signal. Persisted verbatim it pollutes plan.md / criteria.txt and is
+    re-injected into every later prompt. This removes a trailing occurrence
+    (optionally wrapped in backticks/bold) while leaving marker-free output
+    unchanged byte-for-byte.
+
+    Args:
+        text: Raw planner output.
+
+    Returns:
+        ``text`` with a trailing ``PLANNING COMPLETE`` marker removed, or the
+        original string when no marker is present.
+    """
+    stripped = _TRAILING_PLANNING_COMPLETE_RE.sub("", text)
+    if stripped == text:
+        return text
+    cleaned = stripped.rstrip()
+    # Marker-only (or whitespace+marker) input collapses to empty, not a lone
+    # newline. Otherwise normalise to a single trailing newline.
+    return f"{cleaned}\n" if cleaned else ""
+
 
 # How often the shutdown watcher re-checks for a cancellation request while a
 # coroutine is in flight. Small enough that Ctrl+C (or a durable cross-process
@@ -538,12 +574,15 @@ class AgentPhaseExecutor:
             "verification failed",
             "cannot verify",
         ]
+        # NOTE: a bare "success" substring is deliberately NOT an indicator.
+        # Output like "runs successfully but 2 criteria unmet" contains
+        # "success" and would otherwise be scored PASS. Each indicator here
+        # asserts *all* criteria are met, not merely that something succeeded.
         positive_indicators = [
             "all criteria met",
             "all criteria verified",
             "overall success: yes",
             "verification successful",
-            "success",  # Generic success indicator
         ]
 
         # Check for negative indicators first (these are disqualifying)
@@ -580,7 +619,10 @@ class AgentPhaseExecutor:
         Returns:
             The extracted or wrapped plan.
         """
-        # For MVP, return the full result - we'll parse later
+        # Strip the PLANNING COMPLETE stop-marker so it is never persisted into
+        # plan.md or re-injected into later prompts.
+        result = _strip_planning_complete(result)
+
         if "## Task List" in result:
             return result
 
@@ -596,6 +638,10 @@ class AgentPhaseExecutor:
         Returns:
             The extracted success criteria.
         """
+        # Strip the PLANNING COMPLETE stop-marker so it is never persisted into
+        # criteria.txt or re-injected into later prompts.
+        result = _strip_planning_complete(result)
+
         # Look for success criteria section
         if "## Success Criteria" in result:
             parts = result.split("## Success Criteria")

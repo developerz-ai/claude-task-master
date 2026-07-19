@@ -17,6 +17,9 @@ from claude_task_master.core import session_lock
 # Import shared durable atomic-write helper
 from claude_task_master.core.atomic_io import atomic_write_json
 
+# Import the repo-local git-exclude helper (keeps state out of user commits)
+from claude_task_master.core.git_exclude import ensure_state_dir_git_excluded
+
 # Import backup/recovery mixin
 from claude_task_master.core.state_backup import BackupRecoveryMixin
 
@@ -386,6 +389,10 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
             self.logs_dir.mkdir(exist_ok=True)
         except PermissionError as e:
             raise StatePermissionError(self.state_dir, "creating directories", e) from e
+
+        # Keep the state dir out of the user's git history: add it to the
+        # repo-local .git/info/exclude. Best-effort — never blocks init.
+        ensure_state_dir_git_excluded(self.state_dir)
 
         # Acquire session lock
         if not self.acquire_session_lock():
