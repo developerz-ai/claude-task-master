@@ -1663,6 +1663,10 @@ After completing your fixes, end with: TASK COMPLETE"""
             # Load coding style for consistent style in fix session
             coding_style = self.state_manager.load_coding_style()
 
+            # Verification fix creates a NEW PR (there is no existing PR to push
+            # to): _wait_for_fix_pr_merge then detects it via
+            # get_pr_for_current_branch(). Do NOT switch this to push_only — that
+            # would skip PR creation and leave the detection step with nothing.
             self.agent.run_work_session(
                 task_description=task_description,
                 context=context,
@@ -1866,12 +1870,17 @@ Important:
                 except Exception as e:
                     console.warning(f"Failed to checkout {head_branch}: {e}")
 
+            # Fix an EXISTING fix PR: push to re-trigger CI, never open a new PR
+            # or rebase (push_only routes through _build_push_only_execution,
+            # which forbids rebasing already-reviewed commits).
             self.agent.run_work_session(
                 task_description=task_description,
                 context=context,
                 model_override=ModelType.OPUS,
                 required_branch=head_branch or current_branch,
                 coding_style=coding_style,
+                create_pr=False,
+                push_only=True,
             )
 
             state.session_count += 1

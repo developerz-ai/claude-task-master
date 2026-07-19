@@ -1569,6 +1569,21 @@ class TestVerificationFixFlow:
         assert result is False
         mock_console.error.assert_called()
 
+    @patch("claude_task_master.core.orchestrator.console")
+    def test_run_verification_fix_creates_new_pr(
+        self, mock_console, basic_orchestrator, state_manager, mock_agent, basic_task_state
+    ):
+        """Verification fix opens a NEW PR (create_pr=True, not push_only): there is
+        no existing PR to push to; _wait_for_fix_pr_merge discovers the new one."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_criteria("Tests must pass")
+
+        basic_orchestrator._run_verification_fix("Tests failed", basic_task_state)
+
+        call_kwargs = mock_agent.run_work_session.call_args.kwargs
+        assert call_kwargs["create_pr"] is True
+        assert call_kwargs.get("push_only", False) is False
+
 
 # =============================================================================
 # Test Handle Working Stage Skip Path
@@ -2004,3 +2019,35 @@ class TestFixPrCiFailureBranch:
         mock_agent.run_work_session.assert_called_once()
         call_kwargs = mock_agent.run_work_session.call_args.kwargs
         assert call_kwargs["required_branch"] == "fix/verification-failures"
+
+    @patch("claude_task_master.core.orchestrator.console")
+    def test_fix_pr_ci_failure_runs_push_only(
+        self,
+        mock_console,
+        basic_orchestrator,
+        state_manager,
+        mock_agent,
+        mock_github_client,
+        basic_task_state,
+    ):
+        """Fixing CI on an existing fix PR pushes to it (create_pr=False, push_only=True)."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        mock_github_client.get_pr_status.return_value = MagicMock(
+            number=42,
+            head_branch="fix/verification-failures",
+            ci_state="FAILURE",
+        )
+        basic_orchestrator._pr_context = MagicMock()
+        basic_orchestrator._pr_context.get_combined_feedback.return_value = (
+            True,
+            False,
+            "/tmp/pr-context",
+        )
+
+        with patch.object(basic_orchestrator, "_get_current_branch", return_value="main"):
+            result = basic_orchestrator._fix_pr_ci_failure(42, basic_task_state)
+
+        assert result is True
+        call_kwargs = mock_agent.run_work_session.call_args.kwargs
+        assert call_kwargs["push_only"] is True
+        assert call_kwargs["create_pr"] is False

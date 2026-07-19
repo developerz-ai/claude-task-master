@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING
 from ..github.pr_body_sanitizer import strip_decorative_glyphs
 from . import console
 from .agent import ModelType
-from .config_loader import get_config
 from .shutdown import interruptible_sleep
 
 if TYPE_CHECKING:
@@ -59,6 +58,10 @@ class WorkflowStageHandler:
     # review comments a little *after* CI completes, not as a blocking status check — so a short
     # delay would race the merge ahead of the comments. 120s gives them time to land.
     REVIEW_DELAY = 120  # seconds to wait after CI passes before checking reviews
+    # Cap on the release-check failure text persisted into state and injected
+    # into the release-fix prompt. Keep the tail (FAIL marker + reasoning) so
+    # state.json stays small even when the check emits a long transcript.
+    RELEASE_FAIL_DETAILS_MAX_CHARS = 4000
 
     @staticmethod
     def _get_check_name(check: dict) -> str:
@@ -662,11 +665,16 @@ class WorkflowStageHandler:
             context = ""
 
         required_branch = self._get_pr_head_branch(state)
+        # Fix an EXISTING PR: push the fix to re-trigger CI, never open a new PR
+        # or rebase (push_only routes through _build_push_only_execution, which
+        # forbids rebasing already-reviewed commits).
         self.agent.run_work_session(
             task_description=task_description,
             context=context,
             model_override=ModelType.OPUS,
             required_branch=required_branch,
+            create_pr=False,
+            push_only=True,
         )
 
         # Wait for CI to start after push
@@ -710,10 +718,6 @@ class WorkflowStageHandler:
             else ".claude-task-master/debugging/resolve-comments.json"
         )
 
-        # Get target branch from config for rebase instructions
-        config = get_config()
-        target_branch = config.git.target_branch
-
         # Build the appropriate task description based on what feedback exists
         if has_ci and has_comments:
             # Both CI failures and comments - handle together!
@@ -743,24 +747,12 @@ Use Glob to find all .txt files in both directories, then Read each one.
   - Make the requested change, OR
   - Explain why it's not needed
 
-## Step 4: Verify, Commit, Rebase, and Push
+## Step 4: Verify, Commit, and Push
 
 1. Run tests/lint locally to verify ALL passes
 2. Commit all fixes together with a descriptive message
-3. **Rebase onto {target_branch} before pushing** (CRITICAL - prevents merge conflicts!):
-   ```bash
-   git fetch origin {target_branch}
-   git rebase origin/{target_branch}
-   ```
-   If conflicts occur during rebase:
-   - Check `git status` to see conflicted files
-   - Open each file and resolve conflicts (look for `<<<<<<<` markers)
-   - Usually you need BOTH changes (yours AND from {target_branch})
-   - `git add <file>` after resolving each file
-   - `git rebase --continue` to proceed
-   - Run tests again after resolving conflicts
-4. Push the fixes: `git push --force-with-lease`
-5. Create a resolution summary file at: `{resolve_json_path}`
+3. Push to update the existing PR: `git push origin HEAD` (CI re-runs on push). Do NOT rebase or force-push — it rewrites already-reviewed commits and breaks the PR's review threads. If push is rejected: `git pull --rebase origin HEAD`, resolve conflicts, re-test, then push.
+4. Create a resolution summary file at: `{resolve_json_path}`
 
 **Resolution file format:**
 ```json
@@ -800,13 +792,7 @@ Please:
 3. Fix everything that's failing - don't skip anything
 4. Run tests/lint locally to verify ALL passes
 5. Commit fixes with a descriptive message
-6. **Rebase onto {target_branch} before pushing** (CRITICAL - prevents merge conflicts!):
-   ```bash
-   git fetch origin {target_branch}
-   git rebase origin/{target_branch}
-   ```
-   If conflicts occur: resolve them, `git add`, `git rebase --continue`, run tests again.
-7. Push the fixes: `git push --force-with-lease`
+6. Push to update the existing PR: `git push origin HEAD` (CI re-runs on push). Do NOT rebase or force-push — it rewrites already-reviewed commits and breaks the PR's review threads. If push is rejected: `git pull --rebase origin HEAD`, resolve, re-test, then push.
 
 After fixing, end with: TASK COMPLETE"""
 
@@ -825,14 +811,8 @@ Please:
    - Explain why it's not needed
 3. Run tests to verify
 4. Commit fixes with a descriptive message
-5. **Rebase onto {target_branch} before pushing** (CRITICAL - prevents merge conflicts!):
-   ```bash
-   git fetch origin {target_branch}
-   git rebase origin/{target_branch}
-   ```
-   If conflicts occur: resolve them, `git add`, `git rebase --continue`, run tests again.
-6. Push the fixes: `git push --force-with-lease`
-7. Create a resolution summary file at: `{resolve_json_path}`
+5. Push to update the existing PR: `git push origin HEAD` (CI re-runs on push). Do NOT rebase or force-push — it rewrites already-reviewed commits and breaks the PR's review threads. If push is rejected: `git pull --rebase origin HEAD`, resolve, re-test, then push.
+6. Create a resolution summary file at: `{resolve_json_path}`
 
 **Resolution file format:**
 ```json
@@ -1001,10 +981,6 @@ After verifying, end with: TASK COMPLETE"""
             else ".claude-task-master/debugging/resolve-comments.json"
         )
 
-        # Get target branch from config for rebase instructions
-        config = get_config()
-        target_branch = config.git.target_branch
-
         task_description = f"""PR #{state.current_pr} has review comments to address.
 
 **Read comments from:** `{comments_path}` (Glob *.txt, then Read each)
@@ -1012,9 +988,8 @@ After verifying, end with: TASK COMPLETE"""
 For each comment: fix it or explain why not. Then:
 1. Run tests
 2. Commit with descriptive message
-3. Rebase onto {target_branch}: `git fetch origin {target_branch} && git rebase origin/{target_branch}`
-4. Push: `git push --force-with-lease`
-5. Create resolution file at `{resolve_json_path}`:
+3. Push to update the PR: `git push origin HEAD` (do NOT rebase or force-push — it breaks review threads; if rejected: `git pull --rebase origin HEAD`, resolve, re-test, push)
+4. Create resolution file at `{resolve_json_path}`:
 
 ```json
 {{
@@ -1041,11 +1016,15 @@ End with: TASK COMPLETE"""
             context = ""
 
         required_branch = self._get_pr_head_branch(state)
+        # Fix an EXISTING PR: push to re-trigger CI, never open a new PR or
+        # rebase (push_only routes through _build_push_only_execution).
         self.agent.run_work_session(
             task_description=task_description,
             context=context,
             model_override=ModelType.OPUS,
             required_branch=required_branch,
+            create_pr=False,
+            push_only=True,
         )
 
         # Post replies to comments using resolution file
@@ -1313,6 +1292,7 @@ End with: TASK COMPLETE"""
         state.pr_start_time = None
         state.pr_active_work_seconds = 0.0
         state.release_fix_attempts = 0
+        state.release_fix_details = None
         state.ci_fix_attempts = 0
         state.in_release_fix = False
         state.ci_poll_start_time = None
@@ -1427,6 +1407,12 @@ End with: TASK COMPLETE"""
                 return None
 
             console.warning("Release verification failed — attempting quick fix")
+            # Persist the failure details so the fix session isn't blind — the
+            # next handle_release_fix_stage injects them as "## Failed Checks".
+            # Keep only the tail (FAIL marker + reasoning) to bound state size.
+            state.release_fix_details = check_result["details"][
+                -self.RELEASE_FAIL_DETAILS_MAX_CHARS :
+            ]
             state.workflow_stage = "release_fix"
             self.state_manager.save_state(state)
             return None
@@ -1448,11 +1434,15 @@ End with: TASK COMPLETE"""
         )
 
         release_guide = self.state_manager.load_release_guide()
+        failed_checks = state.release_fix_details or "No failure details captured."
 
         task_description = f"""A release verification check FAILED after PR #{state.current_pr or "?"} was merged.
 
 ## Release Guide
 {release_guide or "No release guide available."}
+
+## Failed Checks
+{failed_checks}
 
 ## Instructions
 

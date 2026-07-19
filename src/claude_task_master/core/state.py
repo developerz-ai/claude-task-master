@@ -173,6 +173,10 @@ class TaskState(BaseModel):
     # Release phase fields
     release_fix_attempts: int = 0  # Number of release fix attempts for current PR
     in_release_fix: bool = False  # True while current PR is a release-fix PR
+    # Release-check failure output captured on FAIL and injected into the next
+    # release-fix session's prompt as "## Failed Checks" so the fix agent isn't
+    # blind. Cleared on task advance. Optional/defaulted → no schema bump needed.
+    release_fix_details: str | None = None
 
 
 # =============================================================================
