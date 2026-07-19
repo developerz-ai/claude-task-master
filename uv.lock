@@ -303,11 +303,6 @@ mcp = [
     { name = "mcp" },
 ]
 
-[package.dev-dependencies]
-dev = [
-    { name = "pytest-timeout" },
-]
-
 [package.metadata]
 requires-dist = [
     { name = "bcrypt", marker = "extra == 'api'", specifier = ">=4.0.0,<5.0.0" },
@@ -331,9 +326,6 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'api'", specifier = ">=0.40.0" },
 ]
 provides-extras = ["mcp", "api", "dev", "all"]
-
-[package.metadata.requires-dev]
-dev = [{ name = "pytest-timeout", specifier = ">=2.4.0" }]
 
 [[package]]
 name = "click"
