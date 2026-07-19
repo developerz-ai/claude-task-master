@@ -84,6 +84,24 @@ class FileOperationsMixin:
             return plan_file.read_text()
         return None
 
+    def backup_plan(self) -> Path | None:
+        """Copy the current plan.md to plan.md.bak before it is overwritten.
+
+        Best-effort snapshot so a bad plan update (e.g. an LLM response that
+        drops the task list) can be recovered by hand. Overwrites any prior
+        backup so only the last-known-good plan is kept.
+
+        Returns:
+            The backup file path if a plan.md existed and was copied,
+            otherwise None.
+        """
+        plan_file = self.state_dir / "plan.md"
+        if not plan_file.exists():
+            return None
+        backup_file = self.state_dir / "plan.md.bak"
+        backup_file.write_text(plan_file.read_text())
+        return backup_file
+
     def save_progress(self, progress: str) -> None:
         """Save progress summary to progress.md.
 

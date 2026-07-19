@@ -104,7 +104,9 @@ class TestResumeWithMessageBasic:
 
         assert result.exit_code == 0
         assert "Updating plan" in result.output
-        mock_plan_updater.return_value.update_plan.assert_called_once_with("Add authentication")
+        mock_plan_updater.return_value.update_plan.assert_called_once_with(
+            "Add authentication", current_task_index=0
+        )
 
     def test_resume_with_message_shows_plan_update_success(
         self, cli_runner, temp_dir, mock_state_dir, mock_goal_file, mock_plan_file
@@ -716,7 +718,9 @@ class TestResumeWithMessageSpecialCharacters:
                             result = cli_runner.invoke(app, ["resume", "Fix the 'login' button"])
 
         assert result.exit_code == 0
-        mock_plan_updater.return_value.update_plan.assert_called_once_with("Fix the 'login' button")
+        mock_plan_updater.return_value.update_plan.assert_called_once_with(
+            "Fix the 'login' button", current_task_index=0
+        )
 
     def test_resume_with_message_containing_newlines(
         self, cli_runner, temp_dir, mock_state_dir, mock_goal_file, mock_plan_file
@@ -1218,7 +1222,9 @@ class TestResumeWithMessagePlanUpdaterIntegration:
 
         assert result.exit_code == 0
         # Verify exact message was passed
-        mock_plan_updater.return_value.update_plan.assert_called_once_with(test_message)
+        mock_plan_updater.return_value.update_plan.assert_called_once_with(
+            test_message, current_task_index=0
+        )
 
     def test_resume_updater_receives_logger(
         self, cli_runner, temp_dir, mock_state_dir, mock_goal_file, mock_plan_file

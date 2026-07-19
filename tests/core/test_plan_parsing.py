@@ -6,11 +6,41 @@ import pytest
 
 from claude_task_master.core.plan_parsing import (
     count_completed_tasks,
+    first_incomplete_task_index,
     is_task_complete,
     mark_task_complete,
     parse_task_descriptions,
 )
 from claude_task_master.core.task_group import parse_tasks_with_groups
+
+
+class TestFirstIncompleteTaskIndex:
+    """Tests for first_incomplete_task_index."""
+
+    def test_returns_first_unchecked_index(self):
+        """Should return the index of the first not-complete task."""
+        plan = "- [x] One\n- [x] Two\n- [ ] Three\n- [ ] Four"
+        assert first_incomplete_task_index(plan) == 2
+
+    def test_first_task_incomplete(self):
+        """Should return 0 when the first task is incomplete."""
+        plan = "- [ ] One\n- [x] Two"
+        assert first_incomplete_task_index(plan) == 0
+
+    def test_all_complete_returns_task_count(self):
+        """Should return the task count when every task is complete."""
+        plan = "- [x] One\n- [x] Two"
+        assert first_incomplete_task_index(plan) == 2
+
+    def test_empty_plan_returns_zero(self):
+        """Should return 0 for a plan with no tasks."""
+        assert first_incomplete_task_index("") == 0
+
+    def test_ignores_release_check_boxes(self):
+        """Should ignore checkbox lines inside a Release checks section."""
+        plan = "- [x] Real task\n**Release checks:**\n- [ ] Deploy verified\n"
+        # Only the one real task exists and it is complete → count (1).
+        assert first_incomplete_task_index(plan) == 1
 
 
 class TestParseTaskDescriptions:

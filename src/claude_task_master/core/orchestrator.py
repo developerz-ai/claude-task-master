@@ -531,8 +531,11 @@ class WorkLoopOrchestrator:
         )
         console.info(f"Found {message_count} message(s) in mailbox - processing...")
 
-        # Get and clear messages atomically
-        messages = self.mailbox_storage.get_and_clear()
+        # Peek at messages WITHOUT removing them. They are removed only after
+        # being fully processed (see remove_messages below), so a transient
+        # failure in merge or plan update leaves the user's change requests in
+        # the mailbox to be retried on the next check instead of losing them.
+        messages = self.mailbox_storage.get_messages()
         if not messages:
             # Race condition - messages were cleared by another process
             logger.warning(
@@ -572,6 +575,8 @@ class WorkLoopOrchestrator:
                 len(messages),
             )
             console.warning(f"Failed to merge mailbox messages: {e}")
+            # Messages were only peeked, never removed, so they stay in the
+            # mailbox and are retried on the next check.
             return False
 
         # Update the plan with the merged content
@@ -581,7 +586,31 @@ class WorkLoopOrchestrator:
             total_tasks_before = self._get_total_tasks(state)
 
             console.info("Updating plan based on mailbox messages...")
-            result = self.plan_updater.update_plan(merged_content)
+            result = self.plan_updater.update_plan(
+                merged_content, current_task_index=state.current_task_index
+            )
+
+            # Adopt any positional-index reconciliation before the state save
+            # below. current_task_index is orchestrator-owned (not merged from
+            # disk by save_state_merged), so the stale in-memory value would
+            # otherwise clobber the plan updater's on-disk fix.
+            reconciled_index = result.get("current_task_index")
+            if reconciled_index is not None:
+                state.current_task_index = reconciled_index
+
+            # update_plan returned without raising: the plan (if changed) is
+            # already persisted, so these messages are fully processed. Remove
+            # exactly the peeked IDs — not a blanket clear — so any message that
+            # arrived during the update is preserved for the next check.
+            logger.info(
+                "Dropping %d processed mailbox message(s)",
+                len(messages),
+            )
+            removed = self.mailbox_storage.remove_messages([msg.id for msg in messages])
+            logger.debug(
+                "Removed %d processed message(s) from mailbox after plan update",
+                removed,
+            )
 
             check_time = datetime.now()
             if result.get("changes_made"):
@@ -668,6 +697,7 @@ class WorkLoopOrchestrator:
                 len(messages),
             )
             console.warning(f"Cannot update plan: {e}")
+            # Not removed — messages remain in the mailbox so they are not lost.
             return False
         except Exception as e:
             # Other errors during plan update
@@ -678,6 +708,8 @@ class WorkLoopOrchestrator:
                 len(messages),
             )
             console.warning(f"Error updating plan from mailbox: {e}")
+            # Not removed — a transient error (e.g. API failure) must not
+            # permanently lose the user's change requests; retried next check.
             return False
 
     def _emit_status_changed(

@@ -582,6 +582,114 @@ class TestMailboxEdgeCases:
 
 
 # =============================================================================
+# Test Message Retention on Failure (peek -> process -> clear)
+# =============================================================================
+
+
+class TestMailboxFailureRetention:
+    """Tests that failures never destroy pending mailbox messages."""
+
+    def test_messages_retained_when_plan_update_raises_valueerror(
+        self, orchestrator_with_mailbox, basic_task_state, sample_plan_file
+    ):
+        """A ValueError from update_plan must leave the message in the mailbox."""
+        storage = orchestrator_with_mailbox.mailbox_storage
+        storage.add_message("Keep me on failure", sender="user")
+
+        mock_plan_updater = MagicMock()
+        mock_plan_updater.update_plan = MagicMock(side_effect=ValueError("No plan exists"))
+        orchestrator_with_mailbox._plan_updater = mock_plan_updater
+
+        result = orchestrator_with_mailbox._check_and_process_mailbox(basic_task_state)
+
+        assert result is False
+        assert storage.count() == 1
+        assert storage.get_messages()[0].content == "Keep me on failure"
+
+    def test_messages_retained_when_plan_update_raises_exception(
+        self, orchestrator_with_mailbox, basic_task_state, sample_plan_file
+    ):
+        """A transient error from update_plan must not lose the message."""
+        storage = orchestrator_with_mailbox.mailbox_storage
+        storage.add_message("Transient failure", sender="user")
+
+        mock_plan_updater = MagicMock()
+        mock_plan_updater.update_plan = MagicMock(side_effect=RuntimeError("API timeout"))
+        orchestrator_with_mailbox._plan_updater = mock_plan_updater
+
+        result = orchestrator_with_mailbox._check_and_process_mailbox(basic_task_state)
+
+        assert result is False
+        assert storage.count() == 1
+
+    def test_messages_removed_after_successful_update(
+        self, orchestrator_with_mailbox, basic_task_state, sample_plan_file
+    ):
+        """A successful update removes exactly the processed messages."""
+        storage = orchestrator_with_mailbox.mailbox_storage
+        storage.add_message("Process me", sender="user")
+
+        mock_plan_updater = MagicMock()
+        mock_plan_updater.update_plan = MagicMock(
+            return_value={"success": True, "changes_made": True, "plan": "updated"}
+        )
+        orchestrator_with_mailbox._plan_updater = mock_plan_updater
+
+        orchestrator_with_mailbox._check_and_process_mailbox(basic_task_state)
+
+        assert storage.count() == 0
+
+    def test_message_added_during_processing_is_preserved(
+        self, orchestrator_with_mailbox, basic_task_state, sample_plan_file
+    ):
+        """Selective removal must not sweep away a message that arrived mid-update."""
+        storage = orchestrator_with_mailbox.mailbox_storage
+        storage.add_message("Original request", sender="user1")
+
+        def add_then_succeed(_merged_content, current_task_index=None):
+            # Simulate a concurrent writer landing a message during the update.
+            storage.add_message("Arrived during update", sender="user2")
+            return {"success": True, "changes_made": True, "plan": "updated"}
+
+        mock_plan_updater = MagicMock()
+        mock_plan_updater.update_plan = MagicMock(side_effect=add_then_succeed)
+        orchestrator_with_mailbox._plan_updater = mock_plan_updater
+
+        orchestrator_with_mailbox._check_and_process_mailbox(basic_task_state)
+
+        remaining = storage.get_messages()
+        assert len(remaining) == 1
+        assert remaining[0].content == "Arrived during update"
+
+    def test_retained_message_reprocessed_on_next_check(
+        self, orchestrator_with_mailbox, basic_task_state, sample_plan_file
+    ):
+        """A message kept after a failure is retried and consumed next check."""
+        storage = orchestrator_with_mailbox.mailbox_storage
+        storage.add_message("Retry me", sender="user")
+
+        mock_plan_updater = MagicMock()
+        mock_plan_updater.update_plan = MagicMock(
+            side_effect=[
+                RuntimeError("transient API error"),
+                {"success": True, "changes_made": True, "plan": "updated"},
+            ]
+        )
+        orchestrator_with_mailbox._plan_updater = mock_plan_updater
+
+        # First check: failure retains the message.
+        result1 = orchestrator_with_mailbox._check_and_process_mailbox(basic_task_state)
+        assert result1 is False
+        assert storage.count() == 1
+
+        # Second check: the same message is retried and now consumed.
+        result2 = orchestrator_with_mailbox._check_and_process_mailbox(basic_task_state)
+        assert result2 is True
+        assert storage.count() == 0
+        assert mock_plan_updater.update_plan.call_count == 2
+
+
+# =============================================================================
 # Test State Persistence
 # =============================================================================
 
@@ -672,7 +780,7 @@ class TestMergedMessagesTriggerPlanUpdate:
         orchestrator_with_mailbox._task_runner = mock_task_runner
 
         # Mock plan updater to record when it's called
-        def mock_update_plan(change_request):
+        def mock_update_plan(change_request, current_task_index=None):
             operation_order.append("plan_updated")
             return {"success": True, "changes_made": True, "plan": "updated plan"}
 
@@ -850,7 +958,7 @@ class TestMergedMessagesTriggerPlanUpdate:
         orchestrator_with_mailbox._task_runner = mock_task_runner
 
         # Mock plan updater - this should also update the actual plan file
-        def update_plan_and_save(change_request):
+        def update_plan_and_save(change_request, current_task_index=None):
             # Simulate saving an updated plan with 3 tasks
             new_plan = """## Task List
 - [x] Task 1: First task
@@ -989,7 +1097,7 @@ class TestMailboxProcessingTiming:
         orchestrator_with_mailbox._task_runner = mock_task_runner
 
         # Mock plan updater with order tracking
-        def track_plan_update(change_request):
+        def track_plan_update(change_request, current_task_index=None):
             operation_order.append("mailbox_plan_updated")
             return {"success": True, "changes_made": True, "plan": "updated"}
 

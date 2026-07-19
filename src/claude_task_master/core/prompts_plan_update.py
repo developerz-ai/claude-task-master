@@ -14,6 +14,7 @@ def build_plan_update_prompt(
     change_request: str,
     goal: str | None = None,
     context: str | None = None,
+    max_prs: int | None = None,
 ) -> str:
     """Build the plan update prompt.
 
@@ -22,15 +23,16 @@ def build_plan_update_prompt(
         change_request: The change request/message from the user.
         goal: Optional original goal for context.
         context: Optional accumulated context from previous sessions.
+        max_prs: Optional maximum number of PRs to create.
 
     Returns:
         Complete plan update prompt.
     """
     builder = PromptBuilder(
-        intro=f"""Plan update mode. Change request: **{change_request}**
-
-All tools available for exploration. Do NOT write files — OUTPUT updated plan as text."""
+        intro="""Plan update mode. All tools available for exploration. Do NOT write files — OUTPUT updated plan as text."""
     )
+
+    builder.add_section("Change Request", change_request)
 
     if goal:
         builder.add_section("Original Goal", goal)
@@ -55,5 +57,11 @@ Tasks marked `[x]` are completed — do NOT remove or uncheck them.""",
 - Start output with `## Task List`, end with `## Success Criteria`
 - End response with: `PLAN UPDATE COMPLETE`""",
     )
+
+    if max_prs:
+        builder.add_section(
+            "PR Limit",
+            f"""**Maximum {max_prs} PR(s). No exceptions.** Group everything to fit. Any plan exceeding this is invalid.""",
+        )
 
     return builder.build()
