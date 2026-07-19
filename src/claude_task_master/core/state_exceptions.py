@@ -43,6 +43,18 @@ TERMINAL_STATUSES = frozenset(["success", "failed"])
 # Define resumable statuses (can resume execution)
 RESUMABLE_STATUSES = frozenset(["paused", "stopped", "working", "blocked"])
 
+# Statuses owned by an external control process (claudetm-server / MCP / CLI,
+# possibly in another process, via ControlManager). RESUMABLE_STATUSES /
+# VALID_TRANSITIONS deliberately allow "stopped"/"paused" -> "working" so an
+# *explicit* resume can restart a run — but that same allowance lets the
+# orchestrator's long-lived, stale in-memory state silently clobber a
+# cross-process stop/pause on its next routine save. The reload-merge-save path
+# (StateManager.save_state_merged / _merge_control_fields) treats these two
+# statuses as authoritative and keeps whichever one is on disk, so a merged save
+# can never overwrite a stop/pause; only a deliberate resume (plain save_state,
+# not the merge path) may move off them.
+CONTROL_AUTHORITATIVE_STATUSES = frozenset(["stopped", "paused"])
+
 # Define valid state transitions
 VALID_TRANSITIONS: Mapping[str, frozenset[str]] = {
     "planning": frozenset(["working", "failed", "paused", "stopped"]),

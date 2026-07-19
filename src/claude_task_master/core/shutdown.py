@@ -50,11 +50,52 @@ class ShutdownManager:
         self._lock = threading.Lock()
         self._initialized = False
         self._shutdown_reason: str | None = None
+        self._durable_stop_check: Callable[[], bool] | None = None
 
     @property
     def shutdown_requested(self) -> bool:
-        """Check if shutdown has been requested."""
-        return self._shutdown_requested.is_set()
+        """Check if shutdown has been requested.
+
+        Returns True if an in-process shutdown was signalled (SIGINT/SIGTERM or
+        ``request_shutdown``) *or* a durable cross-process stop is pending (when
+        a control channel has been bound via :meth:`set_durable_stop_check`).
+        The durable check lets a ``claudetm-server``/MCP ``stop`` reach a
+        CLI-launched run, which a process-local Event never could.
+        """
+        return self._shutdown_requested.is_set() or self._durable_stop_requested()
+
+    def _durable_stop_requested(self) -> bool:
+        """Check the bound durable stop predicate, if any.
+
+        Any error from the predicate (e.g. an unreadable control file) is
+        swallowed and treated as "no stop", so a corrupt file can never wedge
+        the shutdown check or a polling loop.
+
+        Returns:
+            True if a durable stop predicate is bound and reports a pending stop.
+        """
+        check = self._durable_stop_check
+        if check is None:
+            return False
+        try:
+            return check()
+        except Exception:
+            return False
+
+    def set_durable_stop_check(self, check: Callable[[], bool] | None) -> None:
+        """Bind (or clear) a durable stop predicate observed by ``shutdown_requested``.
+
+        The orchestrator binds its control channel's ``stop_requested`` here at
+        the start of a run and clears it (``None``) on exit, so long in-cycle
+        waits (``interruptible_sleep`` during CI polling) also honour a
+        cross-process stop.
+
+        Args:
+            check: A zero-arg predicate returning True when a durable stop is
+                pending, or ``None`` to unbind.
+        """
+        with self._lock:
+            self._durable_stop_check = check
 
     @property
     def shutdown_reason(self) -> str | None:
@@ -184,7 +225,7 @@ class ShutdownManager:
         """
         remaining = seconds
         while remaining > 0:
-            if self._shutdown_requested.is_set():
+            if self.shutdown_requested:
                 return False
             sleep_time = min(check_interval, remaining)
             time.sleep(sleep_time)
@@ -286,6 +327,20 @@ def get_shutdown_reason() -> str | None:
         The reason string or None if no shutdown requested.
     """
     return get_shutdown_manager().shutdown_reason
+
+
+def set_durable_stop_check(check: Callable[[], bool] | None) -> None:
+    """Bind or clear the durable stop predicate on the global manager.
+
+    Lets a durable cross-process stop (``control.json``) be observed by
+    ``is_shutdown_requested`` / ``interruptible_sleep``, so a stop issued from
+    ``claudetm-server`` / MCP reaches a CLI-launched run mid-cycle.
+
+    Args:
+        check: Predicate returning True on a pending durable stop, or ``None``
+            to unbind.
+    """
+    get_shutdown_manager().set_durable_stop_check(check)
 
 
 def reset_shutdown() -> None:

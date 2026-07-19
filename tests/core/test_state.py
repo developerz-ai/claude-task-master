@@ -16,6 +16,7 @@ from claude_task_master.core import session_lock
 from claude_task_master.core import state as state_module
 from claude_task_master.core.session_lock import LockOwner
 from claude_task_master.core.state import (
+    CONTROL_AUTHORITATIVE_STATUSES,
     CURRENT_SCHEMA_VERSION,
     RESUMABLE_STATUSES,
     TERMINAL_STATUSES,
@@ -2623,3 +2624,200 @@ class TestSchemaVersionMigration:
         with pytest.raises(StateValidationError) as exc_info:
             StateManager._migrate_state(sample_task_state)
         assert "migration path" in str(exc_info.value).lower()
+
+
+class TestControlAuthoritativeStatuses:
+    """Tests for the CONTROL_AUTHORITATIVE_STATUSES constant."""
+
+    def test_members(self):
+        """The authoritative control statuses are exactly stop and pause."""
+        assert CONTROL_AUTHORITATIVE_STATUSES == frozenset({"stopped", "paused"})
+
+    def test_subset_of_resumable(self):
+        """Both control statuses are resumable (an explicit resume can leave them)."""
+        assert CONTROL_AUTHORITATIVE_STATUSES <= RESUMABLE_STATUSES
+
+
+class TestStateManagerMergedSave:
+    """Tests for reload-merge-save (save_state_merged / _merge_control_fields).
+
+    The orchestrator holds one long-lived in-memory TaskState and saves it many
+    times per run; between saves another process (REST/MCP/CLI via
+    ControlManager) may stop/pause the run or patch its options. A merged save
+    must not clobber those. A second load of the same StateManager simulates the
+    stale in-memory copy the orchestrator holds while another process writes.
+    """
+
+    @staticmethod
+    def _start_working(mgr: StateManager) -> TaskState:
+        """Move the run from planning to working and return a fresh copy."""
+        state = mgr.load_state()
+        state.status = "working"
+        mgr.save_state(state)
+        return mgr.load_state()
+
+    def test_save_state_returns_written_state(self, initialized_state_manager):
+        """save_state returns the persisted state object."""
+        state = initialized_state_manager.load_state()
+        assert initialized_state_manager.save_state(state) is state
+
+    def test_merged_save_returns_written_state(self, initialized_state_manager):
+        """save_state_merged returns the same (in-place overlaid) object."""
+        state = self._start_working(initialized_state_manager)
+        assert initialized_state_manager.save_state_merged(state) is state
+
+    def test_merged_save_keeps_external_stop(self, initialized_state_manager):
+        """A merged save does not resume a run another process stopped."""
+        mgr = initialized_state_manager
+        orch = self._start_working(mgr)  # stale "working" copy
+
+        stopper = mgr.load_state()
+        stopper.status = "stopped"
+        mgr.save_state(stopper)
+
+        mgr.save_state_merged(orch)
+        assert mgr.load_state().status == "stopped"
+        # The overlay is applied in place, so the orchestrator sees the stop too.
+        assert orch.status == "stopped"
+
+    def test_merged_save_keeps_external_pause(self, initialized_state_manager):
+        """A merged save does not resume a run another process paused."""
+        mgr = initialized_state_manager
+        orch = self._start_working(mgr)
+
+        pauser = mgr.load_state()
+        pauser.status = "paused"
+        mgr.save_state(pauser)
+
+        mgr.save_state_merged(orch)
+        assert mgr.load_state().status == "paused"
+        assert orch.status == "paused"
+
+    def test_merged_save_over_stop_does_not_raise_on_terminal(self, initialized_state_manager):
+        """Keeping the external stop makes the transition a no-op, so a terminal
+        write racing a stop cannot trip InvalidStateTransitionError."""
+        mgr = initialized_state_manager
+        orch = self._start_working(mgr)
+
+        stopper = mgr.load_state()
+        stopper.status = "stopped"
+        mgr.save_state(stopper)
+
+        # stopped -> blocked is not a valid transition; the merge keeps stopped.
+        orch.status = "blocked"
+        mgr.save_state_merged(orch)  # must not raise
+        assert mgr.load_state().status == "stopped"
+
+    def test_plain_save_clobbers_external_stop(self, initialized_state_manager):
+        """Documents the bug the merge fixes: a plain save of the stale working
+        copy clobbers the stop — which is why the orchestrator uses the merged
+        path instead."""
+        mgr = initialized_state_manager
+        orch = self._start_working(mgr)
+
+        stopper = mgr.load_state()
+        stopper.status = "stopped"
+        mgr.save_state(stopper)
+
+        mgr.save_state(orch)  # plain save: stopped -> working is allowed
+        assert mgr.load_state().status == "working"
+
+    def test_plain_save_still_resumes_off_stopped(self, initialized_state_manager):
+        """The explicit resume path (plain save_state) may still leave stopped."""
+        mgr = initialized_state_manager
+        self._start_working(mgr)
+
+        stopper = mgr.load_state()
+        stopper.status = "stopped"
+        mgr.save_state(stopper)
+
+        resumed = mgr.load_state()
+        resumed.status = "working"
+        mgr.save_state(resumed)  # deliberate resume
+        assert mgr.load_state().status == "working"
+
+    def test_merged_save_keeps_working_progress(self, initialized_state_manager):
+        """A routine merged progress save on a working run persists normally."""
+        mgr = initialized_state_manager
+        orch = self._start_working(mgr)
+
+        orch.session_count = 7
+        mgr.save_state_merged(orch)
+        reloaded = mgr.load_state()
+        assert reloaded.status == "working"
+        assert reloaded.session_count == 7
+
+    def test_merged_save_applies_terminal_when_disk_not_control(self, initialized_state_manager):
+        """With no control status on disk, a merged save applies the caller's
+        transition normally."""
+        mgr = initialized_state_manager
+        orch = self._start_working(mgr)
+
+        orch.status = "blocked"
+        mgr.save_state_merged(orch)
+        assert mgr.load_state().status == "blocked"
+
+    def test_merged_save_adopts_externally_patched_options(self, initialized_state_manager):
+        """A config patch from another process survives — and is adopted in
+        place — instead of being reverted by the orchestrator's stale options."""
+        mgr = initialized_state_manager
+        orch = self._start_working(mgr)
+        assert orch.options.max_sessions == 10
+        assert orch.options.auto_merge is True
+
+        mgr.update_options(max_sessions=99, auto_merge=False)
+
+        mgr.save_state_merged(orch)
+        on_disk = mgr.load_state()
+        assert on_disk.options.max_sessions == 99
+        assert on_disk.options.auto_merge is False
+        # Adopted in place so the running orchestrator uses the new options.
+        assert orch.options.max_sessions == 99
+        assert orch.options.auto_merge is False
+
+    def test_merged_save_keeps_orchestrator_owned_fields(self, initialized_state_manager):
+        """The merge overlays only control fields; orchestrator-owned fields
+        (task index, session count) come from the caller, not disk."""
+        mgr = initialized_state_manager
+        orch = self._start_working(mgr)
+        orch.current_task_index = 5
+        orch.session_count = 9
+
+        stopper = mgr.load_state()
+        stopper.status = "stopped"
+        mgr.save_state(stopper)
+
+        mgr.save_state_merged(orch)
+        reloaded = mgr.load_state()
+        assert reloaded.status == "stopped"  # control field from disk
+        assert reloaded.current_task_index == 5  # orchestrator-owned from caller
+        assert reloaded.session_count == 9
+
+    def test_merged_save_options_not_aliased_to_disk_copy(self, initialized_state_manager):
+        """The adopted options are a copy, not a shared reference to the
+        discarded on-disk object."""
+        mgr = initialized_state_manager
+        orch = self._start_working(mgr)
+
+        mgr.update_options(max_sessions=55)
+        mgr.save_state_merged(orch)
+
+        # Mutating the caller's adopted options must not leak into a fresh load.
+        orch.options.max_sessions = 1234
+        assert mgr.load_state().options.max_sessions == 55
+
+    def test_merged_save_first_write_without_existing_file(self, temp_dir):
+        """A merged save with no state file yet just writes (nothing to merge)."""
+        state_dir = temp_dir / ".claude-task-master"
+        state_dir.mkdir()
+        mgr = StateManager(state_dir)
+        state = TaskState(
+            status="working",
+            created_at=datetime.now().isoformat(),
+            updated_at=datetime.now().isoformat(),
+            run_id="20260101-000000",
+            model="sonnet",
+            options=TaskOptions(),
+        )
+        mgr.save_state_merged(state)
+        assert mgr.load_state().status == "working"

@@ -13,6 +13,7 @@ from .agent import AgentWrapper, ModelType
 from .agent_exceptions import AgentError, ConsecutiveFailuresError, ContentFilterError
 from .circuit_breaker import CircuitBreakerError
 from .config_loader import get_config
+from .control_channel import ControlChannel
 from .key_listener import (
     get_cancellation_reason,
     is_cancellation_requested,
@@ -24,7 +25,13 @@ from .plan_parsing import count_completed_tasks, parse_task_descriptions
 from .planner import Planner
 from .pr_context import PRContextManager
 from .progress_tracker import ExecutionTracker, TrackerConfig
-from .shutdown import interruptible_sleep, register_handlers, reset_shutdown, unregister_handlers
+from .shutdown import (
+    interruptible_sleep,
+    register_handlers,
+    reset_shutdown,
+    set_durable_stop_check,
+    unregister_handlers,
+)
 from .state import StateError, StateManager, StateValidationError, TaskState
 from .task_runner import (
     NoPlanFoundError,
@@ -223,6 +230,7 @@ class WorkLoopOrchestrator:
         self._webhook_client = webhook_client
 
         # Initialize component managers (lazy)
+        self._control_channel: ControlChannel | None = None
         self._task_runner: TaskRunner | None = None
         self._stage_handler: WorkflowStageHandler | None = None
         self._pr_context: PRContextManager | None = None
@@ -245,6 +253,13 @@ class WorkLoopOrchestrator:
                     f"Install gh CLI and run 'gh auth login': {e}",
                 ) from e
         return self._github_client
+
+    @property
+    def control_channel(self) -> ControlChannel:
+        """Get or lazily initialize the durable cross-process control channel."""
+        if self._control_channel is None:
+            self._control_channel = ControlChannel(self.state_manager.state_dir)
+        return self._control_channel
 
     @property
     def task_runner(self) -> TaskRunner:
@@ -401,7 +416,7 @@ class WorkLoopOrchestrator:
         # Increment PR created counter and mark this PR as counted
         state.prs_created += 1
         state.last_counted_pr_created = state.current_pr
-        self.state_manager.save_state(state)
+        self.state_manager.save_state_merged(state)
 
         # Get PR details from GitHub
         pr_url = ""
@@ -444,7 +459,7 @@ class WorkLoopOrchestrator:
         # Increment PR merged counter and mark this PR as counted
         state.prs_merged += 1
         state.last_counted_pr_merged = state.current_pr
-        self.state_manager.save_state(state)
+        self.state_manager.save_state_merged(state)
 
         # Get PR details from GitHub
         pr_url = ""
@@ -506,7 +521,7 @@ class WorkLoopOrchestrator:
             )
             # Always update the timestamp to track when mailbox was checked
             state.last_mailbox_check = check_time
-            self.state_manager.save_state(state)
+            self.state_manager.save_state_merged(state)
             return False
 
         # Log that we're processing messages
@@ -581,7 +596,7 @@ class WorkLoopOrchestrator:
 
                 # Update state to record the mailbox check
                 state.last_mailbox_check = check_time
-                self.state_manager.save_state(state)
+                self.state_manager.save_state_merged(state)
                 logger.debug(
                     "State saved with mailbox check timestamp: %s",
                     check_time.isoformat(),
@@ -622,7 +637,7 @@ class WorkLoopOrchestrator:
 
                 # Still record that we checked
                 state.last_mailbox_check = check_time
-                self.state_manager.save_state(state)
+                self.state_manager.save_state_merged(state)
                 logger.debug(
                     "State saved with mailbox check timestamp: %s",
                     check_time.isoformat(),
@@ -775,7 +790,7 @@ class WorkLoopOrchestrator:
             state.ci_poll_start_time is not None
         ):
             state.ci_poll_start_time = None
-            self.state_manager.save_state(state)
+            self.state_manager.save_state_merged(state)
 
         # Check max sessions
         if state.options.max_sessions and state.session_count >= state.options.max_sessions:
@@ -816,6 +831,12 @@ class WorkLoopOrchestrator:
         start_listening()
         console.detail("Press [Escape] to pause, [Ctrl+C] to interrupt")
 
+        # Bind the durable control channel so a cross-process stop (from
+        # claudetm-server / MCP / CLI in another process) is observed by
+        # is_shutdown_requested()/interruptible_sleep — reaching even a long
+        # in-cycle CI wait. Unbound in the finally below.
+        set_durable_stop_check(self.control_channel.stop_requested)
+
         def _handle_pause(reason: str) -> int:
             stop_listening()
             unregister_handlers()
@@ -825,7 +846,30 @@ class WorkLoopOrchestrator:
             previous_status = state.status
             state.status = "paused"
             self._emit_status_changed(previous_status, "paused", state, reason)
-            self.state_manager.save_state(state)  # save_state backs up on every write
+            # Merged save (backs up on every write) so a config patch from
+            # another process is not reverted; in the pause flow disk is
+            # "working" or already "paused", so "paused" is persisted.
+            self.state_manager.save_state_merged(state)
+            console.newline()
+            console.info(self.tracker.get_cost_report())
+            console.info("Use 'claudetm resume' to continue")
+            self._emit_run_completed(state, 2, "interrupted", run_start_time, reason)
+            return 2
+
+        def _handle_stop(reason: str) -> int:
+            stop_listening()
+            unregister_handlers()
+            console.newline()
+            console.warning(f"{reason} - stopping...")
+            self.tracker.end_session(outcome="cancelled")
+            previous_status = state.status
+            state.status = "stopped"
+            self._emit_status_changed(previous_status, "stopped", state, reason)
+            # Re-assert the authoritative stopped status. Routine saves in this
+            # cycle already go through save_state_merged, which keeps a
+            # cross-process "stopped" instead of clobbering it with the stale
+            # in-memory "working"; this final merged save persists it plainly.
+            self.state_manager.save_state_merged(state)
             console.newline()
             console.info(self.tracker.get_cost_report())
             console.info("Use 'claudetm resume' to continue")
@@ -838,8 +882,26 @@ class WorkLoopOrchestrator:
                 f"is_all_complete={self.task_runner.is_all_complete(state)}"
             )
             while not self.task_runner.is_all_complete(state):
-                # Check cancellation
+                # Durable cross-process control: a stop/pause written to
+                # control.json by ControlManager (server / MCP / CLI in another
+                # process) is polled here each cycle, beside the in-process
+                # cancellation check below.
+                control_request = self.control_channel.read()
+                if control_request is not None:
+                    self.control_channel.clear()
+                    if control_request.action == "stop":
+                        return _handle_stop(control_request.reason or "Stop requested")
+                    return _handle_pause(control_request.reason or "Pause requested")
+
+                # Check cancellation (Escape / SIGINT / durable stop bridged via
+                # the shutdown manager during an in-cycle wait).
                 if is_cancellation_requested():
+                    # A durable stop that raced in after the poll above (or broke
+                    # an in-cycle wait) surfaces here — honour it as a stop, not
+                    # a pause, so the terminal status matches the request.
+                    if self.control_channel.stop_requested():
+                        self.control_channel.clear()
+                        return _handle_stop(get_cancellation_reason() or "Stop requested")
                     reason = get_cancellation_reason() or "Cancellation requested"
                     if reason == "escape":
                         reason = "Escape pressed"
@@ -852,7 +914,7 @@ class WorkLoopOrchestrator:
                     previous_status = state.status
                     state.status = "blocked"
                     self._emit_status_changed(previous_status, "blocked", state, abort_reason)
-                    self.state_manager.save_state(state)
+                    self.state_manager.save_state_merged(state)
                     stop_listening()
                     unregister_handlers()
                     console.info(self.tracker.get_cost_report())
@@ -885,7 +947,7 @@ class WorkLoopOrchestrator:
                     self._emit_status_changed(
                         previous_status, "blocked", state, "Max sessions reached"
                     )
-                    self.state_manager.save_state(state)
+                    self.state_manager.save_state_merged(state)
                     stop_listening()
                     unregister_handlers()
                     console.info(self.tracker.get_cost_report())
@@ -913,7 +975,7 @@ class WorkLoopOrchestrator:
                     state,
                     "All tasks completed (final verification disabled)",
                 )
-                self.state_manager.save_state(state)
+                self.state_manager.save_state_merged(state)
                 console.success(
                     "All tasks completed! (Final verification skipped — pass --verify to enable.)"
                 )
@@ -938,7 +1000,7 @@ class WorkLoopOrchestrator:
                     self._emit_status_changed(
                         previous_status, "success", state, "All tasks completed successfully"
                     )
-                    self.state_manager.save_state(state)
+                    self.state_manager.save_state_merged(state)
                     console.success("All tasks completed successfully!")
                     console.info(self.tracker.get_cost_report())
                     # Emit run.completed BEFORE cleanup deletes plan/goal (payload needs them)
@@ -957,7 +1019,7 @@ class WorkLoopOrchestrator:
                     self._emit_status_changed(
                         previous_status, "blocked", state, "Max fix attempts reached"
                     )
-                    self.state_manager.save_state(state)
+                    self.state_manager.save_state_merged(state)
                     console.info(self.tracker.get_cost_report())
                     self._emit_run_completed(
                         state, 1, "blocked", run_start_time, "Max fix attempts reached"
@@ -975,7 +1037,7 @@ class WorkLoopOrchestrator:
                     self._emit_status_changed(
                         previous_status, "blocked", state, "Verification fix failed"
                     )
-                    self.state_manager.save_state(state)
+                    self.state_manager.save_state_merged(state)
                     console.info(self.tracker.get_cost_report())
                     self._emit_run_completed(
                         state, 1, "failed", run_start_time, "Verification fix failed"
@@ -991,7 +1053,7 @@ class WorkLoopOrchestrator:
                     self._emit_status_changed(
                         previous_status, "blocked", state, "Fix PR merge failed"
                     )
-                    self.state_manager.save_state(state)
+                    self.state_manager.save_state_merged(state)
                     console.info(self.tracker.get_cost_report())
                     self._emit_run_completed(
                         state, 1, "blocked", run_start_time, "Fix PR merge failed"
@@ -1009,7 +1071,7 @@ class WorkLoopOrchestrator:
             self._emit_status_changed(
                 previous_status, "blocked", state, "Unexpected exit from verification loop"
             )
-            self.state_manager.save_state(state)
+            self.state_manager.save_state_merged(state)
             console.info(self.tracker.get_cost_report())
             self._emit_run_completed(
                 state, 1, "blocked", run_start_time, "Unexpected exit from verification loop"
@@ -1027,7 +1089,7 @@ class WorkLoopOrchestrator:
             self._emit_status_changed(previous_status, "failed", state, e.message)
             try:
                 # Don't checkout to main on error - stay on branch for easier resume
-                self.state_manager.save_state(state)
+                self.state_manager.save_state_merged(state)
             except Exception:
                 pass  # Best effort - state save failed but we still return error
             self._emit_run_completed(state, 1, "failed", run_start_time, e.message)
@@ -1042,17 +1104,21 @@ class WorkLoopOrchestrator:
             self._emit_status_changed(previous_status, "failed", state, error_message)
             try:
                 # Don't checkout to main on error - stay on branch for easier resume
-                self.state_manager.save_state(state)
+                self.state_manager.save_state_merged(state)
             except Exception:
                 pass  # Best effort - state save failed but we still return error
             self._emit_run_completed(state, 1, "failed", run_start_time, error_message)
             return 1
+        finally:
+            # Unbind the durable stop check so a later run/instance sharing the
+            # global shutdown manager is not affected by this run's channel.
+            set_durable_stop_check(None)
 
     def _run_workflow_cycle(self, state: TaskState) -> int | None:
         """Run one cycle of the PR workflow."""
         if state.workflow_stage is None:
             state.workflow_stage = "working"
-            self.state_manager.save_state(state)
+            self.state_manager.save_state_merged(state)
 
         stage = state.workflow_stage
 
@@ -1098,7 +1164,7 @@ class WorkLoopOrchestrator:
             else:
                 console.warning(f"Unknown stage: {stage}, resetting")
                 state.workflow_stage = "working"
-                self.state_manager.save_state(state)
+                self.state_manager.save_state_merged(state)
                 return None
 
         except NoPlanFoundError as e:
@@ -1106,7 +1172,7 @@ class WorkLoopOrchestrator:
             previous_status = state.status
             state.status = "failed"
             self._emit_status_changed(previous_status, "failed", state, e.message)
-            self.state_manager.save_state(state)
+            self.state_manager.save_state_merged(state)
             return 1
         except NoTasksFoundError:
             return None  # Continue to completion check
@@ -1117,7 +1183,7 @@ class WorkLoopOrchestrator:
             self._emit_status_changed(
                 previous_status, "blocked", state, f"Content filter: {e.message}"
             )
-            self.state_manager.save_state(state)
+            self.state_manager.save_state_merged(state)
             return 1
         except CircuitBreakerError as e:
             console.warning(f"Circuit breaker: {e.message}")
@@ -1126,7 +1192,7 @@ class WorkLoopOrchestrator:
             self._emit_status_changed(
                 previous_status, "blocked", state, f"Circuit breaker: {e.message}"
             )
-            self.state_manager.save_state(state)
+            self.state_manager.save_state_merged(state)
             return 1
         except ConsecutiveFailuresError as e:
             console.error(f"Consecutive failures: {e.message}")
@@ -1135,7 +1201,7 @@ class WorkLoopOrchestrator:
             self._emit_status_changed(
                 previous_status, "blocked", state, f"Consecutive failures: {e.message}"
             )
-            self.state_manager.save_state(state)
+            self.state_manager.save_state_merged(state)
             return 1
         except AgentError as e:
             console.error(f"Agent error: {e.message}")
@@ -1155,7 +1221,7 @@ class WorkLoopOrchestrator:
         # Set task start time if not already set (first work session for this task)
         if state.task_start_time is None:
             state.task_start_time = datetime.now()
-            self.state_manager.save_state(state)
+            self.state_manager.save_state_merged(state)
 
         self.tracker.start_session(
             session_id=state.session_count + 1,
@@ -1239,7 +1305,7 @@ class WorkLoopOrchestrator:
         # the next loop iteration picks up the new index.
         if session_result == "skipped_already_complete":
             console.info(f"Task #{completed_task_index + 1} already complete - skipping")
-            self.state_manager.save_state(state)
+            self.state_manager.save_state_merged(state)
             return None
 
         self.tracker.record_task_progress(state.current_task_index)
@@ -1325,7 +1391,7 @@ class WorkLoopOrchestrator:
         # So the arrow → points to the NEXT task, not the one we just completed
         self.task_runner.update_progress(state)
 
-        self.state_manager.save_state(state)
+        self.state_manager.save_state_merged(state)
 
         # Stall check after the session ended (works without an active session)
         should_abort, abort_reason = self.tracker.should_abort()
@@ -1334,7 +1400,7 @@ class WorkLoopOrchestrator:
             previous_status = state.status
             state.status = "blocked"
             self._emit_status_changed(previous_status, "blocked", state, abort_reason)
-            self.state_manager.save_state(state)
+            self.state_manager.save_state_merged(state)
             return 1
 
         return None
@@ -1462,7 +1528,7 @@ After completing your fixes, end with: TASK COMPLETE"""
                 coding_style=coding_style,
             )
             state.session_count += 1
-            self.state_manager.save_state(state)
+            self.state_manager.save_state_merged(state)
             return True
         except Exception as e:
             console.error(f"Fix session failed: {e}")
@@ -1492,7 +1558,7 @@ After completing your fixes, end with: TASK COMPLETE"""
             # Only set pr_start_time if not already set (avoid overwriting on resume)
             if state.pr_start_time is None:
                 state.pr_start_time = datetime.now()
-            self.state_manager.save_state(state)
+            self.state_manager.save_state_merged(state)
         except Exception as e:
             console.warning(f"Could not detect fix PR: {e}")
             return False
@@ -1666,7 +1732,7 @@ Important:
             )
 
             state.session_count += 1
-            self.state_manager.save_state(state)
+            self.state_manager.save_state_merged(state)
             return True
 
         except Exception as e:
