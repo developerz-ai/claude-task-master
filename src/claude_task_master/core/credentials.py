@@ -360,14 +360,19 @@ class CredentialManager:
 
         Raises:
             CredentialNotFoundError: If the credentials file does not exist.
-            InvalidCredentialsError: If the credentials are malformed.
+            InvalidCredentialsError: If the credentials are malformed or empty.
             CredentialPermissionError: If there are permission issues.
         """
         # api-key profiles authenticate via ANTHROPIC_API_KEY (injected into the
         # SDK subprocess), not an OAuth credentials file. The returned value is
         # only used as a pre-flight "are we configured?" gate.
         if self._profile is not None and self._profile.type == "api-key":
-            return self._profile.api_key or ""
+            if not self._profile.api_key:
+                raise InvalidCredentialsError(
+                    f"api-key profile '{self._profile.name}' has an empty api_key",
+                    "Provide the API key via CLAUDETM_API_KEY or re-add the profile with 'claudetm profile add'.",
+                )
+            return self._profile.api_key
         credentials = self.load_credentials()
         return credentials.accessToken
 
@@ -382,11 +387,16 @@ class CredentialManager:
 
         Raises:
             CredentialNotFoundError: If the credentials file does not exist.
-            InvalidCredentialsError: If the credentials are malformed.
+            InvalidCredentialsError: If the credentials are malformed or empty.
             CredentialPermissionError: If there are permission issues.
         """
         # api-key profiles have no OAuth credentials file to verify.
         if self._profile is not None and self._profile.type == "api-key":
-            return bool(self._profile.api_key)
+            if not self._profile.api_key:
+                raise InvalidCredentialsError(
+                    f"api-key profile '{self._profile.name}' has an empty api_key",
+                    "Provide the API key via CLAUDETM_API_KEY or re-add the profile with 'claudetm profile add'.",
+                )
+            return True
         self.load_credentials()
         return True

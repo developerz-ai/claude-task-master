@@ -177,7 +177,7 @@ def _print_profile(profile: Profile, active: bool) -> None:
 @profile_app.command(name="remove")
 def profile_remove(
     name: str = typer.Argument(..., help="Profile name to remove"),
-    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
+    force: bool = typer.Option(False, "--force", "-f", help="Allow removing active profile"),
 ) -> None:
     """🗑️  Remove a profile (its config dir is left on disk)."""
     manager = ProfileManager()
@@ -185,7 +185,7 @@ def profile_remove(
         console.print("[yellow]Cancelled[/yellow]")
         raise typer.Exit(0)
     try:
-        manager.remove(name)
+        manager.remove(name, force=force)
     except ProfileError as e:
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(1) from None

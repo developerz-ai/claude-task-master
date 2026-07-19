@@ -9,6 +9,7 @@ import pytest
 from claude_task_master.core.profiles import (
     PROFILE_ENV_VAR,
     Profile,
+    ProfileError,
     ProfileExistsError,
     ProfileManager,
     ProfileNotFoundError,
@@ -87,9 +88,15 @@ class TestProfileLifecycle:
 
     def test_remove_clears_active(self, manager: ProfileManager) -> None:
         manager.add("work", "oauth")
-        manager.remove("work")
+        manager.remove("work", force=True)
         assert manager.active_name() is None
         assert manager.list() == []
+
+    def test_remove_active_profile_raises_without_force(self, manager: ProfileManager) -> None:
+        manager.add("work", "oauth")
+        assert manager.active_name() == "work"
+        with pytest.raises(ProfileError, match="Cannot remove active profile"):
+            manager.remove("work")
 
     def test_remove_keeps_other_active(self, manager: ProfileManager) -> None:
         manager.add("work", "oauth")
