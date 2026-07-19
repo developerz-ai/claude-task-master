@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from claude_task_master.core.credentials import CredentialNotFoundError
+from claude_task_master.core.credentials import CredentialManager, CredentialNotFoundError
 from claude_task_master.utils.doctor import SystemDoctor
 
 # =============================================================================
@@ -519,18 +519,16 @@ class TestSystemDoctorIntegration:
         """Test all checks passing end-to-end."""
         doctor = SystemDoctor()
 
-        # Create credentials file
-        creds_dir = temp_dir / ".claude"
-        creds_dir.mkdir()
-        creds_file = creds_dir / ".credentials.json"
-        creds_file.write_text('{"token": "test"}')
-
         # Mock gh CLI success
         mock_result = MagicMock()
         mock_result.returncode = 0
 
         with patch("subprocess.run", return_value=mock_result):
-            with patch.object(Path, "home", return_value=temp_dir):
+            with patch("claude_task_master.utils.doctor.CredentialManager") as MockCM:
+                mock_cm = MagicMock()
+                MockCM.return_value = mock_cm
+                mock_cm.verify_credentials.return_value = True
+
                 result = doctor.run_checks()
 
         assert result is True
@@ -619,41 +617,42 @@ class TestSystemDoctorEdgeCases:
                 doctor._check_gh_cli()
 
     def test_credentials_path_with_special_characters(self, temp_dir):
-        """Test credentials path handling with unusual home directory."""
+        """Test credentials resolve when the config dir path contains spaces."""
         doctor = SystemDoctor()
-        mock_console = MagicMock()
-        doctor.console = mock_console
+        doctor.console = MagicMock()
 
-        # Create special directory
-        special_dir = temp_dir / "special spaces"
-        special_dir.mkdir()
-        creds_dir = special_dir / ".claude"
-        creds_dir.mkdir()
-        creds_file = creds_dir / ".credentials.json"
-        creds_file.write_text('{"token": "test"}')
+        # Config dir with spaces holding a valid credentials file.
+        creds_dir = temp_dir / "special spaces" / ".claude"
+        creds_dir.mkdir(parents=True)
+        (creds_dir / ".credentials.json").write_text(
+            '{"claudeAiOauth": {"accessToken": "a", "refreshToken": "r", '
+            '"expiresAt": 9999999999999}}'
+        )
 
-        with patch.object(Path, "home", return_value=special_dir):
+        # Drive the real CredentialManager against that path (config_dir bypasses
+        # profile resolution) to exercise end-to-end path handling.
+        real_cm = CredentialManager(config_dir=creds_dir)
+        with patch("claude_task_master.utils.doctor.CredentialManager", return_value=real_cm):
             doctor._check_credentials()
 
         assert doctor.checks_passed is True
 
     def test_empty_credentials_file(self, temp_dir):
-        """Test credentials file exists but is empty."""
+        """Test credentials file exists but is empty -> check fails (invalid)."""
         doctor = SystemDoctor()
-        mock_console = MagicMock()
-        doctor.console = mock_console
+        doctor.console = MagicMock()
 
-        # Create empty credentials file
+        # Create empty credentials file (invalid JSON).
         creds_dir = temp_dir / ".claude"
         creds_dir.mkdir()
-        creds_file = creds_dir / ".credentials.json"
-        creds_file.write_text("")
+        (creds_dir / ".credentials.json").write_text("")
 
-        with patch.object(Path, "home", return_value=temp_dir):
+        # verify_credentials now validates content, so an empty file is rejected.
+        real_cm = CredentialManager(config_dir=creds_dir)
+        with patch("claude_task_master.utils.doctor.CredentialManager", return_value=real_cm):
             doctor._check_credentials()
 
-        # File exists, so check should pass (content validation is not done)
-        assert doctor.checks_passed is True
+        assert doctor.checks_passed is False
 
     def test_run_checks_multiple_times(self):
         """Test running checks multiple times."""
