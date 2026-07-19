@@ -45,7 +45,8 @@ from .workflow_stages import WorkflowStageHandler
 if TYPE_CHECKING:
     from ..github import GitHubClient
     from ..mailbox import MailboxStorage, MessageMerger
-    from ..webhooks import WebhookClient
+    from ..webhooks import WebhookClient, WebhookRegistry
+    from ..webhooks.config import WebhookConfig
     from ..webhooks.events import EventType
     from .logger import TaskLogger
     from .plan_updater import PlanUpdater
@@ -115,45 +116,67 @@ __all__ = [
 class WebhookEmitter:
     """Helper class to emit webhook events from the orchestrator.
 
-    Handles webhook emission with error handling and logging. Events are sent
-    asynchronously in a fire-and-forget manner - failures don't block the
-    orchestrator workflow.
+    Fans each lifecycle event out to two destinations:
+
+    * the optional single ``--webhook-url`` client (unfiltered — it receives
+      every event), and
+    * every webhook registered through the REST API via the shared
+      :class:`~claude_task_master.webhooks.registry.WebhookRegistry`, filtered by
+      each webhook's event subscription (:meth:`WebhookConfig.should_send_event`).
+
+    Before the registry was wired in, registered webhooks never received any
+    events — the orchestrator only knew about the CLI ``--webhook-url``. Delivery
+    failures are logged, never raised, so a dead endpoint cannot break the loop.
 
     Attributes:
-        client: The webhook client for sending events.
+        client: The optional CLI webhook client for sending events.
+        registry: The optional shared registry of REST-registered webhooks.
         run_id: The current orchestrator run ID for correlation.
     """
 
-    def __init__(self, client: WebhookClient | None, run_id: str | None = None) -> None:
+    def __init__(
+        self,
+        client: WebhookClient | None,
+        run_id: str | None = None,
+        registry: WebhookRegistry | None = None,
+    ) -> None:
         """Initialize the webhook emitter.
 
         Args:
-            client: Optional webhook client. If None, all emit calls are no-ops.
+            client: Optional single webhook client (from ``--webhook-url``). It
+                receives every event, unfiltered.
             run_id: Optional run ID for event correlation.
+            registry: Optional shared webhook registry. Registered webhooks are
+                delivered to on each emit, filtered by their subscriptions.
         """
         self._client = client
         self._run_id = run_id
+        self._registry = registry
 
     @property
     def enabled(self) -> bool:
-        """Check if webhook emission is enabled."""
-        return self._client is not None
+        """Check if any webhook destination is configured."""
+        return self._client is not None or self._registry is not None
 
     def emit(
         self,
         event_type: EventType | str,
         **event_data: Any,
     ) -> None:
-        """Emit a webhook event.
+        """Emit a webhook event to every configured destination.
 
-        Creates and sends a webhook event. Failures are logged but don't
-        raise exceptions to avoid blocking the orchestrator.
+        Builds the event once, then delivers it to the CLI ``--webhook-url``
+        client (if any) and to every registered webhook subscribed to this event
+        type. Failures are logged but never raised, so a dead endpoint cannot
+        block the orchestrator.
 
         Args:
             event_type: The type of event to emit.
             **event_data: Event-specific data fields.
         """
-        if not self._client:
+        # Registered webhooks subscribed to this event (subscription-filtered).
+        registry_targets = self._registry_targets(event_type)
+        if self._client is None and not registry_targets:
             return
 
         try:
@@ -164,32 +187,102 @@ class WebhookEmitter:
             if self._run_id:
                 event_data["run_id"] = self._run_id
 
-            # Create the event
             event = create_event(event_type, **event_data)
-
-            # Send synchronously (fire-and-forget)
-            result = self._client.send_sync(
-                data=event.to_dict(),
-                event_type=str(event.event_type),
-                delivery_id=event.event_id,
-            )
-
-            if result.success:
-                logger.debug(
-                    "Webhook delivered: %s (delivery_id=%s)",
-                    event.event_type,
-                    event.event_id,
-                )
-            else:
-                logger.warning(
-                    "Webhook delivery failed: %s - %s",
-                    event.event_type,
-                    result.error,
-                )
-
         except Exception as e:
-            # Log but don't raise - webhooks shouldn't block the orchestrator
-            logger.warning("Failed to emit webhook event %s: %s", event_type, e)
+            logger.warning("Failed to build webhook event %s: %s", event_type, e)
+            return
+
+        payload = event.to_dict()
+        event_name = str(event.event_type)
+        delivery_id = event.event_id
+
+        # The CLI --webhook-url client receives every event (unfiltered).
+        if self._client is not None:
+            self._deliver(self._client, payload, event_name, delivery_id)
+
+        # Registered webhooks are already filtered to this event's subscribers.
+        for webhook_id, config in registry_targets:
+            client = self._client_for_config(config)
+            if client is not None:
+                self._deliver(client, payload, event_name, delivery_id, webhook_id=webhook_id)
+
+    def _registry_targets(self, event_type: EventType | str) -> list[tuple[str, WebhookConfig]]:
+        """Return registered webhooks subscribed to ``event_type``.
+
+        Args:
+            event_type: The event being emitted.
+
+        Returns:
+            List of ``(webhook_id, config)`` pairs; empty when no registry is
+            configured or it cannot be read.
+        """
+        if self._registry is None:
+            return []
+        try:
+            return self._registry.configs_for_event(event_type)
+        except Exception as e:
+            logger.warning("Failed to read webhook registry for %s: %s", event_type, e)
+            return []
+
+    @staticmethod
+    def _client_for_config(config: WebhookConfig) -> WebhookClient | None:
+        """Build a delivery client for a registered webhook config.
+
+        Args:
+            config: The registered webhook's configuration.
+
+        Returns:
+            A configured ``WebhookClient``, or ``None`` if it cannot be built.
+        """
+        from ..webhooks import WebhookClient
+
+        try:
+            return WebhookClient(
+                url=config.url,
+                secret=config.secret,
+                timeout=config.timeout,
+                max_retries=config.max_retries,
+                retry_delay=config.retry_delay,
+                verify_ssl=config.verify_ssl,
+                headers=dict(config.headers),
+            )
+        except Exception as e:
+            logger.warning("Skipping webhook with invalid config (%s): %s", config.url, e)
+            return None
+
+    def _deliver(
+        self,
+        client: WebhookClient,
+        payload: dict[str, Any],
+        event_name: str,
+        delivery_id: str,
+        webhook_id: str | None = None,
+    ) -> None:
+        """Deliver a prepared payload to a single webhook client.
+
+        Args:
+            client: The webhook client to deliver through.
+            payload: The event payload, already serialised to a dict.
+            event_name: The event type string for the delivery header.
+            delivery_id: The unique delivery id for correlation.
+            webhook_id: Optional registry id, included in logs for traceability.
+        """
+        label = f" (webhook_id={webhook_id})" if webhook_id else ""
+        try:
+            result = client.send_sync(
+                data=payload,
+                event_type=event_name,
+                delivery_id=delivery_id,
+            )
+        except Exception as e:
+            # Log but don't raise - webhooks shouldn't block the orchestrator.
+            logger.warning("Failed to emit webhook event %s%s: %s", event_name, label, e)
+            return
+
+        if result.success:
+            logger.debug("Webhook delivered: %s%s (delivery_id=%s)", event_name, label, delivery_id)
+        else:
+            logger.warning("Webhook delivery failed: %s%s - %s", event_name, label, result.error)
 
 
 class WorkLoopOrchestrator:
@@ -301,6 +394,8 @@ class WorkLoopOrchestrator:
     def webhook_emitter(self) -> WebhookEmitter:
         """Get or lazily initialize webhook emitter."""
         if self._webhook_emitter is None:
+            from ..webhooks import WebhookRegistry
+
             # Initialize with run_id from state if available
             run_id = None
             try:
@@ -309,7 +404,10 @@ class WorkLoopOrchestrator:
                     run_id = state.run_id
             except Exception:
                 pass  # Use None if state can't be loaded
-            self._webhook_emitter = WebhookEmitter(self._webhook_client, run_id)
+            # Fan out to REST-registered webhooks via the shared registry as well
+            # as the optional single --webhook-url client.
+            registry = WebhookRegistry(self.state_manager.state_dir)
+            self._webhook_emitter = WebhookEmitter(self._webhook_client, run_id, registry=registry)
         return self._webhook_emitter
 
     @property

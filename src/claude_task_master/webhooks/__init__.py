@@ -48,6 +48,12 @@ from claude_task_master.webhooks.events import (
     create_event,
     get_event_class,
 )
+from claude_task_master.webhooks.registry import (
+    WebhookConflictError,
+    WebhookNotFoundError,
+    WebhookRegistry,
+    WebhookRegistryError,
+)
 
 __all__ = [
     # Client
@@ -70,4 +76,9 @@ __all__ = [
     "SessionCompletedEvent",
     "create_event",
     "get_event_class",
+    # Registry
+    "WebhookRegistry",
+    "WebhookRegistryError",
+    "WebhookNotFoundError",
+    "WebhookConflictError",
 ]

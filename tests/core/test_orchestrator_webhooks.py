@@ -1600,3 +1600,98 @@ class TestPRCountTrackingWebhooks:
         assert event_data["event_type"] == "pr.merged"
         assert event_data["pr_number"] == 42
         assert event_data["auto_merged"] is True
+
+
+# =============================================================================
+# Registry Fan-Out
+# =============================================================================
+
+
+class TestWebhookEmitterRegistryFanout:
+    """WebhookEmitter fans events out to REST-registered webhooks via the registry."""
+
+    @staticmethod
+    def _registry_with(state_dir, webhook_id, url, *, events=None, enabled=True):
+        """Build a registry containing one webhook record."""
+        from claude_task_master.webhooks.registry import WebhookRegistry
+
+        registry = WebhookRegistry(state_dir)
+        with registry.transaction() as webhooks:
+            webhooks[webhook_id] = {
+                "url": url,
+                "secret": None,
+                "events": events,
+                "enabled": enabled,
+                "name": None,
+                "description": None,
+                "timeout": 30.0,
+                "max_retries": 3,
+                "verify_ssl": True,
+                "headers": {},
+                "created_at": "2026-07-19T00:00:00",
+                "updated_at": "2026-07-19T00:00:00",
+            }
+        return registry
+
+    def test_registered_webhook_receives_event_without_cli_client(self, state_dir):
+        """A registered webhook receives events even with no --webhook-url client."""
+        registry = self._registry_with(state_dir, "wh_1", "https://example.com/a")
+        emitter = WebhookEmitter(None, run_id="run-1", registry=registry)
+
+        mock_client = MagicMock()
+        mock_client.send_sync = MagicMock(return_value=MagicMock(success=True, error=None))
+        with patch.object(WebhookEmitter, "_client_for_config", return_value=mock_client):
+            emitter.emit(EventType.RUN_STARTED)
+
+        mock_client.send_sync.assert_called_once()
+        kwargs = mock_client.send_sync.call_args.kwargs
+        assert kwargs["event_type"] == "run.started"
+        # run_id is threaded into every event payload.
+        assert kwargs["data"]["run_id"] == "run-1"
+
+    def test_unsubscribed_webhook_not_delivered(self, state_dir):
+        """A webhook subscribed only to pr.created is skipped for run.started."""
+        registry = self._registry_with(
+            state_dir, "wh_pr", "https://example.com/pr", events=["pr.created"]
+        )
+        emitter = WebhookEmitter(None, run_id="run-1", registry=registry)
+
+        with patch.object(WebhookEmitter, "_client_for_config") as mk:
+            emitter.emit(EventType.RUN_STARTED)
+        mk.assert_not_called()
+
+    def test_cli_client_and_registry_both_receive(self, state_dir):
+        """Both the CLI client and a registered webhook get the event."""
+        registry = self._registry_with(state_dir, "wh_1", "https://example.com/a")
+        cli_client = MagicMock()
+        cli_client.send_sync = MagicMock(return_value=MagicMock(success=True, error=None))
+        emitter = WebhookEmitter(cli_client, run_id="run-1", registry=registry)
+
+        reg_client = MagicMock()
+        reg_client.send_sync = MagicMock(return_value=MagicMock(success=True, error=None))
+        with patch.object(WebhookEmitter, "_client_for_config", return_value=reg_client):
+            emitter.emit(EventType.RUN_STARTED)
+
+        cli_client.send_sync.assert_called_once()
+        reg_client.send_sync.assert_called_once()
+
+    def test_client_for_config_builds_from_settings(self):
+        """_client_for_config maps WebhookConfig delivery settings onto the client."""
+        from claude_task_master.webhooks.config import WebhookConfig
+
+        config = WebhookConfig(url="https://example.com/a", timeout=12.0, max_retries=7)
+        client = WebhookEmitter._client_for_config(config)
+        assert client is not None
+        assert client.url == "https://example.com/a"
+        assert client.timeout == 12.0
+        assert client.max_retries == 7
+
+    def test_delivery_failure_does_not_raise(self, state_dir):
+        """A registered webhook raising during send is swallowed, not propagated."""
+        registry = self._registry_with(state_dir, "wh_1", "https://example.com/a")
+        emitter = WebhookEmitter(None, run_id="run-1", registry=registry)
+
+        boom_client = MagicMock()
+        boom_client.send_sync = MagicMock(side_effect=RuntimeError("dead endpoint"))
+        with patch.object(WebhookEmitter, "_client_for_config", return_value=boom_client):
+            emitter.emit(EventType.RUN_STARTED)  # must not raise

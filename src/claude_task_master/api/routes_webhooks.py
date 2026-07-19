@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
-import json
 import logging
 import socket
 import uuid
@@ -39,7 +38,10 @@ from claude_task_master.auth import is_auth_enabled
 from claude_task_master.webhooks import (
     EventType,
     WebhookClient,
+    WebhookConflictError,
     WebhookDeliveryResult,
+    WebhookNotFoundError,
+    WebhookRegistry,
 )
 
 if TYPE_CHECKING:
@@ -56,9 +58,6 @@ except ImportError:
     FASTAPI_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
-
-# Webhooks config file name
-WEBHOOKS_FILE = "webhooks.json"
 
 
 # =============================================================================
@@ -372,56 +371,23 @@ class WebhookErrorResponse(BaseModel):
 # =============================================================================
 
 
-def _get_webhooks_file(request: Request) -> Path:
-    """Get the webhooks configuration file path.
+def _get_registry(request: Request) -> WebhookRegistry:
+    """Get the durable, lock-protected webhook registry for this request.
+
+    The registry is the single source of truth shared with the orchestrator's
+    fan-out emitter. It serialises concurrent writes with a file lock and writes
+    atomically, so registrations are never lost to a racing request or a crash
+    mid-save.
 
     Args:
         request: FastAPI request object.
 
     Returns:
-        Path to the webhooks.json file.
+        A ``WebhookRegistry`` bound to this run's state directory.
     """
     working_dir: Path = getattr(request.app.state, "working_dir", Path.cwd())
     state_dir = working_dir / ".claude-task-master"
-    return state_dir / WEBHOOKS_FILE
-
-
-def _load_webhooks(webhooks_file: Path) -> dict[str, dict[str, Any]]:
-    """Load webhooks from the configuration file.
-
-    Args:
-        webhooks_file: Path to the webhooks file.
-
-    Returns:
-        Dictionary mapping webhook IDs to webhook configurations.
-    """
-    if not webhooks_file.exists():
-        return {}
-
-    try:
-        with open(webhooks_file) as f:
-            data = json.load(f)
-            webhooks: dict[str, dict[str, Any]] = data.get("webhooks", {})
-            return webhooks
-    except (json.JSONDecodeError, OSError) as e:
-        logger.error(f"Failed to load webhooks file: {e}")
-        return {}
-
-
-def _save_webhooks(webhooks_file: Path, webhooks: dict[str, dict[str, Any]]) -> None:
-    """Save webhooks to the configuration file.
-
-    Args:
-        webhooks_file: Path to the webhooks file.
-        webhooks: Dictionary mapping webhook IDs to configurations.
-    """
-    # Ensure state directory exists
-    webhooks_file.parent.mkdir(parents=True, exist_ok=True)
-
-    data = {"webhooks": webhooks, "updated_at": datetime.now().isoformat()}
-
-    with open(webhooks_file, "w") as f:
-        json.dump(data, f, indent=2, default=str)
+    return WebhookRegistry(state_dir)
 
 
 def _generate_webhook_id(url: str) -> str:
@@ -692,8 +658,7 @@ def create_webhooks_router() -> APIRouter:
         if not is_auth_enabled():
             return _auth_required_response()
         try:
-            webhooks_file = _get_webhooks_file(request)
-            webhooks = _load_webhooks(webhooks_file)
+            webhooks = _get_registry(request).load()
 
             webhook_responses = [
                 _webhook_to_response(wh_id, wh_data) for wh_id, wh_data in webhooks.items()
@@ -746,48 +711,39 @@ def create_webhooks_router() -> APIRouter:
         if not is_auth_enabled():
             return _auth_required_response()
         try:
-            webhooks_file = _get_webhooks_file(request)
-            webhooks = _load_webhooks(webhooks_file)
+            # The whole duplicate-check + insert runs under the registry lock so
+            # two concurrent creates cannot both pass the check and clobber one
+            # another. A conflict raises and aborts the write.
+            with _get_registry(request).transaction() as webhooks:
+                # Check for duplicate URL
+                for existing_id, existing_webhook in webhooks.items():
+                    if existing_webhook["url"] == webhook_request.url:
+                        raise WebhookConflictError(webhook_request.url, existing_id)
 
-            # Check for duplicate URL
-            for existing_id, existing_webhook in webhooks.items():
-                if existing_webhook["url"] == webhook_request.url:
-                    return JSONResponse(
-                        status_code=409,
-                        content=WebhookErrorResponse(
-                            error="duplicate_webhook",
-                            message=f"A webhook with URL '{webhook_request.url}' already exists",
-                            detail=f"Existing webhook ID: {existing_id}",
-                        ).model_dump(),
-                    )
+                # Generate unique ID
+                webhook_id = _generate_webhook_id(webhook_request.url)
 
-            # Generate unique ID
-            webhook_id = _generate_webhook_id(webhook_request.url)
+                # Ensure ID is unique (very unlikely to collide, but check anyway)
+                while webhook_id in webhooks:
+                    webhook_id = _generate_webhook_id(webhook_request.url + str(uuid.uuid4()))
 
-            # Ensure ID is unique (very unlikely to collide, but check anyway)
-            while webhook_id in webhooks:
-                webhook_id = _generate_webhook_id(webhook_request.url + str(uuid.uuid4()))
-
-            # Create webhook configuration
-            now = datetime.now().isoformat()
-            webhook_data = {
-                "url": webhook_request.url,
-                "secret": webhook_request.secret,
-                "events": webhook_request.events,
-                "enabled": webhook_request.enabled,
-                "name": webhook_request.name,
-                "description": webhook_request.description,
-                "timeout": webhook_request.timeout,
-                "max_retries": webhook_request.max_retries,
-                "verify_ssl": webhook_request.verify_ssl,
-                "headers": webhook_request.headers,
-                "created_at": now,
-                "updated_at": now,
-            }
-
-            # Save webhook
-            webhooks[webhook_id] = webhook_data
-            _save_webhooks(webhooks_file, webhooks)
+                # Create webhook configuration
+                now = datetime.now().isoformat()
+                webhook_data = {
+                    "url": webhook_request.url,
+                    "secret": webhook_request.secret,
+                    "events": webhook_request.events,
+                    "enabled": webhook_request.enabled,
+                    "name": webhook_request.name,
+                    "description": webhook_request.description,
+                    "timeout": webhook_request.timeout,
+                    "max_retries": webhook_request.max_retries,
+                    "verify_ssl": webhook_request.verify_ssl,
+                    "headers": webhook_request.headers,
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                webhooks[webhook_id] = webhook_data
 
             logger.info(f"Created webhook {webhook_id} for URL: {webhook_request.url}")
 
@@ -797,6 +753,15 @@ def create_webhooks_router() -> APIRouter:
                 webhook=_webhook_to_response(webhook_id, webhook_data),
             )
 
+        except WebhookConflictError as e:
+            return JSONResponse(
+                status_code=409,
+                content=WebhookErrorResponse(
+                    error="duplicate_webhook",
+                    message=f"A webhook with URL '{e.url}' already exists",
+                    detail=f"Existing webhook ID: {e.existing_id}",
+                ).model_dump(),
+            )
         except Exception as e:
             logger.exception("Error creating webhook")
             return JSONResponse(
@@ -834,10 +799,9 @@ def create_webhooks_router() -> APIRouter:
         if not is_auth_enabled():
             return _auth_required_response()
         try:
-            webhooks_file = _get_webhooks_file(request)
-            webhooks = _load_webhooks(webhooks_file)
+            webhook = _get_registry(request).get(webhook_id)
 
-            if webhook_id not in webhooks:
+            if webhook is None:
                 return JSONResponse(
                     status_code=404,
                     content=WebhookErrorResponse(
@@ -846,7 +810,7 @@ def create_webhooks_router() -> APIRouter:
                     ).model_dump(),
                 )
 
-            return _webhook_to_response(webhook_id, webhooks[webhook_id])
+            return _webhook_to_response(webhook_id, webhook)
 
         except Exception as e:
             logger.exception("Error getting webhook")
@@ -892,68 +856,69 @@ def create_webhooks_router() -> APIRouter:
         if not is_auth_enabled():
             return _auth_required_response()
         try:
-            webhooks_file = _get_webhooks_file(request)
-            webhooks = _load_webhooks(webhooks_file)
+            # Lookup, conflict-check, and field updates all run under the
+            # registry lock so a racing update cannot be silently overwritten.
+            with _get_registry(request).transaction() as webhooks:
+                if webhook_id not in webhooks:
+                    raise WebhookNotFoundError(webhook_id)
 
-            if webhook_id not in webhooks:
-                return JSONResponse(
-                    status_code=404,
-                    content=WebhookErrorResponse(
-                        error="not_found",
-                        message=f"Webhook '{webhook_id}' not found",
-                    ).model_dump(),
-                )
+                # Check for URL conflict if URL is being updated
+                if update_request.url is not None:
+                    for other_id, other_webhook in webhooks.items():
+                        if other_id != webhook_id and other_webhook["url"] == update_request.url:
+                            raise WebhookConflictError(update_request.url, other_id)
 
-            # Check for URL conflict if URL is being updated
-            if update_request.url is not None:
-                for other_id, other_webhook in webhooks.items():
-                    if other_id != webhook_id and other_webhook["url"] == update_request.url:
-                        return JSONResponse(
-                            status_code=409,
-                            content=WebhookErrorResponse(
-                                error="duplicate_webhook",
-                                message=f"A webhook with URL '{update_request.url}' already exists",
-                                detail=f"Existing webhook ID: {other_id}",
-                            ).model_dump(),
-                        )
+                # Update fields
+                webhook = webhooks[webhook_id]
 
-            # Update fields
-            webhook = webhooks[webhook_id]
+                if update_request.url is not None:
+                    webhook["url"] = update_request.url
+                if update_request.secret is not None:
+                    # Empty string clears the secret
+                    webhook["secret"] = update_request.secret if update_request.secret else None
+                if update_request.events is not None:
+                    # Empty list clears the filter (all events)
+                    webhook["events"] = update_request.events if update_request.events else None
+                if update_request.enabled is not None:
+                    webhook["enabled"] = update_request.enabled
+                if update_request.name is not None:
+                    webhook["name"] = update_request.name if update_request.name else None
+                if update_request.description is not None:
+                    webhook["description"] = (
+                        update_request.description if update_request.description else None
+                    )
+                if update_request.timeout is not None:
+                    webhook["timeout"] = update_request.timeout
+                if update_request.max_retries is not None:
+                    webhook["max_retries"] = update_request.max_retries
+                if update_request.verify_ssl is not None:
+                    webhook["verify_ssl"] = update_request.verify_ssl
+                if update_request.headers is not None:
+                    webhook["headers"] = update_request.headers
 
-            if update_request.url is not None:
-                webhook["url"] = update_request.url
-            if update_request.secret is not None:
-                # Empty string clears the secret
-                webhook["secret"] = update_request.secret if update_request.secret else None
-            if update_request.events is not None:
-                # Empty list clears the filter (all events)
-                webhook["events"] = update_request.events if update_request.events else None
-            if update_request.enabled is not None:
-                webhook["enabled"] = update_request.enabled
-            if update_request.name is not None:
-                webhook["name"] = update_request.name if update_request.name else None
-            if update_request.description is not None:
-                webhook["description"] = (
-                    update_request.description if update_request.description else None
-                )
-            if update_request.timeout is not None:
-                webhook["timeout"] = update_request.timeout
-            if update_request.max_retries is not None:
-                webhook["max_retries"] = update_request.max_retries
-            if update_request.verify_ssl is not None:
-                webhook["verify_ssl"] = update_request.verify_ssl
-            if update_request.headers is not None:
-                webhook["headers"] = update_request.headers
-
-            webhook["updated_at"] = datetime.now().isoformat()
-
-            # Save changes
-            _save_webhooks(webhooks_file, webhooks)
+                webhook["updated_at"] = datetime.now().isoformat()
 
             logger.info(f"Updated webhook {webhook_id}")
 
             return _webhook_to_response(webhook_id, webhook)
 
+        except WebhookNotFoundError:
+            return JSONResponse(
+                status_code=404,
+                content=WebhookErrorResponse(
+                    error="not_found",
+                    message=f"Webhook '{webhook_id}' not found",
+                ).model_dump(),
+            )
+        except WebhookConflictError as e:
+            return JSONResponse(
+                status_code=409,
+                content=WebhookErrorResponse(
+                    error="duplicate_webhook",
+                    message=f"A webhook with URL '{e.url}' already exists",
+                    detail=f"Existing webhook ID: {e.existing_id}",
+                ).model_dump(),
+            )
         except Exception as e:
             logger.exception("Error updating webhook")
             return JSONResponse(
@@ -993,21 +958,12 @@ def create_webhooks_router() -> APIRouter:
         if not is_auth_enabled():
             return _auth_required_response()
         try:
-            webhooks_file = _get_webhooks_file(request)
-            webhooks = _load_webhooks(webhooks_file)
+            with _get_registry(request).transaction() as webhooks:
+                if webhook_id not in webhooks:
+                    raise WebhookNotFoundError(webhook_id)
 
-            if webhook_id not in webhooks:
-                return JSONResponse(
-                    status_code=404,
-                    content=WebhookErrorResponse(
-                        error="not_found",
-                        message=f"Webhook '{webhook_id}' not found",
-                    ).model_dump(),
-                )
-
-            # Delete webhook
-            del webhooks[webhook_id]
-            _save_webhooks(webhooks_file, webhooks)
+                # Delete webhook
+                del webhooks[webhook_id]
 
             logger.info(f"Deleted webhook {webhook_id}")
 
@@ -1017,6 +973,14 @@ def create_webhooks_router() -> APIRouter:
                 id=webhook_id,
             )
 
+        except WebhookNotFoundError:
+            return JSONResponse(
+                status_code=404,
+                content=WebhookErrorResponse(
+                    error="not_found",
+                    message=f"Webhook '{webhook_id}' not found",
+                ).model_dump(),
+            )
         except Exception as e:
             logger.exception("Error deleting webhook")
             return JSONResponse(
@@ -1062,10 +1026,9 @@ def create_webhooks_router() -> APIRouter:
             # Determine webhook URL and secret
             if test_request.webhook_id:
                 # Test existing webhook
-                webhooks_file = _get_webhooks_file(request)
-                webhooks = _load_webhooks(webhooks_file)
+                webhook = _get_registry(request).get(test_request.webhook_id)
 
-                if test_request.webhook_id not in webhooks:
+                if webhook is None:
                     return JSONResponse(
                         status_code=404,
                         content=WebhookErrorResponse(
@@ -1074,7 +1037,6 @@ def create_webhooks_router() -> APIRouter:
                         ).model_dump(),
                     )
 
-                webhook = webhooks[test_request.webhook_id]
                 url = webhook["url"]
                 secret = webhook.get("secret")
                 timeout = webhook.get("timeout", 30.0)
