@@ -264,6 +264,32 @@ class TestAgentWrapperRunQuery:
 
         assert result == ""
 
+    def test_default_process_message_none_result_preserves_text(self, agent):
+        """The fallback processor must not overwrite accumulated text with a
+        None result. Error ResultMessages (max_turns, budget cap) carry
+        result=None; overwriting would drop real work and break the str
+        contract."""
+        result_message = MagicMock()
+        type(result_message).__name__ = "ResultMessage"
+        result_message.content = None
+        result_message.result = None
+
+        out = agent._query_executor._default_process_message(result_message, "accumulated text")
+
+        assert out == "accumulated text"
+
+    def test_default_process_message_uses_non_empty_result(self, agent):
+        """A successful ResultMessage with real text still replaces the
+        accumulated text via the fallback processor."""
+        result_message = MagicMock()
+        type(result_message).__name__ = "ResultMessage"
+        result_message.content = None
+        result_message.result = "final answer"
+
+        out = agent._query_executor._default_process_message(result_message, "partial")
+
+        assert out == "final answer"
+
 
 # =============================================================================
 # AgentWrapper Retry Logic Tests
@@ -759,6 +785,7 @@ class TestStreamIdleTimeoutWatchdog:
             text_msg.content = [text_block]
             # No stop_reason yet — agent might still call a tool.
             text_msg.stop_reason = None
+            text_msg.parent_tool_use_id = None  # top-level conversation
             yield text_msg
 
             # Then emit the end_turn AssistantMessage with NO tool_use.
@@ -766,6 +793,7 @@ class TestStreamIdleTimeoutWatchdog:
             type(final_msg).__name__ = "AssistantMessage"
             final_msg.content = []  # no ToolUseBlock
             final_msg.stop_reason = "end_turn"
+            final_msg.parent_tool_use_id = None  # top-level conversation
             yield final_msg
 
             # Simulate SDK bug #30333: ResultMessage never comes.
@@ -803,6 +831,7 @@ class TestStreamIdleTimeoutWatchdog:
             tool_msg.content = [tool_block]
             # end_turn AFTER tool_use is normal — the agent will continue.
             tool_msg.stop_reason = "end_turn"
+            tool_msg.parent_tool_use_id = None  # top-level conversation
             yield tool_msg
 
             # Hang here. With the short timeout patched, if the watchdog
@@ -826,6 +855,44 @@ class TestStreamIdleTimeoutWatchdog:
         ):
             # Should hit STREAM_IDLE_TIMEOUT (0.05s), raise APITimeoutError,
             # eventually ConsecutiveFailuresError after the stream-timeout cap.
+            with pytest.raises(ConsecutiveFailuresError):
+                await agent._run_query("test prompt", ["Read"])
+
+    @pytest.mark.asyncio
+    async def test_subagent_end_turn_does_not_arm_post_completion_timeout(self, agent):
+        """A Task-subagent's end_turn (parent_tool_use_id != None) must NOT
+        switch to the short post-completion timeout — the parent is still
+        working, and treating the subagent's end_turn as completion would
+        truncate the parent mid-task."""
+        import asyncio as _asyncio
+
+        async def emit_subagent_end_turn_then_hang(*args, **kwargs):
+            # Subagent AssistantMessage: end_turn, no tool_use, but nested
+            # under a parent Task tool call.
+            sub_msg = MagicMock()
+            type(sub_msg).__name__ = "AssistantMessage"
+            sub_msg.content = []
+            sub_msg.stop_reason = "end_turn"
+            sub_msg.parent_tool_use_id = "toolu_parent_123"
+            yield sub_msg
+
+            # Parent is still working — nothing more arrives (simulated hang).
+            await _asyncio.Future()
+
+        agent._query_executor.query = emit_subagent_end_turn_then_hang
+
+        with (
+            patch(
+                "claude_task_master.core.agent_query.POST_COMPLETION_IDLE_TIMEOUT_SEC",
+                0.001,
+            ),
+            patch("claude_task_master.core.agent_query.STREAM_IDLE_TIMEOUT_SEC", 0.05),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            # If the subagent end_turn were (incorrectly) treated as completion,
+            # the 0.001s post-completion timeout would break gracefully. Correct
+            # behavior: the long stream-idle timeout (0.05s) applies, raising
+            # APITimeoutError and eventually ConsecutiveFailuresError.
             with pytest.raises(ConsecutiveFailuresError):
                 await agent._run_query("test prompt", ["Read"])
 

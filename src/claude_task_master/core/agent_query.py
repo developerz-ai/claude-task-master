@@ -540,13 +540,20 @@ class AgentQueryExecutor:
                     # and no ToolUseBlock means: no more turns, ResultMessage
                     # is the only thing left.
                     if type(message).__name__ == "AssistantMessage":
-                        content = getattr(message, "content", None) or []
-                        has_tool_use = any(type(b).__name__ == "ToolUseBlock" for b in content)
-                        stop_reason = getattr(message, "stop_reason", None)
-                        if has_tool_use:
-                            agent_completed = False
-                        elif stop_reason == "end_turn":
-                            agent_completed = True
+                        # Only the top-level conversation drives end-of-turn
+                        # detection. A Task-subagent's messages carry
+                        # parent_tool_use_id != None; its end_turn does NOT mean
+                        # the parent is done, so treating it as completion would
+                        # arm the short post-completion idle timeout and truncate
+                        # the still-working parent mid-task.
+                        if getattr(message, "parent_tool_use_id", None) is None:
+                            content = getattr(message, "content", None) or []
+                            has_tool_use = any(type(b).__name__ == "ToolUseBlock" for b in content)
+                            stop_reason = getattr(message, "stop_reason", None)
+                            if has_tool_use:
+                                agent_completed = False
+                            elif stop_reason == "end_turn":
+                                agent_completed = True
 
                     if process_message_func:
                         result_text = process_message_func(message, result_text)
@@ -615,7 +622,11 @@ class AgentQueryExecutor:
                     result_text += block.text
 
         if message_type == "ResultMessage":
-            if hasattr(message, "result"):
+            # Guard against None: error ResultMessages (max_turns, budget cap,
+            # error_during_execution) carry result=None; overwriting the
+            # accumulated text with None would drop real work and break the
+            # str return contract.
+            if hasattr(message, "result") and message.result:
                 result_text = message.result
 
         return result_text

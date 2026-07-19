@@ -121,6 +121,7 @@ class AgentWrapper:
             get_model_name_func=self._get_model_name,
             get_agents_func=get_agents_for_working_dir,
             process_message_func=self._message_processor.process_message,
+            message_processor=self._message_processor,
         )
 
         # Note: The Claude Agent SDK will automatically use credentials from

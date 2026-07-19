@@ -216,6 +216,8 @@ def mock_result_message():
         type(message).__name__ = "ResultMessage"
         message.result = result
         message.content = None
+        message.is_error = False
+        message.subtype = "success"
         return message
 
     return _create

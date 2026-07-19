@@ -30,6 +30,24 @@ class MessageProcessor:
             logger: Optional TaskLogger for capturing tool usage and responses.
         """
         self.logger = logger
+        # Terminal outcome of the most recently processed ResultMessage.
+        # Callers derive session success from this instead of assuming it.
+        # Reset per query via reset_result_state(). Defaults describe "no
+        # terminal result seen yet": is_error=False so a session whose
+        # ResultMessage is lost (SDK bug #30333) is still treated as success
+        # from its accumulated text, matching prior behavior.
+        self.last_result_is_error: bool = False
+        self.last_result_subtype: str | None = None
+
+    def reset_result_state(self) -> None:
+        """Clear captured terminal-result state before a new query.
+
+        A single MessageProcessor is reused across successive queries, so this
+        must run before each query to stop a prior session's error outcome from
+        leaking into the next session's derived success.
+        """
+        self.last_result_is_error = False
+        self.last_result_subtype = None
 
     def process_message(self, message: Any, result_text: str) -> str:
         """Process a message from the query stream.
@@ -96,6 +114,19 @@ class MessageProcessor:
         # This preserves verification markers (VERIFICATION_RESULT: PASS/FAIL)
         # that may be output in earlier TextBlocks.
         if message_type == "ResultMessage":
+            # Capture the terminal outcome so callers can derive session
+            # success from the SDK instead of hardcoding it. ``is_error`` is
+            # authoritative: it is True for error_max_turns /
+            # error_during_execution / error_max_budget_usd, and for API
+            # errors even when ``subtype`` stays "success".
+            self.last_result_is_error = bool(getattr(message, "is_error", False))
+            self.last_result_subtype = getattr(message, "subtype", None)
+            if self.last_result_is_error:
+                detail = self.last_result_subtype or "unknown"
+                console.warning(f"Session ended with error result: {detail}")
+                if self.logger:
+                    self.logger.log_tool_result("ResultMessage", f"is_error subtype={detail}")
+
             # Log stop_reason for diagnostics (SDK v0.1.46+)
             stop_reason = getattr(message, "stop_reason", None)
             if stop_reason and self.logger:

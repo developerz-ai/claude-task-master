@@ -557,16 +557,71 @@ class TestAgentWrapperRunWorkSession:
         assert "output" in result
         assert "success" in result
 
-    def test_run_work_session_assumes_success(self, agent_with_mock):
-        """Test run_work_session assumes success for MVP."""
-        with patch.object(agent_with_mock, "_run_query", new_callable=AsyncMock) as mock_query:
-            mock_query.return_value = "Done"
-            with patch(
-                "claude_task_master.core.agent_phases.run_async_with_cleanup", return_value="Done"
-            ):
-                result = agent_with_mock.run_work_session("Task")
+    def test_run_work_session_defaults_to_success_without_error(self, agent_with_mock):
+        """With no error ResultMessage captured, success defaults to True.
+
+        This also covers the SDK-bug #30333 lost-ResultMessage path: no terminal
+        result means we trust the accumulated text as success.
+        """
+        agent_with_mock._message_processor.reset_result_state()
+
+        def fake_run(coro):
+            coro.close()  # avoid 'coroutine was never awaited' warning
+            return "Done"
+
+        with patch(
+            "claude_task_master.core.agent_phases.run_async_with_cleanup",
+            side_effect=fake_run,
+        ):
+            result = agent_with_mock.run_work_session("Task")
 
         assert result["success"] is True
+        assert result["subtype"] is None
+
+    def test_run_work_session_reports_failure_on_error_result(self, agent_with_mock):
+        """A budget/turn-capped session (ResultMessage.is_error=True) must report
+        success=False instead of hardcoding True — otherwise the orchestrator
+        would mark half-done work [x]."""
+        proc = agent_with_mock._message_processor
+
+        def fake_run(coro):
+            # Simulate the query stream capturing an error ResultMessage.
+            coro.close()  # avoid 'coroutine was never awaited' warning
+            proc.last_result_is_error = True
+            proc.last_result_subtype = "error_max_budget_usd"
+            return "partial work"
+
+        with patch(
+            "claude_task_master.core.agent_phases.run_async_with_cleanup",
+            side_effect=fake_run,
+        ):
+            result = agent_with_mock.run_work_session("Task")
+
+        assert result["success"] is False
+        assert result["subtype"] == "error_max_budget_usd"
+        assert result["output"] == "partial work"
+
+    def test_run_work_session_resets_prior_error_before_query(self, agent_with_mock):
+        """A stale error from a previous session must not leak: run_work_session
+        resets the processor before the query, so a clean session reports
+        success."""
+        proc = agent_with_mock._message_processor
+        # Leftover error state from an earlier session.
+        proc.last_result_is_error = True
+        proc.last_result_subtype = "error_max_turns"
+
+        def fake_run(coro):
+            coro.close()  # avoid 'coroutine was never awaited' warning
+            return "Done"
+
+        with patch(
+            "claude_task_master.core.agent_phases.run_async_with_cleanup",
+            side_effect=fake_run,
+        ):
+            result = agent_with_mock.run_work_session("Task")
+
+        assert result["success"] is True
+        assert result["subtype"] is None
 
     def test_run_work_session_with_context(self, agent_with_mock):
         """Test run_work_session includes context."""

@@ -25,6 +25,7 @@ from .prompts import (
 )
 
 if TYPE_CHECKING:
+    from .agent_message import MessageProcessor
     from .agent_query import AgentQueryExecutor
     from .logger import TaskLogger
 
@@ -146,6 +147,7 @@ class AgentPhaseExecutor:
         get_model_name_func: Any = None,
         get_agents_func: Any = None,
         process_message_func: Any = None,
+        message_processor: "MessageProcessor | None" = None,
     ):
         """Initialize the phase executor.
 
@@ -156,6 +158,10 @@ class AgentPhaseExecutor:
             get_model_name_func: Function to convert ModelType to API model name.
             get_agents_func: Function to get subagents for working directory.
             process_message_func: Function to process messages from query stream.
+            message_processor: The MessageProcessor whose ``process_message`` is
+                passed as ``process_message_func``. Held so ``run_work_session``
+                can derive session success from the captured terminal
+                ResultMessage. Optional for backward compatibility.
         """
         self.query_executor = query_executor
         self.model = model
@@ -163,6 +169,7 @@ class AgentPhaseExecutor:
         self.get_model_name_func = get_model_name_func
         self.get_agents_func = get_agents_func
         self.process_message_func = process_message_func
+        self.message_processor = message_processor
 
     def run_planning_phase(
         self,
@@ -263,6 +270,11 @@ class AgentPhaseExecutor:
             coding_style=coding_style,
         )
 
+        # Reset terminal-result capture so a prior session's outcome cannot
+        # leak into this session's derived success.
+        if self.message_processor is not None:
+            self.message_processor.reset_result_state()
+
         # Run async query with optional model override
         result = run_async_with_cleanup(
             self.query_executor.run_query(
@@ -275,9 +287,22 @@ class AgentPhaseExecutor:
             )
         )
 
+        # Derive success from the SDK's terminal ResultMessage instead of
+        # assuming it. A budget/turn-capped or mid-execution error leaves
+        # is_error=True; reporting such a half-done session as success would
+        # let the orchestrator mark incomplete work [x]. When no processor is
+        # wired, or the ResultMessage was lost (SDK bug #30333), fall back to
+        # success from the accumulated text.
+        success = True
+        subtype: str | None = None
+        if self.message_processor is not None:
+            success = not self.message_processor.last_result_is_error
+            subtype = self.message_processor.last_result_subtype
+
         return {
             "output": result,
-            "success": True,  # For MVP, assume success
+            "success": success,
+            "subtype": subtype,
             "model_used": (model_override or self.model).value,
         }
 
