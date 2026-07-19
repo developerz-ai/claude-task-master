@@ -28,6 +28,7 @@ from .agent_exceptions import (
     QueryExecutionError,
     SDKImportError,
     SDKInitializationError,
+    StreamStallError,
     WorkingDirectoryError,
 )
 from .circuit_breaker import (
@@ -226,9 +227,11 @@ class AgentQueryExecutor:
         Returns:
             The delay in seconds before the next retry attempt.
         """
-        # For rate limit errors, respect Retry-After if the API provided it
+        # For rate limit errors, respect Retry-After if the API provided it.
+        # Cap at max_backoff so a pathological server can't stall retries
+        # indefinitely and trip the consecutive-failure window.
         if isinstance(error, APIRateLimitError) and error.retry_after:
-            return error.retry_after
+            return min(error.retry_after, self.rate_limit_config.max_backoff)
 
         # Use exponential backoff from rate_limit_config
         # attempt is 0-indexed: first retry = attempt 0
@@ -336,7 +339,7 @@ class AgentQueryExecutor:
             except TRANSIENT_ERRORS as e:
                 # Stream idle-timeouts have their own hard cap (each one
                 # takes ~10min, so the windowed counter would never trip).
-                if isinstance(e, APITimeoutError) and e.timeout == STREAM_IDLE_TIMEOUT_SEC:
+                if isinstance(e, StreamStallError):
                     self._stream_idle_timeouts += 1
                     if self._stream_idle_timeouts >= self._stream_idle_timeout_cap:
                         console.error(
@@ -419,7 +422,6 @@ class AgentQueryExecutor:
             QueryExecutionError: For other query errors.
         """
         result_text = ""
-        original_dir = os.getcwd()
 
         # Determine which model to use
         effective_model = model_override or self.model
@@ -437,179 +439,171 @@ class AgentQueryExecutor:
             flush=True,
         )
 
-        try:
-            # Change to working directory
-            try:
-                os.chdir(self.working_dir)
-            except FileNotFoundError as e:
-                raise WorkingDirectoryError(self.working_dir, "change to", e) from e
-            except PermissionError as e:
-                raise WorkingDirectoryError(self.working_dir, "access", e) from e
-            except OSError as e:
-                raise WorkingDirectoryError(self.working_dir, "change to", e) from e
+        # Validate working directory exists before passing it to the SDK.
+        # The SDK receives cwd= in options_kwargs; we don't chdir (which would
+        # race concurrent queries in server mode) but we do want a clear error
+        # if the directory is missing rather than a cryptic SDK failure.
+        if not os.path.isdir(self.working_dir):
+            raise WorkingDirectoryError(
+                self.working_dir,
+                "change to",
+                FileNotFoundError(f"No such directory: {self.working_dir}"),
+            )
 
-            # Load subagents from .claude/agents/ directory
-            if get_agents_func:
-                agents = get_agents_func(self.working_dir)
+        # Load subagents from .claude/agents/ directory
+        if get_agents_func:
+            agents = get_agents_func(self.working_dir)
+        else:
+            agents = None
+
+        # Determine effort level and fallback model for the effective model.
+        from .agent_models import MODEL_EFFORT_MAP, get_fallback_chain
+
+        # Effort is keyed directly off the resolved model so every tier —
+        # including FABLE, which no complexity routes to — gets extended
+        # thinking (fable → "max"). A None here means "SDK default".
+        effort_level = MODEL_EFFORT_MAP.get(effective_model)
+
+        # Hand the SDK the first hop of the cycle-guarded fallback chain for
+        # automatic single-hop recovery. Deeper hops are driven by the
+        # multi-hop retry in _run_query_with_retry on ModelUnavailableError.
+        fallback_model_name = None
+        fallback_chain = get_fallback_chain(effective_model)
+        if fallback_chain:
+            fallback_type = fallback_chain[0]
+            if get_model_name_func:
+                fallback_model_name = get_model_name_func(fallback_type)
             else:
-                agents = None
+                fallback_model_name = self._default_get_model_name(fallback_type)
 
-            # Determine effort level and fallback model for the effective model.
-            from .agent_models import MODEL_EFFORT_MAP, get_fallback_chain
+        # Pass stall-timeout env vars to the underlying CLI subprocess.
+        # The Python SDK ignores these, but the bundled CLI binary respects
+        # them and will fail-fast on internal stalls before our watchdog
+        # has to step in. Belt-and-suspenders for issue #30333.
+        stall_timeout_ms = str(int(STREAM_IDLE_TIMEOUT_SEC * 1000))
+        cli_env = {
+            "CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS": stall_timeout_ms,
+            "API_TIMEOUT_MS": stall_timeout_ms,
+        }
+        # Inject the active profile's auth context (isolated CLAUDE_CONFIG_DIR
+        # for oauth profiles, or ANTHROPIC_API_KEY/BASE_URL for api-key
+        # profiles). No-op when no profile is active.
+        from .profiles import resolve_runtime_env
 
-            # Effort is keyed directly off the resolved model so every tier —
-            # including FABLE, which no complexity routes to — gets extended
-            # thinking (fable → "max"). A None here means "SDK default".
-            effort_level = MODEL_EFFORT_MAP.get(effective_model)
+        cli_env.update(resolve_runtime_env())
 
-            # Hand the SDK the first hop of the cycle-guarded fallback chain for
-            # automatic single-hop recovery. Deeper hops are driven by the
-            # multi-hop retry in _run_query_with_retry on ModelUnavailableError.
-            fallback_model_name = None
-            fallback_chain = get_fallback_chain(effective_model)
-            if fallback_chain:
-                fallback_type = fallback_chain[0]
-                if get_model_name_func:
-                    fallback_model_name = get_model_name_func(fallback_type)
-                else:
-                    fallback_model_name = self._default_get_model_name(fallback_type)
-
-            # Pass stall-timeout env vars to the underlying CLI subprocess.
-            # The Python SDK ignores these, but the bundled CLI binary respects
-            # them and will fail-fast on internal stalls before our watchdog
-            # has to step in. Belt-and-suspenders for issue #30333.
-            stall_timeout_ms = str(int(STREAM_IDLE_TIMEOUT_SEC * 1000))
-            cli_env = {
-                "CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS": stall_timeout_ms,
-                "API_TIMEOUT_MS": stall_timeout_ms,
+        # Create options with model specification and subagents
+        try:
+            options_kwargs: dict[str, Any] = {
+                "allowed_tools": tools,
+                "permission_mode": "bypassPermissions",
+                "model": model_name,
+                "cwd": str(self.working_dir),
+                "setting_sources": ["user", "local", "project"],
+                "hooks": self.hooks,
+                "agents": agents if agents else None,
+                "max_buffer_size": 5 * 1024 * 1024,
+                "env": cli_env,
             }
-            # Inject the active profile's auth context (isolated CLAUDE_CONFIG_DIR
-            # for oauth profiles, or ANTHROPIC_API_KEY/BASE_URL for api-key
-            # profiles). No-op when no profile is active.
-            from .profiles import resolve_runtime_env
 
-            cli_env.update(resolve_runtime_env())
+            # Add effort level for extended thinking depth control
+            if effort_level:
+                options_kwargs["effort"] = effort_level
 
-            # Create options with model specification and subagents
-            try:
-                options_kwargs: dict[str, Any] = {
-                    "allowed_tools": tools,
-                    "permission_mode": "bypassPermissions",
-                    "model": model_name,
-                    "cwd": str(self.working_dir),
-                    "setting_sources": ["user", "local", "project"],
-                    "hooks": self.hooks,
-                    "agents": agents if agents else None,
-                    "max_buffer_size": 5 * 1024 * 1024,
-                    "env": cli_env,
-                }
+            # Add fallback model for auto-recovery on model unavailability
+            if fallback_model_name:
+                options_kwargs["fallback_model"] = fallback_model_name
 
-                # Add effort level for extended thinking depth control
-                if effort_level:
-                    options_kwargs["effort"] = effort_level
+            # Add per-session budget cap if configured
+            if self.max_budget_usd is not None:
+                options_kwargs["max_budget_usd"] = self.max_budget_usd
 
-                # Add fallback model for auto-recovery on model unavailability
-                if fallback_model_name:
-                    options_kwargs["fallback_model"] = fallback_model_name
+            options = self.options_class(**options_kwargs)
+        except Exception as e:
+            raise SDKInitializationError("ClaudeAgentOptions", e) from e
 
-                # Add per-session budget cap if configured
-                if self.max_budget_usd is not None:
-                    options_kwargs["max_budget_usd"] = self.max_budget_usd
-
-                options = self.options_class(**options_kwargs)
-            except Exception as e:
-                raise SDKInitializationError("ClaudeAgentOptions", e) from e
-
-            # Execute query with per-message idle-timeout watchdog.
-            # Two timeout regimes (see constants above):
-            #   - STREAM_IDLE_TIMEOUT_SEC: the agent may be mid-tool, mid-think,
-            #     etc. Long ceiling to accommodate real long-running tools.
-            #   - POST_COMPLETION_IDLE_TIMEOUT_SEC: the agent just signaled
-            #     end_turn with no pending tool_use. The only remaining message
-            #     is ResultMessage; if it doesn't arrive shortly, the SDK lost
-            #     it (#30333). Treat as success with accumulated text.
-            stream = self.query(prompt=prompt, options=options)
-            agent_completed = False
-            try:
-                while True:
-                    current_timeout = (
-                        POST_COMPLETION_IDLE_TIMEOUT_SEC
-                        if agent_completed
-                        else STREAM_IDLE_TIMEOUT_SEC
+        # Execute query with per-message idle-timeout watchdog.
+        # Two timeout regimes (see constants above):
+        #   - STREAM_IDLE_TIMEOUT_SEC: the agent may be mid-tool, mid-think,
+        #     etc. Long ceiling to accommodate real long-running tools.
+        #   - POST_COMPLETION_IDLE_TIMEOUT_SEC: the agent just signaled
+        #     end_turn with no pending tool_use. The only remaining message
+        #     is ResultMessage; if it doesn't arrive shortly, the SDK lost
+        #     it (#30333). Treat as success with accumulated text.
+        stream = self.query(prompt=prompt, options=options)
+        agent_completed = False
+        try:
+            while True:
+                current_timeout = (
+                    POST_COMPLETION_IDLE_TIMEOUT_SEC if agent_completed else STREAM_IDLE_TIMEOUT_SEC
+                )
+                try:
+                    message = await asyncio.wait_for(
+                        stream.__anext__(),
+                        timeout=current_timeout,
                     )
-                    try:
-                        message = await asyncio.wait_for(
-                            stream.__anext__(),
-                            timeout=current_timeout,
-                        )
-                    except StopAsyncIteration:
-                        break
-                    except TimeoutError as e:
-                        if agent_completed:
-                            # Agent finished; SDK swallowed ResultMessage. Don't
-                            # retry — the work succeeded, retrying would re-run
-                            # a completed task.
-                            console.newline()
-                            console.warning(
-                                f"ResultMessage missing after end_turn "
-                                f"({current_timeout:.0f}s) - SDK bug #30333, "
-                                "treating accumulated text as success",
-                                flush=True,
-                            )
-                            break
+                except StopAsyncIteration:
+                    break
+                except TimeoutError as e:
+                    if agent_completed:
+                        # Agent finished; SDK swallowed ResultMessage. Don't
+                        # retry — the work succeeded, retrying would re-run
+                        # a completed task.
                         console.newline()
                         console.warning(
-                            f"Stream idle for {current_timeout:.0f}s - treating as upstream stall",
+                            f"ResultMessage missing after end_turn "
+                            f"({current_timeout:.0f}s) - SDK bug #30333, "
+                            "treating accumulated text as success",
                             flush=True,
                         )
-                        raise APITimeoutError(current_timeout, e) from e
-                    except APITimeoutError:
-                        raise
-                    except Exception as e:
-                        raise self._classify_api_error(e) from e
+                        break
+                    console.newline()
+                    console.warning(
+                        f"Stream idle for {current_timeout:.0f}s - treating as upstream stall",
+                        flush=True,
+                    )
+                    raise StreamStallError(current_timeout, e) from e
+                except StreamStallError:
+                    raise
+                except APITimeoutError:
+                    raise
+                except Exception as e:
+                    raise self._classify_api_error(e) from e
 
-                    # Detect "agent has nothing more to do" — used to switch to
-                    # the post-completion short timeout. We can't import the
-                    # SDK types directly without circular issues, so check by
-                    # class name. An AssistantMessage with stop_reason=end_turn
-                    # and no ToolUseBlock means: no more turns, ResultMessage
-                    # is the only thing left.
-                    if type(message).__name__ == "AssistantMessage":
-                        # Only the top-level conversation drives end-of-turn
-                        # detection. A Task-subagent's messages carry
-                        # parent_tool_use_id != None; its end_turn does NOT mean
-                        # the parent is done, so treating it as completion would
-                        # arm the short post-completion idle timeout and truncate
-                        # the still-working parent mid-task.
-                        if getattr(message, "parent_tool_use_id", None) is None:
-                            content = getattr(message, "content", None) or []
-                            has_tool_use = any(type(b).__name__ == "ToolUseBlock" for b in content)
-                            stop_reason = getattr(message, "stop_reason", None)
-                            if has_tool_use:
-                                agent_completed = False
-                            elif stop_reason == "end_turn":
-                                agent_completed = True
+                # Detect "agent has nothing more to do" — used to switch to
+                # the post-completion short timeout. We can't import the
+                # SDK types directly without circular issues, so check by
+                # class name. An AssistantMessage with stop_reason=end_turn
+                # and no ToolUseBlock means: no more turns, ResultMessage
+                # is the only thing left.
+                if type(message).__name__ == "AssistantMessage":
+                    # Only the top-level conversation drives end-of-turn
+                    # detection. A Task-subagent's messages carry
+                    # parent_tool_use_id != None; its end_turn does NOT mean
+                    # the parent is done, so treating it as completion would
+                    # arm the short post-completion idle timeout and truncate
+                    # the still-working parent mid-task.
+                    if getattr(message, "parent_tool_use_id", None) is None:
+                        content = getattr(message, "content", None) or []
+                        has_tool_use = any(type(b).__name__ == "ToolUseBlock" for b in content)
+                        stop_reason = getattr(message, "stop_reason", None)
+                        if has_tool_use:
+                            agent_completed = False
+                        elif stop_reason == "end_turn":
+                            agent_completed = True
 
-                    if process_message_func:
-                        result_text = process_message_func(message, result_text)
-                    else:
-                        result_text = self._default_process_message(message, result_text)
-            finally:
-                # Release SDK transport resources (HTTP connection, subprocess).
-                aclose = getattr(stream, "aclose", None)
-                if aclose is not None:
-                    try:
-                        await aclose()
-                    except Exception:
-                        pass
-
+                if process_message_func:
+                    result_text = process_message_func(message, result_text)
+                else:
+                    result_text = self._default_process_message(message, result_text)
         finally:
-            # Always restore original directory
-            try:
-                os.chdir(original_dir)
-            except OSError:
-                # Best effort to restore directory - don't mask original error
-                pass
+            # Release SDK transport resources (HTTP connection, subprocess).
+            aclose = getattr(stream, "aclose", None)
+            if aclose is not None:
+                try:
+                    await aclose()
+                except Exception:
+                    pass
 
         return result_text
 

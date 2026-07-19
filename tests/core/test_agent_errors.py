@@ -678,7 +678,7 @@ class TestAgentWrapperWorkingDirectoryErrors:
 
     @pytest.mark.asyncio
     async def test_working_directory_permission_error(self, temp_dir):
-        """Test error when working directory has permission issues."""
+        """Test error when working directory is inaccessible (os.path.isdir returns False)."""
         mock_sdk = MagicMock()
         mock_sdk.query = AsyncMock()
         mock_sdk.ClaudeAgentOptions = MagicMock()
@@ -690,12 +690,14 @@ class TestAgentWrapperWorkingDirectoryErrors:
                 working_dir=str(temp_dir),
             )
 
-        # Mock os.chdir to raise PermissionError
-        with patch("os.chdir", side_effect=PermissionError("Permission denied")):
+        # os.path.isdir returning False simulates a missing or inaccessible path.
+        # The old code used os.chdir; the new code validates with isdir so we
+        # no longer need to mock chdir.
+        with patch("os.path.isdir", return_value=False):
             with pytest.raises(WorkingDirectoryError) as exc_info:
                 await agent._query_executor._execute_query("test prompt", ["Read"])
 
-            assert "access" in exc_info.value.operation
+            assert "change to" in exc_info.value.operation
 
     @pytest.mark.asyncio
     async def test_working_directory_error_includes_path(self, temp_dir):

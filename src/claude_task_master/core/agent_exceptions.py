@@ -98,6 +98,20 @@ class APITimeoutError(QueryExecutionError):
         )
 
 
+class StreamStallError(APITimeoutError):
+    """Raised when the SDK stream goes idle beyond the stall timeout.
+
+    A distinct subclass of APITimeoutError so the stream-stall counter can be
+    checked via isinstance() rather than float-equality on the timeout value,
+    which breaks when CLAUDETM_STREAM_IDLE_TIMEOUT_SEC is overridden to the
+    same value used by _classify_api_error's 30.0-second default.
+    """
+
+    def __init__(self, timeout: float, original_error: Exception | None = None):
+        super().__init__(timeout, original_error)
+        self.message = f"Stream idle for {timeout:.0f}s - upstream stall detected"
+
+
 class APIAuthenticationError(QueryExecutionError):
     """Raised when API authentication fails."""
 
@@ -200,6 +214,7 @@ __all__ = [
     "APIRateLimitError",
     "APIConnectionError",
     "APITimeoutError",
+    "StreamStallError",
     "APIAuthenticationError",
     "APIServerError",
     "ContentFilterError",

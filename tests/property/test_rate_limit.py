@@ -3,6 +3,8 @@
 Tests the mathematical properties of exponential backoff calculations.
 """
 
+from unittest.mock import patch
+
 import pytest
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
@@ -22,7 +24,12 @@ class TestRateLimitConfigProperties:
     def test_backoff_monotonically_increasing(
         self, max_retries: int, initial_backoff: float, backoff_multiplier: float
     ):
-        """Backoff times should be monotonically increasing until hitting max."""
+        """Base backoff times (without jitter) should be monotonically increasing.
+
+        calculate_backoff() adds decorrelated jitter in [0.5, 1.0] × base, so
+        individual calls may not be monotonic.  The underlying _base_backoff is
+        deterministic and always monotonically non-decreasing up to max_backoff.
+        """
         # Calculate max_backoff and clamp to valid range [initial_backoff, 300]
         max_backoff = min(300, initial_backoff * (backoff_multiplier**max_retries))
         config = RateLimitConfig(
@@ -32,11 +39,13 @@ class TestRateLimitConfigProperties:
             backoff_multiplier=backoff_multiplier,
         )
 
+        # Pin jitter to 1.0 so calculate_backoff is deterministic
         prev_backoff = 0.0
-        for attempt in range(max_retries):
-            current_backoff = config.calculate_backoff(attempt)
-            assert current_backoff >= prev_backoff
-            prev_backoff = current_backoff
+        with patch("random.random", return_value=1.0):
+            for attempt in range(max_retries):
+                current_backoff = config.calculate_backoff(attempt)
+                assert current_backoff >= prev_backoff
+                prev_backoff = current_backoff
 
     @given(
         max_retries=st.integers(min_value=1, max_value=10),
@@ -71,7 +80,7 @@ class TestRateLimitConfigProperties:
     def test_first_attempt_is_initial_backoff(
         self, max_retries: int, initial_backoff: float, backoff_multiplier: float
     ):
-        """First attempt (0) should always return initial_backoff."""
+        """First attempt (0) should return exactly initial_backoff (jitter pinned to 1.0)."""
         max_backoff = min(300, initial_backoff * 10)  # Clamp to valid range
         config = RateLimitConfig(
             max_retries=max_retries,
@@ -80,7 +89,9 @@ class TestRateLimitConfigProperties:
             backoff_multiplier=backoff_multiplier,
         )
 
-        assert config.calculate_backoff(0) == pytest.approx(initial_backoff)
+        # Pin jitter so calculate_backoff(0) == initial_backoff × 1.0
+        with patch("random.random", return_value=1.0):
+            assert config.calculate_backoff(0) == pytest.approx(initial_backoff)
 
     @given(
         max_retries=st.integers(min_value=1, max_value=5),
@@ -91,7 +102,13 @@ class TestRateLimitConfigProperties:
     def test_total_max_time_is_sum_of_backoffs(
         self, max_retries: int, initial_backoff: float, backoff_multiplier: float
     ):
-        """Total max time should equal sum of all backoff times."""
+        """get_total_max_time() equals the sum of deterministic (no-jitter) backoffs.
+
+        calculate_backoff() adds jitter, but get_total_max_time() uses the
+        deterministic _base_backoff for planning purposes.  The property we
+        verify is: total == sum(_base_backoff(i) for i in range(max_retries)),
+        which is equivalent to running calculate_backoff with jitter pinned to 1.0.
+        """
         max_backoff = min(300, initial_backoff * (backoff_multiplier**max_retries))
         config = RateLimitConfig(
             max_retries=max_retries,
@@ -100,7 +117,8 @@ class TestRateLimitConfigProperties:
             backoff_multiplier=backoff_multiplier,
         )
 
-        expected_total = sum(config.calculate_backoff(i) for i in range(max_retries))
+        with patch("random.random", return_value=1.0):
+            expected_total = sum(config.calculate_backoff(i) for i in range(max_retries))
         assert config.get_total_max_time() == pytest.approx(expected_total)
 
     @given(attempt=st.integers(min_value=-100, max_value=-1))

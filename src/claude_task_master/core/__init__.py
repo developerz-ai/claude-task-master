@@ -14,6 +14,7 @@ from claude_task_master.core.agent_exceptions import (
     QueryExecutionError,
     SDKImportError,
     SDKInitializationError,
+    StreamStallError,
     WorkingDirectoryError,
 )
 from claude_task_master.core.agent_message import MessageProcessor
@@ -229,6 +230,7 @@ __all__ = [
     "APIRateLimitError",
     "APIConnectionError",
     "APITimeoutError",
+    "StreamStallError",
     "APIAuthenticationError",
     "APIServerError",
     "ContentFilterError",

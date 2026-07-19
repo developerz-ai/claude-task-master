@@ -38,6 +38,12 @@ class MessageProcessor:
         # from its accumulated text, matching prior behavior.
         self.last_result_is_error: bool = False
         self.last_result_subtype: str | None = None
+        # Actual cost/token data from the most recent ResultMessage.
+        # None until a ResultMessage is processed; stays None when the SDK
+        # omits the field (e.g. error results or older SDK versions).
+        self.last_total_cost_usd: float | None = None
+        self.last_input_tokens: int = 0
+        self.last_output_tokens: int = 0
 
     def reset_result_state(self) -> None:
         """Clear captured terminal-result state before a new query.
@@ -48,6 +54,9 @@ class MessageProcessor:
         """
         self.last_result_is_error = False
         self.last_result_subtype = None
+        self.last_total_cost_usd = None
+        self.last_input_tokens = 0
+        self.last_output_tokens = 0
 
     def process_message(self, message: Any, result_text: str) -> str:
         """Process a message from the query stream.
@@ -126,6 +135,18 @@ class MessageProcessor:
                 console.warning(f"Session ended with error result: {detail}")
                 if self.logger:
                     self.logger.log_tool_result("ResultMessage", f"is_error subtype={detail}")
+
+            # Extract actual cost and token usage (SDK v0.1+ ResultMessage fields).
+            # total_cost_usd is the authoritative figure; usage carries per-token
+            # counts for display. Both are optional — older SDK versions or error
+            # results may omit them, so we guard with getattr.
+            cost_usd = getattr(message, "total_cost_usd", None)
+            if cost_usd is not None:
+                self.last_total_cost_usd = float(cost_usd)
+            usage = getattr(message, "usage", None)
+            if usage is not None:
+                self.last_input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
+                self.last_output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
 
             # Log stop_reason for diagnostics (SDK v0.1.46+)
             stop_reason = getattr(message, "stop_reason", None)

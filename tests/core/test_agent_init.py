@@ -272,7 +272,7 @@ class TestAgentWrapperWorkingDirectoryErrors:
 
     @pytest.mark.asyncio
     async def test_working_directory_permission_error(self, temp_dir):
-        """Test error when working directory has permission issues."""
+        """Test error when working directory is inaccessible (os.path.isdir returns False)."""
         mock_sdk = MagicMock()
         mock_sdk.query = AsyncMock()
         mock_sdk.ClaudeAgentOptions = MagicMock()
@@ -284,48 +284,18 @@ class TestAgentWrapperWorkingDirectoryErrors:
                 working_dir=str(temp_dir),
             )
 
-        # Mock os.chdir to raise PermissionError
-        with patch("os.chdir", side_effect=PermissionError("Permission denied")):
+        # os.path.isdir returning False simulates a missing or inaccessible path.
+        # _execute_query no longer uses os.chdir; it validates with os.path.isdir
+        # and passes cwd= to the SDK options to avoid global process-state races.
+        with patch("os.path.isdir", return_value=False):
             with pytest.raises(WorkingDirectoryError) as exc_info:
                 await agent._query_executor._execute_query("test prompt", ["Read"])
 
-            assert "access" in exc_info.value.operation
+            assert "change to" in exc_info.value.operation
 
     @pytest.mark.asyncio
-    async def test_directory_restored_after_error(self, temp_dir):
-        """Test working directory is restored even after query error."""
-        mock_sdk = MagicMock()
-        mock_sdk.query = AsyncMock()
-        mock_sdk.ClaudeAgentOptions = MagicMock()
-
-        original_dir = os.getcwd()
-
-        with patch.dict("sys.modules", {"claude_agent_sdk": mock_sdk}):
-            agent = AgentWrapper(
-                access_token="test-token",
-                model=ModelType.SONNET,
-                working_dir=str(temp_dir),
-            )
-
-        # Create async generator that raises an error
-        async def mock_query_gen(*args, **kwargs):
-            raise ValueError("Test error")
-            yield  # Make it a generator
-
-        agent.query = mock_query_gen
-        agent._query_executor.query = mock_query_gen
-
-        from claude_task_master.core.agent_exceptions import QueryExecutionError
-
-        with pytest.raises(QueryExecutionError):
-            await agent._run_query("test prompt", ["Read"])
-
-        # Should be back in original directory
-        assert os.getcwd() == original_dir
-
-    @pytest.mark.asyncio
-    async def test_directory_restored_after_success(self, temp_dir):
-        """Test working directory is restored after successful query."""
+    async def test_query_does_not_chdir(self, temp_dir):
+        """Test that _execute_query does not change process working directory."""
         mock_sdk = MagicMock()
         mock_sdk.query = AsyncMock()
         mock_sdk.ClaudeAgentOptions = MagicMock()
@@ -348,5 +318,5 @@ class TestAgentWrapperWorkingDirectoryErrors:
 
         await agent._run_query("test prompt", ["Read"])
 
-        # Should be back in original directory
+        # Working directory must NOT change — cwd is passed to the SDK, not set globally.
         assert os.getcwd() == original_dir

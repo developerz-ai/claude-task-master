@@ -479,7 +479,12 @@ class TestAgentWrapperRetryLogic:
         async def capture_sleep(delay):
             sleep_delays.append(delay)
 
-        with patch("asyncio.sleep", side_effect=capture_sleep):
+        # Pin jitter to 1.0 (factor = 0.5 + 0.5*1.0 = 1.0) so backoff values
+        # are deterministic: attempt 0 → 0.1, attempt 1 → 0.2
+        with (
+            patch("asyncio.sleep", side_effect=capture_sleep),
+            patch("random.random", return_value=1.0),
+        ):
             await agent._run_query("test prompt", ["Read"])
 
         # rate_limit_config: initial_backoff=0.1, multiplier=2.0
@@ -523,9 +528,10 @@ class TestAgentWrapperRetryLogic:
         with patch("asyncio.sleep", side_effect=capture_sleep):
             await agent._run_query("test prompt", ["Read"])
 
-        # Should use retry_after value instead of exponential backoff
+        # retry_after is capped at max_backoff (0.5) to prevent a pathological
+        # server from stalling retries indefinitely.
         assert len(sleep_delays) == 1
-        assert sleep_delays[0] == 42.0
+        assert sleep_delays[0] == pytest.approx(0.5)
 
     @pytest.mark.asyncio
     async def test_max_retries_configurable(self, temp_dir):

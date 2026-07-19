@@ -1303,6 +1303,17 @@ class WorkLoopOrchestrator:
             session_duration = time.time() - session_start_time
             if session_result == "skipped_already_complete":
                 outcome = "skipped"
+            # Feed actual cost/token data from the most recent ResultMessage
+            # before ending the session so the cost report shows real charges.
+            mp = getattr(self.agent, "_message_processor", None)
+            if mp is not None:
+                cost_usd = getattr(mp, "last_total_cost_usd", None)
+                if isinstance(cost_usd, float):
+                    self.tracker.record_cost(
+                        cost_usd=cost_usd,
+                        tokens_in=int(getattr(mp, "last_input_tokens", 0) or 0),
+                        tokens_out=int(getattr(mp, "last_output_tokens", 0) or 0),
+                    )
             self.tracker.end_session(outcome=outcome)
             if self.logger:
                 self.logger.end_session(outcome)

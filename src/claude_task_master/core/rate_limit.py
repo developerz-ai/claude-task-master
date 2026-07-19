@@ -1,5 +1,6 @@
 """Rate Limiting Configuration - Configurable exponential backoff for API calls."""
 
+import random
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -104,29 +105,53 @@ class RateLimitConfig(BaseModel):
         """Convert configuration to dictionary."""
         return self.model_dump()
 
-    def calculate_backoff(self, attempt: int) -> float:
-        """Calculate backoff time for given attempt number.
+    def _base_backoff(self, attempt: int) -> float:
+        """Deterministic (no-jitter) backoff for a given attempt.
+
+        Used by get_total_max_time() for planning and by calculate_backoff()
+        as the ceiling before jitter is applied.
 
         Args:
             attempt: Attempt number (0-indexed).
 
         Returns:
-            Backoff time in seconds, clamped to max_backoff.
+            Deterministic backoff in seconds, clamped to max_backoff.
         """
         if attempt < 0:
             return 0
         backoff = self.initial_backoff * (self.backoff_multiplier**attempt)
         return min(backoff, self.max_backoff)
 
-    def get_total_max_time(self) -> float:
-        """Calculate total maximum time for all retries.
+    def calculate_backoff(self, attempt: int) -> float:
+        """Calculate backoff time for given attempt number with decorrelated jitter.
+
+        Jitter spreads simultaneous retries across concurrent instances so they
+        don't all hit the API in lockstep.  The random factor is in [0.5, 1.0]
+        so the returned value is always between half and the full deterministic
+        ceiling — callers never wait longer than the configured max_backoff.
+
+        Args:
+            attempt: Attempt number (0-indexed).
 
         Returns:
-            Sum of all backoff times in seconds.
+            Jittered backoff time in seconds.
+        """
+        base = self._base_backoff(attempt)
+        if base == 0:
+            return 0
+        # Multiply by [0.5, 1.0] — expected value is 0.75× the deterministic
+        # ceiling, maximum is 1.0× (so the cap is never exceeded).
+        return base * (0.5 + 0.5 * random.random())
+
+    def get_total_max_time(self) -> float:
+        """Calculate total maximum time for all retries (deterministic, no jitter).
+
+        Returns:
+            Sum of all deterministic backoff times in seconds.
         """
         total = 0.0
         for attempt in range(self.max_retries):
-            total += self.calculate_backoff(attempt)
+            total += self._base_backoff(attempt)
         return total
 
     def __str__(self) -> str:
