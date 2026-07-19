@@ -28,6 +28,9 @@ Example usage:
 
 from __future__ import annotations
 
+import logging
+import os
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -42,9 +45,23 @@ from claude_task_master.core.state import (
     StateNotFoundError,
 )
 from claude_task_master.core.state_exceptions import RESUMABLE_STATUSES
+from claude_task_master.mailbox.storage import MailboxStorage
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+# Bounded wait for an *other* live session to release the state directory before
+# ``stop(cleanup=True)`` deletes it. A stop request written from one process can
+# reach an orchestrator running in another that is still mid-cycle and holding
+# the session lock; deleting the state dir underneath it races its next
+# ``save_state`` (which would recreate a half-populated directory). Both bounds
+# are env-configurable, mirroring the timeout idiom in ``agent_query``.
+SESSION_RELEASE_TIMEOUT_SEC = float(os.environ.get("CLAUDETM_SESSION_RELEASE_TIMEOUT_SEC", "30"))
+SESSION_RELEASE_POLL_INTERVAL_SEC = float(
+    os.environ.get("CLAUDETM_SESSION_RELEASE_POLL_INTERVAL_SEC", "0.5")
+)
 
 
 # =============================================================================
@@ -334,10 +351,34 @@ class ControlManager:
             progress_update = f"\n\n## Stopped\n\nReason: {reason}"
             self.state_manager.save_progress(progress + progress_update)
 
-        # Optionally cleanup state
+        # Optionally cleanup state. A stop signal written from another process
+        # may reach an orchestrator that is still mid-cycle and holding the
+        # session lock; deleting the state dir underneath it would let its next
+        # save_state recreate a half-populated dir (state.json without
+        # goal/plan). Wait (bounded) for the session to release first, and skip
+        # cleanup entirely if it never does — never clobber a live run.
+        details: dict[str, Any] = {"reason": reason, "cleanup": cleanup}
         if cleanup:
-            run_id = state.run_id
-            self.state_manager.cleanup_on_success(run_id)
+            if self._wait_for_session_release():
+                dropped = self._count_pending_mailbox_messages()
+                if dropped:
+                    logger.warning(
+                        "stop(cleanup=True): dropping %d pending mailbox "
+                        "message(s) while cleaning up %s",
+                        dropped,
+                        self.state_manager.state_dir,
+                    )
+                    details["dropped_mailbox_messages"] = dropped
+                self.state_manager.cleanup_on_success(state.run_id)
+            else:
+                details["cleanup"] = False
+                details["cleanup_skipped"] = "session still active"
+                logger.warning(
+                    "stop(cleanup=True): a live session still holds %s after "
+                    "%.0fs; skipping cleanup to avoid clobbering active state",
+                    self.state_manager.state_dir,
+                    SESSION_RELEASE_TIMEOUT_SEC,
+                )
 
         return ControlResult(
             success=True,
@@ -345,8 +386,44 @@ class ControlManager:
             previous_status=previous_status,
             new_status="stopped",
             message=f"Task stopped successfully (was {previous_status})",
-            details={"reason": reason, "cleanup": cleanup},
+            details=details,
         )
+
+    def _wait_for_session_release(self) -> bool:
+        """Wait (bounded) for any *other* live session to release the state dir.
+
+        A stop request written from one process can reach an orchestrator
+        running in another process that is still mid-cycle and holding the
+        session lock. Cleaning up the state directory underneath it races its
+        next ``save_state``, which would recreate a half-populated directory.
+        This polls :meth:`StateManager.is_session_active` until it reports no
+        live session or :data:`SESSION_RELEASE_TIMEOUT_SEC` elapses.
+
+        A same-process caller (or one with no active session) returns
+        immediately without sleeping.
+
+        Returns:
+            True if no *other* live session holds the state dir (safe to clean
+            up), False if the timeout elapsed with a session still active.
+        """
+        deadline = time.monotonic() + SESSION_RELEASE_TIMEOUT_SEC
+        while self.state_manager.is_session_active():
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(SESSION_RELEASE_POLL_INTERVAL_SEC)
+        return True
+
+    def _count_pending_mailbox_messages(self) -> int:
+        """Count mailbox messages that state cleanup is about to discard.
+
+        Returns:
+            Number of pending messages in ``mailbox.json``; ``0`` if the mailbox
+            is empty, absent, or unreadable (best-effort — never blocks stop).
+        """
+        try:
+            return MailboxStorage(self.state_manager.state_dir).count()
+        except OSError:
+            return 0
 
     def update_config(self, **kwargs: Any) -> ControlResult:
         """Update task configuration at runtime.

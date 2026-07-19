@@ -1,7 +1,10 @@
 """Tests for ControlManager - runtime control operations."""
 
+import logging
+
 import pytest
 
+from claude_task_master.core import control as control_module
 from claude_task_master.core.control import (
     ControlError,
     ControlManager,
@@ -10,6 +13,7 @@ from claude_task_master.core.control import (
     NoActiveTaskError,
 )
 from claude_task_master.core.state import StateManager, TaskState
+from claude_task_master.mailbox.storage import MailboxStorage
 
 # =============================================================================
 # ControlResult Tests
@@ -443,6 +447,79 @@ class TestControlManagerStop:
 
         # Verify state was cleaned up
         assert not initialized_state_manager.exists()
+
+    def test_stop_cleanup_logs_dropped_mailbox_count(self, initialized_state_manager, caplog):
+        """stop(cleanup=True) logs and reports pending mailbox messages it drops."""
+        mailbox = MailboxStorage(initialized_state_manager.state_dir)
+        mailbox.add_message("update the plan")
+        mailbox.add_message("also add rate limiting")
+
+        control = ControlManager(state_manager=initialized_state_manager)
+        with caplog.at_level(logging.WARNING):
+            result = control.stop(cleanup=True)
+
+        assert result.details is not None
+        assert result.details["cleanup"] is True
+        assert result.details["dropped_mailbox_messages"] == 2
+        assert any("2 pending mailbox" in message for message in caplog.messages)
+        assert not initialized_state_manager.exists()
+
+    def test_stop_cleanup_no_mailbox_omits_dropped_count(self, initialized_state_manager):
+        """No pending messages → no dropped-count key and no spurious warning."""
+        control = ControlManager(state_manager=initialized_state_manager)
+        result = control.stop(cleanup=True)
+
+        assert result.details is not None
+        assert result.details["cleanup"] is True
+        assert "dropped_mailbox_messages" not in result.details
+
+    def test_stop_cleanup_skipped_when_session_active(
+        self, initialized_state_manager, caplog, monkeypatch
+    ):
+        """Cleanup is skipped (state preserved) if a live session never releases."""
+        monkeypatch.setattr(control_module, "SESSION_RELEASE_TIMEOUT_SEC", 0.05)
+        monkeypatch.setattr(control_module, "SESSION_RELEASE_POLL_INTERVAL_SEC", 0.01)
+        monkeypatch.setattr(initialized_state_manager, "is_session_active", lambda: True)
+
+        control = ControlManager(state_manager=initialized_state_manager)
+        with caplog.at_level(logging.WARNING):
+            result = control.stop(cleanup=True)
+
+        assert result.success is True
+        assert result.details is not None
+        assert result.details["cleanup"] is False
+        assert result.details["cleanup_skipped"] == "session still active"
+        assert any("skipping cleanup" in message for message in caplog.messages)
+        # State survives — never clobber a live run.
+        assert initialized_state_manager.exists()
+
+    def test_stop_cleanup_proceeds_after_session_releases(
+        self, initialized_state_manager, monkeypatch
+    ):
+        """Cleanup runs once a still-active session releases within the timeout."""
+        monkeypatch.setattr(control_module, "SESSION_RELEASE_TIMEOUT_SEC", 5.0)
+        monkeypatch.setattr(control_module, "SESSION_RELEASE_POLL_INTERVAL_SEC", 0.01)
+
+        calls = {"n": 0}
+
+        def fake_active() -> bool:
+            calls["n"] += 1
+            return calls["n"] < 3  # active for the first two probes, then released
+
+        monkeypatch.setattr(initialized_state_manager, "is_session_active", fake_active)
+
+        control = ControlManager(state_manager=initialized_state_manager)
+        result = control.stop(cleanup=True)
+
+        assert result.details is not None
+        assert result.details["cleanup"] is True
+        assert calls["n"] >= 3
+        assert not initialized_state_manager.exists()
+
+    def test_wait_for_session_release_immediate_when_inactive(self, initialized_state_manager):
+        """Helper returns True without waiting when no other session is active."""
+        control = ControlManager(state_manager=initialized_state_manager)
+        assert control._wait_for_session_release() is True
 
     def test_stop_success_task_raises_error(self, initialized_state_manager):
         """Test stopping a successful task raises error."""
