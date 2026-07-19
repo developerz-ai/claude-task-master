@@ -4,6 +4,7 @@ import typer
 from rich.console import Console
 from rich.markdown import Markdown
 
+from ..core.agent_models import get_tools_for_phase
 from ..core.state import StateManager
 
 console = Console()
@@ -35,13 +36,16 @@ def status() -> None:
         console.print(f"[cyan]Sessions:[/cyan] {state.session_count}")
         console.print(f"[cyan]Run ID:[/cyan] {state.run_id}")
 
-        # Show tools based on current phase/status
+        # Show tools based on current phase/status. Derive from config so the
+        # display stays in sync with the actual restricted phase defaults.
         if state.status == "planning":
-            console.print("[cyan]Tools:[/cyan] Read, Glob, Grep, Bash (read-only mode)")
+            planning_tools = get_tools_for_phase("planning")
+            tools_display = ", ".join(planning_tools) if planning_tools else "All"
+            console.print(f"[cyan]Tools:[/cyan] {tools_display} (read-only mode)")
         elif state.status == "working":
             console.print("[cyan]Tools:[/cyan] All (bypassPermissions mode)")
         else:
-            # For blocked, paused, success, failed - show what was last used
+            # For blocked, paused, stopped, success, failed - show what was last used
             console.print("[cyan]Tools:[/cyan] All (bypassPermissions mode)")
 
         if state.current_pr:

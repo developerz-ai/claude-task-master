@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -270,6 +271,118 @@ class TestConfigShow:
         # Should indicate overrides are applied
         assert "environment variable override" in result.output.lower()
         assert "claudetm config show --env" in result.output
+
+
+class TestSecretMasking:
+    """Unit tests for the secret-masking helpers."""
+
+    def test_looks_secret_matches_key_names(self):
+        """Field/env names containing key/secret/token/password are secret."""
+        from claude_task_master.cli_commands.config import _looks_secret
+
+        assert _looks_secret("anthropic_api_key")
+        assert _looks_secret("OPENROUTER_API_KEY")
+        assert _looks_secret("webhook_secret")
+        assert _looks_secret("access_token")
+        assert not _looks_secret("anthropic_base_url")
+        assert not _looks_secret("target_branch")
+
+    def test_mask_secret_keeps_short_prefix(self):
+        """Long secrets keep an 8-char prefix hint; short ones fully collapse."""
+        from claude_task_master.cli_commands.config import _mask_secret
+
+        assert _mask_secret("sk-ant-supersecret-value") == "sk-ant-s..."
+        assert _mask_secret("short") == "***"
+
+    def test_redact_secrets_masks_only_secret_string_leaves(self):
+        """Recursion masks secret string leaves but leaves None/non-secrets intact."""
+        from claude_task_master.cli_commands.config import _redact_secrets
+
+        data: dict[str, dict[str, Any]] = {
+            "api": {
+                "anthropic_api_key": "sk-ant-supersecret-1234",
+                "openrouter_api_key": None,
+                "anthropic_base_url": "https://api.anthropic.com",
+            },
+            "git": {"target_branch": "main"},
+        }
+        redacted = _redact_secrets(data)
+
+        assert redacted["api"]["anthropic_api_key"] == "sk-ant-s..."
+        assert redacted["api"]["openrouter_api_key"] is None  # unset stays visible
+        assert redacted["api"]["anthropic_base_url"] == "https://api.anthropic.com"
+        assert redacted["git"]["target_branch"] == "main"
+        # Original is not mutated
+        assert data["api"]["anthropic_api_key"] == "sk-ant-supersecret-1234"
+
+
+class TestConfigShowSecrets:
+    """Tests that 'claudetm config show' masks secrets by default."""
+
+    def test_config_show_masks_api_key(self, cli_runner, temp_dir, monkeypatch):
+        """A configured API key is masked in the default (formatted) output."""
+        monkeypatch.chdir(temp_dir)
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-supersecret-abcdef123456")
+        reset_config()
+
+        result = cli_runner.invoke(app, ["config", "show"])
+
+        assert result.exit_code == 0
+        assert "supersecret" not in result.output
+        assert "Secrets masked" in result.output
+
+    def test_config_show_raw_masks_secrets(self, cli_runner, temp_dir, monkeypatch):
+        """--raw output masks secrets too (piped JSON must not leak keys)."""
+        monkeypatch.chdir(temp_dir)
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-supersecret-abcdef123456")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-anothersecret-xyz789")
+        reset_config()
+
+        result = cli_runner.invoke(app, ["config", "show", "--raw"])
+
+        assert result.exit_code == 0
+        cleaned = strip_ansi(result.output).strip()
+        config_data = json.loads(cleaned)  # still valid JSON
+        assert "supersecret" not in cleaned
+        assert "anothersecret" not in cleaned
+        assert config_data["api"]["anthropic_api_key"].endswith("...")
+        assert config_data["api"]["openrouter_api_key"].endswith("...")
+
+    def test_config_show_secrets_reveals_values(self, cli_runner, temp_dir, monkeypatch):
+        """--show-secrets reveals the full key values."""
+        monkeypatch.chdir(temp_dir)
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-supersecret-abcdef123456")
+        reset_config()
+
+        result = cli_runner.invoke(app, ["config", "show", "--raw", "--show-secrets"])
+
+        assert result.exit_code == 0
+        assert "sk-ant-supersecret-abcdef123456" in result.output
+        # No mask hint when nothing is masked
+        assert "Secrets masked" not in result.output
+
+    def test_config_show_no_secrets_no_hint(self, cli_runner, temp_dir, monkeypatch):
+        """Without any configured secret, no masking hint is shown."""
+        monkeypatch.chdir(temp_dir)
+        for var in ("ANTHROPIC_API_KEY", "OPENROUTER_API_KEY"):
+            monkeypatch.delenv(var, raising=False)
+        reset_config()
+
+        result = cli_runner.invoke(app, ["config", "show"])
+
+        assert result.exit_code == 0
+        assert "Secrets masked" not in result.output
+
+    def test_config_show_env_show_secrets_reveals(self, cli_runner, temp_dir, monkeypatch):
+        """--env --show-secrets reveals the masked override value."""
+        monkeypatch.chdir(temp_dir)
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-supersecret-abcdef123456")
+        reset_config()
+
+        result = cli_runner.invoke(app, ["config", "show", "--env", "--show-secrets"])
+
+        assert result.exit_code == 0
+        assert "sk-ant-supersecret-abcdef123456" in result.output
 
 
 class TestConfigPath:

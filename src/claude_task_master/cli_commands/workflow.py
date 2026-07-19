@@ -118,8 +118,48 @@ def _validate_log_options(log_level: str, log_format: str) -> tuple[LogLevel, Lo
     return log_level_enum, log_format_enum
 
 
+def _validate_goal(value: str) -> str:
+    """Reject an empty or whitespace-only goal at parse time.
+
+    Args:
+        value: The goal argument as parsed from the CLI.
+
+    Returns:
+        The original value if non-empty.
+
+    Raises:
+        typer.BadParameter: If the goal is empty or only whitespace.
+    """
+    if not value.strip():
+        raise typer.BadParameter("goal must not be empty")
+    return value
+
+
+def _validate_budget(value: float | None) -> float | None:
+    """Reject a non-positive per-session budget at parse time.
+
+    A zero or negative budget would otherwise block the run on the first token.
+
+    Args:
+        value: The budget in USD, or None when unset.
+
+    Returns:
+        The original value if positive or None.
+
+    Raises:
+        typer.BadParameter: If the budget is zero or negative.
+    """
+    if value is not None and value <= 0:
+        raise typer.BadParameter("must be greater than 0 (USD per session)")
+    return value
+
+
 def start(
-    goal: str = typer.Argument(..., help="The goal to achieve (e.g., 'Add user authentication')"),
+    goal: str = typer.Argument(
+        ...,
+        callback=_validate_goal,
+        help="The goal to achieve (e.g., 'Add user authentication')",
+    ),
     model: str = typer.Option(
         "opus",
         "--model",
@@ -150,11 +190,13 @@ def start(
         None,
         "--max-sessions",
         "-n",
+        min=1,
         help="Max work sessions before pausing (default: unlimited)",
     ),
     max_prs: int | None = typer.Option(
         None,
         "--prs",
+        min=1,
         help="Max pull requests to create (default: unlimited)",
     ),
     pause_on_pr: bool = typer.Option(
@@ -206,7 +248,8 @@ def start(
         None,
         "--budget",
         envvar="CLAUDETM_BUDGET",
-        help="Max spending per session in USD (env: CLAUDETM_BUDGET)",
+        callback=_validate_budget,
+        help="Max spending per session in USD, must be > 0 (env: CLAUDETM_BUDGET)",
     ),
 ) -> None:
     """Start a new task with the given goal.
@@ -253,6 +296,9 @@ def start(
             console.print(f"[red]Invalid webhook configuration: {e}[/red]")
             raise typer.Exit(1) from None
 
+    # Acquired once the state dir is known (after the exists() check) and always
+    # released in the finally, even if setup fails before the lock is taken.
+    state_manager: StateManager | None = None
     try:
         # Initialize configuration (creates config.json with defaults if missing)
         working_dir = Path.cwd()
@@ -266,6 +312,18 @@ def start(
         if state_manager.exists():
             console.print(
                 "[red]Error: Task already exists. Use 'resume' to continue or 'clean' to start fresh.[/red]"
+            )
+            raise typer.Exit(1)
+
+        # Guard against concurrent runs: acquire the single-instance session lock
+        # before loading credentials or touching shared state. Two simultaneous
+        # `claudetm start` runs would otherwise corrupt state.json, duplicate PRs,
+        # and race OAuth refresh-token rotation. Held for the whole run and freed
+        # by the finally. (Pairs with the O_EXCL PID lock in core/state.py.)
+        if not state_manager.acquire_session_lock():
+            console.print("[red]Error: Another claudetm session is active for this project.[/red]")
+            console.print(
+                "[dim]Wait for it to finish, or run 'claudetm clean -f' to force cleanup.[/dim]"
             )
             raise typer.Exit(1)
 
@@ -362,6 +420,12 @@ def start(
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1) from None
+    finally:
+        # Release the session lock on every exit path (success, pause, block,
+        # error). A no-op if we never acquired it or the orchestrator's
+        # cleanup_on_success already released it.
+        if state_manager is not None:
+            state_manager.release_session_lock()
 
 
 def resume(
@@ -406,6 +470,9 @@ def resume(
     """
     console.print("[bold blue]Resuming task...[/bold blue]")
 
+    # Acquired after validate_for_resume and always released in the finally,
+    # even if setup fails before the lock is taken.
+    state_manager: StateManager | None = None
     try:
         # Initialize configuration (loads existing config.json or uses defaults)
         working_dir = Path.cwd()
@@ -455,6 +522,19 @@ def resume(
                 if e.details:
                     console.print(f"[dim]{e.details}[/dim]")
                 raise typer.Exit(1) from None
+
+        # Guard against concurrent runs: acquire the single-instance session lock
+        # now that the task is known resumable. Placed after validation so a no-op
+        # resume of an already-finished task exits cleanly without taking the lock.
+        # Two concurrent resumes would otherwise both drive the work loop —
+        # corrupting state, duplicating PRs, racing OAuth refresh-token rotation.
+        # Held for the whole run and freed by the finally.
+        if not state_manager.acquire_session_lock():
+            console.print("[red]Error: Another claudetm session is active for this project.[/red]")
+            console.print(
+                "[dim]Wait for it to finish, or run 'claudetm clean -f' to force cleanup.[/dim]"
+            )
+            raise typer.Exit(1)
 
         # Toggle admin force-merge. It is persisted so the retry loop (each blocked-merge
         # cycle re-enters the merge stage and re-reads state) keeps the override active, but
@@ -579,6 +659,12 @@ def resume(
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1) from None
+    finally:
+        # Release the session lock on every exit path. A no-op if we never
+        # acquired it (e.g. a terminal-state resume) or the orchestrator's
+        # cleanup_on_success already released it.
+        if state_manager is not None:
+            state_manager.release_session_lock()
 
 
 def register_workflow_commands(app: typer.Typer) -> None:

@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from claude_task_master.core.credentials import CredentialManager, CredentialNotFoundError
 from claude_task_master.utils.doctor import SystemDoctor
 
 # =============================================================================
@@ -278,13 +279,11 @@ class TestCheckCredentials:
         mock_console = MagicMock()
         doctor.console = mock_console
 
-        # Create fake credentials file
-        creds_dir = temp_dir / ".claude"
-        creds_dir.mkdir()
-        creds_file = creds_dir / ".credentials.json"
-        creds_file.write_text('{"token": "test"}')
+        with patch("claude_task_master.utils.doctor.CredentialManager") as MockCM:
+            mock_cm = MagicMock()
+            MockCM.return_value = mock_cm
+            mock_cm.verify_credentials.return_value = True
 
-        with patch.object(Path, "home", return_value=temp_dir):
             doctor._check_credentials()
 
         assert doctor.checks_passed is True
@@ -295,8 +294,13 @@ class TestCheckCredentials:
         mock_console = MagicMock()
         doctor.console = mock_console
 
-        # No credentials file exists
-        with patch.object(Path, "home", return_value=temp_dir):
+        with patch("claude_task_master.utils.doctor.CredentialManager") as MockCM:
+            mock_cm = MagicMock()
+            MockCM.return_value = mock_cm
+            mock_cm.verify_credentials.side_effect = CredentialNotFoundError(
+                Path.home() / ".claude" / ".credentials.json"
+            )
+
             doctor._check_credentials()
 
         assert doctor.checks_passed is False
@@ -307,13 +311,11 @@ class TestCheckCredentials:
         mock_console = MagicMock()
         doctor.console = mock_console
 
-        # Create fake credentials file
-        creds_dir = temp_dir / ".claude"
-        creds_dir.mkdir()
-        creds_file = creds_dir / ".credentials.json"
-        creds_file.write_text('{"token": "test"}')
+        with patch("claude_task_master.utils.doctor.CredentialManager") as MockCM:
+            mock_cm = MagicMock()
+            MockCM.return_value = mock_cm
+            mock_cm.verify_credentials.return_value = True
 
-        with patch.object(Path, "home", return_value=temp_dir):
             doctor._check_credentials()
 
         calls = [str(call) for call in mock_console.print.call_args_list]
@@ -326,28 +328,33 @@ class TestCheckCredentials:
         mock_console = MagicMock()
         doctor.console = mock_console
 
-        with patch.object(Path, "home", return_value=temp_dir):
+        with patch("claude_task_master.utils.doctor.CredentialManager") as MockCM:
+            mock_cm = MagicMock()
+            MockCM.return_value = mock_cm
+            mock_cm.verify_credentials.side_effect = CredentialNotFoundError(
+                Path.home() / ".claude" / ".credentials.json"
+            )
+
             doctor._check_credentials()
 
         calls = [str(call) for call in mock_console.print.call_args_list]
-        assert any("Claude credentials not found" in call for call in calls)
-        assert any("Expected at:" in call for call in calls)
-        assert any("Run Claude CLI once to authenticate" in call for call in calls)
+        assert any("Credentials check failed" in call for call in calls)
 
     def test_credentials_path_is_correct(self, temp_dir):
-        """Test credentials are checked at correct path."""
+        """Test credentials are checked via CredentialManager."""
         doctor = SystemDoctor()
         mock_console = MagicMock()
         doctor.console = mock_console
 
-        expected_path = temp_dir / ".claude" / ".credentials.json"
+        with patch("claude_task_master.utils.doctor.CredentialManager") as MockCM:
+            mock_cm = MagicMock()
+            MockCM.return_value = mock_cm
+            mock_cm.verify_credentials.return_value = True
 
-        with patch.object(Path, "home", return_value=temp_dir):
             doctor._check_credentials()
 
-        # Check that the expected path was checked
-        calls = [str(call) for call in mock_console.print.call_args_list]
-        assert any(str(expected_path) in call for call in calls)
+        # Verify CredentialManager was instantiated
+        MockCM.assert_called_once()
 
     def test_credentials_directory_exists_but_file_missing(self, temp_dir):
         """Test credentials directory exists but file is missing."""
@@ -355,11 +362,13 @@ class TestCheckCredentials:
         mock_console = MagicMock()
         doctor.console = mock_console
 
-        # Create directory but not file
-        creds_dir = temp_dir / ".claude"
-        creds_dir.mkdir()
+        with patch("claude_task_master.utils.doctor.CredentialManager") as MockCM:
+            mock_cm = MagicMock()
+            MockCM.return_value = mock_cm
+            mock_cm.verify_credentials.side_effect = CredentialNotFoundError(
+                Path.home() / ".claude" / ".credentials.json"
+            )
 
-        with patch.object(Path, "home", return_value=temp_dir):
             doctor._check_credentials()
 
         assert doctor.checks_passed is False
@@ -510,18 +519,16 @@ class TestSystemDoctorIntegration:
         """Test all checks passing end-to-end."""
         doctor = SystemDoctor()
 
-        # Create credentials file
-        creds_dir = temp_dir / ".claude"
-        creds_dir.mkdir()
-        creds_file = creds_dir / ".credentials.json"
-        creds_file.write_text('{"token": "test"}')
-
         # Mock gh CLI success
         mock_result = MagicMock()
         mock_result.returncode = 0
 
         with patch("subprocess.run", return_value=mock_result):
-            with patch.object(Path, "home", return_value=temp_dir):
+            with patch("claude_task_master.utils.doctor.CredentialManager") as MockCM:
+                mock_cm = MagicMock()
+                MockCM.return_value = mock_cm
+                mock_cm.verify_credentials.return_value = True
+
                 result = doctor.run_checks()
 
         assert result is True
@@ -530,18 +537,16 @@ class TestSystemDoctorIntegration:
         """Test gh CLI fails but other checks pass."""
         doctor = SystemDoctor()
 
-        # Create credentials file
-        creds_dir = temp_dir / ".claude"
-        creds_dir.mkdir()
-        creds_file = creds_dir / ".credentials.json"
-        creds_file.write_text('{"token": "test"}')
-
         # Mock gh CLI failure
         mock_result = MagicMock()
         mock_result.returncode = 1
 
         with patch("subprocess.run", return_value=mock_result):
-            with patch.object(Path, "home", return_value=temp_dir):
+            with patch("claude_task_master.utils.doctor.CredentialManager") as MockCM:
+                mock_cm = MagicMock()
+                MockCM.return_value = mock_cm
+                mock_cm.verify_credentials.return_value = True
+
                 result = doctor.run_checks()
 
         assert result is False
@@ -550,14 +555,18 @@ class TestSystemDoctorIntegration:
         """Test credentials fail but other checks pass."""
         doctor = SystemDoctor()
 
-        # No credentials file
-
         # Mock gh CLI success
         mock_result = MagicMock()
         mock_result.returncode = 0
 
         with patch("subprocess.run", return_value=mock_result):
-            with patch.object(Path, "home", return_value=temp_dir):
+            with patch("claude_task_master.utils.doctor.CredentialManager") as MockCM:
+                mock_cm = MagicMock()
+                MockCM.return_value = mock_cm
+                mock_cm.verify_credentials.side_effect = CredentialNotFoundError(
+                    Path.home() / ".claude" / ".credentials.json"
+                )
+
                 result = doctor.run_checks()
 
         assert result is False
@@ -566,11 +575,15 @@ class TestSystemDoctorIntegration:
         """Test multiple checks failing."""
         doctor = SystemDoctor()
 
-        # No credentials file
-
         # Mock gh CLI failure
         with patch("subprocess.run", side_effect=FileNotFoundError):
-            with patch.object(Path, "home", return_value=temp_dir):
+            with patch("claude_task_master.utils.doctor.CredentialManager") as MockCM:
+                mock_cm = MagicMock()
+                MockCM.return_value = mock_cm
+                mock_cm.verify_credentials.side_effect = CredentialNotFoundError(
+                    Path.home() / ".claude" / ".credentials.json"
+                )
+
                 result = doctor.run_checks()
 
         assert result is False
@@ -604,41 +617,42 @@ class TestSystemDoctorEdgeCases:
                 doctor._check_gh_cli()
 
     def test_credentials_path_with_special_characters(self, temp_dir):
-        """Test credentials path handling with unusual home directory."""
+        """Test credentials resolve when the config dir path contains spaces."""
         doctor = SystemDoctor()
-        mock_console = MagicMock()
-        doctor.console = mock_console
+        doctor.console = MagicMock()
 
-        # Create special directory
-        special_dir = temp_dir / "special spaces"
-        special_dir.mkdir()
-        creds_dir = special_dir / ".claude"
-        creds_dir.mkdir()
-        creds_file = creds_dir / ".credentials.json"
-        creds_file.write_text('{"token": "test"}')
+        # Config dir with spaces holding a valid credentials file.
+        creds_dir = temp_dir / "special spaces" / ".claude"
+        creds_dir.mkdir(parents=True)
+        (creds_dir / ".credentials.json").write_text(
+            '{"claudeAiOauth": {"accessToken": "a", "refreshToken": "r", '
+            '"expiresAt": 9999999999999}}'
+        )
 
-        with patch.object(Path, "home", return_value=special_dir):
+        # Drive the real CredentialManager against that path (config_dir bypasses
+        # profile resolution) to exercise end-to-end path handling.
+        real_cm = CredentialManager(config_dir=creds_dir)
+        with patch("claude_task_master.utils.doctor.CredentialManager", return_value=real_cm):
             doctor._check_credentials()
 
         assert doctor.checks_passed is True
 
     def test_empty_credentials_file(self, temp_dir):
-        """Test credentials file exists but is empty."""
+        """Test credentials file exists but is empty -> check fails (invalid)."""
         doctor = SystemDoctor()
-        mock_console = MagicMock()
-        doctor.console = mock_console
+        doctor.console = MagicMock()
 
-        # Create empty credentials file
+        # Create empty credentials file (invalid JSON).
         creds_dir = temp_dir / ".claude"
         creds_dir.mkdir()
-        creds_file = creds_dir / ".credentials.json"
-        creds_file.write_text("")
+        (creds_dir / ".credentials.json").write_text("")
 
-        with patch.object(Path, "home", return_value=temp_dir):
+        # verify_credentials now validates content, so an empty file is rejected.
+        real_cm = CredentialManager(config_dir=creds_dir)
+        with patch("claude_task_master.utils.doctor.CredentialManager", return_value=real_cm):
             doctor._check_credentials()
 
-        # File exists, so check should pass (content validation is not done)
-        assert doctor.checks_passed is True
+        assert doctor.checks_passed is False
 
     def test_run_checks_multiple_times(self):
         """Test running checks multiple times."""

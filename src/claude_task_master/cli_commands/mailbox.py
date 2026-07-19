@@ -241,49 +241,9 @@ def mailbox_callback(ctx: typer.Context) -> None:
         mailbox_status()
 
 
-@mailbox_app.command("send")
-def mailbox_send_command(
-    message: Annotated[str, typer.Argument(help="Message content to send")],
-    sender: Annotated[
-        str,
-        typer.Option("--sender", "-s", help="Sender identifier"),
-    ] = "cli",
-    priority: Annotated[
-        int,
-        typer.Option("--priority", "-p", help="Priority level (0=low, 1=normal, 2=high, 3=urgent)"),
-    ] = 1,
-) -> None:
-    """Send a message to the mailbox.
-
-    Adds a new message that will be processed after the current task completes.
-    The orchestrator checks the mailbox after each task and updates the plan
-    if messages are present.
-
-    Examples:
-        claudetm mailbox send "Please also update the README"
-        claudetm mailbox send "Fix the auth bug first" --priority 3
-        claudetm mailbox send "Low priority cleanup" -p 0 -s "supervisor"
-    """
-    mailbox_send(message, sender, priority)
-
-
-@mailbox_app.command("clear")
-def mailbox_clear_command(
-    force: Annotated[
-        bool,
-        typer.Option("--force", "-f", help="Skip confirmation"),
-    ] = False,
-) -> None:
-    """Clear all messages from the mailbox.
-
-    Removes all pending messages. This is useful to cancel pending plan updates
-    or start fresh.
-
-    Examples:
-        claudetm mailbox clear
-        claudetm mailbox clear -f
-    """
-    mailbox_clear(force)
+# Register the original command functions with the mailbox_app
+mailbox_app.command("send")(mailbox_send)
+mailbox_app.command("clear")(mailbox_clear)
 
 
 def register_mailbox_commands(app: typer.Typer) -> None:

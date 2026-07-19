@@ -145,17 +145,23 @@ class ContextWindowsConfig(BaseModel):
 class ToolsConfig(BaseModel):
     """Tool configurations per execution phase.
 
-    Each phase has a list of allowed tools.
-    An empty list means ALL tools are allowed.
+    Each phase has a list of allowed tools. Planning and verification default
+    to read-only tool sets so the agent cannot mutate the repository before a
+    plan exists or while checking success criteria — matching the phase table
+    in CLAUDE.md. The working phase defaults to an empty list, which means ALL
+    tools are allowed (full access to implement tasks).
+
+    An empty list always means ALL tools are allowed for that phase.
     """
 
     planning: list[str] = Field(
-        default_factory=list,
-        description="Tools available during planning phase (empty = all tools).",
+        default_factory=lambda: ["Read", "Glob", "Grep", "WebFetch", "WebSearch"],
+        description="Tools available during planning phase (read-only default; empty = all tools).",
     )
     verification: list[str] = Field(
-        default_factory=list,
-        description="Tools available during verification phase (empty = all tools).",
+        default_factory=lambda: ["Read", "Glob", "Grep", "Bash"],
+        description="Tools available during verification phase "
+        "(read + Bash default; empty = all tools).",
     )
     working: list[str] = Field(
         default_factory=list,
@@ -202,7 +208,7 @@ class ClaudeTaskMasterConfig(BaseModel):
         "sonnet_1m": 1000000
       },
       "tools": {
-        "planning": ["Read", "Glob", "Grep", "Bash", "WebFetch", "WebSearch"],
+        "planning": ["Read", "Glob", "Grep", "WebFetch", "WebSearch"],
         "verification": ["Read", "Glob", "Grep", "Bash"],
         "working": []
       }

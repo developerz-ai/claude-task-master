@@ -1,9 +1,10 @@
 """Doctor command - Check system requirements and authentication."""
 
 import subprocess
-from pathlib import Path
 
 from rich.console import Console
+
+from ..core.credentials import CredentialError, CredentialManager
 
 
 class SystemDoctor:
@@ -52,15 +53,15 @@ class SystemDoctor:
             self.checks_passed = False
 
     def _check_credentials(self) -> None:
-        """Check if Claude credentials exist."""
-        creds_path = Path.home() / ".claude" / ".credentials.json"
-
-        if creds_path.exists():
+        """Check if Claude credentials exist (profile-aware)."""
+        try:
+            cred_manager = CredentialManager()
+            cred_manager.verify_credentials()
             self.console.print("[green]✓[/green] Claude credentials found")
-        else:
-            self.console.print("[red]✗[/red] Claude credentials not found")
-            self.console.print(f"  Expected at: {creds_path}")
-            self.console.print("  Run Claude CLI once to authenticate")
+        except CredentialError as e:
+            self.console.print(f"[red]✗[/red] Credentials check failed: {e.message}")
+            if e.details:
+                self.console.print(f"  {e.details}")
             self.checks_passed = False
 
     def _check_python_version(self) -> None:

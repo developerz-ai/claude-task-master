@@ -6,6 +6,11 @@ Provides commands to manage the .claude-task-master/config.json file:
 - path: Show path to config file
 """
 
+from __future__ import annotations
+
+import json
+from typing import Any
+
 import typer
 from rich.console import Console
 from rich.markdown import Markdown
@@ -68,22 +73,30 @@ def config_init(
 def config_show(
     raw: bool = typer.Option(False, "--raw", "-r", help="Show raw JSON without formatting"),
     env: bool = typer.Option(False, "--env", "-e", help="Show environment variable overrides"),
+    show_secrets: bool = typer.Option(
+        False,
+        "--show-secrets",
+        help="Reveal API keys and other secrets (default: masked)",
+    ),
 ) -> None:
     """📖 Display current configuration.
 
     Shows the active configuration including any environment variable overrides.
+    Secrets (API keys) are masked unless --show-secrets is passed — this applies
+    to --raw output too, so piped JSON never leaks credentials by default.
     Use --raw for machine-readable JSON output.
 
     Examples:
         claudetm config show
         claudetm config show --raw
         claudetm config show --env
+        claudetm config show --show-secrets
     """
     if env:
-        _display_env_overrides()
+        _display_env_overrides(show_secrets=show_secrets)
         return
 
-    _display_config(raw=raw)
+    _display_config(raw=raw, show_secrets=show_secrets)
 
 
 @config_app.command(name="path")
@@ -114,15 +127,73 @@ def config_path(
         console.print(str(path))
 
 
-def _display_config(raw: bool = False) -> None:
+# Field/env-var names whose values are treated as secrets and masked in output.
+_SECRET_NAME_HINTS = ("key", "secret", "token", "password")
+
+
+def _looks_secret(name: str) -> bool:
+    """Return True if a field/env-var name looks like it holds a secret.
+
+    Args:
+        name: The config field name or environment variable name.
+
+    Returns:
+        True if the name matches a known secret hint (key/secret/token/password).
+    """
+    lowered = name.lower()
+    return any(hint in lowered for hint in _SECRET_NAME_HINTS)
+
+
+def _mask_secret(value: str) -> str:
+    """Mask a secret value, keeping a short prefix as an identification hint.
+
+    Args:
+        value: The secret value to mask.
+
+    Returns:
+        A masked placeholder; short values collapse to ``***``.
+    """
+    return f"{value[:8]}..." if len(value) > 8 else "***"
+
+
+def _redact_secrets(data: Any) -> Any:
+    """Recursively copy config data, masking any leaf whose key looks secret.
+
+    Only non-empty string values are masked; ``None``/unset fields are left as-is
+    so the output still shows which secrets are configured versus absent.
+
+    Args:
+        data: A config value (dict, list, or scalar) from ``model_dump()``.
+
+    Returns:
+        A new structure with secret leaves replaced by masked placeholders.
+    """
+    if isinstance(data, dict):
+        redacted: dict[str, Any] = {}
+        for key, value in data.items():
+            if _looks_secret(key) and isinstance(value, str) and value:
+                redacted[key] = _mask_secret(value)
+            else:
+                redacted[key] = _redact_secrets(value)
+        return redacted
+    if isinstance(data, list):
+        return [_redact_secrets(item) for item in data]
+    return data
+
+
+def _display_config(raw: bool = False, show_secrets: bool = False) -> None:
     """Display the current configuration.
 
     Args:
         raw: If True, output raw JSON without formatting.
+        show_secrets: If True, reveal secret values instead of masking them.
     """
     try:
         config = get_config()
-        config_json = config.model_dump_json(indent=2)
+        config_dict = config.model_dump()
+        display_dict = config_dict if show_secrets else _redact_secrets(config_dict)
+        secrets_masked = display_dict != config_dict
+        config_json = json.dumps(display_dict, indent=2)
 
         if raw:
             print(config_json)
@@ -141,6 +212,11 @@ def _display_config(raw: bool = False) -> None:
             syntax = Syntax(config_json, "json", theme="monokai", line_numbers=False)
             console.print(syntax)
 
+            if secrets_masked:
+                console.print(
+                    "\n[dim]🔒 Secrets masked. Use '--show-secrets' to reveal them.[/dim]"
+                )
+
             # Show env var overrides hint
             overrides = get_env_overrides()
             if overrides:
@@ -154,8 +230,12 @@ def _display_config(raw: bool = False) -> None:
         raise typer.Exit(1) from None
 
 
-def _display_env_overrides() -> None:
-    """Display active environment variable overrides."""
+def _display_env_overrides(show_secrets: bool = False) -> None:
+    """Display active environment variable overrides.
+
+    Args:
+        show_secrets: If True, reveal secret values instead of masking them.
+    """
     overrides = get_env_overrides()
 
     console.print("[bold blue]🔧 Environment Variable Overrides[/bold blue]\n")
@@ -180,10 +260,9 @@ def _display_env_overrides() -> None:
 
     console.print("[bold]Active overrides:[/bold]\n")
     for env_var, value in overrides.items():
-        # Mask sensitive values
-        if "key" in env_var.lower() or "secret" in env_var.lower():
-            masked = value[:8] + "..." if len(value) > 8 else "***"
-            console.print(f"  [cyan]{env_var}[/cyan] = [dim]{masked}[/dim]")
+        # Mask sensitive values unless explicitly revealed
+        if not show_secrets and _looks_secret(env_var):
+            console.print(f"  [cyan]{env_var}[/cyan] = [dim]{_mask_secret(value)}[/dim]")
         else:
             console.print(f"  [cyan]{env_var}[/cyan] = {value}")
 

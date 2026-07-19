@@ -356,19 +356,32 @@ class ProfileManager:
         self.save(registry)
         return profile
 
-    def remove(self, name: str) -> None:
+    def remove(self, name: str, force: bool = False) -> None:
         """Remove a profile and clear the active pointer if it referenced it.
 
         Note: the profile's isolated config directory is left on disk so
         credentials are not destroyed by an accidental remove. Delete it
         manually if desired.
 
+        Args:
+            name: The profile name to remove.
+            force: If True, allow removing the active profile without warning.
+                   If False, raises ProfileError when removing the active profile.
+
         Raises:
             ProfileNotFoundError: If no such profile exists.
+            ProfileError: If attempting to remove the active profile without force=True.
         """
         registry = self.load()
         if name not in registry.profiles:
             raise ProfileNotFoundError(name)
+
+        if not force and registry.active == name:
+            raise ProfileError(
+                f"Cannot remove active profile '{name}'. "
+                "Use --force to remove it, or first switch to another profile with 'claudetm profile use'."
+            )
+
         del registry.profiles[name]
         if registry.active == name:
             registry.active = None

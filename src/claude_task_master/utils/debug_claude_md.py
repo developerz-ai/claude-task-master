@@ -20,6 +20,9 @@ from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
 
+from ..core.config_loader import get_config
+from ..core.credentials import CredentialManager
+
 console = Console()
 
 
@@ -60,13 +63,15 @@ async def debug_claude_md_detection(working_dir: str | None = None) -> bool:
         console.print(f"[red]✗[/red] Failed to import claude_agent_sdk: {e}")
         return False
 
-    # Check credentials
-    creds_path = Path.home() / ".claude" / ".credentials.json"
-    if not creds_path.exists():
-        console.print(f"[red]✗[/red] Credentials not found at {creds_path}")
+    # Check credentials (profile-aware)
+    try:
+        cred_manager = CredentialManager()
+        cred_manager.verify_credentials()
+        console.print("[green]✓[/green] Credentials found")
+    except Exception as e:
+        console.print(f"[red]✗[/red] Credentials check failed: {e}")
         console.print("  Run: [cyan]claude[/cyan] to authenticate first")
         return False
-    console.print("[green]✓[/green] Credentials found")
 
     console.print("\n[bold]Running test query...[/bold]")
     console.print("Asking Claude: 'What code style instructions do you see?'\n")
@@ -80,10 +85,11 @@ async def debug_claude_md_detection(working_dir: str | None = None) -> bool:
         console.print(f"[dim]Changed to: {os.getcwd()}[/dim]")
 
         # Create options with cwd and setting_sources
+        config = get_config()
         options = claude_agent_sdk.ClaudeAgentOptions(
             allowed_tools=["Read"],  # Minimal tools for test
             permission_mode="bypassPermissions",
-            model="claude-haiku-4-5-20251001",  # Use Haiku for speed/cost
+            model=config.models.haiku,  # Use Haiku for speed/cost
             cwd=str(target_dir),
             setting_sources=["user", "local", "project"],  # Load CLAUDE.md
             hooks={},  # Disable hooks to prevent "Stream closed" errors

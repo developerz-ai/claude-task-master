@@ -58,10 +58,16 @@ class TestAgentWrapperGetToolsForPhase:
                 model=ModelType.SONNET,
             )
 
-    def test_all_phases_allow_all_tools(self, agent):
-        """Test all phases default to all tools allowed (empty list)."""
-        assert agent.get_tools_for_phase("planning") == []
-        assert agent.get_tools_for_phase("verification") == []
+    def test_phase_defaults_restrict_planning_and_verification(self, agent):
+        """Test planning/verification default to read-only sets; working = all tools."""
+        assert agent.get_tools_for_phase("planning") == [
+            "Read",
+            "Glob",
+            "Grep",
+            "WebFetch",
+            "WebSearch",
+        ]
+        assert agent.get_tools_for_phase("verification") == ["Read", "Glob", "Grep", "Bash"]
         assert agent.get_tools_for_phase("working") == []
 
     def test_unknown_phase_returns_working_tools(self, agent):
@@ -415,6 +421,48 @@ class TestAgentWrapperRunPlanningPhase:
                 # Check that run_async_with_cleanup was called
                 assert mock_asyncio.called
 
+    def test_run_planning_phase_tools_reach_query_executor(
+        self, agent_with_mock, temp_dir, monkeypatch
+    ):
+        """Planning tool restriction flows end-to-end into query_executor.run_query.
+
+        Verifies the full chain:
+          run_planning_phase()
+            → get_tools_for_phase("planning")     # returns config-driven list
+            → query_executor.run_query(tools=...) # that list is passed as-is
+        Ensures the restricted read-only tool set (no Bash/Edit/Write) is what
+        the SDK subprocess actually receives in ``ClaudeAgentOptions.allowed_tools``.
+        """
+        monkeypatch.chdir(temp_dir)
+        from claude_task_master.core.config_loader import reset_config
+
+        reset_config()
+
+        planning_response = "## Task List\n- [ ] Task 1\n## Success Criteria\n1. Done"
+
+        # Patch query_executor.run_query so we can capture which tools were passed.
+        mock_run_query = AsyncMock(return_value=planning_response)
+        agent_with_mock._phase_executor.query_executor.run_query = mock_run_query
+
+        with patch(
+            "claude_task_master.core.agent_phases.run_async_with_cleanup",
+            return_value=planning_response,
+        ):
+            agent_with_mock.run_planning_phase("Build a feature")
+
+        # query_executor.run_query must have been called with the planning tool list.
+        mock_run_query.assert_called_once()
+        call_kwargs = mock_run_query.call_args[1]
+        planning_tools_used: list[str] = call_kwargs["tools"]
+
+        assert planning_tools_used == ["Read", "Glob", "Grep", "WebFetch", "WebSearch"]
+        # Destructive tools must be absent from the planning phase.
+        for forbidden in ("Bash", "Edit", "Write"):
+            assert forbidden not in planning_tools_used, (
+                f"Forbidden tool '{forbidden}' reached ClaudeAgentOptions.allowed_tools "
+                "during the planning phase"
+            )
+
     def test_run_planning_phase_with_context(self, agent_with_mock):
         """Test run_planning_phase includes context."""
         mock_result = """## Task List
@@ -645,9 +693,9 @@ class TestAgentWrapperVerifySuccessCriteria:
         assert result is not None
 
     def test_verify_success_criteria_uses_verification_tools(self, agent_with_mock):
-        """Test verify_success_criteria uses verification tools (all tools allowed)."""
+        """Test verify_success_criteria uses the read + Bash verification tool set."""
         tools = agent_with_mock.get_tools_for_phase("verification")
-        assert tools == []  # Empty = all tools allowed
+        assert tools == ["Read", "Glob", "Grep", "Bash"]
 
 
 # =============================================================================
