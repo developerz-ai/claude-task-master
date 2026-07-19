@@ -16,6 +16,7 @@ from . import console
 from .agent_models import ModelType, get_tools_for_phase
 from .prompts import (
     build_coding_style_prompt,
+    build_context_extraction_prompt,
     build_planning_prompt,
     build_release_discovery_prompt,
     build_verification_prompt,
@@ -360,7 +361,9 @@ class AgentPhaseExecutor:
             "model_used": (model_override or self.model).value,
         }
 
-    def verify_success_criteria(self, criteria: str, context: str = "") -> dict[str, Any]:
+    def verify_success_criteria(
+        self, criteria: str, context: str = "", tasks_summary: str = ""
+    ) -> dict[str, Any]:
         """Verify if success criteria are met.
 
         Uses verification tools (Read, Glob, Grep, Bash) to actually run tests
@@ -368,13 +371,22 @@ class AgentPhaseExecutor:
 
         Args:
             criteria: The success criteria to verify.
-            context: Additional context (e.g., tasks summary).
+            context: Accumulated learnings from prior sessions (context.md),
+                injected under its own "Previous Context" header.
+            tasks_summary: Summary of the tasks actually completed (checked-off
+                plan tasks, merged PRs), injected under "Completed Tasks".
 
         Returns:
             Dict with 'success' and 'details' keys.
         """
-        # Build prompt using centralized prompts module
-        prompt = build_verification_prompt(criteria=criteria, tasks_summary=context)
+        # Build prompt using centralized prompts module. Context and the
+        # completed-tasks summary are passed separately so accumulated context
+        # is never rendered under the "Completed Tasks" header.
+        prompt = build_verification_prompt(
+            criteria=criteria,
+            tasks_summary=tasks_summary or None,
+            context=context or None,
+        )
 
         # Run async query with verification tools (read + bash for running tests)
         result = run_async_with_cleanup(
@@ -394,6 +406,47 @@ class AgentPhaseExecutor:
             "success": success,
             "details": result,
         }
+
+    def extract_session_learnings(self, session_output: str, existing_context: str = "") -> str:
+        """Extract terse, reusable learnings from a completed work session.
+
+        Runs the (previously dead) context-extraction prompt over the session
+        output so accumulated learnings can be persisted to context.md and
+        injected into later planning/work/verification prompts. Uses read-only
+        tools and Sonnet — this is a per-session summarization step, so it is
+        kept cheap and fast rather than burning the work model on it.
+
+        Args:
+            session_output: The raw text output of the work session to summarize.
+            existing_context: Already-accumulated context, passed so the model
+                avoids repeating learnings it has captured before.
+
+        Returns:
+            The extracted learnings as terse markdown bullets, or ``""`` when
+            ``session_output`` is empty.
+        """
+        if not session_output.strip():
+            return ""
+
+        prompt = build_context_extraction_prompt(
+            session_output=session_output,
+            existing_context=existing_context or None,
+        )
+
+        # Read-only tools (planning phase) — extraction only summarizes text
+        # already in the prompt; it must never modify the repo or run commands.
+        result = run_async_with_cleanup(
+            self.query_executor.run_query(
+                prompt=prompt,
+                tools=self.get_tools_for_phase("planning"),
+                model_override=ModelType.SONNET,  # Sonnet for speed/cost
+                get_model_name_func=self.get_model_name_func,
+                get_agents_func=self.get_agents_func,
+                process_message_func=self.process_message_func,
+            )
+        )
+
+        return result.strip()
 
     def _parse_verification_result(self, result: str) -> bool:
         """Parse the verification result to determine success.

@@ -275,6 +275,96 @@ class TestAgentPhaseExecutorExtractMethods:
 
 
 # =============================================================================
+# AgentPhaseExecutor Extract Session Learnings Tests
+# =============================================================================
+
+
+class TestAgentPhaseExecutorExtractSessionLearnings:
+    """Tests for extract_session_learnings (context.md accumulation source)."""
+
+    @pytest.fixture
+    def phase_executor(self):
+        """Create an AgentPhaseExecutor whose default model is NOT Sonnet.
+
+        Uses Opus as the executor default so tests can prove the extraction
+        forces the cheaper Sonnet override regardless of the work model.
+        """
+        from claude_task_master.core.agent_phases import AgentPhaseExecutor
+
+        return AgentPhaseExecutor(
+            query_executor=MagicMock(),
+            model=ModelType.OPUS,
+            logger=None,
+        )
+
+    def test_empty_output_returns_empty_without_querying(self, phase_executor):
+        """Empty session output short-circuits — no query is issued."""
+        mock_run_query = AsyncMock(return_value="ignored")
+        phase_executor.query_executor.run_query = mock_run_query
+
+        assert phase_executor.extract_session_learnings("") == ""
+        mock_run_query.assert_not_called()
+
+    def test_whitespace_output_returns_empty_without_querying(self, phase_executor):
+        """Whitespace-only session output is treated as empty."""
+        mock_run_query = AsyncMock(return_value="ignored")
+        phase_executor.query_executor.run_query = mock_run_query
+
+        assert phase_executor.extract_session_learnings("   \n\t  ") == ""
+        mock_run_query.assert_not_called()
+
+    def test_returns_stripped_learnings(self, phase_executor):
+        """Non-empty output runs the query and returns the stripped result."""
+        mock_run_query = AsyncMock(return_value="  - Uses fcntl locking\n  ")
+        phase_executor.query_executor.run_query = mock_run_query
+
+        with patch(
+            "claude_task_master.core.agent_phases.run_async_with_cleanup",
+            return_value="  - Uses fcntl locking\n  ",
+        ):
+            learnings = phase_executor.extract_session_learnings("Did some work")
+
+        assert learnings == "- Uses fcntl locking"
+        mock_run_query.assert_called_once()
+
+    def test_uses_sonnet_and_read_only_tools(self, phase_executor):
+        """Extraction runs on Sonnet with a read-only tool set (no Bash/Edit/Write)."""
+        mock_run_query = AsyncMock(return_value="- learning")
+        phase_executor.query_executor.run_query = mock_run_query
+
+        with patch(
+            "claude_task_master.core.agent_phases.run_async_with_cleanup",
+            return_value="- learning",
+        ):
+            phase_executor.extract_session_learnings("Session output here")
+
+        call_kwargs = mock_run_query.call_args[1]
+        assert call_kwargs["model_override"] == ModelType.SONNET
+        tools = call_kwargs["tools"]
+        assert "Read" in tools
+        for forbidden in ("Bash", "Edit", "Write"):
+            assert forbidden not in tools
+
+    def test_existing_context_flows_into_prompt(self, phase_executor):
+        """existing_context is embedded in the extraction prompt."""
+        mock_run_query = AsyncMock(return_value="- learning")
+        phase_executor.query_executor.run_query = mock_run_query
+
+        with patch(
+            "claude_task_master.core.agent_phases.run_async_with_cleanup",
+            return_value="- learning",
+        ):
+            phase_executor.extract_session_learnings(
+                "New session output",
+                existing_context="EARLIER_LEARNING_MARKER",
+            )
+
+        prompt = mock_run_query.call_args[1]["prompt"]
+        assert "EARLIER_LEARNING_MARKER" in prompt
+        assert "New session output" in prompt
+
+
+# =============================================================================
 # AgentPhaseExecutor Parse Verification Result Tests
 # =============================================================================
 

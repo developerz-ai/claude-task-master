@@ -32,6 +32,7 @@ def mock_agent():
     )
     agent.verify_success_criteria = MagicMock(return_value={"success": True})
     agent.get_tools_for_phase = MagicMock(return_value=["Read", "Glob", "Grep"])
+    agent.extract_session_learnings = MagicMock(return_value="")
     return agent
 
 

@@ -830,6 +830,8 @@ def mock_agent_wrapper(mock_sdk: MockClaudeAgentSDK):
             "details": "All criteria met!",
         }
     )
+    # Default: no learnings extracted, so context accumulation is a no-op.
+    mock.extract_session_learnings = MagicMock(return_value="")
     return mock
 
 

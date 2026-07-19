@@ -13,6 +13,7 @@ from .agent import AgentWrapper, ModelType
 from .agent_exceptions import AgentError, ConsecutiveFailuresError, ContentFilterError
 from .circuit_breaker import CircuitBreakerError
 from .config_loader import get_config
+from .context_accumulator import ContextAccumulator
 from .control_channel import ControlChannel
 from .key_listener import (
     get_cancellation_reason,
@@ -21,7 +22,7 @@ from .key_listener import (
     start_listening,
     stop_listening,
 )
-from .plan_parsing import count_completed_tasks, parse_task_descriptions
+from .plan_parsing import count_completed_tasks, is_task_complete, parse_task_descriptions
 from .planner import Planner
 from .pr_context import PRContextManager
 from .progress_tracker import ExecutionTracker, TrackerConfig
@@ -238,6 +239,7 @@ class WorkLoopOrchestrator:
         self._mailbox_storage: MailboxStorage | None = None
         self._message_merger: MessageMerger | None = None
         self._plan_updater: PlanUpdater | None = None
+        self._context_accumulator: ContextAccumulator | None = None
 
     @property
     def github_client(self) -> GitHubClient:
@@ -345,6 +347,18 @@ class WorkLoopOrchestrator:
             )
         return self._plan_updater
 
+    @property
+    def context_accumulator(self) -> ContextAccumulator:
+        """Get or lazily initialize the context accumulator.
+
+        Owns the context.md accumulation: after each successful work session the
+        orchestrator distils learnings and persists them here so later planning,
+        work, and verification prompts build on prior sessions.
+        """
+        if self._context_accumulator is None:
+            self._context_accumulator = ContextAccumulator(self.state_manager)
+        return self._context_accumulator
+
     def _get_total_tasks(self, state: TaskState) -> int:
         """Get total number of tasks from the plan.
 
@@ -382,6 +396,79 @@ class WorkLoopOrchestrator:
         except Exception:
             pass
         return state.current_task_index
+
+    def _accumulate_context(self, state: TaskState) -> None:
+        """Distil the just-finished work session into context.md.
+
+        Runs the extraction prompt over the session output and appends the
+        resulting learnings under a ``## Session N`` header, so accumulated
+        context grows across sessions and is injected into later
+        planning/work/verification prompts.
+
+        Best-effort: any failure is logged and swallowed so a summarizer hiccup
+        never fails an otherwise-complete task. ``KeyboardInterrupt`` still
+        propagates so Ctrl+C interrupts the run.
+
+        Args:
+            state: Current task state (``session_count`` already incremented for
+                the session being summarized).
+        """
+        session_output = getattr(self.task_runner, "last_session_output", "") or ""
+        if not session_output.strip():
+            return
+
+        try:
+            # Feed back the (capped) accumulated context so the model avoids
+            # repeating learnings it already captured. get_context_for_prompt
+            # bounds the size, keeping extraction cost from growing per session.
+            existing_context = self.context_accumulator.get_context_for_prompt()
+            learnings = self.agent.extract_session_learnings(
+                session_output=session_output,
+                existing_context=existing_context,
+            )
+            if learnings.strip():
+                self.context_accumulator.add_session_summary(state.session_count, learnings.strip())
+                console.detail(f"context.md updated from session {state.session_count}")
+        except KeyboardInterrupt:
+            raise
+        except Exception as e:
+            # Context accumulation is advisory; never let it fail the task.
+            logger.warning("Context accumulation failed (non-fatal): %s", e)
+            console.detail(f"Context accumulation skipped (non-fatal): {e}")
+
+    def _build_completed_tasks_summary(self, state: TaskState) -> str:
+        """Summarize completed tasks + merged PRs for the verification prompt.
+
+        Distinct from accumulated context.md: this lists what was actually done
+        (checked-off ``- [x]`` plan tasks plus PR counts) so the verifier sees
+        the concrete deliverables, while context.md is injected separately under
+        its own header.
+
+        Args:
+            state: Current task state.
+
+        Returns:
+            Markdown bullet list, or ``""`` when nothing is available.
+        """
+        lines: list[str] = []
+        try:
+            plan = self.state_manager.load_plan()
+            if plan:
+                lines.extend(
+                    f"- {desc}"
+                    for index, desc in enumerate(parse_task_descriptions(plan))
+                    if is_task_complete(plan, index)
+                )
+        except Exception:
+            pass
+
+        if state.prs_created or state.prs_merged:
+            pr_line = f"- PRs: {state.prs_created} created, {state.prs_merged} merged"
+            if state.last_counted_pr_merged is not None:
+                pr_line += f" (last merged: #{state.last_counted_pr_merged})"
+            lines.append(pr_line)
+
+        return "\n".join(lines)
 
     def _get_current_branch(self) -> str | None:
         """Get the current git branch name.
@@ -1022,7 +1109,7 @@ class WorkLoopOrchestrator:
             fix_attempt = 0
 
             while fix_attempt <= max_fix_attempts:
-                verification = self._verify_success()
+                verification = self._verify_success(state)
 
                 if verification["success"]:
                     # Success! Checkout to main and cleanup
@@ -1381,6 +1468,10 @@ class WorkLoopOrchestrator:
             f"Task #{completed_task_index + 1} took {task_duration_seconds / 60:.1f} minutes"
         )
 
+        # Distil this session's output into accumulated context.md (best-effort)
+        # so later sessions build on prior learnings.
+        self._accumulate_context(state)
+
         # Emit task.completed webhook event
         # (count already includes the task just marked complete in plan.md)
         completed_tasks = self._get_completed_tasks(state)
@@ -1471,8 +1562,11 @@ class WorkLoopOrchestrator:
         except Exception:
             return None
 
-    def _verify_success(self) -> dict:
+    def _verify_success(self, state: TaskState) -> dict:
         """Verify success criteria are met.
+
+        Args:
+            state: Current task state (used to summarize completed tasks/PRs).
 
         Returns:
             Dict with 'success' (bool) and 'details' (str) keys.
@@ -1481,8 +1575,14 @@ class WorkLoopOrchestrator:
         if not criteria:
             return {"success": True, "details": "No criteria specified"}
 
+        # Pass accumulated context and the real completed-tasks summary
+        # separately so context is injected under its own header rather than
+        # being mislabelled as the list of completed tasks.
         context = self.state_manager.load_context()
-        result = self.agent.verify_success_criteria(criteria=criteria, context=context)
+        tasks_summary = self._build_completed_tasks_summary(state)
+        result = self.agent.verify_success_criteria(
+            criteria=criteria, context=context, tasks_summary=tasks_summary
+        )
         return {
             "success": bool(result.get("success", False)),
             "details": result.get("details", ""),
