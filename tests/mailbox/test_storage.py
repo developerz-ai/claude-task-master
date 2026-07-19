@@ -4,11 +4,13 @@ Tests message storage, retrieval, clearing, and persistence.
 """
 
 import json
+import threading
 from datetime import datetime
 from pathlib import Path
 
 import pytest
 
+from claude_task_master.core.state import StateLockError, file_lock
 from claude_task_master.mailbox.models import Priority
 from claude_task_master.mailbox.storage import MailboxStorage
 
@@ -883,3 +885,104 @@ class TestAtomicWriteFailure:
         # Should still raise the original error, even if temp cleanup fails
         with pytest.raises(OSError, match="Simulated error after temp deletion"):
             storage.add_message("Test message")
+
+
+class TestMailboxLocking:
+    """Test that every mutation serializes its load→modify→save under a lock.
+
+    Without the ``.mailbox.lock`` flock, a REST/MCP/CLI ``add_message`` racing
+    the orchestrator's ``get_and_clear`` interleaves read-modify-write and
+    silently destroys or resurrects messages (the slice-05 P0 bug).
+    """
+
+    @pytest.mark.parametrize(
+        "mutate",
+        [
+            lambda s: s.add_message("blocked"),
+            lambda s: s.get_and_clear(),
+            lambda s: s.clear(),
+        ],
+        ids=["add_message", "get_and_clear", "clear"],
+    )
+    def test_mutation_requires_the_lock(self, state_dir, mutate):
+        """Each mutation waits on the mailbox lock and times out if held elsewhere."""
+        state_dir.mkdir(parents=True, exist_ok=True)
+        storage = MailboxStorage(state_dir=state_dir)
+        storage.LOCK_TIMEOUT = 0.1  # fail fast instead of blocking the full 5s
+
+        # Simulate another process/instance holding the mailbox lock.
+        with file_lock(storage._lock_file, timeout=1.0):
+            with pytest.raises(StateLockError):
+                mutate(storage)
+
+    def test_reads_do_not_require_the_lock(self, state_dir):
+        """Read-only accessors never block on the mailbox lock (atomic writes suffice)."""
+        state_dir.mkdir(parents=True, exist_ok=True)
+        storage = MailboxStorage(state_dir=state_dir)
+        storage.add_message("present")
+
+        # Hold the lock, then confirm reads still resolve immediately.
+        with file_lock(storage._lock_file, timeout=1.0):
+            assert storage.count() == 1
+            assert len(storage.get_messages()) == 1
+            assert storage.get_status()["count"] == 1
+            assert storage.exists() is True
+
+    def test_concurrent_adds_lose_no_messages(self, state_dir):
+        """Threads adding concurrently never clobber each other's write."""
+        storage = MailboxStorage(state_dir=state_dir)
+        n_threads = 6
+        per_thread = 4
+        total = n_threads * per_thread
+        barrier = threading.Barrier(n_threads)
+
+        def worker(tid: int) -> None:
+            barrier.wait()  # release all threads at once to maximize contention
+            for i in range(per_thread):
+                storage.add_message(f"t{tid}-m{i}")
+
+        threads = [threading.Thread(target=worker, args=(t,)) for t in range(n_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert storage.count() == total
+        assert storage.get_status()["total_messages_received"] == total
+
+    def test_concurrent_add_and_dequeue_conserve_messages(self, state_dir):
+        """Adders racing dequeuers destroy no message and resurrect none."""
+        storage = MailboxStorage(state_dir=state_dir)
+        n = 3
+        per = 3
+        barrier = threading.Barrier(2 * n)
+        drained: list[str] = []
+        drained_lock = threading.Lock()
+
+        def adder(tid: int) -> None:
+            barrier.wait()
+            for i in range(per):
+                storage.add_message(f"t{tid}-m{i}")
+
+        def dequeuer() -> None:
+            barrier.wait()
+            for _ in range(per):
+                caught = storage.get_and_clear()
+                with drained_lock:
+                    drained.extend(m.content for m in caught)
+
+        threads = [threading.Thread(target=adder, args=(t,)) for t in range(n)] + [
+            threading.Thread(target=dequeuer) for _ in range(n)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # Collect whatever the dequeuers hadn't caught by the time they finished.
+        drained.extend(m.content for m in storage.get_and_clear())
+
+        expected = sorted(f"t{t}-m{i}" for t in range(n) for i in range(per))
+        # Every message present exactly once: none destroyed, none duplicated.
+        assert sorted(drained) == expected
+        assert storage.count() == 0
