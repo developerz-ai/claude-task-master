@@ -14,7 +14,6 @@ from .agent_message import MessageProcessor
 from .agent_models import (
     ModelType,
     TaskComplexity,
-    ToolConfig,
     get_tools_for_phase,
 )
 from .agent_phases import AgentPhaseExecutor
@@ -35,7 +34,6 @@ __all__ = [
     "AgentWrapper",
     "ModelType",
     "TaskComplexity",
-    "ToolConfig",
 ]
 
 

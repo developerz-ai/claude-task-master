@@ -24,7 +24,6 @@ from claude_task_master.core.agent_models import (
     MODEL_CONTEXT_WINDOWS_STANDARD,
     ModelType,
     TaskComplexity,
-    ToolConfig,
     get_context_window,
     get_tools_for_phase,
     parse_task_complexity,
@@ -108,10 +107,8 @@ from claude_task_master.core.prompts import (
     PromptBuilder,
     PromptSection,
     build_context_extraction_prompt,
-    build_error_recovery_prompt,
     build_plan_update_prompt,
     build_planning_prompt,
-    build_task_completion_check_prompt,
     build_verification_prompt,
     build_work_prompt,
 )
@@ -213,7 +210,6 @@ __all__ = [
     # Agent classes
     "ModelType",
     "TaskComplexity",
-    "ToolConfig",
     "AgentWrapper",
     "AgentPhaseExecutor",
     "AgentQueryExecutor",
@@ -277,9 +273,7 @@ __all__ = [
     "build_plan_update_prompt",
     "build_work_prompt",
     "build_verification_prompt",
-    "build_task_completion_check_prompt",
     "build_context_extraction_prompt",
-    "build_error_recovery_prompt",
     # Control classes and exceptions
     "ControlManager",
     "ControlResult",

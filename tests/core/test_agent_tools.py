@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from claude_task_master.core.agent import AgentWrapper, ModelType, ToolConfig
+from claude_task_master.core.agent import AgentWrapper, ModelType
 from claude_task_master.core.config_loader import reset_config
 from claude_task_master.core.rate_limit import RateLimitConfig
 
@@ -482,7 +482,7 @@ class TestToolUsageIntegration:
         agent._query_executor.query = mock_query_gen
 
         # Test with planning tools
-        planning_tools = ToolConfig.PLANNING.value
+        planning_tools = ["Read", "Glob", "Grep", "WebFetch", "WebSearch"]
         await agent._run_query("test prompt", planning_tools)
 
         assert len(options_calls) == 1

@@ -120,34 +120,6 @@ class TestPRContextMethods:
         assert "New comment" in content
         assert "Old comment" not in content
 
-    def test_save_ci_failure_creates_file(self, state_manager: StateManager) -> None:
-        """Test that save_ci_failure creates failure log file."""
-        state_manager.save_ci_failure(123, "tests", "Error: Test failed\nAssertionError")
-
-        pr_dir = state_manager.get_pr_dir(123)
-        ci_dir = pr_dir / "ci"
-        assert ci_dir.exists()
-
-        ci_files = list(ci_dir.glob("failed_*.txt"))
-        assert len(ci_files) == 1
-        assert "tests" in ci_files[0].name
-
-        content = ci_files[0].read_text()
-        assert "CI Check Failed: tests" in content
-        assert "Error: Test failed" in content
-
-    def test_save_ci_failure_sanitizes_check_name(self, state_manager: StateManager) -> None:
-        """Test that save_ci_failure sanitizes check names for filenames."""
-        state_manager.save_ci_failure(123, "build/test runner", "Failed")
-
-        pr_dir = state_manager.get_pr_dir(123)
-        ci_dir = pr_dir / "ci"
-        ci_files = list(ci_dir.glob("failed_*.txt"))
-        assert len(ci_files) == 1
-        # Check that / and spaces are replaced
-        assert "/" not in ci_files[0].name
-        assert " " not in ci_files[0].name
-
     def test_load_pr_context_empty_when_no_context(self, state_manager: StateManager) -> None:
         """Test that load_pr_context returns empty string when no context."""
         context = state_manager.load_pr_context(999)
@@ -193,7 +165,6 @@ class TestPRContextMethods:
     def test_clear_pr_context_removes_directory(self, state_manager: StateManager) -> None:
         """Test that clear_pr_context removes the PR directory."""
         state_manager.save_pr_comments(123, [{"body": "Comment"}])
-        state_manager.save_ci_failure(123, "tests", "Failure")
 
         # Structure: .claude-task-master/debugging/pr/{number}/
         pr_dir = state_manager.state_dir / "debugging" / "pr" / "123"

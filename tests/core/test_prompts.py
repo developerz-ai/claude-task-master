@@ -4,9 +4,7 @@ from claude_task_master.core.prompts import (
     PromptBuilder,
     PromptSection,
     build_context_extraction_prompt,
-    build_error_recovery_prompt,
     build_planning_prompt,
-    build_task_completion_check_prompt,
     build_verification_prompt,
     build_work_prompt,
 )
@@ -285,39 +283,6 @@ class TestBuildVerificationPrompt:
 
 
 # =============================================================================
-# Task Completion Check Tests
-# =============================================================================
-
-
-class TestBuildTaskCompletionCheckPrompt:
-    """Tests for build_task_completion_check_prompt function."""
-
-    def test_basic_prompt(self) -> None:
-        """Test basic completion check prompt."""
-        prompt = build_task_completion_check_prompt(
-            task_description="Add feature X",
-            session_output="Feature X implemented and tested.",
-        )
-
-        assert "Add feature X" in prompt
-        assert "Feature X implemented and tested." in prompt
-        assert "COMPLETED" in prompt
-        assert "IN_PROGRESS" in prompt
-
-    def test_includes_all_statuses(self) -> None:
-        """Test all status options are included."""
-        prompt = build_task_completion_check_prompt(
-            task_description="Task",
-            session_output="Output",
-        )
-
-        assert "COMPLETED" in prompt
-        assert "IN_PROGRESS" in prompt
-        assert "BLOCKED" in prompt
-        assert "FAILED" in prompt
-
-
-# =============================================================================
 # Context Extraction Tests
 # =============================================================================
 
@@ -360,56 +325,3 @@ class TestBuildContextExtractionPrompt:
 
         # Should be truncated to 5000 chars
         assert len(prompt) < len(long_output)
-
-
-# =============================================================================
-# Error Recovery Tests
-# =============================================================================
-
-
-class TestBuildErrorRecoveryPrompt:
-    """Tests for build_error_recovery_prompt function."""
-
-    def test_basic_prompt(self) -> None:
-        """Test basic error recovery prompt."""
-        prompt = build_error_recovery_prompt(
-            error_message="ModuleNotFoundError: flask",
-        )
-
-        assert "ModuleNotFoundError: flask" in prompt
-        assert "Error" in prompt
-        assert "## Steps" in prompt
-
-    def test_with_task_context(self) -> None:
-        """Test error recovery with task context."""
-        prompt = build_error_recovery_prompt(
-            error_message="Test failed",
-            task_context="Running unit tests for auth module",
-        )
-
-        assert "Test failed" in prompt
-        assert "Running unit tests for auth module" in prompt
-        assert "Task Context" in prompt
-
-    def test_with_attempted_actions(self) -> None:
-        """Test error recovery with attempted actions."""
-        prompt = build_error_recovery_prompt(
-            error_message="Connection refused",
-            attempted_actions=[
-                "Restarted server",
-                "Checked port availability",
-            ],
-        )
-
-        assert "Connection refused" in prompt
-        assert "Restarted server" in prompt
-        assert "Checked port availability" in prompt
-        assert "Already Tried" in prompt
-
-    def test_includes_recovery_steps(self) -> None:
-        """Test recovery steps are included."""
-        prompt = build_error_recovery_prompt("Error")
-
-        assert "Root cause" in prompt
-        assert "Minimal fix" in prompt
-        assert "Verify" in prompt

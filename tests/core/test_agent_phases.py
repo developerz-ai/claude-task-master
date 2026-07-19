@@ -17,25 +17,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from claude_task_master.core.agent import AgentWrapper, ModelType, ToolConfig
+from claude_task_master.core.agent import AgentWrapper, ModelType
 from claude_task_master.core.agent_phases import _drive_coroutine_on_new_loop
 from claude_task_master.core.config_loader import reset_config
 from claude_task_master.core.shutdown import get_shutdown_manager, reset_shutdown
-
-# =============================================================================
-# ToolConfig Enum Tests
-# =============================================================================
-
-
-class TestToolConfig:
-    """Tests for ToolConfig enum."""
-
-    def test_all_phases_allow_all_tools(self):
-        """Test all phases default to all tools allowed (empty list)."""
-        assert ToolConfig.PLANNING.value == []
-        assert ToolConfig.VERIFICATION.value == []
-        assert ToolConfig.WORKING.value == []
-
 
 # =============================================================================
 # AgentWrapper get_tools_for_phase Tests

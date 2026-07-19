@@ -293,90 +293,6 @@ Third line"""
 
 
 # =============================================================================
-# update_plan_progress Tests
-# =============================================================================
-
-
-class TestUpdatePlanProgress:
-    """Tests for update_plan_progress method."""
-
-    def test_update_plan_progress_with_existing_plan(self, planner, state_manager, sample_plan):
-        """Test update_plan_progress with an existing plan."""
-        state_manager.state_dir.mkdir(exist_ok=True)
-        state_manager.save_plan(sample_plan)
-
-        # Should not raise an exception
-        planner.update_plan_progress(task_index=0, completed=True)
-
-        # Verify plan is still accessible
-        loaded_plan = state_manager.load_plan()
-        assert loaded_plan is not None
-
-    def test_update_plan_progress_without_plan_does_nothing(self, planner, state_manager):
-        """Test update_plan_progress returns early when no plan exists."""
-        state_manager.state_dir.mkdir(exist_ok=True)
-
-        # Remove any existing plan file
-        plan_file = state_manager.state_dir / "plan.md"
-        if plan_file.exists():
-            plan_file.unlink()
-
-        # Should not raise an exception
-        planner.update_plan_progress(task_index=0, completed=True)
-
-    def test_update_plan_progress_calls_save_plan(self, planner, state_manager, sample_plan):
-        """Test update_plan_progress saves the plan after update."""
-        state_manager.state_dir.mkdir(exist_ok=True)
-        state_manager.save_plan(sample_plan)
-
-        original_mtime = (state_manager.state_dir / "plan.md").stat().st_mtime
-
-        # Small delay to ensure mtime changes
-        import time
-
-        time.sleep(0.01)
-
-        planner.update_plan_progress(task_index=0, completed=True)
-
-        new_mtime = (state_manager.state_dir / "plan.md").stat().st_mtime
-        # File should have been rewritten (mtime should be same or newer)
-        assert new_mtime >= original_mtime
-
-    def test_update_plan_progress_with_completed_false(self, planner, state_manager, sample_plan):
-        """Test update_plan_progress with completed=False."""
-        state_manager.state_dir.mkdir(exist_ok=True)
-        state_manager.save_plan(sample_plan)
-
-        # Should not raise an exception
-        planner.update_plan_progress(task_index=0, completed=False)
-
-    def test_update_plan_progress_with_various_indices(self, planner, state_manager, sample_plan):
-        """Test update_plan_progress with various task indices."""
-        state_manager.state_dir.mkdir(exist_ok=True)
-        state_manager.save_plan(sample_plan)
-
-        # Test with various indices
-        for idx in [0, 1, 2, 10, -1]:
-            planner.update_plan_progress(task_index=idx, completed=True)
-
-        # Plan should still be valid
-        loaded_plan = state_manager.load_plan()
-        assert loaded_plan is not None
-
-    def test_update_plan_progress_preserves_plan_content(self, planner, state_manager, sample_plan):
-        """Test update_plan_progress preserves plan content."""
-        state_manager.state_dir.mkdir(exist_ok=True)
-        state_manager.save_plan(sample_plan)
-
-        planner.update_plan_progress(task_index=0, completed=True)
-
-        # Note: The TODO in the code indicates checkbox parsing is not implemented yet
-        # For now, the plan content should be preserved as-is
-        loaded_plan = state_manager.load_plan()
-        assert loaded_plan == sample_plan
-
-
-# =============================================================================
 # Integration Tests
 # =============================================================================
 
@@ -409,10 +325,7 @@ class TestPlannerIntegration:
         assert "plan" in result
         assert "Task 1" in result["plan"]
 
-        # Update progress
-        planner.update_plan_progress(task_index=0, completed=True)
-
-        # Plan should still be accessible
+        # Verify plan is still accessible after creation
         loaded_plan = state_manager.load_plan()
         assert loaded_plan is not None
 
@@ -502,14 +415,6 @@ class TestPlannerEdgeCases:
         # Whitespace-only is truthy, so it will be saved
         loaded_plan = state_manager.load_plan()
         assert loaded_plan is not None
-
-    def test_update_plan_progress_with_empty_plan(self, planner, state_manager):
-        """Test update_plan_progress with empty plan content."""
-        state_manager.state_dir.mkdir(exist_ok=True)
-        state_manager.save_plan("")  # Empty plan
-
-        # Should not raise an exception
-        planner.update_plan_progress(task_index=0, completed=True)
 
     def test_planner_with_fresh_state_manager(self, mock_agent_wrapper, temp_dir):
         """Test planner works with freshly created state manager."""
@@ -623,21 +528,6 @@ class TestErrorHandling:
         with pytest.raises((FileNotFoundError, OSError)):
             planner.create_plan("Test goal")
 
-    def test_update_plan_progress_handles_corrupted_plan_file(self, planner, state_manager):
-        """Test update_plan_progress handles corrupted plan file."""
-        state_manager.state_dir.mkdir(exist_ok=True)
-
-        # Write binary data to plan file (corrupted)
-        plan_file = state_manager.state_dir / "plan.md"
-        plan_file.write_bytes(b"\x00\x01\x02\x03")
-
-        # Should handle corrupted file gracefully or raise appropriate error
-        # The current implementation will try to read it as text
-        try:
-            planner.update_plan_progress(task_index=0, completed=True)
-        except UnicodeDecodeError:
-            pass  # Expected for binary data
-
 
 # =============================================================================
 # Planner with Initialized State Manager Tests
@@ -657,17 +547,6 @@ class TestPlannerWithInitializedStateManager:
 
         assert result is not None
         assert "plan" in result
-
-    def test_update_progress_with_initialized_state(
-        self, mock_agent_wrapper, initialized_state_manager, sample_plan
-    ):
-        """Test update_plan_progress works with initialized state manager."""
-        initialized_state_manager.save_plan(sample_plan)
-
-        planner = Planner(agent=mock_agent_wrapper, state_manager=initialized_state_manager)
-
-        # Should not raise an exception
-        planner.update_plan_progress(task_index=0, completed=True)
 
 
 # =============================================================================

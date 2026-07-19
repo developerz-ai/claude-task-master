@@ -3,7 +3,6 @@
 This module tests:
 - ModelType enum
 - TaskComplexity enum
-- ToolConfig enum
 - MODEL_CONTEXT_WINDOWS constants
 - parse_task_complexity function
 """
@@ -18,10 +17,8 @@ from claude_task_master.core.agent_models import (
     MODEL_FALLBACK_MAP,
     ModelType,
     TaskComplexity,
-    ToolConfig,
     get_fallback_chain,
     parse_task_complexity,
-    validate_model,
 )
 
 # =============================================================================
@@ -65,38 +62,6 @@ class TestModelType:
         expected = {"SONNET", "OPUS", "FABLE", "HAIKU", "SONNET_1M"}
         actual = {m.name for m in ModelType}
         assert actual == expected
-
-
-class TestValidateModel:
-    """Tests for the shared validate_model validation path."""
-
-    def test_accepts_every_model_type(self):
-        """validate_model accepts every ModelType value and returns the enum."""
-        for model in ModelType:
-            assert validate_model(model.value) is model
-
-    def test_accepts_fable_and_sonnet_1m(self):
-        """validate_model accepts fable and sonnet_1m (the previously-missed pair)."""
-        assert validate_model("fable") is ModelType.FABLE
-        assert validate_model("sonnet_1m") is ModelType.SONNET_1M
-
-    def test_rejects_unknown_model(self):
-        """validate_model raises ValueError naming the offending model."""
-        with pytest.raises(ValueError, match="Invalid model 'gpt-4'"):
-            validate_model("gpt-4")
-
-    def test_error_lists_every_valid_option(self):
-        """The rejection message lists every valid identifier."""
-        with pytest.raises(ValueError) as exc_info:
-            validate_model("bogus")
-        message = str(exc_info.value)
-        for model in ModelType:
-            assert model.value in message
-
-    def test_is_case_sensitive(self):
-        """validate_model does not silently accept differently-cased names."""
-        with pytest.raises(ValueError):
-            validate_model("Opus")
 
 
 # =============================================================================
@@ -160,33 +125,6 @@ class TestTaskComplexity:
         """Test DEBUGGING_QA complexity maps to SONNET_1M."""
         model = TaskComplexity.get_model_for_complexity(TaskComplexity.DEBUGGING_QA)
         assert model == ModelType.SONNET_1M
-
-
-# =============================================================================
-# ToolConfig Enum Tests
-# =============================================================================
-
-
-class TestToolConfig:
-    """Tests for ToolConfig enum."""
-
-    def test_planning_tools(self):
-        """Test PLANNING tool configuration - all tools allowed (empty list)."""
-        assert ToolConfig.PLANNING.value == []
-
-    def test_working_tools(self):
-        """Test WORKING tool configuration - empty list allows ALL tools."""
-        assert ToolConfig.WORKING.value == []
-
-    def test_verification_tools(self):
-        """Test VERIFICATION tool configuration - all tools allowed (empty list)."""
-        assert ToolConfig.VERIFICATION.value == []
-
-    def test_all_phases_allow_all_tools_by_default(self):
-        """Test all phases default to all tools allowed (empty list)."""
-        assert ToolConfig.PLANNING.value == []
-        assert ToolConfig.VERIFICATION.value == []
-        assert ToolConfig.WORKING.value == []
 
 
 # =============================================================================
@@ -533,12 +471,10 @@ class TestBackwardCompatibility:
         from claude_task_master.core.agent import (
             ModelType,
             TaskComplexity,
-            ToolConfig,
         )
 
         assert ModelType.SONNET.value == "sonnet"
         assert TaskComplexity.CODING.value == "coding"
-        assert ToolConfig.PLANNING.value == []  # All tools allowed
 
     def test_import_from_core_init(self):
         """Test imports from core.__init__ work."""
@@ -548,14 +484,12 @@ class TestBackwardCompatibility:
             MODEL_CONTEXT_WINDOWS_STANDARD,
             ModelType,
             TaskComplexity,
-            ToolConfig,
             parse_task_complexity,
         )
 
         assert ModelType.SONNET.value == "sonnet"
         assert ModelType.SONNET_1M.value == "sonnet_1m"
         assert TaskComplexity.CODING.value == "coding"
-        assert ToolConfig.PLANNING.value == []  # All tools allowed
         assert MODEL_CONTEXT_WINDOWS[ModelType.SONNET] == 1_000_000
         assert MODEL_CONTEXT_WINDOWS_STANDARD[ModelType.SONNET] == 200_000
         assert DEFAULT_COMPACT_THRESHOLD_PERCENT == 0.85

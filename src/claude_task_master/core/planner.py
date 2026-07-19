@@ -131,16 +131,3 @@ class Planner:
             self.state_manager.save_criteria(criteria)
 
         return result
-
-    def update_plan_progress(self, task_index: int, completed: bool) -> None:
-        """Update task completion status in plan."""
-        plan = self.state_manager.load_plan()
-        if not plan:
-            return
-
-        # Note: Checkpoint persistence handles task completion tracking.
-        # Plan markdown files serve as human-readable documentation.
-        # Direct checkbox updates in plan.md could be added as a feature
-        # if UI-level task tracking is needed.
-
-        self.state_manager.save_plan(plan)
