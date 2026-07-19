@@ -233,6 +233,35 @@ DEFAULT_COMPACT_THRESHOLD_PERCENT = 0.85  # Compact at 85% usage
 # =============================================================================
 
 
+def validate_model(model: str) -> ModelType:
+    """Resolve a model identifier to its :class:`ModelType`, or raise.
+
+    The single validation path shared by the REST API, the MCP server, and the
+    repo-planning flow, so all three accept exactly the same identifiers -- every
+    ``ModelType`` value (``opus``, ``sonnet``, ``fable``, ``haiku``,
+    ``sonnet_1m``) -- and reject everything else identically. Before this
+    existed each transport diverged: REST hard-coded an ``opus|sonnet|haiku``
+    regex (silently rejecting ``fable``/``sonnet_1m``), MCP ``initialize_task``
+    persisted any string unchecked, and ``plan_repo`` coerced unknown names to
+    Opus.
+
+    Args:
+        model: The model identifier to validate.
+
+    Returns:
+        The corresponding :class:`ModelType`.
+
+    Raises:
+        ValueError: If ``model`` is not a recognised identifier. The message
+            lists every valid option.
+    """
+    try:
+        return ModelType(model)
+    except ValueError:
+        valid = ", ".join(m.value for m in ModelType)
+        raise ValueError(f"Invalid model '{model}'. Must be one of: {valid}") from None
+
+
 def parse_task_complexity(task_description: str) -> tuple[TaskComplexity, str]:
     """Parse the complexity routing tag from a task description.
 

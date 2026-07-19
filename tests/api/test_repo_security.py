@@ -213,7 +213,7 @@ class TestPlanRepoFromRunningLoop:
             }
 
         with patch(
-            "claude_task_master.api.routes_repo.plan_repo",
+            "claude_task_master.mcp.tools.plan_repo",
             side_effect=_plan_with_own_loop,
         ):
             response = api_client.post(

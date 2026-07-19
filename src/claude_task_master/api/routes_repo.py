@@ -18,10 +18,7 @@ Usage:
 from __future__ import annotations
 
 import logging
-from functools import partial
 from typing import TYPE_CHECKING
-
-import anyio
 
 from claude_task_master.api.models import (
     CloneRepoRequest,
@@ -33,11 +30,7 @@ from claude_task_master.api.models import (
     SetupRepoResponse,
 )
 from claude_task_master.auth import is_auth_enabled
-from claude_task_master.mcp.tools import (
-    clone_repo,
-    plan_repo,
-    setup_repo,
-)
+from claude_task_master.core.services import RepoService, ServiceOutcome
 
 if TYPE_CHECKING:
     from fastapi import APIRouter
@@ -53,6 +46,10 @@ except ImportError:
     FASTAPI_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+# Stateless service shared across requests; centralises the thread-offloading
+# and path confinement for repo operations.
+_repo_service = RepoService()
 
 
 def _auth_required_response() -> JSONResponse:
@@ -129,35 +126,32 @@ def create_repo_router() -> APIRouter:
         if not is_auth_enabled():
             return _auth_required_response()
         try:
-            # Use the MCP tool implementation for consistency. Offload the
-            # (blocking, subprocess-heavy) clone to a worker thread so the
-            # event loop stays responsive.
-            result = await anyio.to_thread.run_sync(
-                partial(
-                    clone_repo,
-                    url=clone_request.url,
-                    target_dir=clone_request.target_dir,
-                    branch=clone_request.branch,
-                )
+            # RepoService offloads the blocking clone to a worker thread and
+            # returns a typed result; ``data`` is the underlying tool dict.
+            result = await _repo_service.clone(
+                url=clone_request.url,
+                target_dir=clone_request.target_dir,
+                branch=clone_request.branch,
             )
+            data = result.data
 
-            if not result.get("success", False):
+            if not result.success:
                 return JSONResponse(
                     status_code=400,
                     content=ErrorResponse(
                         error="clone_failed",
-                        message=result.get("message", "Clone failed"),
-                        detail=result.get("error"),
+                        message=data.get("message", "Clone failed"),
+                        detail=data.get("error"),
                         suggestion="Check the repository URL and your network connection",
                     ).model_dump(),
                 )
 
             return CloneRepoResponse(
                 success=True,
-                message=result.get("message", "Repository cloned successfully"),
-                repo_url=result.get("repo_url"),
-                target_dir=result.get("target_dir"),
-                branch=result.get("branch"),
+                message=data.get("message", "Repository cloned successfully"),
+                repo_url=data.get("repo_url"),
+                target_dir=data.get("target_dir"),
+                branch=data.get("branch"),
             )
 
         except Exception as e:
@@ -210,27 +204,20 @@ def create_repo_router() -> APIRouter:
         if not is_auth_enabled():
             return _auth_required_response()
         try:
-            # Use the MCP tool implementation for consistency. Offload the
-            # (blocking, subprocess-heavy) setup to a worker thread so the
-            # event loop stays responsive.
-            result = await anyio.to_thread.run_sync(
-                partial(
-                    setup_repo,
-                    work_dir=setup_request.work_dir,
-                    run_setup_scripts=setup_request.run_setup_scripts,
-                )
+            result = await _repo_service.setup(
+                work_dir=setup_request.work_dir,
+                run_setup_scripts=setup_request.run_setup_scripts,
             )
+            data = result.data
 
-            if not result.get("success", False):
-                # Determine appropriate error code
-                error_msg = result.get("error", "")
-                if "not found" in error_msg.lower() or "does not exist" in error_msg.lower():
+            if not result.success:
+                if result.outcome is ServiceOutcome.NOT_FOUND:
                     return JSONResponse(
                         status_code=404,
                         content=ErrorResponse(
                             error="not_found",
-                            message=result.get("message", "Directory not found"),
-                            detail=result.get("error"),
+                            message=data.get("message", "Directory not found"),
+                            detail=data.get("error"),
                             suggestion="Ensure the work directory exists and is accessible",
                         ).model_dump(),
                     )
@@ -239,20 +226,20 @@ def create_repo_router() -> APIRouter:
                     status_code=400,
                     content=ErrorResponse(
                         error="setup_failed",
-                        message=result.get("message", "Setup failed"),
-                        detail=result.get("error"),
+                        message=data.get("message", "Setup failed"),
+                        detail=data.get("error"),
                         suggestion="Check the project structure and dependencies",
                     ).model_dump(),
                 )
 
             return SetupRepoResponse(
                 success=True,
-                message=result.get("message", "Repository setup completed"),
-                work_dir=result.get("work_dir"),
-                steps_completed=result.get("steps_completed", []),
-                venv_path=result.get("venv_path"),
-                dependencies_installed=result.get("dependencies_installed", False),
-                setup_scripts_run=result.get("setup_scripts_run", []),
+                message=data.get("message", "Repository setup completed"),
+                work_dir=data.get("work_dir"),
+                steps_completed=data.get("steps_completed", []),
+                venv_path=data.get("venv_path"),
+                dependencies_installed=data.get("dependencies_installed", False),
+                setup_scripts_run=data.get("setup_scripts_run", []),
             )
 
         except Exception as e:
@@ -307,29 +294,24 @@ def create_repo_router() -> APIRouter:
         if not is_auth_enabled():
             return _auth_required_response()
         try:
-            # Use the MCP tool implementation for consistency. Offload the
-            # (blocking, agent-driven) planning to a worker thread: it avoids
-            # freezing the event loop and lets ``run_async_with_cleanup`` drive
-            # its own loop without hitting the running-loop RuntimeError.
-            result = await anyio.to_thread.run_sync(
-                partial(
-                    plan_repo,
-                    work_dir=plan_request.work_dir,
-                    goal=plan_request.goal,
-                    model=plan_request.model,
-                )
+            # RepoService offloads planning to a worker thread: it keeps the
+            # event loop responsive and lets the agent drive its own loop in a
+            # thread that has none, avoiding the running-loop RuntimeError.
+            result = await _repo_service.plan(
+                work_dir=plan_request.work_dir,
+                goal=plan_request.goal,
+                model=plan_request.model,
             )
+            data = result.data
 
-            if not result.get("success", False):
-                # Determine appropriate error code
-                error_msg = result.get("error", "")
-                if "not found" in error_msg.lower() or "does not exist" in error_msg.lower():
+            if not result.success:
+                if result.outcome is ServiceOutcome.NOT_FOUND:
                     return JSONResponse(
                         status_code=404,
                         content=ErrorResponse(
                             error="not_found",
-                            message=result.get("message", "Directory not found"),
-                            detail=result.get("error"),
+                            message=data.get("message", "Directory not found"),
+                            detail=data.get("error"),
                             suggestion="Ensure the work directory exists and is accessible",
                         ).model_dump(),
                     )
@@ -338,20 +320,20 @@ def create_repo_router() -> APIRouter:
                     status_code=400,
                     content=ErrorResponse(
                         error="planning_failed",
-                        message=result.get("message", "Planning failed"),
-                        detail=result.get("error"),
+                        message=data.get("message", "Planning failed"),
+                        detail=data.get("error"),
                         suggestion="Check the goal description and repository structure",
                     ).model_dump(),
                 )
 
             return PlanRepoResponse(
                 success=True,
-                message=result.get("message", "Plan created successfully"),
-                work_dir=result.get("work_dir"),
-                goal=result.get("goal"),
-                plan=result.get("plan"),
-                criteria=result.get("criteria"),
-                run_id=result.get("run_id"),
+                message=data.get("message", "Plan created successfully"),
+                work_dir=data.get("work_dir"),
+                goal=data.get("goal"),
+                plan=data.get("plan"),
+                criteria=data.get("criteria"),
+                run_id=data.get("run_id"),
             )
 
         except Exception as e:

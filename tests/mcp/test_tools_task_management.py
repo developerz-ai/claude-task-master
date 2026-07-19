@@ -127,6 +127,27 @@ class TestInitializeTaskTool:
         assert state.options.max_sessions == 5
         assert state.options.pause_on_pr is True
 
+    def test_initialize_task_rejects_unknown_model(self, temp_dir):
+        """initialize_task rejects an unrecognised model before persisting state."""
+        from claude_task_master.mcp.tools import initialize_task
+
+        result = initialize_task(temp_dir, goal="Test", model="gpt-4")
+
+        assert result["success"] is False
+        assert "Must be one of" in result["message"]
+        # No state is created for an invalid model.
+        assert not (temp_dir / ".claude-task-master").exists()
+
+    def test_initialize_task_accepts_fable(self, temp_dir):
+        """initialize_task accepts the fable model (previously persisted unchecked)."""
+        from claude_task_master.mcp.tools import initialize_task
+
+        result = initialize_task(temp_dir, goal="Test", model="fable")
+
+        assert result["success"] is True
+        state_manager = StateManager(state_dir=temp_dir / ".claude-task-master")
+        assert state_manager.load_state().model == "fable"
+
 
 class TestListTasksTool:
     """Test the list_tasks MCP tool."""

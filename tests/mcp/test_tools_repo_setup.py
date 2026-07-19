@@ -476,11 +476,24 @@ class TestPlanRepoTool:
         from claude_task_master.mcp.tools import plan_repo
 
         # Test with different model values using nonexistent path to fail fast
-        for model in ["opus", "sonnet", "haiku"]:
+        for model in ["opus", "sonnet", "fable", "haiku", "sonnet_1m"]:
             result = plan_repo(str(temp_dir / "nonexistent"), goal="Test goal", model=model)
             # Should accept the parameter and fail quickly on path validation
             assert result["success"] is False
             assert result["error"] == "Work directory not found"
+
+    def test_plan_repo_rejects_unknown_model(self, temp_dir):
+        """plan_repo rejects an unknown model instead of coercing it to Opus."""
+        from claude_task_master.mcp.tools import plan_repo
+
+        # temp_dir exists and is confined, so validation reaches the model check.
+        result = plan_repo(temp_dir, goal="Test goal", model="gpt-4")
+
+        assert result["success"] is False
+        assert result["error"] == "invalid_model"
+        assert "Must be one of" in result["message"]
+        # No state is created when the model is rejected.
+        assert not (temp_dir / ".claude-task-master").exists()
 
     def test_plan_repo_result_structure(self, temp_dir):
         """Test plan_repo returns correct result structure."""

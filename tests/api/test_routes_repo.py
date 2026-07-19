@@ -394,7 +394,7 @@ def test_post_plan_repo_success(api_client, temp_dir):
 """
     mock_criteria = "All tests pass and code is documented"
 
-    with patch("claude_task_master.api.routes_repo.plan_repo") as mock_plan_repo:
+    with patch("claude_task_master.mcp.tools.plan_repo") as mock_plan_repo:
         mock_plan_repo.return_value = {
             "success": True,
             "message": "Plan created successfully",
@@ -429,7 +429,7 @@ def test_post_plan_repo_with_custom_model(api_client, temp_dir):
     repo_dir = temp_dir / "test-plan-repo"
     repo_dir.mkdir(parents=True)
 
-    with patch("claude_task_master.api.routes_repo.plan_repo") as mock_plan_repo:
+    with patch("claude_task_master.mcp.tools.plan_repo") as mock_plan_repo:
         mock_plan_repo.return_value = {
             "success": True,
             "message": "Plan created successfully",
@@ -536,7 +536,7 @@ def test_post_plan_repo_long_goal(api_client, temp_dir):
 
     long_goal = "A" * 5000  # 5KB goal
 
-    with patch("claude_task_master.api.routes_repo.plan_repo") as mock_plan_repo:
+    with patch("claude_task_master.mcp.tools.plan_repo") as mock_plan_repo:
         mock_plan_repo.return_value = {
             "success": True,
             "message": "Plan created successfully",
@@ -613,7 +613,7 @@ def test_repo_workflow_clone_setup_plan(api_client, temp_dir):
     assert setup_response.json()["success"] is True
 
     # Step 3: Plan
-    with patch("claude_task_master.api.routes_repo.plan_repo") as mock_plan_repo:
+    with patch("claude_task_master.mcp.tools.plan_repo") as mock_plan_repo:
         mock_plan_repo.return_value = {
             "success": True,
             "message": "Plan created successfully",

@@ -18,13 +18,12 @@ from __future__ import annotations
 
 import logging
 import os
-from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-import anyio
-
+from claude_task_master.core.services import RepoService
 from claude_task_master.mcp import tools
+from claude_task_master.mcp.tool_forwarding import ForwardingSpec, register_forwarding_tools
 
 if TYPE_CHECKING:
     from starlette.applications import Starlette
@@ -48,6 +47,10 @@ except ImportError:
     check_auth_config = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
+
+# Stateless service centralising repo path-confinement and thread-offloading,
+# shared with the REST transport.
+_repo_service = RepoService()
 
 # Security: Default host for network transports
 MCP_HOST = os.getenv("CLAUDETM_MCP_HOST", "127.0.0.1")
@@ -73,6 +76,205 @@ CloneRepoResult = tools.CloneRepoResult
 SetupRepoResult = tools.SetupRepoResult
 PlanRepoResult = tools.PlanRepoResult
 DeleteCodingStyleResult = tools.DeleteCodingStyleResult
+
+
+# =============================================================================
+# Forwarding tool table
+# =============================================================================
+#
+# The task and mailbox tools all inject ``work_dir`` and forward to a matching
+# ``tools`` function. Declaring them here -- rather than hand-writing one
+# ``@mcp.tool()`` wrapper each -- means every tool's parameters are DERIVED from
+# the underlying function (see ``register_forwarding_tools``), so a parameter can
+# never be silently dropped from a wrapper again (as ``enable_verification`` was
+# from ``initialize_task``). Only the client-facing description lives here.
+_FORWARDING_SPECS: tuple[ForwardingSpec, ...] = (
+    ForwardingSpec(
+        tools.get_status,
+        "Get the current status of a claudetm task.\n\n"
+        "Returns task goal, status, model, current task index, session count,\n"
+        "and configuration options.\n\n"
+        "Args:\n"
+        "    state_dir: Optional custom state directory path.\n\n"
+        "Returns:\n"
+        "    Dictionary containing task status information.",
+    ),
+    ForwardingSpec(
+        tools.get_plan,
+        "Get the current task plan with checkboxes.\n\n"
+        "Returns the markdown task list showing completion status.\n\n"
+        "Args:\n"
+        "    state_dir: Optional custom state directory path.\n\n"
+        "Returns:\n"
+        "    Dictionary containing the plan content or error.",
+    ),
+    ForwardingSpec(
+        tools.get_logs,
+        "Get logs from the current task run.\n\n"
+        "Args:\n"
+        "    tail: Number of lines to return from the end of the log.\n"
+        "    state_dir: Optional custom state directory path.\n\n"
+        "Returns:\n"
+        "    Dictionary containing log content or error.",
+    ),
+    ForwardingSpec(
+        tools.get_progress,
+        "Get the human-readable progress summary.\n\n"
+        "Returns what has been accomplished and what remains.\n\n"
+        "Args:\n"
+        "    state_dir: Optional custom state directory path.\n\n"
+        "Returns:\n"
+        "    Dictionary containing progress content or error.",
+    ),
+    ForwardingSpec(
+        tools.get_context,
+        "Get the accumulated context and learnings.\n\n"
+        "Returns insights gathered during execution.\n\n"
+        "Args:\n"
+        "    state_dir: Optional custom state directory path.\n\n"
+        "Returns:\n"
+        "    Dictionary containing context content or error.",
+    ),
+    ForwardingSpec(
+        tools.clean_task,
+        "Clean up task state directory.\n\n"
+        "Removes all state files to allow starting fresh.\n\n"
+        "Args:\n"
+        "    force: If True, skip confirmation (always True for MCP).\n"
+        "    state_dir: Optional custom state directory path.\n\n"
+        "Returns:\n"
+        "    Dictionary indicating success or failure.",
+    ),
+    ForwardingSpec(
+        tools.delete_coding_style,
+        "Delete the coding style guide file (coding-style.md).\n\n"
+        "The coding style file is a cached guide that's preserved across runs to\n"
+        "save tokens. Call this to force regeneration on the next planning phase\n"
+        "when project conventions have changed.\n\n"
+        "Args:\n"
+        "    state_dir: Optional custom state directory path.\n\n"
+        "Returns:\n"
+        "    Dictionary indicating success or failure with deletion status.",
+    ),
+    ForwardingSpec(
+        tools.initialize_task,
+        "Initialize a new task with the given goal.\n\n"
+        "This only initializes the task state - it does NOT run the task.\n"
+        "Use this to set up a task that will be executed separately.\n\n"
+        "Args:\n"
+        "    goal: The goal to achieve.\n"
+        "    model: Model to use (opus, sonnet, fable, haiku, sonnet_1m).\n"
+        "    auto_merge: Whether to auto-merge PRs when approved.\n"
+        "    enable_release: Whether to run post-merge release verification.\n"
+        "    enable_verification: Run final success-criteria verification after\n"
+        "        all tasks complete.\n"
+        "    max_sessions: Max work sessions before pausing.\n"
+        "    max_prs: Max pull requests to create.\n"
+        "    pause_on_pr: Pause after creating PR for manual review.\n"
+        "    state_dir: Optional custom state directory path.\n\n"
+        "Returns:\n"
+        "    Dictionary indicating success with run_id or failure.",
+    ),
+    ForwardingSpec(
+        tools.list_tasks,
+        "List tasks from the current plan.\n\n"
+        "Returns parsed tasks with their completion status.\n\n"
+        "Args:\n"
+        "    state_dir: Optional custom state directory path.\n\n"
+        "Returns:\n"
+        "    Dictionary containing list of tasks with status.",
+    ),
+    ForwardingSpec(
+        tools.pause_task,
+        "Pause a running task.\n\n"
+        "Transitions the task from planning/working status to paused status.\n"
+        "The task can be resumed later using resume_task.\n\n"
+        "Args:\n"
+        "    reason: Optional reason for pausing (stored in progress).\n"
+        "    state_dir: Optional custom state directory path.\n\n"
+        "Returns:\n"
+        "    Dictionary indicating success or failure with status details.",
+    ),
+    ForwardingSpec(
+        tools.stop_task,
+        "Stop a running task and trigger graceful shutdown.\n\n"
+        "Transitions the task from any active status to stopped status and\n"
+        "triggers shutdown of any running processes. The task can be resumed\n"
+        "later if not cleaned up.\n\n"
+        "Args:\n"
+        "    reason: Optional reason for stopping (stored in progress).\n"
+        "    cleanup: If True, also cleanup state files after stopping.\n"
+        "    state_dir: Optional custom state directory path.\n\n"
+        "Returns:\n"
+        "    Dictionary indicating success or failure with status details.",
+    ),
+    ForwardingSpec(
+        tools.resume_task,
+        "Resume a paused or blocked task.\n\n"
+        "Transitions the task from paused/blocked/stopped status back to working\n"
+        "status. This is distinct from CLI resume - it only updates the state\n"
+        "without restarting the work loop.\n\n"
+        "Args:\n"
+        "    state_dir: Optional custom state directory path.\n\n"
+        "Returns:\n"
+        "    Dictionary indicating success or failure with status details.",
+    ),
+    ForwardingSpec(
+        tools.update_config,
+        "Update task configuration options at runtime.\n\n"
+        "Updates the TaskOptions stored in the task state. Only specified\n"
+        "options are updated; others retain their current values.\n\n"
+        "Args:\n"
+        "    auto_merge: Whether to auto-merge PRs when approved.\n"
+        "    max_sessions: Maximum number of work sessions before pausing.\n"
+        "    max_prs: Maximum number of pull requests to create.\n"
+        "    pause_on_pr: Whether to pause after creating PR for manual review.\n"
+        "    enable_checkpointing: Whether to enable state checkpointing.\n"
+        "    log_level: Log level (quiet, normal, verbose).\n"
+        "    log_format: Log format (text, json).\n"
+        "    pr_per_task: Whether to create PR per task vs per group.\n"
+        "    enable_release: Whether to run post-merge release verification.\n"
+        "    enable_verification: Whether to run final success-criteria verification.\n"
+        "    state_dir: Optional custom state directory path.\n\n"
+        "Returns:\n"
+        "    Dictionary indicating success or failure with updated config.",
+    ),
+    ForwardingSpec(
+        tools.send_message,
+        "Send a message to the claudetm mailbox.\n\n"
+        "Messages are processed after the current task completes. Multiple\n"
+        "messages are merged into a single change request that updates the plan\n"
+        "before continuing work.\n\n"
+        "Use this to send instructions, feedback, or change requests to a running\n"
+        "claudetm instance from external systems or other AI agents.\n\n"
+        "Args:\n"
+        "    content: The message content describing the change request.\n"
+        '    sender: Identifier of the sender (default: "anonymous").\n'
+        "    priority: Message priority - 0=low, 1=normal, 2=high, 3=urgent.\n"
+        "    state_dir: Optional custom state directory path.\n\n"
+        "Returns:\n"
+        "    Dictionary containing the message_id on success, or error info.",
+    ),
+    ForwardingSpec(
+        tools.check_mailbox,
+        "Check the status of the claudetm mailbox.\n\n"
+        "Returns the number of pending messages and previews of each.\n"
+        "Use this to see what messages are waiting to be processed.\n\n"
+        "Args:\n"
+        "    state_dir: Optional custom state directory path.\n\n"
+        "Returns:\n"
+        "    Dictionary containing mailbox status with message previews.",
+    ),
+    ForwardingSpec(
+        tools.clear_mailbox,
+        "Clear all messages from the claudetm mailbox.\n\n"
+        "Use this to discard all pending messages without processing them.\n\n"
+        "Args:\n"
+        "    state_dir: Optional custom state directory path.\n\n"
+        "Returns:\n"
+        "    Dictionary indicating success and number of messages cleared.",
+    ),
+)
 
 
 # =============================================================================
@@ -114,168 +316,10 @@ def create_server(
     # Tool Wrappers - Delegate to tools module
     # =============================================================================
 
-    @mcp.tool()
-    def get_status(state_dir: str | None = None) -> dict[str, Any]:
-        """Get the current status of a claudetm task.
-
-        Returns task goal, status, model, current task index, session count,
-        and configuration options.
-
-        Args:
-            state_dir: Optional custom state directory path.
-
-        Returns:
-            Dictionary containing task status information.
-        """
-        return tools.get_status(work_dir, state_dir)
-
-    @mcp.tool()
-    def get_plan(state_dir: str | None = None) -> dict[str, Any]:
-        """Get the current task plan with checkboxes.
-
-        Returns the markdown task list showing completion status.
-
-        Args:
-            state_dir: Optional custom state directory path.
-
-        Returns:
-            Dictionary containing the plan content or error.
-        """
-        return tools.get_plan(work_dir, state_dir)
-
-    @mcp.tool()
-    def get_logs(
-        tail: int = 100,
-        state_dir: str | None = None,
-    ) -> dict[str, Any]:
-        """Get logs from the current task run.
-
-        Args:
-            tail: Number of lines to return from the end of the log.
-            state_dir: Optional custom state directory path.
-
-        Returns:
-            Dictionary containing log content or error.
-        """
-        return tools.get_logs(work_dir, tail, state_dir)
-
-    @mcp.tool()
-    def get_progress(state_dir: str | None = None) -> dict[str, Any]:
-        """Get the human-readable progress summary.
-
-        Returns what has been accomplished and what remains.
-
-        Args:
-            state_dir: Optional custom state directory path.
-
-        Returns:
-            Dictionary containing progress content or error.
-        """
-        return tools.get_progress(work_dir, state_dir)
-
-    @mcp.tool()
-    def get_context(state_dir: str | None = None) -> dict[str, Any]:
-        """Get the accumulated context and learnings.
-
-        Returns insights gathered during execution.
-
-        Args:
-            state_dir: Optional custom state directory path.
-
-        Returns:
-            Dictionary containing context content or error.
-        """
-        return tools.get_context(work_dir, state_dir)
-
-    @mcp.tool()
-    def clean_task(
-        force: bool = False,
-        state_dir: str | None = None,
-    ) -> dict[str, Any]:
-        """Clean up task state directory.
-
-        Removes all state files to allow starting fresh.
-
-        Args:
-            force: If True, skip confirmation (always True for MCP).
-            state_dir: Optional custom state directory path.
-
-        Returns:
-            Dictionary indicating success or failure.
-        """
-        return tools.clean_task(work_dir, force, state_dir)
-
-    @mcp.tool()
-    def delete_coding_style(
-        state_dir: str | None = None,
-    ) -> dict[str, Any]:
-        """Delete the coding style guide file (coding-style.md).
-
-        The coding style file is a cached guide that's preserved across runs to save
-        tokens. Call this to force regeneration on the next planning phase when
-        project conventions have changed.
-
-        Args:
-            state_dir: Optional custom state directory path.
-
-        Returns:
-            Dictionary indicating success or failure with deletion status.
-        """
-        return tools.delete_coding_style(work_dir, state_dir)
-
-    @mcp.tool()
-    def initialize_task(
-        goal: str,
-        model: str = "opus",
-        auto_merge: bool = True,
-        enable_release: bool = False,
-        max_sessions: int | None = None,
-        max_prs: int | None = None,
-        pause_on_pr: bool = False,
-        state_dir: str | None = None,
-    ) -> dict[str, Any]:
-        """Initialize a new task with the given goal.
-
-        This only initializes the task state - it does NOT run the task.
-        Use this to set up a task that will be executed separately.
-
-        Args:
-            goal: The goal to achieve.
-            model: Model to use (opus, sonnet, haiku).
-            auto_merge: Whether to auto-merge PRs when approved.
-            max_sessions: Max work sessions before pausing.
-            max_prs: Max pull requests to create.
-            pause_on_pr: Pause after creating PR for manual review.
-            state_dir: Optional custom state directory path.
-
-        Returns:
-            Dictionary indicating success with run_id or failure.
-        """
-        return tools.initialize_task(
-            work_dir,
-            goal,
-            model,
-            auto_merge,
-            max_sessions,
-            max_prs,
-            pause_on_pr,
-            state_dir,
-            enable_release=enable_release,
-        )
-
-    @mcp.tool()
-    def list_tasks(state_dir: str | None = None) -> dict[str, Any]:
-        """List tasks from the current plan.
-
-        Returns parsed tasks with their completion status.
-
-        Args:
-            state_dir: Optional custom state directory path.
-
-        Returns:
-            Dictionary containing list of tasks with status.
-        """
-        return tools.list_tasks(work_dir, state_dir)
+    # The task and mailbox tools are generated from the declarative
+    # _FORWARDING_SPECS table so their parameters are derived from the
+    # underlying tools functions and can never silently drift.
+    register_forwarding_tools(mcp, _FORWARDING_SPECS, work_dir=work_dir)
 
     @mcp.tool()
     def health_check() -> dict[str, Any]:
@@ -288,173 +332,6 @@ def create_server(
             Dictionary containing health status information.
         """
         return tools.health_check(work_dir, name, start_time)
-
-    @mcp.tool()
-    def pause_task(
-        reason: str | None = None,
-        state_dir: str | None = None,
-    ) -> dict[str, Any]:
-        """Pause a running task.
-
-        Transitions the task from planning/working status to paused status.
-        The task can be resumed later using resume_task.
-
-        Args:
-            reason: Optional reason for pausing (stored in progress).
-            state_dir: Optional custom state directory path.
-
-        Returns:
-            Dictionary indicating success or failure with status details.
-        """
-        return tools.pause_task(work_dir, reason, state_dir)
-
-    @mcp.tool()
-    def stop_task(
-        reason: str | None = None,
-        cleanup: bool = False,
-        state_dir: str | None = None,
-    ) -> dict[str, Any]:
-        """Stop a running task and trigger graceful shutdown.
-
-        Transitions the task from any active status to stopped status and
-        triggers shutdown of any running processes. The task can be resumed
-        later if not cleaned up.
-
-        Args:
-            reason: Optional reason for stopping (stored in progress).
-            cleanup: If True, also cleanup state files after stopping.
-            state_dir: Optional custom state directory path.
-
-        Returns:
-            Dictionary indicating success or failure with status details.
-        """
-        return tools.stop_task(work_dir, reason, cleanup, state_dir)
-
-    @mcp.tool()
-    def resume_task(state_dir: str | None = None) -> dict[str, Any]:
-        """Resume a paused or blocked task.
-
-        Transitions the task from paused/blocked/stopped status back to working
-        status. This is distinct from CLI resume - it only updates the state
-        without restarting the work loop.
-
-        Args:
-            state_dir: Optional custom state directory path.
-
-        Returns:
-            Dictionary indicating success or failure with status details.
-        """
-        return tools.resume_task(work_dir, state_dir)
-
-    @mcp.tool()
-    def update_config(
-        auto_merge: bool | None = None,
-        enable_release: bool | None = None,
-        max_sessions: int | None = None,
-        max_prs: int | None = None,
-        pause_on_pr: bool | None = None,
-        enable_checkpointing: bool | None = None,
-        log_level: str | None = None,
-        log_format: str | None = None,
-        pr_per_task: bool | None = None,
-        state_dir: str | None = None,
-    ) -> dict[str, Any]:
-        """Update task configuration options at runtime.
-
-        Updates the TaskOptions stored in the task state. Only specified
-        options are updated; others retain their current values.
-
-        Args:
-            auto_merge: Whether to auto-merge PRs when approved.
-            max_sessions: Maximum number of work sessions before pausing.
-            max_prs: Maximum number of pull requests to create.
-            pause_on_pr: Whether to pause after creating PR for manual review.
-            enable_checkpointing: Whether to enable state checkpointing.
-            log_level: Log level (quiet, normal, verbose).
-            log_format: Log format (text, json).
-            pr_per_task: Whether to create PR per task vs per group.
-            state_dir: Optional custom state directory path.
-
-        Returns:
-            Dictionary indicating success or failure with updated config.
-        """
-        return tools.update_config(
-            work_dir,
-            auto_merge=auto_merge,
-            enable_release=enable_release,
-            max_sessions=max_sessions,
-            max_prs=max_prs,
-            pause_on_pr=pause_on_pr,
-            enable_checkpointing=enable_checkpointing,
-            log_level=log_level,
-            log_format=log_format,
-            pr_per_task=pr_per_task,
-            state_dir=state_dir,
-        )
-
-    # =============================================================================
-    # Mailbox Tool Wrappers
-    # =============================================================================
-
-    @mcp.tool()
-    def send_message(
-        content: str,
-        sender: str = "anonymous",
-        priority: int = 1,
-        state_dir: str | None = None,
-    ) -> dict[str, Any]:
-        """Send a message to the claudetm mailbox.
-
-        Messages are processed after the current task completes. Multiple messages
-        are merged into a single change request that updates the plan before
-        continuing work.
-
-        Use this to send instructions, feedback, or change requests to a running
-        claudetm instance from external systems or other AI agents.
-
-        Args:
-            content: The message content describing the change request.
-            sender: Identifier of the sender (default: "anonymous").
-            priority: Message priority - 0=low, 1=normal, 2=high, 3=urgent.
-            state_dir: Optional custom state directory path.
-
-        Returns:
-            Dictionary containing the message_id on success, or error info.
-
-        Example:
-            send_message("Please also add unit tests for the new feature")
-            send_message("URGENT: Fix the security bug first", priority=3)
-        """
-        return tools.send_message(work_dir, content, sender, priority, state_dir)
-
-    @mcp.tool()
-    def check_mailbox(state_dir: str | None = None) -> dict[str, Any]:
-        """Check the status of the claudetm mailbox.
-
-        Returns the number of pending messages and previews of each.
-        Use this to see what messages are waiting to be processed.
-
-        Args:
-            state_dir: Optional custom state directory path.
-
-        Returns:
-            Dictionary containing mailbox status with message previews.
-        """
-        return tools.check_mailbox(work_dir, state_dir)
-
-    @mcp.tool()
-    def clear_mailbox(state_dir: str | None = None) -> dict[str, Any]:
-        """Clear all messages from the claudetm mailbox.
-
-        Use this to discard all pending messages without processing them.
-
-        Args:
-            state_dir: Optional custom state directory path.
-
-        Returns:
-            Dictionary indicating success and number of messages cleared.
-        """
-        return tools.clear_mailbox(work_dir, state_dir)
 
     # =============================================================================
     # Repo Setup Tool Wrappers
@@ -493,13 +370,14 @@ def create_server(
             clone_repo("git@github.com:user/project.git", branch="develop")
             clone_repo("https://github.com/user/project", target_dir="/custom/path")
         """
-        # Offload the blocking subprocess work to a thread so the MCP event
-        # loop is never frozen during a (potentially minutes-long) clone.
-        return await anyio.to_thread.run_sync(partial(tools.clone_repo, url, target_dir, branch))
+        # RepoService offloads the blocking subprocess work to a thread so the
+        # MCP event loop is never frozen during a (potentially minutes-long)
+        # clone; ``data`` is the underlying tool dict, forwarded verbatim.
+        return (await _repo_service.clone(url, target_dir, branch)).data
 
     @mcp.tool()
     async def setup_repo(
-        repo_dir: str,
+        work_dir: str,
         run_setup_scripts: bool = False,
     ) -> dict[str, Any]:
         """Set up a cloned repository for development.
@@ -514,7 +392,7 @@ def create_server(
         management when available, falling back to standard venv + pip.
 
         Args:
-            repo_dir: Path to the cloned repository directory to set up.
+            work_dir: Path to the cloned repository directory to set up.
             run_setup_scripts: Execute repo-supplied setup scripts. Disabled by
                 default because running untrusted scripts is a remote-code-execution
                 risk; scripts are detected but skipped unless this is True.
@@ -534,15 +412,14 @@ def create_server(
             setup_repo("/home/user/workspace/claude-task-master/my-project")
             setup_repo("~/workspace/claude-task-master/python-app")
         """
-        # Offload the blocking subprocess work to a thread so the MCP event
-        # loop is never frozen during dependency installation / setup scripts.
-        return await anyio.to_thread.run_sync(
-            partial(tools.setup_repo, repo_dir, run_setup_scripts=run_setup_scripts)
-        )
+        # RepoService offloads the blocking subprocess work to a thread so the
+        # MCP event loop is never frozen during dependency installation / setup
+        # scripts; ``data`` is the underlying tool dict, forwarded verbatim.
+        return (await _repo_service.setup(work_dir, run_setup_scripts=run_setup_scripts)).data
 
     @mcp.tool()
     async def plan_repo(
-        repo_dir: str,
+        work_dir: str,
         goal: str,
         model: str = "opus",
     ) -> dict[str, Any]:
@@ -556,11 +433,11 @@ def create_server(
         or to get a plan for a new goal in an existing repository.
 
         Args:
-            repo_dir: Path to the repository directory to plan for.
+            work_dir: Path to the repository directory to plan for.
             goal: The goal/task description to plan for. Be specific about
                 what you want to accomplish.
             model: Model to use for planning (default: "opus" for best quality).
-                Options: "opus", "sonnet", "haiku".
+                Options: "opus", "sonnet", "fable", "haiku", "sonnet_1m".
 
         Returns:
             Dictionary containing:
@@ -577,10 +454,11 @@ def create_server(
             plan_repo("/home/user/workspace/project", "Add user authentication")
             plan_repo("~/workspace/my-app", "Fix the login bug", model="sonnet")
         """
-        # Offload to a thread: keeps the MCP event loop responsive and lets the
-        # agent's ``run_async_with_cleanup`` drive its own loop in a thread that
-        # has none running, avoiding the running-loop RuntimeError.
-        return await anyio.to_thread.run_sync(partial(tools.plan_repo, repo_dir, goal, model))
+        # RepoService offloads to a thread: keeps the MCP event loop responsive
+        # and lets the agent's ``run_async_with_cleanup`` drive its own loop in a
+        # thread that has none, avoiding the running-loop RuntimeError; ``data``
+        # is the underlying tool dict, forwarded verbatim.
+        return (await _repo_service.plan(work_dir, goal, model)).data
 
     # =============================================================================
     # Resource Wrappers
