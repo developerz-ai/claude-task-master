@@ -586,7 +586,17 @@ class WorkLoopOrchestrator:
             total_tasks_before = self._get_total_tasks(state)
 
             console.info("Updating plan based on mailbox messages...")
-            result = self.plan_updater.update_plan(merged_content)
+            result = self.plan_updater.update_plan(
+                merged_content, current_task_index=state.current_task_index
+            )
+
+            # Adopt any positional-index reconciliation before the state save
+            # below. current_task_index is orchestrator-owned (not merged from
+            # disk by save_state_merged), so the stale in-memory value would
+            # otherwise clobber the plan updater's on-disk fix.
+            reconciled_index = result.get("current_task_index")
+            if reconciled_index is not None:
+                state.current_task_index = reconciled_index
 
             # update_plan returned without raising: the plan (if changed) is
             # already persisted, so these messages are fully processed. Remove

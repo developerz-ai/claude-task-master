@@ -264,6 +264,149 @@ class TestPlanUpdaterUpdatePlan:
         assert "[x] Completed Task" in result["plan"]
 
 
+class TestPlanUpdaterValidation:
+    """Tests for validating LLM plan output before overwriting plan.md."""
+
+    def _updater(self, current_plan: str):
+        """Build an updater whose state_manager returns ``current_plan``."""
+        agent = MagicMock()
+        state_manager = MagicMock()
+        state_manager.load_plan.return_value = current_plan
+        state_manager.load_goal.return_value = "Goal"
+        state_manager.load_context.return_value = ""
+        return PlanUpdater(agent, state_manager), state_manager
+
+    def test_prose_response_does_not_overwrite_plan(self):
+        """A refusal/prose response with no tasks must leave plan.md untouched."""
+        current_plan = "## Task List\n- [x] Done\n- [ ] Todo"
+        updater, state_manager = self._updater(current_plan)
+
+        with patch.object(updater, "_run_plan_update_query") as mock_query:
+            mock_query.return_value = "I'm sorry, I can't help with that request."
+            result = updater.update_plan("Do something")
+
+        assert result["changes_made"] is False
+        assert result["plan"] == current_plan
+        state_manager.save_plan.assert_not_called()
+        state_manager.backup_plan.assert_not_called()
+
+    def test_dropping_completed_tasks_is_rejected(self):
+        """An update that regresses completed-task count must be rejected."""
+        current_plan = "## Task List\n- [x] A\n- [ ] B"
+        updater, state_manager = self._updater(current_plan)
+
+        with patch.object(updater, "_run_plan_update_query") as mock_query:
+            # Model un-checked the completed task.
+            mock_query.return_value = "## Task List\n- [ ] A\n- [ ] B"
+            result = updater.update_plan("Rework")
+
+        assert result["changes_made"] is False
+        assert result["plan"] == current_plan
+        state_manager.save_plan.assert_not_called()
+
+    def test_valid_update_preserving_completed_is_applied(self):
+        """A changed plan that keeps completed tasks is saved."""
+        current_plan = "## Task List\n- [x] A\n- [ ] B"
+        updater, state_manager = self._updater(current_plan)
+
+        with patch.object(updater, "_run_plan_update_query") as mock_query:
+            mock_query.return_value = "## Task List\n- [x] A\n- [ ] B\n- [ ] C"
+            result = updater.update_plan("Add C")
+
+        assert result["changes_made"] is True
+        state_manager.save_plan.assert_called_once()
+
+    def test_backup_is_taken_before_overwrite(self):
+        """plan.md must be backed up before it is overwritten."""
+        current_plan = "## Task List\n- [ ] A"
+        updater, state_manager = self._updater(current_plan)
+
+        with patch.object(updater, "_run_plan_update_query") as mock_query:
+            mock_query.return_value = "## Task List\n- [ ] A\n- [ ] B"
+            updater.update_plan("Add B")
+
+        names = [call[0] for call in state_manager.method_calls]
+        assert "backup_plan" in names
+        assert names.index("backup_plan") < names.index("save_plan")
+
+    def test_empty_task_list_response_rejected(self):
+        """A Task List header with no task lines must not overwrite the plan."""
+        current_plan = "## Task List\n- [ ] A"
+        updater, state_manager = self._updater(current_plan)
+
+        with patch.object(updater, "_run_plan_update_query") as mock_query:
+            mock_query.return_value = "## Task List\n\nNothing to do here."
+            result = updater.update_plan("Clear it")
+
+        assert result["changes_made"] is False
+        state_manager.save_plan.assert_not_called()
+
+
+class TestPlanUpdaterIndexReconciliation:
+    """Tests for reconciling current_task_index against the rewritten plan."""
+
+    def _updater(self, current_plan: str):
+        agent = MagicMock()
+        state_manager = MagicMock()
+        state_manager.load_plan.return_value = current_plan
+        state_manager.load_goal.return_value = "Goal"
+        state_manager.load_context.return_value = ""
+        return PlanUpdater(agent, state_manager), state_manager
+
+    def test_no_index_passed_returns_none(self):
+        """Without current_task_index, no reconciliation is performed."""
+        updater, _ = self._updater("## Task List\n- [ ] A\n- [ ] B")
+
+        with patch.object(updater, "_run_plan_update_query") as mock_query:
+            mock_query.return_value = "## Task List\n- [ ] A\n- [ ] B\n- [ ] C"
+            result = updater.update_plan("Add C")
+
+        assert result["current_task_index"] is None
+
+    def test_insertion_above_shifts_index(self):
+        """Inserting a task above the current one shifts its index down."""
+        updater, _ = self._updater("## Task List\n- [ ] A\n- [ ] B\n- [ ] C")
+
+        with patch.object(updater, "_run_plan_update_query") as mock_query:
+            # NEW inserted above B → B moves from index 1 to index 2.
+            mock_query.return_value = "## Task List\n- [ ] A\n- [ ] NEW\n- [ ] B\n- [ ] C"
+            result = updater.update_plan("Insert NEW", current_task_index=1)
+
+        assert result["current_task_index"] == 2
+
+    def test_removed_current_task_falls_back_to_first_incomplete(self):
+        """If the current task is gone, index points at the first incomplete task."""
+        updater, _ = self._updater("## Task List\n- [x] A\n- [ ] B\n- [ ] C")
+
+        with patch.object(updater, "_run_plan_update_query") as mock_query:
+            # B removed; remaining incomplete task is C at index 1.
+            mock_query.return_value = "## Task List\n- [x] A\n- [ ] C"
+            result = updater.update_plan("Drop B", current_task_index=1)
+
+        assert result["current_task_index"] == 1
+
+    def test_out_of_range_index_uses_first_incomplete(self):
+        """An all-done run (index == task count) resumes at newly added work."""
+        updater, _ = self._updater("## Task List\n- [x] A\n- [x] B")
+
+        with patch.object(updater, "_run_plan_update_query") as mock_query:
+            mock_query.return_value = "## Task List\n- [x] A\n- [x] B\n- [ ] C"
+            result = updater.update_plan("Add C", current_task_index=2)
+
+        assert result["current_task_index"] == 2
+
+    def test_rejected_update_leaves_index_unreconciled(self):
+        """A rejected update returns None for the index (nothing changed)."""
+        updater, _ = self._updater("## Task List\n- [ ] A\n- [ ] B")
+
+        with patch.object(updater, "_run_plan_update_query") as mock_query:
+            mock_query.return_value = "Sorry, no."
+            result = updater.update_plan("x", current_task_index=1)
+
+        assert result["current_task_index"] is None
+        assert result["changes_made"] is False
+
+
 class TestPlanUpdaterExtractPlan:
     """Tests for PlanUpdater._extract_updated_plan method."""
 

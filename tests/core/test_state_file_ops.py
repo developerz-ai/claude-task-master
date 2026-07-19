@@ -147,6 +147,34 @@ def example():
         plan_file = state_manager.state_dir / "plan.md"
         assert plan_file.exists()
 
+    def test_backup_plan_copies_current_plan(self, state_manager):
+        """Test backup_plan snapshots the current plan.md to plan.md.bak."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan("## Task List\n- [x] Done\n- [ ] Todo")
+
+        backup = state_manager.backup_plan()
+
+        assert backup == state_manager.state_dir / "plan.md.bak"
+        assert backup.read_text() == "## Task List\n- [x] Done\n- [ ] Todo"
+
+    def test_backup_plan_no_plan_returns_none(self, state_manager):
+        """Test backup_plan is a no-op returning None when no plan.md exists."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+
+        assert state_manager.backup_plan() is None
+        assert not (state_manager.state_dir / "plan.md.bak").exists()
+
+    def test_backup_plan_overwrites_previous_backup(self, state_manager):
+        """Test backup_plan keeps only the most recent pre-update plan."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+
+        state_manager.save_plan("first")
+        state_manager.backup_plan()
+        state_manager.save_plan("second")
+        state_manager.backup_plan()
+
+        assert (state_manager.state_dir / "plan.md.bak").read_text() == "second"
+
 
 # =============================================================================
 # Criteria File Operations Tests

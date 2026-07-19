@@ -646,7 +646,7 @@ class TestMailboxFailureRetention:
         storage = orchestrator_with_mailbox.mailbox_storage
         storage.add_message("Original request", sender="user1")
 
-        def add_then_succeed(_merged_content):
+        def add_then_succeed(_merged_content, current_task_index=None):
             # Simulate a concurrent writer landing a message during the update.
             storage.add_message("Arrived during update", sender="user2")
             return {"success": True, "changes_made": True, "plan": "updated"}
@@ -780,7 +780,7 @@ class TestMergedMessagesTriggerPlanUpdate:
         orchestrator_with_mailbox._task_runner = mock_task_runner
 
         # Mock plan updater to record when it's called
-        def mock_update_plan(change_request):
+        def mock_update_plan(change_request, current_task_index=None):
             operation_order.append("plan_updated")
             return {"success": True, "changes_made": True, "plan": "updated plan"}
 
@@ -958,7 +958,7 @@ class TestMergedMessagesTriggerPlanUpdate:
         orchestrator_with_mailbox._task_runner = mock_task_runner
 
         # Mock plan updater - this should also update the actual plan file
-        def update_plan_and_save(change_request):
+        def update_plan_and_save(change_request, current_task_index=None):
             # Simulate saving an updated plan with 3 tasks
             new_plan = """## Task List
 - [x] Task 1: First task
@@ -1097,7 +1097,7 @@ class TestMailboxProcessingTiming:
         orchestrator_with_mailbox._task_runner = mock_task_runner
 
         # Mock plan updater with order tracking
-        def track_plan_update(change_request):
+        def track_plan_update(change_request, current_task_index=None):
             operation_order.append("mailbox_plan_updated")
             return {"success": True, "changes_made": True, "plan": "updated"}
 

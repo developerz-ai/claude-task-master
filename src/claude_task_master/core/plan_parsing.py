@@ -117,3 +117,24 @@ def count_completed_tasks(plan: str) -> int:
     """
     tasks, _ = parse_tasks_with_groups(plan)
     return sum(1 for t in tasks if t.is_complete)
+
+
+def first_incomplete_task_index(plan: str) -> int:
+    """Return the index of the first not-yet-complete task.
+
+    Uses the same task-line semantics as the group parser. When every task
+    is complete (or the plan has no tasks), returns the total task count so
+    the value is a valid "past the end" resume position.
+
+    Args:
+        plan: The plan markdown content.
+
+    Returns:
+        Zero-based index of the first incomplete task, or the total number
+        of tasks when all are complete.
+    """
+    tasks, _ = parse_tasks_with_groups(plan)
+    for i, t in enumerate(tasks):
+        if not t.is_complete:
+            return i
+    return len(tasks)

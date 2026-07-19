@@ -531,8 +531,17 @@ def resume(
 
             plan_updater = PlanUpdater(agent, state_manager, logger=logger)
             try:
-                update_result = plan_updater.update_plan(message)
+                update_result = plan_updater.update_plan(
+                    message, current_task_index=state.current_task_index
+                )
                 if update_result["changes_made"]:
+                    # Adopt the reconciled task index and persist it so the work
+                    # loop (which reloads state from disk) resumes on the right
+                    # task even if the update inserted/removed tasks above it.
+                    reconciled_index = update_result.get("current_task_index")
+                    if reconciled_index is not None:
+                        state.current_task_index = reconciled_index
+                        state_manager.save_state(state)
                     console.print("[green]Plan updated successfully[/green]")
                     # Display a brief summary of the updated plan
                     plan = state_manager.load_plan()
