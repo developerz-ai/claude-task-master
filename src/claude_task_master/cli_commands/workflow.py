@@ -118,8 +118,48 @@ def _validate_log_options(log_level: str, log_format: str) -> tuple[LogLevel, Lo
     return log_level_enum, log_format_enum
 
 
+def _validate_goal(value: str) -> str:
+    """Reject an empty or whitespace-only goal at parse time.
+
+    Args:
+        value: The goal argument as parsed from the CLI.
+
+    Returns:
+        The original value if non-empty.
+
+    Raises:
+        typer.BadParameter: If the goal is empty or only whitespace.
+    """
+    if not value.strip():
+        raise typer.BadParameter("goal must not be empty")
+    return value
+
+
+def _validate_budget(value: float | None) -> float | None:
+    """Reject a non-positive per-session budget at parse time.
+
+    A zero or negative budget would otherwise block the run on the first token.
+
+    Args:
+        value: The budget in USD, or None when unset.
+
+    Returns:
+        The original value if positive or None.
+
+    Raises:
+        typer.BadParameter: If the budget is zero or negative.
+    """
+    if value is not None and value <= 0:
+        raise typer.BadParameter("must be greater than 0 (USD per session)")
+    return value
+
+
 def start(
-    goal: str = typer.Argument(..., help="The goal to achieve (e.g., 'Add user authentication')"),
+    goal: str = typer.Argument(
+        ...,
+        callback=_validate_goal,
+        help="The goal to achieve (e.g., 'Add user authentication')",
+    ),
     model: str = typer.Option(
         "opus",
         "--model",
@@ -150,11 +190,13 @@ def start(
         None,
         "--max-sessions",
         "-n",
+        min=1,
         help="Max work sessions before pausing (default: unlimited)",
     ),
     max_prs: int | None = typer.Option(
         None,
         "--prs",
+        min=1,
         help="Max pull requests to create (default: unlimited)",
     ),
     pause_on_pr: bool = typer.Option(
@@ -206,7 +248,8 @@ def start(
         None,
         "--budget",
         envvar="CLAUDETM_BUDGET",
-        help="Max spending per session in USD (env: CLAUDETM_BUDGET)",
+        callback=_validate_budget,
+        help="Max spending per session in USD, must be > 0 (env: CLAUDETM_BUDGET)",
     ),
 ) -> None:
     """Start a new task with the given goal.
