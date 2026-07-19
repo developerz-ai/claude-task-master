@@ -121,33 +121,6 @@ Status: {"Resolved" if is_resolved else "Unresolved"}
 
         atomic_write_text(summary_file, "\n".join(summary_lines))
 
-    def save_ci_failure(self, pr_number: int, check_name: str, logs: str) -> None:
-        """Save CI failure logs for Claude to read.
-
-        Args:
-            pr_number: The PR number.
-            check_name: Name of the failing check.
-            logs: The failure logs.
-        """
-        pr_dir = self.get_pr_dir(pr_number)
-        ci_dir = pr_dir / "ci"
-        ci_dir.mkdir(exist_ok=True)
-
-        # Sanitize check name for filename
-        safe_name = check_name.replace("/", "_").replace("\\", "_").replace(" ", "_")
-        filename = f"failed_{safe_name}.txt"
-
-        content = f"""CI Check Failed: {check_name}
-PR: #{pr_number}
-
-{"=" * 60}
-FAILURE LOGS:
-{"=" * 60}
-
-{logs}
-"""
-        (ci_dir / filename).write_text(content)
-
     def load_pr_context(self, pr_number: int) -> str:
         """Load all PR context (comments + CI failures) as a single string.
 

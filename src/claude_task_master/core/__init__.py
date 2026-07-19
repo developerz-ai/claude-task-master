@@ -24,22 +24,12 @@ from claude_task_master.core.agent_models import (
     MODEL_CONTEXT_WINDOWS_STANDARD,
     ModelType,
     TaskComplexity,
-    ToolConfig,
     get_context_window,
     get_tools_for_phase,
     parse_task_complexity,
 )
 from claude_task_master.core.agent_phases import AgentPhaseExecutor
 from claude_task_master.core.agent_query import AgentQueryExecutor
-from claude_task_master.core.checkpoint import (
-    Checkpoint,
-    CheckpointError,
-    CheckpointingOptions,
-    CheckpointManager,
-    CheckpointNotFoundError,
-    CheckpointRewindError,
-    get_checkpointing_env,
-)
 from claude_task_master.core.circuit_breaker import (
     CircuitBreaker,
     CircuitBreakerConfig,
@@ -99,28 +89,11 @@ from claude_task_master.core.credentials import (
     TokenRefreshError,
     TokenRefreshHTTPError,
 )
-from claude_task_master.core.hooks import (
-    AuditLogger,
-    DangerousPattern,
-    HookMatcher,
-    HookResult,
-    ProgressTracker,
-    SafetyHooks,
-    create_default_hooks,
-)
 from claude_task_master.core.orchestrator import (
     MaxSessionsReachedError,
     OrchestratorError,
     StateRecoveryError,
     WorkLoopOrchestrator,
-)
-from claude_task_master.core.parallel import (
-    AsyncParallelExecutor,
-    ParallelExecutor,
-    ParallelExecutorConfig,
-    ParallelTask,
-    TaskResult,
-    TaskStatus,
 )
 from claude_task_master.core.plan_updater import PlanUpdater
 from claude_task_master.core.pr_context import PRContextManager
@@ -134,10 +107,8 @@ from claude_task_master.core.prompts import (
     PromptBuilder,
     PromptSection,
     build_context_extraction_prompt,
-    build_error_recovery_prompt,
     build_plan_update_prompt,
     build_planning_prompt,
-    build_task_completion_check_prompt,
     build_verification_prompt,
     build_work_prompt,
 )
@@ -239,7 +210,6 @@ __all__ = [
     # Agent classes
     "ModelType",
     "TaskComplexity",
-    "ToolConfig",
     "AgentWrapper",
     "AgentPhaseExecutor",
     "AgentQueryExecutor",
@@ -252,15 +222,6 @@ __all__ = [
     "get_context_window",
     # Rate limit classes
     "RateLimitConfig",
-    # Checkpoint exceptions
-    "CheckpointError",
-    "CheckpointNotFoundError",
-    "CheckpointRewindError",
-    # Checkpoint classes
-    "Checkpoint",
-    "CheckpointManager",
-    "CheckpointingOptions",
-    "get_checkpointing_env",
     # State exceptions
     "StateError",
     "StateNotFoundError",
@@ -305,14 +266,6 @@ __all__ = [
     "add_shutdown_callback",
     "remove_shutdown_callback",
     "interruptible_sleep",
-    # Hook classes
-    "HookMatcher",
-    "HookResult",
-    "DangerousPattern",
-    "SafetyHooks",
-    "AuditLogger",
-    "ProgressTracker",
-    "create_default_hooks",
     # Prompt classes
     "PromptBuilder",
     "PromptSection",
@@ -320,9 +273,7 @@ __all__ = [
     "build_plan_update_prompt",
     "build_work_prompt",
     "build_verification_prompt",
-    "build_task_completion_check_prompt",
     "build_context_extraction_prompt",
-    "build_error_recovery_prompt",
     # Control classes and exceptions
     "ControlManager",
     "ControlResult",
@@ -337,13 +288,6 @@ __all__ = [
     "CircuitBreakerRegistry",
     "CircuitState",
     "get_circuit_breaker",
-    # Parallel executor classes
-    "AsyncParallelExecutor",
-    "ParallelExecutor",
-    "ParallelExecutorConfig",
-    "ParallelTask",
-    "TaskResult",
-    "TaskStatus",
     # Execution tracker classes
     "ExecutionTracker",
     "ProgressState",

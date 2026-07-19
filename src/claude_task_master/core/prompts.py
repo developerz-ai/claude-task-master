@@ -20,8 +20,7 @@ The actual implementations are in:
 - prompts_planning.py: build_planning_prompt
 - prompts_plan_update.py: build_plan_update_prompt
 - prompts_working.py: build_work_prompt
-- prompts_verification.py: build_verification_prompt, build_task_completion_check_prompt,
-                           build_context_extraction_prompt, build_error_recovery_prompt
+- prompts_verification.py: build_verification_prompt
 """
 
 from __future__ import annotations
@@ -48,8 +47,6 @@ from .prompts_release import (
 # Re-export verification prompts
 from .prompts_verification import (
     build_context_extraction_prompt,
-    build_error_recovery_prompt,
-    build_task_completion_check_prompt,
     build_verification_prompt,
 )
 
@@ -76,7 +73,5 @@ __all__ = [
     "build_work_prompt",
     # Verification and utilities
     "build_verification_prompt",
-    "build_task_completion_check_prompt",
     "build_context_extraction_prompt",
-    "build_error_recovery_prompt",
 ]

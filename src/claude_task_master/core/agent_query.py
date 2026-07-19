@@ -40,7 +40,6 @@ from .config_loader import get_config
 if TYPE_CHECKING:
     from .agent_models import ModelType
     from .circuit_breaker import CircuitBreaker
-    from .hooks import HookMatcher
     from .logger import TaskLogger
     from .rate_limit import RateLimitConfig
 
@@ -84,7 +83,7 @@ class AgentQueryExecutor:
         model: "ModelType",
         rate_limit_config: "RateLimitConfig",
         circuit_breaker: "CircuitBreaker",
-        hooks: dict[str, list["HookMatcher"]] | None = None,
+        hooks: dict[str, Any] | None = None,
         logger: "TaskLogger | None" = None,
         max_budget_usd: float | None = None,
     ):
@@ -97,7 +96,7 @@ class AgentQueryExecutor:
             model: The default model to use for queries.
             rate_limit_config: Rate limiting configuration.
             circuit_breaker: Circuit breaker instance for fault tolerance.
-            hooks: Optional hooks dictionary for ClaudeAgentOptions.
+            hooks: Hooks dictionary for ClaudeAgentOptions (pass {} to disable).
             logger: Optional TaskLogger for capturing tool usage.
             max_budget_usd: Optional per-session spending cap in USD.
         """
@@ -107,7 +106,7 @@ class AgentQueryExecutor:
         self.model = model
         self.rate_limit_config = rate_limit_config
         self.circuit_breaker = circuit_breaker
-        self.hooks = hooks
+        self.hooks: dict[str, Any] = hooks if hooks is not None else {}
         self.logger = logger
         self.max_budget_usd = max_budget_usd
 

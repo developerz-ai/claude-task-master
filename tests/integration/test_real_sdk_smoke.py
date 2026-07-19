@@ -84,7 +84,6 @@ def agent_wrapper(access_token: str, tmp_path: Path):
         access_token=access_token,
         model=ModelType.HAIKU,  # cheapest / fastest for a smoke test
         working_dir=str(tmp_path),
-        enable_safety_hooks=False,  # no hooks needed for a smoke test
     )
 
 

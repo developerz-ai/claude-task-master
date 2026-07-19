@@ -100,19 +100,6 @@ class TaskComplexity(Enum):
         return mapping.get(complexity, ModelType.SONNET)
 
 
-class ToolConfig(Enum):
-    """Tool configurations for different phases.
-
-    Empty list means all tools allowed. Override via config.json.
-
-    DEPRECATED: Use `get_tools_for_phase()` function instead.
-    """
-
-    PLANNING = list[str]()
-    VERIFICATION = list[str]()
-    WORKING = list[str]()
-
-
 # =============================================================================
 # Constants
 # =============================================================================

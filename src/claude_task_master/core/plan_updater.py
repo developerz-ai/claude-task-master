@@ -288,38 +288,3 @@ class PlanUpdater:
             plan_content = plan_content[start_idx:]
 
         return plan_content.strip()
-
-    def update_plan_from_messages(self, messages: list[str]) -> dict[str, Any]:
-        """Update the plan from multiple messages (e.g., from mailbox).
-
-        Merges multiple messages into a single change request and updates
-        the plan accordingly.
-
-        Args:
-            messages: List of message strings to process.
-
-        Returns:
-            Dict with update results (same as update_plan).
-
-        Raises:
-            ValueError: If no messages provided or no plan exists.
-        """
-        if not messages:
-            raise ValueError("No messages provided for plan update")
-
-        # Merge messages into a single change request
-        if len(messages) == 1:
-            change_request = messages[0]
-        else:
-            # Format multiple messages with clear separation
-            merged_parts = []
-            for i, msg in enumerate(messages, 1):
-                merged_parts.append(f"### Change Request {i}\n{msg}")
-            change_request = "\n\n".join(merged_parts)
-            change_request = (
-                f"**Multiple change requests received ({len(messages)} total):**\n\n"
-                f"{change_request}\n\n"
-                f"**Please address ALL of these change requests in the plan update.**"
-            )
-
-        return self.update_plan(change_request)
