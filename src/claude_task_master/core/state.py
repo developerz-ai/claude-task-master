@@ -22,6 +22,7 @@ from claude_task_master.core.state_backup import BackupRecoveryMixin
 
 # Import exceptions and state constants from dedicated module
 from claude_task_master.core.state_exceptions import (
+    CONTROL_AUTHORITATIVE_STATUSES,
     RESUMABLE_STATUSES,
     TERMINAL_STATUSES,
     VALID_STATUSES,
@@ -59,6 +60,7 @@ __all__ = [
     "WORKFLOW_STAGES",
     "TERMINAL_STATUSES",
     "RESUMABLE_STATUSES",
+    "CONTROL_AUTHORITATIVE_STATUSES",
     "VALID_TRANSITIONS",
     "CURRENT_SCHEMA_VERSION",
     # Classes
@@ -405,20 +407,39 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
 
         return state
 
-    def save_state(self, state: TaskState, validate_transition: bool = True) -> None:
+    def save_state(
+        self,
+        state: TaskState,
+        validate_transition: bool = True,
+        merge_control: bool = False,
+    ) -> TaskState:
         """Save state to state.json with file locking.
 
-        The transition check, the atomic write, and the rotating backup all run
-        under a single exclusive lock. The current state is read for validation
-        *inside* the lock (not before acquiring it) so a concurrent writer cannot
-        change the on-disk status between the check and the write
-        (time-of-check-to-time-of-use). On success a rotating backup of the
-        written state is created (best-effort) so a later corruption can be
-        recovered from the most recent good state.
+        The optional control-field merge, the transition check, the atomic
+        write, and the rotating backup all run under a single exclusive lock.
+        The current on-disk state is read *inside* the lock (not before acquiring
+        it) so a concurrent writer in another process cannot change the on-disk
+        status/options between the read and the write (time-of-check-to-
+        time-of-use). ``_load_state_internal`` may heal a corrupt file via
+        recovery, which is safe here because we hold the exclusive lock. On
+        success a rotating backup of the written state is created (best-effort)
+        so a later corruption can be recovered from the most recent good state.
 
         Args:
-            state: The TaskState to save.
+            state: The TaskState to save. Mutated in place: ``updated_at`` is
+                refreshed, and when ``merge_control`` is set the control-plane
+                fields (see :meth:`_merge_control_fields`) are overlaid.
             validate_transition: If True, validates state transition (default True).
+            merge_control: If True, overlay control-plane-owned fields
+                (``options`` and an externally-set ``stopped``/``paused`` status)
+                from disk before writing — the reload-merge-save discipline used
+                by the long-running orchestrator so it cannot clobber a signal
+                written by another process. Default False. See
+                :meth:`save_state_merged`.
+
+        Returns:
+            The state written to disk (the same object, with any merged fields
+            applied), so a caller can adopt authoritative external changes.
 
         Raises:
             InvalidStateTransitionError: If the state transition is invalid.
@@ -426,17 +447,25 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
             StateLockError: If the file lock cannot be acquired.
         """
         with file_lock(self._lock_file, timeout=self.LOCK_TIMEOUT):
-            # Validate the transition while holding the exclusive lock so no
-            # other writer can slip a status change in between the read and the
-            # write (TOCTOU). _load_state_internal may heal a corrupt file via
+            # Read the current on-disk state once, inside the lock, for both the
+            # control-field merge and the transition check. Doing it here (not
+            # before acquiring the lock) closes the time-of-check-to-time-of-use
+            # gap: no other writer can change status/options between the read and
+            # the write. _load_state_internal may heal a corrupt file via
             # recovery, which is safe here because we hold the exclusive lock.
-            if validate_transition and self.state_file.exists():
+            current_state: TaskState | None = None
+            if (validate_transition or merge_control) and self.state_file.exists():
                 try:
                     current_state = self._load_state_internal()
-                    self._validate_transition(current_state.status, state.status)
                 except (StateNotFoundError, StateCorruptedError):
-                    # If we can't load current state, allow the save.
-                    pass
+                    # If we can't load current state, fall back to a plain save.
+                    current_state = None
+
+            if merge_control and current_state is not None:
+                self._merge_control_fields(current_state, state)
+
+            if validate_transition and current_state is not None:
+                self._validate_transition(current_state.status, state.status)
 
             state.updated_at = datetime.now().isoformat()
 
@@ -451,6 +480,84 @@ class StateManager(PRContextMixin, FileOperationsMixin, BackupRecoveryMixin):
             # corruption can be recovered from the most recent good state.
             # Best-effort: a backup failure must never fail the save itself.
             self.create_state_backup()
+
+        return state
+
+    def save_state_merged(self, state: TaskState) -> TaskState:
+        """Reload-merge-save: overlay externally-set control fields, then persist.
+
+        Use this instead of :meth:`save_state` from the long-running
+        orchestrator, which holds one in-memory :class:`TaskState` and saves it
+        dozens of times per run. Between those saves another process — the REST
+        server (``claudetm-server``), the MCP server, or a second CLI — may have
+        written an authoritative control status or patched the run's options
+        through :class:`~claude_task_master.core.control.ControlManager`. A plain
+        :meth:`save_state` would overwrite those with the orchestrator's stale
+        copy; this re-reads the on-disk state and merges the control-plane-owned
+        fields *inside the same exclusive lock* as the write (no
+        time-of-check-to-time-of-use gap), so:
+
+        - a live ``PATCH /config`` (``update_options``) is preserved on disk and
+          returned, so the running orchestrator adopts the new options; and
+        - a cross-process ``stopped``/``paused`` is never overwritten by the
+          orchestrator's stale copy (see :meth:`_merge_control_fields`).
+
+        Args:
+            state: The orchestrator's in-memory state to persist. Overlaid
+                fields are applied **in place**, so the caller's own object picks
+                up an external stop/pause and any patched options with no
+                reassignment (the same object is threaded through the whole run).
+
+        Returns:
+            The same state object, with authoritative external fields overlaid,
+            for callers that prefer to adopt it explicitly.
+
+        Raises:
+            InvalidStateTransitionError: If the resulting transition is invalid.
+            StatePermissionError: If the file cannot be written.
+            StateLockError: If the file lock cannot be acquired.
+        """
+        return self.save_state(state, merge_control=True)
+
+    def _merge_control_fields(self, on_disk: TaskState, incoming: TaskState) -> None:
+        """Overlay control-plane-owned fields from disk onto ``incoming`` in place.
+
+        Called under the state lock by :meth:`save_state` when ``merge_control``
+        is set. The orchestrator owns most of :class:`TaskState` (task index,
+        session count, workflow stage, PR counters, …) and its in-memory value is
+        authoritative for those. Two fields are instead owned by the *control
+        plane* (:class:`~claude_task_master.core.control.ControlManager`, driven
+        from the REST/MCP/CLI surfaces, possibly in another process) and must win
+        over the orchestrator's stale copy:
+
+        - **options** — always taken from disk. The orchestrator never changes
+          its own options mid-run, so any on-disk difference is a live
+          ``PATCH /config`` that must survive and be adopted.
+        - **status** — a cross-process ``stopped``/``paused`` (one of
+          :data:`CONTROL_AUTHORITATIVE_STATUSES`) is kept regardless of the
+          incoming status. A routine progress save therefore cannot silently
+          resume the run to ``working``, and even a terminal write
+          (``blocked``/``success``/``failed``) that *raced* an external stop
+          defers to the control signal — the run stays resumable rather than
+          being finalized behind the user's back. Keeping the on-disk value also
+          makes the persisted transition a no-op, so it never trips
+          :meth:`_validate_transition` (``stopped`` -> ``blocked``, for example,
+          is not otherwise a valid transition). Only an explicit ``resume`` —
+          which uses plain :meth:`save_state`, not this path — moves off it.
+
+        Args:
+            on_disk: The freshly-loaded on-disk state, authoritative for the
+                control-plane fields.
+            incoming: The caller's state, mutated in place with the overlay.
+        """
+        # External config (update_options / PATCH /config) always wins; copy so
+        # the caller does not alias the soon-discarded on-disk object.
+        incoming.options = on_disk.options.model_copy(deep=True)
+
+        # An externally-set stop/pause is authoritative: keep it. Only a
+        # deliberate resume (plain save_state) may move a run off stopped/paused.
+        if on_disk.status in CONTROL_AUTHORITATIVE_STATUSES:
+            incoming.status = on_disk.status
 
     def load_state(self) -> TaskState:
         """Load state from state.json with error recovery.

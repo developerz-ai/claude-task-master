@@ -9,7 +9,7 @@ from claude_task_master.core.control import (
     ControlResult,
     NoActiveTaskError,
 )
-from claude_task_master.core.state import StateManager
+from claude_task_master.core.state import StateManager, TaskState
 
 # =============================================================================
 # ControlResult Tests
@@ -835,3 +835,94 @@ class TestControlManagerIntegration:
         progress = initialized_state_manager.load_progress()
         assert "Break 1" in progress
         assert "Break 2" in progress
+
+
+# =============================================================================
+# Cross-process reload-merge-save Tests
+# =============================================================================
+
+
+class TestControlManagerCrossProcessSaves:
+    """A control write from one process must survive the orchestrator's next
+    save from another process.
+
+    The orchestrator holds one long-lived, stale in-memory TaskState and saves
+    it dozens of times per run. A control operation from a *different* process
+    (the REST server / MCP / a second CLI) writes an authoritative status or
+    config to the same state dir. Simulated here with a second StateManager: the
+    orchestrator's next merged save must not clobber the control write.
+    """
+
+    @staticmethod
+    def _start_working(mgr: StateManager) -> TaskState:
+        """Move the run to working and return the orchestrator's stale copy."""
+        state = mgr.load_state()
+        state.status = "working"
+        mgr.save_state(state)
+        return mgr.load_state()
+
+    def test_external_stop_survives_orchestrator_save(self, initialized_state_manager):
+        """ControlManager.stop() in one process is not clobbered by the
+        orchestrator's next merged save in another."""
+        orch_mgr = initialized_state_manager
+        orch_state = self._start_working(orch_mgr)
+
+        # A separate process (own StateManager on the same dir) stops the run.
+        control = ControlManager(state_manager=StateManager(orch_mgr.state_dir))
+        control.stop(reason="user requested")
+
+        # The orchestrator's next routine save must preserve the stop.
+        orch_mgr.save_state_merged(orch_state)
+        assert orch_mgr.load_state().status == "stopped"
+
+    def test_external_pause_survives_orchestrator_save(self, initialized_state_manager):
+        """ControlManager.pause() in one process survives the orchestrator's
+        next merged save in another."""
+        orch_mgr = initialized_state_manager
+        orch_state = self._start_working(orch_mgr)
+
+        control = ControlManager(state_manager=StateManager(orch_mgr.state_dir))
+        control.pause(reason="user requested")
+
+        orch_mgr.save_state_merged(orch_state)
+        assert orch_mgr.load_state().status == "paused"
+
+    def test_config_patch_survives_orchestrator_save(self, initialized_state_manager):
+        """update_config (PATCH /config) in one process survives — and is
+        adopted by — the orchestrator's next merged save in another."""
+        orch_mgr = initialized_state_manager
+        orch_state = self._start_working(orch_mgr)
+        assert orch_state.options.max_sessions == 10
+
+        control = ControlManager(state_manager=StateManager(orch_mgr.state_dir))
+        control.update_config(max_sessions=99, auto_merge=False)
+
+        orch_mgr.save_state_merged(orch_state)
+        reloaded = orch_mgr.load_state()
+        assert reloaded.options.max_sessions == 99
+        assert reloaded.options.auto_merge is False
+        # Adopted in place so the running orchestrator uses the new options.
+        assert orch_state.options.max_sessions == 99
+        assert orch_state.options.auto_merge is False
+
+    def test_resume_after_external_stop_then_orchestrator_save(self, initialized_state_manager):
+        """An explicit resume clears the stop; the orchestrator's merged saves
+        then persist working progress normally."""
+        orch_mgr = initialized_state_manager
+        orch_state = self._start_working(orch_mgr)
+
+        control = ControlManager(state_manager=StateManager(orch_mgr.state_dir))
+        control.stop(reason="pause the world")
+        # Merged save keeps the stop (no clobber).
+        orch_mgr.save_state_merged(orch_state)
+        assert orch_mgr.load_state().status == "stopped"
+
+        # Deliberate resume from the control plane.
+        control.resume()
+
+        # The orchestrator reloads and continues; merged progress saves persist.
+        resumed_state = orch_mgr.load_state()
+        assert resumed_state.status == "working"
+        resumed_state.session_count += 1
+        orch_mgr.save_state_merged(resumed_state)
+        assert orch_mgr.load_state().status == "working"

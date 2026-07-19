@@ -680,13 +680,15 @@ class TestMergedMessagesTriggerPlanUpdate:
         mock_plan_updater.update_plan = MagicMock(side_effect=mock_update_plan)
         orchestrator_with_mailbox._plan_updater = mock_plan_updater
 
-        # Patch state save to track when task index is saved
+        # Patch state save to track when task index is saved. Accept the full
+        # save_state signature (validate_transition / merge_control) so the shim
+        # also catches saves routed through save_state_merged.
         original_save = state_manager.save_state
 
-        def tracking_save(state):
+        def tracking_save(state, *args, **kwargs):
             if state.current_task_index > 0:
                 operation_order.append("task_index_incremented")
-            return original_save(state)
+            return original_save(state, *args, **kwargs)
 
         state_manager.save_state = tracking_save
 
