@@ -21,6 +21,7 @@ Example:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -37,6 +38,10 @@ logger = logging.getLogger(__name__)
 DEFAULT_TIMEOUT = 30.0  # 30 seconds
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_RETRY_DELAY = 1.0  # 1 second base delay
+MAX_RETRY_DELAY = 30.0  # Cap exponential backoff at 30 seconds
+
+# HTTP status codes that warrant a retry (transient / rate-limited responses).
+RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 
 # Header names
 HEADER_SIGNATURE = "X-Webhook-Signature"
@@ -443,8 +448,9 @@ class WebhookClient:
         last_error: Exception | None = None
         attempt = 0
 
+        # Total attempts = 1 initial try + ``max_retries`` retries.
         async with httpx.AsyncClient(verify=self.verify_ssl) as client:
-            while attempt < self.max_retries:
+            while attempt <= self.max_retries:
                 attempt += 1
                 try:
                     response = await client.post(
@@ -454,121 +460,48 @@ class WebhookClient:
                         timeout=self.timeout,
                     )
 
-                    delivery_time_ms = (time.time() - start_time) * 1000
-
                     # Success on 2xx status codes
                     if 200 <= response.status_code < 300:
+                        result = self._success_result(
+                            response, start_time, attempt, signature, delivery_id
+                        )
                         logger.debug(
                             "Webhook delivered successfully",
                             extra={
                                 "url": self.url,
                                 "status": response.status_code,
-                                "delivery_time_ms": delivery_time_ms,
+                                "delivery_time_ms": result.delivery_time_ms,
                             },
                         )
-                        return WebhookDeliveryResult(
-                            success=True,
-                            status_code=response.status_code,
-                            response_body=response.text,
-                            delivery_time_ms=delivery_time_ms,
-                            attempt_count=attempt,
-                            signature=signature,
-                            delivery_id=delivery_id,
+                        return result
+
+                    # Non-retryable error (4xx except 429): fail immediately.
+                    if response.status_code not in RETRYABLE_STATUS_CODES:
+                        return self._http_error_result(
+                            response, start_time, attempt, signature, delivery_id
                         )
 
                     # Retryable status codes: 429, 500, 502, 503, 504
-                    if response.status_code in (429, 500, 502, 503, 504):
-                        last_error = WebhookDeliveryError(
-                            f"Webhook returned {response.status_code}",
-                            url=self.url,
-                            status_code=response.status_code,
-                            response_body=response.text,
-                        )
-                        logger.warning(
-                            "Webhook delivery failed, will retry",
-                            extra={
-                                "url": self.url,
-                                "status": response.status_code,
-                                "attempt": attempt,
-                                "max_retries": self.max_retries,
-                            },
-                        )
-                        await self._wait_before_retry(attempt)
-                        continue
-
-                    # Non-retryable error (4xx except 429)
-                    delivery_time_ms = (time.time() - start_time) * 1000
-                    return WebhookDeliveryResult(
-                        success=False,
-                        status_code=response.status_code,
-                        response_body=response.text,
-                        delivery_time_ms=delivery_time_ms,
-                        attempt_count=attempt,
-                        signature=signature,
-                        delivery_id=delivery_id,
-                        error=f"HTTP {response.status_code}: {response.text[:200] if response.text else ''}",
-                    )
+                    last_error = self._retryable_status_error(response)
+                    self._log_retry("Webhook delivery failed, will retry", attempt)
 
                 except httpx.TimeoutException:
                     last_error = WebhookTimeoutError(self.url, self.timeout)
-                    logger.warning(
-                        "Webhook delivery timed out, will retry",
-                        extra={
-                            "url": self.url,
-                            "timeout": self.timeout,
-                            "attempt": attempt,
-                        },
-                    )
-                    await self._wait_before_retry(attempt)
+                    self._log_retry("Webhook delivery timed out, will retry", attempt)
 
                 except httpx.ConnectError as e:
                     last_error = WebhookConnectionError(self.url, e)
-                    logger.warning(
-                        "Webhook connection failed, will retry",
-                        extra={
-                            "url": self.url,
-                            "error": str(e),
-                            "attempt": attempt,
-                        },
-                    )
-                    await self._wait_before_retry(attempt)
+                    self._log_retry("Webhook connection failed, will retry", attempt, error=e)
 
                 except httpx.RequestError as e:
-                    last_error = WebhookDeliveryError(
-                        f"Request failed: {e}",
-                        url=self.url,
-                    )
-                    logger.warning(
-                        "Webhook request failed, will retry",
-                        extra={
-                            "url": self.url,
-                            "error": str(e),
-                            "attempt": attempt,
-                        },
-                    )
+                    last_error = WebhookDeliveryError(f"Request failed: {e}", url=self.url)
+                    self._log_retry("Webhook request failed, will retry", attempt, error=e)
+
+                # Only back off when another attempt actually remains.
+                if self._should_retry(attempt):
                     await self._wait_before_retry(attempt)
 
-        # All retries exhausted
-        delivery_time_ms = (time.time() - start_time) * 1000
-        error_msg = str(last_error) if last_error else "All retry attempts exhausted"
-
-        logger.error(
-            "Webhook delivery failed after all retries",
-            extra={
-                "url": self.url,
-                "attempts": attempt,
-                "error": error_msg,
-            },
-        )
-
-        return WebhookDeliveryResult(
-            success=False,
-            delivery_time_ms=delivery_time_ms,
-            attempt_count=attempt,
-            signature=signature,
-            delivery_id=delivery_id,
-            error=error_msg,
-        )
+        return self._exhausted_result(last_error, start_time, attempt, signature, delivery_id)
 
     def send_sync(
         self,
@@ -594,8 +527,9 @@ class WebhookClient:
         last_error: Exception | None = None
         attempt = 0
 
+        # Total attempts = 1 initial try + ``max_retries`` retries.
         with httpx.Client(verify=self.verify_ssl) as client:
-            while attempt < self.max_retries:
+            while attempt <= self.max_retries:
                 attempt += 1
                 try:
                     response = client.post(
@@ -605,68 +539,150 @@ class WebhookClient:
                         timeout=self.timeout,
                     )
 
-                    delivery_time_ms = (time.time() - start_time) * 1000
-
                     # Success on 2xx status codes
                     if 200 <= response.status_code < 300:
-                        return WebhookDeliveryResult(
-                            success=True,
-                            status_code=response.status_code,
-                            response_body=response.text,
-                            delivery_time_ms=delivery_time_ms,
-                            attempt_count=attempt,
-                            signature=signature,
-                            delivery_id=delivery_id,
+                        return self._success_result(
+                            response, start_time, attempt, signature, delivery_id
+                        )
+
+                    # Non-retryable error (4xx except 429): fail immediately.
+                    if response.status_code not in RETRYABLE_STATUS_CODES:
+                        return self._http_error_result(
+                            response, start_time, attempt, signature, delivery_id
                         )
 
                     # Retryable status codes
-                    if response.status_code in (429, 500, 502, 503, 504):
-                        last_error = WebhookDeliveryError(
-                            f"Webhook returned {response.status_code}",
-                            url=self.url,
-                            status_code=response.status_code,
-                            response_body=response.text,
-                        )
-                        self._wait_before_retry_sync(attempt)
-                        continue
-
-                    # Non-retryable error
-                    delivery_time_ms = (time.time() - start_time) * 1000
-                    return WebhookDeliveryResult(
-                        success=False,
-                        status_code=response.status_code,
-                        response_body=response.text,
-                        delivery_time_ms=delivery_time_ms,
-                        attempt_count=attempt,
-                        signature=signature,
-                        delivery_id=delivery_id,
-                        error=f"HTTP {response.status_code}",
-                    )
+                    last_error = self._retryable_status_error(response)
+                    self._log_retry("Webhook delivery failed, will retry", attempt)
 
                 except httpx.TimeoutException:
                     last_error = WebhookTimeoutError(self.url, self.timeout)
-                    self._wait_before_retry_sync(attempt)
+                    self._log_retry("Webhook delivery timed out, will retry", attempt)
 
                 except httpx.ConnectError as e:
                     last_error = WebhookConnectionError(self.url, e)
-                    self._wait_before_retry_sync(attempt)
+                    self._log_retry("Webhook connection failed, will retry", attempt, error=e)
 
                 except httpx.RequestError as e:
                     last_error = WebhookDeliveryError(f"Request failed: {e}", url=self.url)
+                    self._log_retry("Webhook request failed, will retry", attempt, error=e)
+
+                # Only back off when another attempt actually remains.
+                if self._should_retry(attempt):
                     self._wait_before_retry_sync(attempt)
 
-        # All retries exhausted
-        delivery_time_ms = (time.time() - start_time) * 1000
-        error_msg = str(last_error) if last_error else "All retry attempts exhausted"
+        return self._exhausted_result(last_error, start_time, attempt, signature, delivery_id)
 
+    # -------------------------------------------------------------------------
+    # Shared delivery helpers (used by both send() and send_sync())
+    # -------------------------------------------------------------------------
+
+    def _should_retry(self, attempt: int) -> bool:
+        """Return whether another attempt remains after the given one.
+
+        Args:
+            attempt: The attempt just completed (1-indexed). With the loop bound
+                ``attempt <= max_retries``, another attempt runs iff this holds.
+
+        Returns:
+            True if a further retry will be made, False if attempts are exhausted.
+        """
+        return attempt <= self.max_retries
+
+    def _success_result(
+        self,
+        response: httpx.Response,
+        start_time: float,
+        attempt: int,
+        signature: str | None,
+        delivery_id: str | None,
+    ) -> WebhookDeliveryResult:
+        """Build a successful delivery result from a 2xx response."""
+        return WebhookDeliveryResult(
+            success=True,
+            status_code=response.status_code,
+            response_body=response.text,
+            delivery_time_ms=(time.time() - start_time) * 1000,
+            attempt_count=attempt,
+            signature=signature,
+            delivery_id=delivery_id,
+        )
+
+    def _http_error_result(
+        self,
+        response: httpx.Response,
+        start_time: float,
+        attempt: int,
+        signature: str | None,
+        delivery_id: str | None,
+    ) -> WebhookDeliveryResult:
+        """Build a failed result for a non-retryable HTTP status (4xx except 429)."""
+        body = response.text or ""
         return WebhookDeliveryResult(
             success=False,
-            delivery_time_ms=delivery_time_ms,
+            status_code=response.status_code,
+            response_body=response.text,
+            delivery_time_ms=(time.time() - start_time) * 1000,
+            attempt_count=attempt,
+            signature=signature,
+            delivery_id=delivery_id,
+            error=f"HTTP {response.status_code}: {body[:200]}",
+        )
+
+    def _exhausted_result(
+        self,
+        last_error: Exception | None,
+        start_time: float,
+        attempt: int,
+        signature: str | None,
+        delivery_id: str | None,
+    ) -> WebhookDeliveryResult:
+        """Build the terminal result after all retry attempts are exhausted."""
+        error_msg = str(last_error) if last_error else "All retry attempts exhausted"
+        logger.error(
+            "Webhook delivery failed after all retries",
+            extra={"url": self.url, "attempts": attempt, "error": error_msg},
+        )
+        return WebhookDeliveryResult(
+            success=False,
+            delivery_time_ms=(time.time() - start_time) * 1000,
             attempt_count=attempt,
             signature=signature,
             delivery_id=delivery_id,
             error=error_msg,
         )
+
+    def _retryable_status_error(self, response: httpx.Response) -> WebhookDeliveryError:
+        """Build the error recorded for a retryable HTTP status code."""
+        return WebhookDeliveryError(
+            f"Webhook returned {response.status_code}",
+            url=self.url,
+            status_code=response.status_code,
+            response_body=response.text,
+        )
+
+    def _log_retry(self, message: str, attempt: int, error: Exception | None = None) -> None:
+        """Log a transient delivery failure that will (or may) be retried."""
+        extra: dict[str, Any] = {
+            "url": self.url,
+            "attempt": attempt,
+            "max_retries": self.max_retries,
+        }
+        if error is not None:
+            extra["error"] = str(error)
+        logger.warning(message, extra=extra)
+
+    def _backoff_delay(self, attempt: int) -> float:
+        """Compute the exponential backoff delay for an attempt, capped.
+
+        Args:
+            attempt: Current attempt number (1-indexed).
+
+        Returns:
+            Delay in seconds: ``retry_delay * 2^(attempt-1)``, capped at
+            :data:`MAX_RETRY_DELAY`.
+        """
+        return min(self.retry_delay * (2.0 ** (attempt - 1)), MAX_RETRY_DELAY)
 
     async def _wait_before_retry(self, attempt: int) -> None:
         """Wait before retrying with exponential backoff.
@@ -674,13 +690,7 @@ class WebhookClient:
         Args:
             attempt: Current attempt number (1-indexed).
         """
-        import asyncio
-
-        # Exponential backoff: delay * 2^(attempt-1)
-        delay = self.retry_delay * (2 ** (attempt - 1))
-        # Cap at 30 seconds
-        delay = min(delay, 30.0)
-        await asyncio.sleep(delay)
+        await asyncio.sleep(self._backoff_delay(attempt))
 
     def _wait_before_retry_sync(self, attempt: int) -> None:
         """Wait before retrying with exponential backoff (sync version).
@@ -688,11 +698,7 @@ class WebhookClient:
         Args:
             attempt: Current attempt number (1-indexed).
         """
-        # Exponential backoff: delay * 2^(attempt-1)
-        delay = self.retry_delay * (2 ** (attempt - 1))
-        # Cap at 30 seconds
-        delay = min(delay, 30.0)
-        time.sleep(delay)
+        time.sleep(self._backoff_delay(attempt))
 
     def __repr__(self) -> str:
         """Return string representation of the client."""

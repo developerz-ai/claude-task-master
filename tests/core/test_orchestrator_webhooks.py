@@ -12,6 +12,7 @@ task execution, PR creation, and session management. Tests verify that:
 
 from __future__ import annotations
 
+import threading
 from datetime import datetime
 from unittest.mock import MagicMock, Mock, patch
 
@@ -37,14 +38,20 @@ def mock_webhook_client():
 
 @pytest.fixture
 def webhook_emitter(mock_webhook_client):
-    """Create a WebhookEmitter with mock client."""
-    return WebhookEmitter(mock_webhook_client, run_id="test-run-123")
+    """Create a WebhookEmitter with mock client.
+
+    Synchronous mode delivers inline on the calling thread, so a test can
+    assert on ``send_sync`` immediately after ``emit()`` without racing the
+    background delivery worker. The async worker path is covered by
+    ``TestWebhookEmitterAsyncDelivery``.
+    """
+    return WebhookEmitter(mock_webhook_client, run_id="test-run-123", synchronous=True)
 
 
 @pytest.fixture
 def webhook_emitter_no_client():
     """Create a WebhookEmitter without a client (disabled)."""
-    return WebhookEmitter(None, run_id="test-run-123")
+    return WebhookEmitter(None, run_id="test-run-123", synchronous=True)
 
 
 @pytest.fixture
@@ -71,7 +78,31 @@ def mock_planner():
 def orchestrator_with_webhooks(
     mock_agent, state_manager, mock_planner, mock_github_client, mock_webhook_client
 ):
-    """Create a WorkLoopOrchestrator with webhook client."""
+    """Create a WorkLoopOrchestrator with a synchronous webhook emitter.
+
+    Delivery is forced synchronous (seeded emitter) so a test can assert on
+    ``send_sync`` immediately after ``emit()`` / a stage handler instead of
+    racing the background delivery worker. The async worker path — dispatch,
+    flush, close, and drain-on-run — is covered separately in
+    ``TestWebhookEmitterAsyncDelivery``. Tests that exercise the lazy property
+    itself use ``lazy_orchestrator_with_webhooks``.
+    """
+    orchestrator = WorkLoopOrchestrator(
+        agent=mock_agent,
+        state_manager=state_manager,
+        planner=mock_planner,
+        github_client=mock_github_client,
+        webhook_client=mock_webhook_client,
+    )
+    orchestrator._webhook_emitter = WebhookEmitter(mock_webhook_client, synchronous=True)
+    return orchestrator
+
+
+@pytest.fixture
+def lazy_orchestrator_with_webhooks(
+    mock_agent, state_manager, mock_planner, mock_github_client, mock_webhook_client
+):
+    """WorkLoopOrchestrator with no pre-seeded emitter (tests lazy property init)."""
     return WorkLoopOrchestrator(
         agent=mock_agent,
         state_manager=state_manager,
@@ -240,21 +271,21 @@ class TestWebhookEmitter:
 class TestOrchestratorWebhookProperty:
     """Tests for orchestrator webhook_emitter property."""
 
-    def test_webhook_emitter_lazy_initialization(self, orchestrator_with_webhooks):
+    def test_webhook_emitter_lazy_initialization(self, lazy_orchestrator_with_webhooks):
         """Should create webhook emitter lazily."""
-        assert orchestrator_with_webhooks._webhook_emitter is None
-        emitter = orchestrator_with_webhooks.webhook_emitter
+        assert lazy_orchestrator_with_webhooks._webhook_emitter is None
+        emitter = lazy_orchestrator_with_webhooks.webhook_emitter
         assert emitter is not None
         assert isinstance(emitter, WebhookEmitter)
 
-    def test_webhook_emitter_caches_instance(self, orchestrator_with_webhooks):
+    def test_webhook_emitter_caches_instance(self, lazy_orchestrator_with_webhooks):
         """Should cache webhook emitter after first access."""
-        emitter1 = orchestrator_with_webhooks.webhook_emitter
-        emitter2 = orchestrator_with_webhooks.webhook_emitter
+        emitter1 = lazy_orchestrator_with_webhooks.webhook_emitter
+        emitter2 = lazy_orchestrator_with_webhooks.webhook_emitter
         assert emitter1 is emitter2
 
     def test_webhook_emitter_extracts_run_id_from_state(
-        self, orchestrator_with_webhooks, state_manager, sample_task_options
+        self, lazy_orchestrator_with_webhooks, state_manager, sample_task_options
     ):
         """Should extract run_id from state when available."""
         state_manager.state_dir.mkdir(exist_ok=True)
@@ -264,7 +295,7 @@ class TestOrchestratorWebhookProperty:
         state.run_id = "extracted-run-id"
         state_manager.save_state(state)
 
-        emitter = orchestrator_with_webhooks.webhook_emitter
+        emitter = lazy_orchestrator_with_webhooks.webhook_emitter
         assert emitter._run_id == "extracted-run-id"
 
     def test_webhook_emitter_handles_missing_state(
@@ -699,9 +730,10 @@ class TestEventOrderingAndCorrelation:
         state_manager.save_goal("Test goal")
         basic_task_state.run_id = "correlation-test-123"
 
-        # Initialize webhook emitter with run_id
+        # Initialize webhook emitter with run_id (synchronous for deterministic
+        # assertions right after the stage handler returns)
         orchestrator_with_webhooks._webhook_emitter = WebhookEmitter(
-            mock_webhook_client, run_id="correlation-test-123"
+            mock_webhook_client, run_id="correlation-test-123", synchronous=True
         )
 
         orchestrator_with_webhooks._handle_working_stage(basic_task_state)
@@ -1636,7 +1668,7 @@ class TestWebhookEmitterRegistryFanout:
     def test_registered_webhook_receives_event_without_cli_client(self, state_dir):
         """A registered webhook receives events even with no --webhook-url client."""
         registry = self._registry_with(state_dir, "wh_1", "https://example.com/a")
-        emitter = WebhookEmitter(None, run_id="run-1", registry=registry)
+        emitter = WebhookEmitter(None, run_id="run-1", registry=registry, synchronous=True)
 
         mock_client = MagicMock()
         mock_client.send_sync = MagicMock(return_value=MagicMock(success=True, error=None))
@@ -1654,7 +1686,7 @@ class TestWebhookEmitterRegistryFanout:
         registry = self._registry_with(
             state_dir, "wh_pr", "https://example.com/pr", events=["pr.created"]
         )
-        emitter = WebhookEmitter(None, run_id="run-1", registry=registry)
+        emitter = WebhookEmitter(None, run_id="run-1", registry=registry, synchronous=True)
 
         with patch.object(WebhookEmitter, "_client_for_config") as mk:
             emitter.emit(EventType.RUN_STARTED)
@@ -1665,7 +1697,7 @@ class TestWebhookEmitterRegistryFanout:
         registry = self._registry_with(state_dir, "wh_1", "https://example.com/a")
         cli_client = MagicMock()
         cli_client.send_sync = MagicMock(return_value=MagicMock(success=True, error=None))
-        emitter = WebhookEmitter(cli_client, run_id="run-1", registry=registry)
+        emitter = WebhookEmitter(cli_client, run_id="run-1", registry=registry, synchronous=True)
 
         reg_client = MagicMock()
         reg_client.send_sync = MagicMock(return_value=MagicMock(success=True, error=None))
@@ -1689,9 +1721,164 @@ class TestWebhookEmitterRegistryFanout:
     def test_delivery_failure_does_not_raise(self, state_dir):
         """A registered webhook raising during send is swallowed, not propagated."""
         registry = self._registry_with(state_dir, "wh_1", "https://example.com/a")
-        emitter = WebhookEmitter(None, run_id="run-1", registry=registry)
+        emitter = WebhookEmitter(None, run_id="run-1", registry=registry, synchronous=True)
 
         boom_client = MagicMock()
         boom_client.send_sync = MagicMock(side_effect=RuntimeError("dead endpoint"))
         with patch.object(WebhookEmitter, "_client_for_config", return_value=boom_client):
             emitter.emit(EventType.RUN_STARTED)  # must not raise
+
+
+# =============================================================================
+# Async Background Delivery
+# =============================================================================
+
+
+class TestWebhookEmitterAsyncDelivery:
+    """The default (non-synchronous) emitter delivers off the calling thread.
+
+    These tests cover the background single-worker queue that keeps a slow or
+    dead endpoint from blocking the orchestrator loop, and the flush/close/drain
+    guarantees that stop terminal events from being lost on shutdown.
+    """
+
+    @staticmethod
+    def _ok_client() -> MagicMock:
+        """A client whose send_sync always succeeds."""
+        client = MagicMock()
+        client.send_sync = MagicMock(return_value=MagicMock(success=True, error=None))
+        return client
+
+    def test_emit_delivers_on_background_worker_thread(self) -> None:
+        """Async emit hands delivery to the worker thread, not the caller thread."""
+        client = self._ok_client()
+        seen: dict[str, int] = {}
+
+        def record(*_args: object, **_kwargs: object) -> MagicMock:
+            seen["thread"] = threading.get_ident()
+            return MagicMock(success=True, error=None)
+
+        client.send_sync.side_effect = record
+
+        emitter = WebhookEmitter(client, run_id="run-async")  # async by default
+        try:
+            emitter.emit(EventType.RUN_STARTED)
+            assert emitter.flush(timeout=5) is True
+            client.send_sync.assert_called_once()
+            assert seen["thread"] != threading.get_ident()
+        finally:
+            emitter.close()
+
+    def test_flush_drains_all_pending_deliveries(self) -> None:
+        """flush() blocks until every queued delivery has been processed."""
+        client = self._ok_client()
+        emitter = WebhookEmitter(client, run_id="run-async")
+        try:
+            emitter.emit(EventType.RUN_STARTED)
+            emitter.emit(EventType.RUN_COMPLETED)
+            assert emitter.flush(timeout=5) is True
+            assert client.send_sync.call_count == 2
+        finally:
+            emitter.close()
+
+    def test_flush_is_noop_before_any_emit(self) -> None:
+        """flush() returns True when no worker has started."""
+        emitter = WebhookEmitter(self._ok_client(), run_id="run-async")
+        assert emitter.flush(timeout=5) is True
+
+    def test_close_drains_pending_and_stops_worker(self) -> None:
+        """close() delivers everything queued, then tears the worker down."""
+        client = self._ok_client()
+        emitter = WebhookEmitter(client, run_id="run-async")
+        emitter.emit(EventType.RUN_STARTED)
+        emitter.close(timeout=5)
+
+        client.send_sync.assert_called_once()
+        # Worker is cleared so a later emit starts a fresh one (or falls inline).
+        assert emitter._worker is None
+
+    def test_close_is_idempotent(self) -> None:
+        """Calling close() repeatedly (incl. before any emit) is safe."""
+        emitter = WebhookEmitter(self._ok_client(), run_id="run-async")
+        emitter.close()
+        emitter.close()  # must not raise
+
+    def test_emit_after_close_falls_back_to_inline_delivery(self) -> None:
+        """Once closed, emit() delivers inline so nothing is silently dropped."""
+        client = self._ok_client()
+        seen: dict[str, int] = {}
+
+        def record(*_args: object, **_kwargs: object) -> MagicMock:
+            seen["thread"] = threading.get_ident()
+            return MagicMock(success=True, error=None)
+
+        client.send_sync.side_effect = record
+
+        emitter = WebhookEmitter(client, run_id="run-async")
+        emitter.close()  # no worker was ever started; just marks closed
+        emitter.emit(EventType.RUN_STARTED)
+
+        # Delivered synchronously on the caller thread — no flush needed.
+        client.send_sync.assert_called_once()
+        assert seen["thread"] == threading.get_ident()
+
+    def test_worker_survives_a_failing_delivery(self) -> None:
+        """A delivery that raises is swallowed; later deliveries still run."""
+        client = MagicMock()
+        client.send_sync = MagicMock(
+            side_effect=[RuntimeError("boom"), MagicMock(success=True, error=None)]
+        )
+        emitter = WebhookEmitter(client, run_id="run-async")
+        try:
+            emitter.emit(EventType.RUN_STARTED)
+            emitter.emit(EventType.RUN_COMPLETED)
+            assert emitter.flush(timeout=5) is True
+            assert client.send_sync.call_count == 2
+        finally:
+            emitter.close()
+
+    @patch("claude_task_master.core.orchestrator.register_handlers")
+    @patch("claude_task_master.core.orchestrator.start_listening")
+    def test_run_drains_async_emitter_before_returning(
+        self,
+        _mock_start_listening,
+        _mock_register,
+        mock_agent,
+        state_manager,
+        mock_planner,
+        mock_github_client,
+        mock_webhook_client,
+        sample_task_options,
+        basic_plan,
+    ):
+        """run() flushes the background worker so run.completed is delivered.
+
+        Uses a genuinely asynchronous emitter (not the synchronous test fixture)
+        to prove the drain in run()'s finally block, without which the terminal
+        event would be lost when the process exits under the daemon worker.
+        """
+        state_manager.state_dir.mkdir(exist_ok=True)
+        options = TaskOptions(**sample_task_options)
+        state_manager.initialize(goal="Drain test", model="sonnet", options=options)
+        state_manager.save_plan(basic_plan)
+        state_manager.save_goal("Drain test")
+
+        orchestrator = WorkLoopOrchestrator(
+            agent=mock_agent,
+            state_manager=state_manager,
+            planner=mock_planner,
+            github_client=mock_github_client,
+            webhook_client=mock_webhook_client,
+        )
+        # Async emitter (no synchronous seed): delivery happens on the worker.
+        orchestrator._webhook_emitter = WebhookEmitter(mock_webhook_client, run_id="run-async")
+
+        with patch.object(orchestrator, "_run_workflow_cycle", return_value=0):
+            exit_code = orchestrator.run()
+
+        assert exit_code == 0
+        calls = mock_webhook_client.send_sync.call_args_list
+        run_completed = [c for c in calls if c.kwargs.get("event_type") == "run.completed"]
+        assert len(run_completed) == 1
+        # Emitter was drained and cleared by run()'s finally.
+        assert orchestrator._webhook_emitter is None

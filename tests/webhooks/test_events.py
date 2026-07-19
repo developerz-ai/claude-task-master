@@ -193,6 +193,23 @@ class TestWebhookEventBase:
         assert isinstance(event.event_type, EventType)
         assert event.event_type == EventType.TASK_STARTED
 
+    def test_base_event_is_abstract(self) -> None:
+        """Instantiating WebhookEvent directly raises (event_type is required)."""
+        from claude_task_master.webhooks.events import WebhookEvent
+
+        with pytest.raises(TypeError, match="abstract"):
+            WebhookEvent()
+
+    def test_base_event_has_no_event_type_default(self) -> None:
+        """The base no longer silently defaults event_type to task.started."""
+        from dataclasses import MISSING, fields
+
+        from claude_task_master.webhooks.events import WebhookEvent
+
+        (event_type_field,) = [f for f in fields(WebhookEvent) if f.name == "event_type"]
+        assert event_type_field.init is False
+        assert event_type_field.default is MISSING
+
 
 # =============================================================================
 # Test: TaskStartedEvent

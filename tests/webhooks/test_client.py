@@ -419,8 +419,9 @@ class TestAsyncSend:
             result = await client.send({"event": "test"})
 
         assert result.success is False
-        assert result.attempt_count == 2  # Max retries reached
-        assert mock_post.call_count == 2
+        # 1 initial attempt + max_retries (2) = 3 total attempts.
+        assert result.attempt_count == 3
+        assert mock_post.call_count == 3
 
     @pytest.mark.asyncio
     async def test_send_timeout_retried(self) -> None:
@@ -437,7 +438,8 @@ class TestAsyncSend:
             result = await client.send({"event": "test"})
 
         assert result.success is False
-        assert result.attempt_count == 2
+        # 1 initial attempt + max_retries (2) = 3 total attempts.
+        assert result.attempt_count == 3
         # Error message starts with capital "Webhook" so use lower() for comparison
         assert result.error is not None and "timed out" in result.error.lower()
 
@@ -456,7 +458,8 @@ class TestAsyncSend:
             result = await client.send({"event": "test"})
 
         assert result.success is False
-        assert result.attempt_count == 2
+        # 1 initial attempt + max_retries (2) = 3 total attempts.
+        assert result.attempt_count == 3
 
     @pytest.mark.asyncio
     async def test_send_recovery_after_retry(self) -> None:
@@ -543,7 +546,93 @@ class TestSyncSend:
             result = client.send_sync({"event": "test"})
 
         assert result.success is False
-        assert result.attempt_count == 2
+        # 1 initial attempt + max_retries (2) = 3 total attempts.
+        assert result.attempt_count == 3
+
+
+# =============================================================================
+# Test: Retry Attempt Semantics
+# =============================================================================
+
+
+class TestRetryAttemptSemantics:
+    """Tests for attempt counting and conditional backoff (send / send_sync)."""
+
+    @pytest.mark.asyncio
+    async def test_default_max_retries_makes_initial_plus_retries(self) -> None:
+        """Default max_retries=3 → 1 initial attempt + 3 retries = 4 attempts."""
+        client = WebhookClient("https://example.com/webhook", retry_delay=0.0)
+
+        mock_response = MagicMock()
+        mock_response.status_code = 503
+        mock_response.text = "Service Unavailable"
+
+        with (
+            patch.object(httpx.AsyncClient, "post", new_callable=AsyncMock) as mock_post,
+            patch.object(client, "_wait_before_retry", new_callable=AsyncMock),
+        ):
+            mock_post.return_value = mock_response
+            result = await client.send({"event": "test"})
+
+        assert mock_post.call_count == 4
+        assert result.attempt_count == 4
+
+    @pytest.mark.asyncio
+    async def test_no_backoff_after_final_attempt(self) -> None:
+        """Async: backoff runs between attempts only, never after the last one."""
+        client = WebhookClient("https://example.com/webhook", max_retries=2, retry_delay=0.0)
+
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        mock_response.text = "err"
+
+        with (
+            patch.object(httpx.AsyncClient, "post", new_callable=AsyncMock) as mock_post,
+            patch.object(client, "_wait_before_retry", new_callable=AsyncMock) as mock_wait,
+        ):
+            mock_post.return_value = mock_response
+            await client.send({"event": "test"})
+
+        # 3 attempts, but only 2 backoffs (no sleep after the exhausting attempt).
+        assert mock_post.call_count == 3
+        assert mock_wait.call_count == 2
+
+    def test_no_backoff_after_final_attempt_sync(self) -> None:
+        """Sync: backoff runs between attempts only, never after the last one."""
+        client = WebhookClient("https://example.com/webhook", max_retries=2, retry_delay=0.0)
+
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        mock_response.text = "err"
+
+        with (
+            patch.object(httpx.Client, "post") as mock_post,
+            patch.object(client, "_wait_before_retry_sync") as mock_wait,
+        ):
+            mock_post.return_value = mock_response
+            client.send_sync({"event": "test"})
+
+        assert mock_post.call_count == 3
+        assert mock_wait.call_count == 2
+
+    def test_zero_max_retries_makes_single_attempt(self) -> None:
+        """max_retries=0 → a single attempt with no backoff."""
+        client = WebhookClient("https://example.com/webhook", max_retries=0, retry_delay=0.0)
+
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        mock_response.text = "err"
+
+        with (
+            patch.object(httpx.Client, "post") as mock_post,
+            patch.object(client, "_wait_before_retry_sync") as mock_wait,
+        ):
+            mock_post.return_value = mock_response
+            result = client.send_sync({"event": "test"})
+
+        assert mock_post.call_count == 1
+        assert mock_wait.call_count == 0
+        assert result.attempt_count == 1
 
 
 # =============================================================================
