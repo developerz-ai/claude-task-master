@@ -603,7 +603,7 @@ class TestHandleWorkingStage:
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
     @patch("claude_task_master.core.task_runner.console")
-    @patch("claude_task_master.core.orchestrator.reset_escape")
+    @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_handle_working_stage_basic(
         self,
         mock_reset,
@@ -630,7 +630,7 @@ class TestHandleWorkingStage:
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
     @patch("claude_task_master.core.task_runner.console")
-    @patch("claude_task_master.core.orchestrator.reset_escape")
+    @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_handle_working_stage_pr_per_task_mode(
         self,
         mock_reset,
@@ -654,7 +654,7 @@ class TestHandleWorkingStage:
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
     @patch("claude_task_master.core.task_runner.console")
-    @patch("claude_task_master.core.orchestrator.reset_escape")
+    @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_handle_working_stage_logs_with_logger(
         self,
         mock_reset,
@@ -706,7 +706,7 @@ class TestHandleWorkingStage:
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
     @patch("claude_task_master.core.task_runner.console")
-    @patch("claude_task_master.core.orchestrator.reset_escape")
+    @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_handle_working_stage_single_task_pr(
         self,
         mock_reset,
@@ -757,7 +757,7 @@ class TestHandleWorkingStage:
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
     @patch("claude_task_master.core.task_runner.console")
-    @patch("claude_task_master.core.orchestrator.reset_escape")
+    @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_handle_working_stage_multi_task_first_stays_in_working(
         self,
         mock_reset,
@@ -803,7 +803,7 @@ class TestHandleWorkingStage:
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
     @patch("claude_task_master.core.task_runner.console")
-    @patch("claude_task_master.core.orchestrator.reset_escape")
+    @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_handle_working_stage_multi_task_last_creates_pr(
         self,
         mock_reset,
@@ -871,7 +871,7 @@ class TestRunWorkflowCycle:
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
     @patch("claude_task_master.core.task_runner.console")
-    @patch("claude_task_master.core.orchestrator.reset_escape")
+    @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_workflow_cycle_working_stage(
         self,
         mock_reset,
@@ -905,7 +905,7 @@ class TestRunWorkflowCycle:
         assert result == 1
         assert basic_task_state.status == "blocked"
 
-    @patch("claude_task_master.core.orchestrator.console")
+    @patch("claude_task_master.core.orchestrator_loop.console")
     def test_workflow_cycle_unknown_stage_resets(
         self, mock_console, basic_orchestrator, state_manager, basic_task_state
     ):
@@ -1019,12 +1019,12 @@ class TestRunWorkflowCycle:
 class TestRunMethod:
     """Tests for main run() method."""
 
-    @patch("claude_task_master.core.orchestrator.start_listening")
-    @patch("claude_task_master.core.orchestrator.stop_listening")
-    @patch("claude_task_master.core.orchestrator.register_handlers")
-    @patch("claude_task_master.core.orchestrator.unregister_handlers")
-    @patch("claude_task_master.core.orchestrator.reset_shutdown")
-    @patch("claude_task_master.core.orchestrator.console")
+    @patch("claude_task_master.core.orchestrator_loop.start_listening")
+    @patch("claude_task_master.core.orchestrator_loop.stop_listening")
+    @patch("claude_task_master.core.orchestrator_loop.register_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.unregister_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.reset_shutdown")
+    @patch("claude_task_master.core.orchestrator_loop.console")
     def test_run_max_sessions_reached(
         self,
         mock_console,
@@ -1052,14 +1052,14 @@ class TestRunMethod:
         assert result == 1
         mock_console.warning.assert_called()
 
-    @patch("claude_task_master.core.orchestrator.is_cancellation_requested")
-    @patch("claude_task_master.core.orchestrator.get_cancellation_reason")
-    @patch("claude_task_master.core.orchestrator.start_listening")
-    @patch("claude_task_master.core.orchestrator.stop_listening")
-    @patch("claude_task_master.core.orchestrator.register_handlers")
-    @patch("claude_task_master.core.orchestrator.unregister_handlers")
-    @patch("claude_task_master.core.orchestrator.reset_shutdown")
-    @patch("claude_task_master.core.orchestrator.console")
+    @patch("claude_task_master.core.orchestrator_loop.is_cancellation_requested")
+    @patch("claude_task_master.core.orchestrator_loop.get_cancellation_reason")
+    @patch("claude_task_master.core.orchestrator_loop.start_listening")
+    @patch("claude_task_master.core.orchestrator_loop.stop_listening")
+    @patch("claude_task_master.core.orchestrator_loop.register_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.unregister_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.reset_shutdown")
+    @patch("claude_task_master.core.orchestrator_loop.console")
     def test_run_cancellation_requested(
         self,
         mock_console,
@@ -1089,13 +1089,13 @@ class TestRunMethod:
         mock_console.warning.assert_called()
 
     @patch("subprocess.run")
-    @patch("claude_task_master.core.orchestrator.is_cancellation_requested")
-    @patch("claude_task_master.core.orchestrator.start_listening")
-    @patch("claude_task_master.core.orchestrator.stop_listening")
-    @patch("claude_task_master.core.orchestrator.register_handlers")
-    @patch("claude_task_master.core.orchestrator.unregister_handlers")
-    @patch("claude_task_master.core.orchestrator.reset_shutdown")
-    @patch("claude_task_master.core.orchestrator.console")
+    @patch("claude_task_master.core.orchestrator_loop.is_cancellation_requested")
+    @patch("claude_task_master.core.orchestrator_loop.start_listening")
+    @patch("claude_task_master.core.orchestrator_loop.stop_listening")
+    @patch("claude_task_master.core.orchestrator_loop.register_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.unregister_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.reset_shutdown")
+    @patch("claude_task_master.core.orchestrator_loop.console")
     def test_run_all_complete_success(
         self,
         mock_console,
@@ -1134,13 +1134,13 @@ class TestRunMethod:
 
     @pytest.mark.timeout(5)
     @patch("subprocess.run")
-    @patch("claude_task_master.core.orchestrator.is_cancellation_requested")
-    @patch("claude_task_master.core.orchestrator.start_listening")
-    @patch("claude_task_master.core.orchestrator.stop_listening")
-    @patch("claude_task_master.core.orchestrator.register_handlers")
-    @patch("claude_task_master.core.orchestrator.unregister_handlers")
-    @patch("claude_task_master.core.orchestrator.reset_shutdown")
-    @patch("claude_task_master.core.orchestrator.console")
+    @patch("claude_task_master.core.orchestrator_loop.is_cancellation_requested")
+    @patch("claude_task_master.core.orchestrator_loop.start_listening")
+    @patch("claude_task_master.core.orchestrator_loop.stop_listening")
+    @patch("claude_task_master.core.orchestrator_loop.register_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.unregister_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.reset_shutdown")
+    @patch("claude_task_master.core.orchestrator_loop.console")
     def test_run_verification_skipped_by_default(
         self,
         mock_console,
@@ -1184,13 +1184,13 @@ class TestRunMethod:
 
     @pytest.mark.timeout(5)  # This test runs the full orchestration loop, needs more time
     @patch("subprocess.run")
-    @patch("claude_task_master.core.orchestrator.is_cancellation_requested")
-    @patch("claude_task_master.core.orchestrator.start_listening")
-    @patch("claude_task_master.core.orchestrator.stop_listening")
-    @patch("claude_task_master.core.orchestrator.register_handlers")
-    @patch("claude_task_master.core.orchestrator.unregister_handlers")
-    @patch("claude_task_master.core.orchestrator.reset_shutdown")
-    @patch("claude_task_master.core.orchestrator.console")
+    @patch("claude_task_master.core.orchestrator_loop.is_cancellation_requested")
+    @patch("claude_task_master.core.orchestrator_loop.start_listening")
+    @patch("claude_task_master.core.orchestrator_loop.stop_listening")
+    @patch("claude_task_master.core.orchestrator_loop.register_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.unregister_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.reset_shutdown")
+    @patch("claude_task_master.core.orchestrator_loop.console")
     def test_run_verification_failed(
         self,
         mock_console,
@@ -1231,12 +1231,12 @@ class TestRunMethod:
         assert result == 1
         mock_console.warning.assert_called()
 
-    @patch("claude_task_master.core.orchestrator.start_listening")
-    @patch("claude_task_master.core.orchestrator.stop_listening")
-    @patch("claude_task_master.core.orchestrator.register_handlers")
-    @patch("claude_task_master.core.orchestrator.unregister_handlers")
-    @patch("claude_task_master.core.orchestrator.reset_shutdown")
-    @patch("claude_task_master.core.orchestrator.console")
+    @patch("claude_task_master.core.orchestrator_loop.start_listening")
+    @patch("claude_task_master.core.orchestrator_loop.stop_listening")
+    @patch("claude_task_master.core.orchestrator_loop.register_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.unregister_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.reset_shutdown")
+    @patch("claude_task_master.core.orchestrator_loop.console")
     def test_run_keyboard_interrupt(
         self,
         mock_console,
@@ -1263,12 +1263,12 @@ class TestRunMethod:
         assert result == 2
         mock_stop.assert_called()
 
-    @patch("claude_task_master.core.orchestrator.start_listening")
-    @patch("claude_task_master.core.orchestrator.stop_listening")
-    @patch("claude_task_master.core.orchestrator.register_handlers")
-    @patch("claude_task_master.core.orchestrator.unregister_handlers")
-    @patch("claude_task_master.core.orchestrator.reset_shutdown")
-    @patch("claude_task_master.core.orchestrator.console")
+    @patch("claude_task_master.core.orchestrator_loop.start_listening")
+    @patch("claude_task_master.core.orchestrator_loop.stop_listening")
+    @patch("claude_task_master.core.orchestrator_loop.register_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.unregister_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.reset_shutdown")
+    @patch("claude_task_master.core.orchestrator_loop.console")
     def test_run_orchestrator_error(
         self,
         mock_console,
@@ -1297,12 +1297,12 @@ class TestRunMethod:
         assert result == 1
         mock_console.error.assert_called()
 
-    @patch("claude_task_master.core.orchestrator.start_listening")
-    @patch("claude_task_master.core.orchestrator.stop_listening")
-    @patch("claude_task_master.core.orchestrator.register_handlers")
-    @patch("claude_task_master.core.orchestrator.unregister_handlers")
-    @patch("claude_task_master.core.orchestrator.reset_shutdown")
-    @patch("claude_task_master.core.orchestrator.console")
+    @patch("claude_task_master.core.orchestrator_loop.start_listening")
+    @patch("claude_task_master.core.orchestrator_loop.stop_listening")
+    @patch("claude_task_master.core.orchestrator_loop.register_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.unregister_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.reset_shutdown")
+    @patch("claude_task_master.core.orchestrator_loop.console")
     def test_run_unexpected_error(
         self,
         mock_console,
@@ -1331,7 +1331,7 @@ class TestRunMethod:
         assert result == 1
         mock_console.error.assert_called()
 
-    @patch("claude_task_master.core.orchestrator.console")
+    @patch("claude_task_master.core.orchestrator_loop.console")
     def test_run_state_error_with_recovery(
         self,
         mock_console,
@@ -1369,11 +1369,11 @@ class TestRunMethod:
 
                 with (
                     patch("subprocess.run"),
-                    patch("claude_task_master.core.orchestrator.start_listening"),
-                    patch("claude_task_master.core.orchestrator.stop_listening"),
-                    patch("claude_task_master.core.orchestrator.register_handlers"),
-                    patch("claude_task_master.core.orchestrator.unregister_handlers"),
-                    patch("claude_task_master.core.orchestrator.reset_shutdown"),
+                    patch("claude_task_master.core.orchestrator_loop.start_listening"),
+                    patch("claude_task_master.core.orchestrator_loop.stop_listening"),
+                    patch("claude_task_master.core.orchestrator_loop.register_handlers"),
+                    patch("claude_task_master.core.orchestrator_loop.unregister_handlers"),
+                    patch("claude_task_master.core.orchestrator_loop.reset_shutdown"),
                 ):
                     result = basic_orchestrator.run()
 
@@ -1400,13 +1400,13 @@ class TestRunMethod:
 class TestTrackerIntegration:
     """Tests for execution tracker integration."""
 
-    @patch("claude_task_master.core.orchestrator.is_cancellation_requested")
-    @patch("claude_task_master.core.orchestrator.start_listening")
-    @patch("claude_task_master.core.orchestrator.stop_listening")
-    @patch("claude_task_master.core.orchestrator.register_handlers")
-    @patch("claude_task_master.core.orchestrator.unregister_handlers")
-    @patch("claude_task_master.core.orchestrator.reset_shutdown")
-    @patch("claude_task_master.core.orchestrator.console")
+    @patch("claude_task_master.core.orchestrator_loop.is_cancellation_requested")
+    @patch("claude_task_master.core.orchestrator_loop.start_listening")
+    @patch("claude_task_master.core.orchestrator_loop.stop_listening")
+    @patch("claude_task_master.core.orchestrator_loop.register_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.unregister_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.reset_shutdown")
+    @patch("claude_task_master.core.orchestrator_loop.console")
     def test_run_aborts_on_stall(
         self,
         mock_console,
@@ -1437,13 +1437,13 @@ class TestTrackerIntegration:
         assert result == 1
         mock_console.warning.assert_called()
 
-    @patch("claude_task_master.core.orchestrator.is_cancellation_requested")
-    @patch("claude_task_master.core.orchestrator.start_listening")
-    @patch("claude_task_master.core.orchestrator.stop_listening")
-    @patch("claude_task_master.core.orchestrator.register_handlers")
-    @patch("claude_task_master.core.orchestrator.unregister_handlers")
-    @patch("claude_task_master.core.orchestrator.reset_shutdown")
-    @patch("claude_task_master.core.orchestrator.console")
+    @patch("claude_task_master.core.orchestrator_loop.is_cancellation_requested")
+    @patch("claude_task_master.core.orchestrator_loop.start_listening")
+    @patch("claude_task_master.core.orchestrator_loop.stop_listening")
+    @patch("claude_task_master.core.orchestrator_loop.register_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.unregister_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.reset_shutdown")
+    @patch("claude_task_master.core.orchestrator_loop.console")
     def test_run_checks_session_limit_in_loop(
         self,
         mock_console,
@@ -1489,9 +1489,9 @@ class TestTrackerIntegration:
 class TestCheckoutToMain:
     """Tests for _checkout_to_main and _get_target_branch methods."""
 
-    @patch("claude_task_master.core.orchestrator.get_config")
-    @patch("claude_task_master.core.orchestrator.subprocess.run")
-    @patch("claude_task_master.core.orchestrator.console")
+    @patch("claude_task_master.core.orchestrator_loop.get_config")
+    @patch("claude_task_master.core.orchestrator_loop.subprocess.run")
+    @patch("claude_task_master.core.orchestrator_loop.console")
     def test_checkout_to_main_success(
         self, mock_console, mock_subprocess, mock_get_config, basic_orchestrator
     ):
@@ -1507,9 +1507,9 @@ class TestCheckoutToMain:
         assert mock_subprocess.call_count == 2  # checkout + pull
         mock_console.success.assert_called()
 
-    @patch("claude_task_master.core.orchestrator.get_config")
-    @patch("claude_task_master.core.orchestrator.subprocess.run")
-    @patch("claude_task_master.core.orchestrator.console")
+    @patch("claude_task_master.core.orchestrator_loop.get_config")
+    @patch("claude_task_master.core.orchestrator_loop.subprocess.run")
+    @patch("claude_task_master.core.orchestrator_loop.console")
     def test_checkout_to_main_failure(
         self, mock_console, mock_subprocess, mock_get_config, basic_orchestrator
     ):
@@ -1526,7 +1526,7 @@ class TestCheckoutToMain:
         assert result is False
         mock_console.warning.assert_called()
 
-    @patch("claude_task_master.core.orchestrator.get_config")
+    @patch("claude_task_master.core.orchestrator_loop.get_config")
     def test_get_target_branch_from_config(self, mock_get_config, basic_orchestrator):
         """Should get target branch from config."""
         mock_config = MagicMock()
@@ -1546,7 +1546,7 @@ class TestCheckoutToMain:
 class TestVerificationFixFlow:
     """Tests for verification fix loop functionality."""
 
-    @patch("claude_task_master.core.orchestrator.console")
+    @patch("claude_task_master.core.orchestrator_loop.console")
     def test_run_verification_fix_success(
         self, mock_console, basic_orchestrator, state_manager, mock_agent, basic_task_state
     ):
@@ -1559,7 +1559,7 @@ class TestVerificationFixFlow:
         assert result is True
         mock_agent.run_work_session.assert_called()
 
-    @patch("claude_task_master.core.orchestrator.console")
+    @patch("claude_task_master.core.orchestrator_loop.console")
     def test_run_verification_fix_failure(
         self, mock_console, basic_orchestrator, state_manager, mock_agent, basic_task_state
     ):
@@ -1573,7 +1573,7 @@ class TestVerificationFixFlow:
         assert result is False
         mock_console.error.assert_called()
 
-    @patch("claude_task_master.core.orchestrator.console")
+    @patch("claude_task_master.core.orchestrator_loop.console")
     def test_run_verification_fix_creates_new_pr(
         self, mock_console, basic_orchestrator, state_manager, mock_agent, basic_task_state
     ):
@@ -1599,7 +1599,7 @@ class TestHandleWorkingStageSkipPath:
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
     @patch("claude_task_master.core.task_runner.console")
-    @patch("claude_task_master.core.orchestrator.reset_escape")
+    @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_handle_working_stage_skipped_task_does_not_double_mark(
         self,
         mock_reset,
@@ -1653,7 +1653,7 @@ class TestHandleWorkingStageSkipPath:
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
     @patch("claude_task_master.core.task_runner.console")
-    @patch("claude_task_master.core.orchestrator.reset_escape")
+    @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_handle_working_stage_ran_marks_task_at_captured_index(
         self,
         mock_reset,
@@ -1735,12 +1735,12 @@ class TestRunCompletedWebhookMapping:
         )
         return client
 
-    @patch("claude_task_master.core.orchestrator.register_handlers")
-    @patch("claude_task_master.core.orchestrator.start_listening")
-    @patch("claude_task_master.core.orchestrator.unregister_handlers")
-    @patch("claude_task_master.core.orchestrator.stop_listening")
-    @patch("claude_task_master.core.orchestrator.reset_shutdown")
-    @patch("claude_task_master.core.orchestrator.console")
+    @patch("claude_task_master.core.orchestrator_loop.register_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.start_listening")
+    @patch("claude_task_master.core.orchestrator_loop.unregister_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.stop_listening")
+    @patch("claude_task_master.core.orchestrator_loop.reset_shutdown")
+    @patch("claude_task_master.core.orchestrator_loop.console")
     def test_run_completed_maps_exit_code_2_to_interrupted(
         self,
         mock_console,
@@ -1778,12 +1778,12 @@ class TestRunCompletedWebhookMapping:
         assert events[0]["exit_code"] == 2
         assert events[0]["result"] == "interrupted"
 
-    @patch("claude_task_master.core.orchestrator.register_handlers")
-    @patch("claude_task_master.core.orchestrator.start_listening")
-    @patch("claude_task_master.core.orchestrator.unregister_handlers")
-    @patch("claude_task_master.core.orchestrator.stop_listening")
-    @patch("claude_task_master.core.orchestrator.reset_shutdown")
-    @patch("claude_task_master.core.orchestrator.console")
+    @patch("claude_task_master.core.orchestrator_loop.register_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.start_listening")
+    @patch("claude_task_master.core.orchestrator_loop.unregister_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.stop_listening")
+    @patch("claude_task_master.core.orchestrator_loop.reset_shutdown")
+    @patch("claude_task_master.core.orchestrator_loop.console")
     def test_run_completed_maps_exit_code_0_to_success(
         self,
         mock_console,
@@ -1821,14 +1821,14 @@ class TestRunCompletedWebhookMapping:
         assert events[0]["exit_code"] == 0
         assert events[0]["result"] == "success"
 
-    @patch("claude_task_master.core.orchestrator.register_handlers")
-    @patch("claude_task_master.core.orchestrator.start_listening")
-    @patch("claude_task_master.core.orchestrator.unregister_handlers")
-    @patch("claude_task_master.core.orchestrator.stop_listening")
-    @patch("claude_task_master.core.orchestrator.reset_shutdown")
+    @patch("claude_task_master.core.orchestrator_loop.register_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.start_listening")
+    @patch("claude_task_master.core.orchestrator_loop.unregister_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.stop_listening")
+    @patch("claude_task_master.core.orchestrator_loop.reset_shutdown")
     @patch("subprocess.run")
-    @patch("claude_task_master.core.orchestrator.is_cancellation_requested")
-    @patch("claude_task_master.core.orchestrator.console")
+    @patch("claude_task_master.core.orchestrator_loop.is_cancellation_requested")
+    @patch("claude_task_master.core.orchestrator_loop.console")
     def test_run_completed_payload_emitted_before_cleanup(
         self,
         mock_console,
@@ -1884,8 +1884,8 @@ class TestRunCompletedWebhookMapping:
 class TestFixPrCiRetryLimit:
     """Tests for max_ci_fix_attempts in the fix-PR merge path."""
 
-    @patch("claude_task_master.core.orchestrator.interruptible_sleep", return_value=True)
-    @patch("claude_task_master.core.orchestrator.console")
+    @patch("claude_task_master.core.orchestrator_loop.interruptible_sleep", return_value=True)
+    @patch("claude_task_master.core.orchestrator_loop.console")
     def test_wait_for_fix_pr_merge_retries_ci_fix_exactly_twice(
         self,
         mock_console,
@@ -1925,13 +1925,13 @@ class TestFixPrCiRetryLimit:
 class TestWaitingCiResumeTimerReset:
     """Tests for ci_poll_start_time reset when resuming in waiting_ci stage."""
 
-    @patch("claude_task_master.core.orchestrator.is_cancellation_requested")
-    @patch("claude_task_master.core.orchestrator.start_listening")
-    @patch("claude_task_master.core.orchestrator.stop_listening")
-    @patch("claude_task_master.core.orchestrator.register_handlers")
-    @patch("claude_task_master.core.orchestrator.unregister_handlers")
-    @patch("claude_task_master.core.orchestrator.reset_shutdown")
-    @patch("claude_task_master.core.orchestrator.console")
+    @patch("claude_task_master.core.orchestrator_loop.is_cancellation_requested")
+    @patch("claude_task_master.core.orchestrator_loop.start_listening")
+    @patch("claude_task_master.core.orchestrator_loop.stop_listening")
+    @patch("claude_task_master.core.orchestrator_loop.register_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.unregister_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.reset_shutdown")
+    @patch("claude_task_master.core.orchestrator_loop.console")
     def test_run_resets_stale_ci_poll_start_time_on_resume(
         self,
         mock_console,
@@ -1991,7 +1991,7 @@ class TestWaitingCiResumeTimerReset:
 class TestFixPrCiFailureBranch:
     """Tests for _fix_pr_ci_failure required_branch resolution."""
 
-    @patch("claude_task_master.core.orchestrator.console")
+    @patch("claude_task_master.core.orchestrator_loop.console")
     def test_fix_pr_ci_failure_uses_pr_head_branch_not_current_branch(
         self,
         mock_console,
@@ -2024,7 +2024,7 @@ class TestFixPrCiFailureBranch:
         call_kwargs = mock_agent.run_work_session.call_args.kwargs
         assert call_kwargs["required_branch"] == "fix/verification-failures"
 
-    @patch("claude_task_master.core.orchestrator.console")
+    @patch("claude_task_master.core.orchestrator_loop.console")
     def test_fix_pr_ci_failure_runs_push_only(
         self,
         mock_console,

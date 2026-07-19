@@ -15,9 +15,9 @@ from .shutdown import interruptible_sleep
 if TYPE_CHECKING:
     from ..github import GitHubClient
     from .agent import AgentWrapper
-    from .orchestrator import WebhookEmitter
     from .pr_context import PRContextManager
     from .state import StateManager, TaskState
+    from .webhook_emitter import WebhookEmitter
 
 
 class WorkflowStageHandler:

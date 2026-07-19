@@ -321,10 +321,10 @@ class TestOrchestratorWebhookProperty:
 class TestTaskLifecycleWebhooks:
     """Tests for webhook events during task lifecycle."""
 
-    @patch("claude_task_master.core.orchestrator.subprocess.run")
+    @patch("claude_task_master.core.orchestrator_loop.subprocess.run")
     @patch("claude_task_master.core.task_runner.get_current_branch")
     @patch("claude_task_master.core.task_runner.console")
-    @patch("claude_task_master.core.orchestrator.reset_escape")
+    @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_task_started_event_emitted(
         self,
         mock_reset,
@@ -361,10 +361,10 @@ class TestTaskLifecycleWebhooks:
         # Branch may be real or mocked
         assert event_data["branch"] is not None
 
-    @patch("claude_task_master.core.orchestrator.subprocess.run")
+    @patch("claude_task_master.core.orchestrator_loop.subprocess.run")
     @patch("claude_task_master.core.task_runner.get_current_branch")
     @patch("claude_task_master.core.task_runner.console")
-    @patch("claude_task_master.core.orchestrator.reset_escape")
+    @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_task_completed_event_emitted(
         self,
         mock_reset,
@@ -402,7 +402,7 @@ class TestTaskLifecycleWebhooks:
         assert "duration_seconds" in event_data
         assert event_data["branch"] is not None
 
-    @patch("claude_task_master.core.orchestrator.subprocess.run")
+    @patch("claude_task_master.core.orchestrator_loop.subprocess.run")
     @patch("claude_task_master.core.task_runner.get_current_branch")
     @patch("claude_task_master.core.task_runner.console")
     def test_task_failed_event_emitted_on_error(
@@ -458,7 +458,7 @@ class TestSessionLifecycleWebhooks:
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
     @patch("claude_task_master.core.task_runner.console")
-    @patch("claude_task_master.core.orchestrator.reset_escape")
+    @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_session_started_event_emitted(
         self,
         mock_reset,
@@ -493,7 +493,7 @@ class TestSessionLifecycleWebhooks:
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
     @patch("claude_task_master.core.task_runner.console")
-    @patch("claude_task_master.core.orchestrator.reset_escape")
+    @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_session_completed_event_emitted(
         self,
         mock_reset,
@@ -613,7 +613,7 @@ class TestPRLifecycleWebhooks:
         assert event_data["base_branch"] == "main"
 
     @patch("claude_task_master.core.workflow_stages.console")
-    @patch("claude_task_master.core.orchestrator.interruptible_sleep")
+    @patch("claude_task_master.core.orchestrator_loop.interruptible_sleep")
     def test_pr_merged_event_emitted(
         self,
         mock_sleep,
@@ -670,10 +670,10 @@ class TestPRLifecycleWebhooks:
 class TestEventOrderingAndCorrelation:
     """Tests for event ordering and correlation."""
 
-    @patch("claude_task_master.core.orchestrator.subprocess.run")
+    @patch("claude_task_master.core.orchestrator_loop.subprocess.run")
     @patch("claude_task_master.core.task_runner.get_current_branch")
     @patch("claude_task_master.core.task_runner.console")
-    @patch("claude_task_master.core.orchestrator.reset_escape")
+    @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_events_emitted_in_correct_order(
         self,
         mock_reset,
@@ -711,7 +711,7 @@ class TestEventOrderingAndCorrelation:
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
     @patch("claude_task_master.core.task_runner.console")
-    @patch("claude_task_master.core.orchestrator.reset_escape")
+    @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_all_events_have_same_run_id(
         self,
         mock_reset,
@@ -755,7 +755,7 @@ class TestWebhookErrorHandling:
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
     @patch("claude_task_master.core.task_runner.console")
-    @patch("claude_task_master.core.orchestrator.reset_escape")
+    @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_webhook_failure_does_not_block_execution(
         self,
         mock_reset,
@@ -782,7 +782,7 @@ class TestWebhookErrorHandling:
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
     @patch("claude_task_master.core.task_runner.console")
-    @patch("claude_task_master.core.orchestrator.reset_escape")
+    @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_webhook_exception_does_not_block_execution(
         self,
         mock_reset,
@@ -809,7 +809,7 @@ class TestWebhookErrorHandling:
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
     @patch("claude_task_master.core.task_runner.console")
-    @patch("claude_task_master.core.orchestrator.reset_escape")
+    @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_orchestrator_without_webhook_client_works(
         self,
         mock_reset,
@@ -850,8 +850,8 @@ class TestWebhookErrorHandling:
 class TestRunLifecycleWebhooks:
     """Tests for run.started and run.completed webhook events."""
 
-    @patch("claude_task_master.core.orchestrator.register_handlers")
-    @patch("claude_task_master.core.orchestrator.start_listening")
+    @patch("claude_task_master.core.orchestrator_loop.register_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.start_listening")
     def test_run_started_event_emitted_on_orchestrator_start(
         self,
         mock_start_listening,
@@ -891,8 +891,8 @@ class TestRunLifecycleWebhooks:
         assert event_data["resumed"] is False
         assert "working_directory" in event_data
 
-    @patch("claude_task_master.core.orchestrator.register_handlers")
-    @patch("claude_task_master.core.orchestrator.start_listening")
+    @patch("claude_task_master.core.orchestrator_loop.register_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.start_listening")
     def test_run_started_event_indicates_resumed_run(
         self,
         mock_start_listening,
@@ -929,8 +929,8 @@ class TestRunLifecycleWebhooks:
         event_data = run_started_calls[0].kwargs["data"]
         assert event_data["resumed"] is True
 
-    @patch("claude_task_master.core.orchestrator.register_handlers")
-    @patch("claude_task_master.core.orchestrator.start_listening")
+    @patch("claude_task_master.core.orchestrator_loop.register_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.start_listening")
     def test_run_completed_event_emitted_on_success(
         self,
         mock_start_listening,
@@ -974,8 +974,8 @@ class TestRunLifecycleWebhooks:
         assert event_data["final_status"] in ("planning", "working", "success")
         assert event_data["error_message"] is None
 
-    @patch("claude_task_master.core.orchestrator.register_handlers")
-    @patch("claude_task_master.core.orchestrator.start_listening")
+    @patch("claude_task_master.core.orchestrator_loop.register_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.start_listening")
     def test_run_completed_event_emitted_on_blocked(
         self,
         mock_start_listening,
@@ -1013,12 +1013,12 @@ class TestRunLifecycleWebhooks:
         assert event_data["exit_code"] == 1
         assert "Max sessions reached" in event_data["error_message"]
 
-    @patch("claude_task_master.core.orchestrator.register_handlers")
-    @patch("claude_task_master.core.orchestrator.start_listening")
-    @patch("claude_task_master.core.orchestrator.unregister_handlers")
-    @patch("claude_task_master.core.orchestrator.stop_listening")
-    @patch("claude_task_master.core.orchestrator.reset_shutdown")
-    @patch("claude_task_master.core.orchestrator.is_cancellation_requested")
+    @patch("claude_task_master.core.orchestrator_loop.register_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.start_listening")
+    @patch("claude_task_master.core.orchestrator_loop.unregister_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.stop_listening")
+    @patch("claude_task_master.core.orchestrator_loop.reset_shutdown")
+    @patch("claude_task_master.core.orchestrator_loop.is_cancellation_requested")
     def test_run_completed_event_emitted_on_interruption(
         self,
         mock_cancel_requested,
@@ -1223,7 +1223,7 @@ class TestCIWebhooks:
 class TestPlanUpdatedWebhooks:
     """Tests for plan.updated webhook events."""
 
-    @patch("claude_task_master.core.orchestrator.console")
+    @patch("claude_task_master.core.orchestrator_loop.console")
     def test_plan_updated_event_emitted_on_mailbox_update(
         self,
         mock_console,
@@ -1275,7 +1275,7 @@ class TestPlanUpdatedWebhooks:
         assert "completed_tasks" in event_data
         assert event_data["tasks_added"] >= 0
 
-    @patch("claude_task_master.core.orchestrator.console")
+    @patch("claude_task_master.core.orchestrator_loop.console")
     def test_plan_updated_event_with_no_changes(
         self,
         mock_console,
@@ -1335,8 +1335,8 @@ class TestPlanUpdatedWebhooks:
 class TestPRCountTrackingWebhooks:
     """Tests for PR count tracking in webhook events."""
 
-    @patch("claude_task_master.core.orchestrator.register_handlers")
-    @patch("claude_task_master.core.orchestrator.start_listening")
+    @patch("claude_task_master.core.orchestrator_loop.register_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.start_listening")
     def test_run_completed_includes_pr_counts(
         self,
         mock_start_listening,
@@ -1379,8 +1379,8 @@ class TestPRCountTrackingWebhooks:
         assert event_data["prs_merged"] == 2
         assert event_data["result"] == "success"
 
-    @patch("claude_task_master.core.orchestrator.register_handlers")
-    @patch("claude_task_master.core.orchestrator.start_listening")
+    @patch("claude_task_master.core.orchestrator_loop.register_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.start_listening")
     def test_run_completed_with_zero_pr_counts(
         self,
         mock_start_listening,
@@ -1420,8 +1420,8 @@ class TestPRCountTrackingWebhooks:
         assert event_data["prs_created"] == 0
         assert event_data["prs_merged"] == 0
 
-    @patch("claude_task_master.core.orchestrator.register_handlers")
-    @patch("claude_task_master.core.orchestrator.start_listening")
+    @patch("claude_task_master.core.orchestrator_loop.register_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.start_listening")
     def test_run_completed_blocked_includes_pr_counts(
         self,
         mock_start_listening,
@@ -1463,12 +1463,12 @@ class TestPRCountTrackingWebhooks:
         assert event_data["prs_created"] == 5
         assert event_data["prs_merged"] == 3
 
-    @patch("claude_task_master.core.orchestrator.register_handlers")
-    @patch("claude_task_master.core.orchestrator.start_listening")
-    @patch("claude_task_master.core.orchestrator.unregister_handlers")
-    @patch("claude_task_master.core.orchestrator.stop_listening")
-    @patch("claude_task_master.core.orchestrator.reset_shutdown")
-    @patch("claude_task_master.core.orchestrator.is_cancellation_requested")
+    @patch("claude_task_master.core.orchestrator_loop.register_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.start_listening")
+    @patch("claude_task_master.core.orchestrator_loop.unregister_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.stop_listening")
+    @patch("claude_task_master.core.orchestrator_loop.reset_shutdown")
+    @patch("claude_task_master.core.orchestrator_loop.is_cancellation_requested")
     def test_run_completed_interrupted_includes_pr_counts(
         self,
         mock_cancel_requested,
@@ -1575,7 +1575,7 @@ class TestPRCountTrackingWebhooks:
         assert event_data["pr_number"] == 42
 
     @patch("claude_task_master.core.workflow_stages.console")
-    @patch("claude_task_master.core.orchestrator.interruptible_sleep")
+    @patch("claude_task_master.core.orchestrator_loop.interruptible_sleep")
     def test_pr_merged_event_increments_count(
         self,
         mock_sleep,
@@ -1837,8 +1837,8 @@ class TestWebhookEmitterAsyncDelivery:
         finally:
             emitter.close()
 
-    @patch("claude_task_master.core.orchestrator.register_handlers")
-    @patch("claude_task_master.core.orchestrator.start_listening")
+    @patch("claude_task_master.core.orchestrator_loop.register_handlers")
+    @patch("claude_task_master.core.orchestrator_loop.start_listening")
     def test_run_drains_async_emitter_before_returning(
         self,
         _mock_start_listening,

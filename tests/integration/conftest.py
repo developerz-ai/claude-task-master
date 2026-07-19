@@ -864,13 +864,13 @@ def mock_key_listener():
             return_value=None,
         ),
         # Patch the imported names in orchestrator
-        patch("claude_task_master.core.orchestrator.start_listening"),
-        patch("claude_task_master.core.orchestrator.stop_listening"),
+        patch("claude_task_master.core.orchestrator_loop.start_listening"),
+        patch("claude_task_master.core.orchestrator_loop.stop_listening"),
         patch(
-            "claude_task_master.core.orchestrator.is_cancellation_requested",
+            "claude_task_master.core.orchestrator_loop.is_cancellation_requested",
             return_value=False,
         ),
-        patch("claude_task_master.core.orchestrator.reset_escape"),
+        patch("claude_task_master.core.orchestrator_loop.reset_escape"),
     ):
         yield
 
@@ -888,7 +888,7 @@ def mock_interruptible_sleep():
             return_value=True,
         ),
         patch(
-            "claude_task_master.core.orchestrator.interruptible_sleep",
+            "claude_task_master.core.orchestrator_loop.interruptible_sleep",
             return_value=True,
         ),
         patch(
