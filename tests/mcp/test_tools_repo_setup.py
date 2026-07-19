@@ -511,6 +511,46 @@ class TestPlanRepoTool:
         # State directory should not be created for validation failures
         # (though it may exist from other tests)
 
+    def test_plan_repo_routes_through_planner(self, temp_dir):
+        """plan_repo delegates to Planner.create_plan, not bare run_planning_phase.
+
+        Routing through the Planner is what gives plan-only mode the same inputs
+        as `start`: generated coding-style, release guide, accumulated context,
+        and max_prs. The old path called run_planning_phase(context="") directly.
+        """
+        from unittest.mock import MagicMock, patch
+
+        from claude_task_master.mcp.tools import plan_repo
+
+        repo = temp_dir / "routed-repo"
+        repo.mkdir()
+
+        fake_planner = MagicMock()
+        fake_planner.create_plan.return_value = {
+            "plan": "## Task List\n\n- [ ] Do it",
+            "criteria": "Tests pass",
+            "raw_output": "...",
+        }
+
+        with (
+            patch("claude_task_master.core.credentials.CredentialManager") as mock_cred,
+            patch("claude_task_master.core.agent.AgentWrapper") as mock_agent,
+            patch(
+                "claude_task_master.core.planner.Planner",
+                return_value=fake_planner,
+            ) as mock_planner_cls,
+        ):
+            mock_cred.return_value.get_valid_token.return_value = "tok"
+            result = plan_repo(str(repo), goal="Add a feature", model="sonnet")
+
+        assert result["success"] is True
+        assert result["plan"] == "## Task List\n\n- [ ] Do it"
+        assert result["criteria"] == "Tests pass"
+        fake_planner.create_plan.assert_called_once_with(goal="Add a feature")
+        mock_planner_cls.assert_called_once()
+        # The bare planning path must NOT be used anymore.
+        mock_agent.return_value.run_planning_phase.assert_not_called()
+
 
 class TestPlanRepoResultModel:
     """Test the PlanRepoResult model."""

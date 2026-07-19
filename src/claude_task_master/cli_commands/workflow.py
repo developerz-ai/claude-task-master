@@ -9,7 +9,6 @@ from rich.markdown import Markdown
 
 from ..core.agent import AgentWrapper, ModelType
 from ..core.config_loader import initialize_config
-from ..core.context_accumulator import ContextAccumulator
 from ..core.credentials import CredentialManager
 from ..core.git_branch import is_valid_branch_name
 from ..core.logger import LogFormat, LogLevel, TaskLogger
@@ -68,7 +67,6 @@ def _initialize_components(
         access_token, model_type, str(working_dir), logger=logger, max_budget_usd=max_budget_usd
     )
     planner = Planner(agent, state_manager)
-    ContextAccumulator(state_manager)
     return agent, planner
 
 

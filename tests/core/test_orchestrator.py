@@ -40,6 +40,8 @@ def mock_agent():
         return_value={"output": "Task completed successfully", "success": True}
     )
     agent.verify_success_criteria = MagicMock(return_value={"success": True})
+    # Default: no learnings extracted, so context accumulation is a no-op.
+    agent.extract_session_learnings = MagicMock(return_value="")
     return agent
 
 
@@ -416,26 +418,30 @@ class TestStateRecovery:
 class TestVerifySuccess:
     """Tests for _verify_success method."""
 
-    def test_verify_success_no_criteria(self, basic_orchestrator, state_manager):
+    def test_verify_success_no_criteria(self, basic_orchestrator, state_manager, basic_task_state):
         """Should return success=True when no criteria exist."""
         state_manager.state_dir.mkdir(exist_ok=True)
         # No criteria file
 
-        result = basic_orchestrator._verify_success()
+        result = basic_orchestrator._verify_success(basic_task_state)
         assert result["success"] is True
         assert "No criteria" in result["details"]
 
-    def test_verify_success_criteria_met(self, basic_orchestrator, state_manager, mock_agent):
+    def test_verify_success_criteria_met(
+        self, basic_orchestrator, state_manager, mock_agent, basic_task_state
+    ):
         """Should return success=True when criteria are met."""
         state_manager.state_dir.mkdir(exist_ok=True)
         state_manager.save_criteria("All tests pass")
         mock_agent.verify_success_criteria.return_value = {"success": True, "details": "All good"}
 
-        result = basic_orchestrator._verify_success()
+        result = basic_orchestrator._verify_success(basic_task_state)
         assert result["success"] is True
         mock_agent.verify_success_criteria.assert_called_once()
 
-    def test_verify_success_criteria_not_met(self, basic_orchestrator, state_manager, mock_agent):
+    def test_verify_success_criteria_not_met(
+        self, basic_orchestrator, state_manager, mock_agent, basic_task_state
+    ):
         """Should return success=False when criteria are not met."""
         state_manager.state_dir.mkdir(exist_ok=True)
         state_manager.save_criteria("All tests pass")
@@ -444,19 +450,143 @@ class TestVerifySuccess:
             "details": "Tests failed",
         }
 
-        result = basic_orchestrator._verify_success()
+        result = basic_orchestrator._verify_success(basic_task_state)
         assert result["success"] is False
 
-    def test_verify_success_passes_context(self, basic_orchestrator, state_manager, mock_agent):
-        """Should pass context to agent when available."""
+    def test_verify_success_passes_context(
+        self, basic_orchestrator, state_manager, mock_agent, basic_task_state
+    ):
+        """Should pass accumulated context to agent under its own header."""
         state_manager.state_dir.mkdir(exist_ok=True)
         state_manager.save_criteria("All tests pass")
         state_manager.save_context("Previous context here")
 
-        basic_orchestrator._verify_success()
+        basic_orchestrator._verify_success(basic_task_state)
 
         call_kwargs = mock_agent.verify_success_criteria.call_args.kwargs
+        # Context is passed distinctly from the completed-tasks summary.
         assert call_kwargs["context"] == "Previous context here"
+        assert "tasks_summary" in call_kwargs
+
+
+class TestAccumulateContext:
+    """Tests for _accumulate_context — the context.md accumulation wiring."""
+
+    def test_persists_session_learnings(
+        self, basic_orchestrator, state_manager, mock_agent, basic_task_state
+    ):
+        """A completed session's learnings are written under a Session header."""
+        basic_orchestrator.task_runner.last_session_output = "Implemented the lock"
+        mock_agent.extract_session_learnings.return_value = "- Uses fcntl file locking"
+        basic_task_state.session_count = 1
+
+        basic_orchestrator._accumulate_context(basic_task_state)
+
+        context = state_manager.load_context()
+        assert "## Session 1" in context
+        assert "- Uses fcntl file locking" in context
+
+    def test_context_grows_across_two_sessions(
+        self, basic_orchestrator, state_manager, mock_agent, basic_task_state
+    ):
+        """context.md accumulates learnings from consecutive sessions."""
+        mock_agent.extract_session_learnings.side_effect = [
+            "- Session one learning",
+            "- Session two learning",
+        ]
+
+        basic_orchestrator.task_runner.last_session_output = "work 1"
+        basic_task_state.session_count = 1
+        basic_orchestrator._accumulate_context(basic_task_state)
+
+        basic_orchestrator.task_runner.last_session_output = "work 2"
+        basic_task_state.session_count = 2
+        basic_orchestrator._accumulate_context(basic_task_state)
+
+        context = state_manager.load_context()
+        assert "## Session 1" in context
+        assert "- Session one learning" in context
+        assert "## Session 2" in context
+        assert "- Session two learning" in context
+
+    def test_skips_when_no_session_output(
+        self, basic_orchestrator, state_manager, mock_agent, basic_task_state
+    ):
+        """No output → no extraction query and no context written."""
+        basic_orchestrator.task_runner.last_session_output = ""
+
+        basic_orchestrator._accumulate_context(basic_task_state)
+
+        mock_agent.extract_session_learnings.assert_not_called()
+        assert state_manager.load_context() == ""
+
+    def test_skips_when_no_learnings_extracted(
+        self, basic_orchestrator, state_manager, mock_agent, basic_task_state
+    ):
+        """Empty extraction result leaves context.md untouched."""
+        basic_orchestrator.task_runner.last_session_output = "did work"
+        mock_agent.extract_session_learnings.return_value = "   "
+
+        basic_orchestrator._accumulate_context(basic_task_state)
+
+        assert state_manager.load_context() == ""
+
+    def test_extraction_failure_is_non_fatal(
+        self, basic_orchestrator, state_manager, mock_agent, basic_task_state
+    ):
+        """A failing extraction must never propagate out of the work loop."""
+        basic_orchestrator.task_runner.last_session_output = "did work"
+        mock_agent.extract_session_learnings.side_effect = RuntimeError("api down")
+
+        # Must not raise.
+        basic_orchestrator._accumulate_context(basic_task_state)
+
+        assert state_manager.load_context() == ""
+
+    def test_keyboard_interrupt_propagates(self, basic_orchestrator, mock_agent, basic_task_state):
+        """Ctrl+C during extraction still interrupts the run."""
+        basic_orchestrator.task_runner.last_session_output = "did work"
+        mock_agent.extract_session_learnings.side_effect = KeyboardInterrupt
+
+        with pytest.raises(KeyboardInterrupt):
+            basic_orchestrator._accumulate_context(basic_task_state)
+
+
+class TestBuildCompletedTasksSummary:
+    """Tests for _build_completed_tasks_summary (verification tasks_summary)."""
+
+    def test_lists_only_completed_tasks(self, basic_orchestrator, state_manager, basic_task_state):
+        """Only checked-off tasks appear; pending tasks are excluded."""
+        state_manager.save_plan(
+            "## Task List\n\n"
+            "- [x] Task 1: Set up structure\n"
+            "- [x] Task 2: Implement core\n"
+            "- [ ] Task 3: Add tests\n"
+        )
+
+        summary = basic_orchestrator._build_completed_tasks_summary(basic_task_state)
+
+        assert "Set up structure" in summary
+        assert "Implement core" in summary
+        assert "Add tests" not in summary
+
+    def test_includes_pr_counts_and_last_merged(
+        self, basic_orchestrator, state_manager, basic_task_state
+    ):
+        """PR counts and the last merged PR number are surfaced."""
+        state_manager.save_plan("## Task List\n\n- [x] Task 1: Done\n")
+        basic_task_state.prs_created = 3
+        basic_task_state.prs_merged = 2
+        basic_task_state.last_counted_pr_merged = 42
+
+        summary = basic_orchestrator._build_completed_tasks_summary(basic_task_state)
+
+        assert "PRs: 3 created, 2 merged" in summary
+        assert "#42" in summary
+
+    def test_empty_when_nothing_done(self, basic_orchestrator, basic_task_state):
+        """No plan and no PRs → empty summary."""
+        assert basic_orchestrator._build_completed_tasks_summary(basic_task_state) == ""
 
 
 # =============================================================================
@@ -1439,6 +1569,21 @@ class TestVerificationFixFlow:
         assert result is False
         mock_console.error.assert_called()
 
+    @patch("claude_task_master.core.orchestrator.console")
+    def test_run_verification_fix_creates_new_pr(
+        self, mock_console, basic_orchestrator, state_manager, mock_agent, basic_task_state
+    ):
+        """Verification fix opens a NEW PR (create_pr=True, not push_only): there is
+        no existing PR to push to; _wait_for_fix_pr_merge discovers the new one."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_criteria("Tests must pass")
+
+        basic_orchestrator._run_verification_fix("Tests failed", basic_task_state)
+
+        call_kwargs = mock_agent.run_work_session.call_args.kwargs
+        assert call_kwargs["create_pr"] is True
+        assert call_kwargs.get("push_only", False) is False
+
 
 # =============================================================================
 # Test Handle Working Stage Skip Path
@@ -1874,3 +2019,35 @@ class TestFixPrCiFailureBranch:
         mock_agent.run_work_session.assert_called_once()
         call_kwargs = mock_agent.run_work_session.call_args.kwargs
         assert call_kwargs["required_branch"] == "fix/verification-failures"
+
+    @patch("claude_task_master.core.orchestrator.console")
+    def test_fix_pr_ci_failure_runs_push_only(
+        self,
+        mock_console,
+        basic_orchestrator,
+        state_manager,
+        mock_agent,
+        mock_github_client,
+        basic_task_state,
+    ):
+        """Fixing CI on an existing fix PR pushes to it (create_pr=False, push_only=True)."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        mock_github_client.get_pr_status.return_value = MagicMock(
+            number=42,
+            head_branch="fix/verification-failures",
+            ci_state="FAILURE",
+        )
+        basic_orchestrator._pr_context = MagicMock()
+        basic_orchestrator._pr_context.get_combined_feedback.return_value = (
+            True,
+            False,
+            "/tmp/pr-context",
+        )
+
+        with patch.object(basic_orchestrator, "_get_current_branch", return_value="main"):
+            result = basic_orchestrator._fix_pr_ci_failure(42, basic_task_state)
+
+        assert result is True
+        call_kwargs = mock_agent.run_work_session.call_args.kwargs
+        assert call_kwargs["push_only"] is True
+        assert call_kwargs["create_pr"] is False

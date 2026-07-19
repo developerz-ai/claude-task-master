@@ -130,6 +130,56 @@ Task 3: Done"""
         assert "Update docs" in result
 
 
+class TestContextSectionVerification:
+    """Tests for the accumulated-context section in the verification prompt."""
+
+    def test_no_context_by_default(self) -> None:
+        """No 'Previous Context' section when context is None."""
+        result = build_verification_prompt("Criteria", context=None)
+        assert "Previous Context" not in result
+
+    def test_context_included_when_provided(self) -> None:
+        """Accumulated context is rendered under its own header."""
+        result = build_verification_prompt(
+            criteria="Tests pass",
+            context="Session 1: chose fcntl over lockfile",
+        )
+        assert "Previous Context" in result
+        assert "chose fcntl over lockfile" in result
+
+    def test_context_not_labelled_as_completed_tasks(self) -> None:
+        """Context must NOT be mislabelled under 'Completed Tasks'."""
+        result = build_verification_prompt(
+            criteria="Tests pass",
+            context="Accumulated learning from prior sessions",
+        )
+        # Only context passed → no Completed Tasks section, and the learning
+        # lands under Previous Context (regression guard for the audit bug where
+        # context.md was injected as tasks_summary).
+        assert "Completed Tasks" not in result
+        context_pos = result.find("Previous Context")
+        learning_pos = result.find("Accumulated learning from prior sessions")
+        assert context_pos != -1
+        assert context_pos < learning_pos
+
+    def test_context_and_tasks_summary_are_distinct_sections(self) -> None:
+        """Completed tasks and accumulated context appear under separate headers."""
+        result = build_verification_prompt(
+            criteria="Tests pass",
+            tasks_summary="- Implemented login",
+            context="Session 1: login uses OAuth",
+        )
+        assert "Completed Tasks" in result
+        assert "Previous Context" in result
+        assert "Implemented login" in result
+        assert "login uses OAuth" in result
+
+    def test_context_keyword_arg(self) -> None:
+        """context can be supplied as a keyword argument."""
+        result = build_verification_prompt(criteria="Criteria", context="Ctx marker")
+        assert "Ctx marker" in result
+
+
 class TestVerificationStepsSection:
     """Tests for verification steps section."""
 

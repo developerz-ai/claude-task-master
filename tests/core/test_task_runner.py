@@ -1046,6 +1046,34 @@ class TestRunWorkSession:
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
     @patch("claude_task_master.core.task_runner.console")
+    def test_run_work_session_exposes_output_for_context(
+        self,
+        mock_console,
+        mock_branch,
+        task_runner,
+        state_manager,
+        mock_agent,
+        basic_task_state,
+        basic_plan,
+    ):
+        """After a real session, last_session_output holds the agent output.
+
+        The orchestrator reads this to distil accumulated context.md learnings.
+        """
+        mock_branch.return_value = "feature/test"
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan(basic_plan)
+        state_manager.save_goal("Test goal")
+
+        # Defaults to empty before any session runs.
+        assert task_runner.last_session_output == ""
+
+        task_runner.run_work_session(basic_task_state)
+
+        assert task_runner.last_session_output == "Task completed successfully"
+
+    @patch("claude_task_master.core.task_runner.get_current_branch")
+    @patch("claude_task_master.core.task_runner.console")
     def test_run_work_session_consecutive_complete_tasks_each_skip(
         self,
         mock_console,

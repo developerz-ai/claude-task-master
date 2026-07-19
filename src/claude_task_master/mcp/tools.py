@@ -1916,18 +1916,20 @@ def plan_repo(
             enable_safety_hooks=True,
         )
 
-        # Run planning phase (read-only)
-        result = agent.run_planning_phase(goal=goal, context="")
+        # Route planning through the Planner so plan-only mode receives the same
+        # inputs as `start`: a generated coding-style guide, the release guide
+        # (only when release is enabled — it is not here), accumulated context,
+        # and the max_prs constraint. Calling run_planning_phase(context="")
+        # directly skipped all of these and produced a lower-quality plan.
+        from claude_task_master.core.planner import Planner
 
-        # Extract plan and criteria
+        planner = Planner(agent=agent, state_manager=state_manager)
+        result = planner.create_plan(goal=goal)
+
+        # create_plan already persists plan.md / criteria.txt; read the values
+        # back for the response payload.
         plan = result.get("plan", "")
         criteria = result.get("criteria", "")
-
-        # Save plan and criteria to state
-        if plan:
-            state_manager.save_plan(plan)
-        if criteria:
-            state_manager.save_criteria(criteria)
 
         # Update state to paused (plan complete, ready for work)
         state.status = "paused"

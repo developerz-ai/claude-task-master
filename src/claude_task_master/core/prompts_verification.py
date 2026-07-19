@@ -15,12 +15,19 @@ from .prompts_base import PromptBuilder
 def build_verification_prompt(
     criteria: str,
     tasks_summary: str | None = None,
+    context: str | None = None,
 ) -> str:
     """Build the verification phase prompt.
 
     Args:
         criteria: The success criteria to verify.
-        tasks_summary: Optional summary of completed tasks.
+        tasks_summary: Optional summary of the tasks actually completed
+            (checked-off plan tasks, merged PRs). Rendered under
+            "Completed Tasks".
+        context: Optional accumulated learnings from prior sessions. Rendered
+            under its own "Previous Context" header — kept distinct from
+            ``tasks_summary`` so accumulated context is never mislabelled as
+            the list of completed tasks.
 
     Returns:
         Complete verification prompt.
@@ -31,6 +38,9 @@ def build_verification_prompt(
 
     if tasks_summary:
         builder.add_section("Completed Tasks", tasks_summary)
+
+    if context:
+        builder.add_section("Previous Context", context)
 
     builder.add_section("Success Criteria", criteria)
 

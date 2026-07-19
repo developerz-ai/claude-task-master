@@ -226,7 +226,7 @@ eslint . && tsc          # JS lint/types
 
 **6. Commit** —
 ```bash
-git add -A && git commit -m "$(cat <<'EOF'
+git add -A -- ':!.claude-task-master' && git commit -m "$(cat <<'EOF'
 type: Brief description (≤50 chars)
 
 - What changed / why
@@ -235,7 +235,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 EOF
 )"
 ```
-`.claude-task-master/` is auto-gitignored (orchestrator state) — never commit it.
+The `':!.claude-task-master'` pathspec above (and `.git/info/exclude`, written at init) keeps orchestrator state out of the commit. Never add it manually.
 
 **7. Rebase onto {target_branch} before pushing** — `git fetch origin {target_branch} && git rebase origin/{target_branch}`. Other PRs may have merged; rebasing now prevents conflicts in the PR. Resolve any conflicts keeping both sides' intent, then re-run tests.
 
@@ -248,9 +248,7 @@ If the label doesn't exist, create it and retry. PR body = 2-4 bullets of what/w
 
 Your work is NOT complete until you have a PR URL.
 
-**STOP AFTER PR CREATION.** Do not wait for CI, check status, or merge — the orchestrator handles that.
-
-**9. Log File Best Practices** — append (`echo "msg" >> progress.md`), don't Read+rewrite. Avoids context bloat."""
+**STOP AFTER PR CREATION.** Do not wait for CI, check status, or merge — the orchestrator handles that."""
 
 
 def _build_push_only_execution(target_branch: str = "main") -> str:
@@ -279,7 +277,7 @@ eslint . && tsc          # JS lint/types
 
 **6. Commit** —
 ```bash
-git add -A && git commit -m "$(cat <<'EOF'
+git add -A -- ':!.claude-task-master' && git commit -m "$(cat <<'EOF'
 fix: Brief description (≤50 chars)
 
 - What changed / why
@@ -288,13 +286,11 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 EOF
 )"
 ```
-`.claude-task-master/` is auto-gitignored — never commit it.
+The `':!.claude-task-master'` pathspec above (and `.git/info/exclude`, written at init) keeps orchestrator state out of the commit. Never add it manually.
 
 **7. Push to update the existing PR** (REQUIRED) — `git push origin HEAD`. CI re-runs on push. Do NOT run `gh pr create` (the PR already exists). NEVER rebase onto {target_branch} during a fix — it rewrites already-reviewed commits and breaks the PR's review threads. If push is rejected: `git pull --rebase origin HEAD`, resolve conflicts, re-test, push.
 
-**STOP AFTER PUSH.** Do not wait for CI, check status, or merge — the orchestrator handles that.
-
-**8. Log File Best Practices** — append (`echo "msg" >> progress.md`), don't Read+rewrite. Avoids context bloat."""
+**STOP AFTER PUSH.** Do not wait for CI, check status, or merge — the orchestrator handles that."""
 
 
 def _build_commit_only_execution() -> str:
@@ -317,7 +313,7 @@ eslint . && tsc          # JS lint/types
 
 **6. Commit** —
 ```bash
-git add -A && git commit -m "$(cat <<'EOF'
+git add -A -- ':!.claude-task-master' && git commit -m "$(cat <<'EOF'
 type: Brief description (≤50 chars)
 
 - What changed / why
@@ -326,8 +322,6 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 EOF
 )"
 ```
-`.claude-task-master/` is auto-gitignored — never commit it.
+The `':!.claude-task-master'` pathspec above (and `.git/info/exclude`, written at init) keeps orchestrator state out of the commit. Never add it manually.
 
-**7. DO NOT create PR yet** — More tasks remain in this PR group. Just commit; do NOT push or create a PR. The orchestrator will tell you when to open the PR (after all tasks in the group are done).
-
-**8. Log File Best Practices** — append (`echo "msg" >> progress.md`), don't Read+rewrite. Avoids context bloat."""
+**7. DO NOT create PR yet** — More tasks remain in this PR group. Just commit; do NOT push or create a PR. The orchestrator will tell you when to open the PR (after all tasks in the group are done)."""

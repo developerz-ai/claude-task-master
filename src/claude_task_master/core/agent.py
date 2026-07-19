@@ -276,15 +276,55 @@ class AgentWrapper:
             coding_style=coding_style,
         )
 
-    def verify_success_criteria(self, criteria: str, context: str = "") -> dict[str, Any]:
-        """Verify if success criteria are met.
+    def run_release_check(
+        self,
+        prompt: str,
+        model_override: ModelType | None = None,
+    ) -> dict[str, Any]:
+        """Run a verify-only post-merge release check (no create-PR contract).
 
-        Uses verification tools (Read, Glob, Grep, Bash) to actually run tests
-        and lint checks as specified in the verification prompt.
+        The release check must NOT go through ``run_work_session``: that wraps
+        the prompt in the create-PR contract, which contradicts the verify-only
+        ``RELEASE_CHECK: PASS/FAIL/SKIP`` marker and lets the check silently
+        default to SKIP (never FAIL). See ``AgentPhaseExecutor.run_release_check``.
+
+        Args:
+            prompt: The fully-built release verification prompt.
+            model_override: Optional model to use (Sonnet for speed).
+
+        Returns:
+            Dict with 'output', 'success', 'subtype', and 'model_used' keys.
 
         Delegates to AgentPhaseExecutor for implementation.
         """
-        return self._phase_executor.verify_success_criteria(criteria, context)
+        return self._phase_executor.run_release_check(
+            prompt=prompt,
+            model_override=model_override,
+        )
+
+    def verify_success_criteria(
+        self, criteria: str, context: str = "", tasks_summary: str = ""
+    ) -> dict[str, Any]:
+        """Verify if success criteria are met.
+
+        Uses verification tools (Read, Glob, Grep, Bash) to actually run tests
+        and lint checks as specified in the verification prompt. ``context``
+        (accumulated learnings) and ``tasks_summary`` (completed tasks/PRs) are
+        injected under separate headers.
+
+        Delegates to AgentPhaseExecutor for implementation.
+        """
+        return self._phase_executor.verify_success_criteria(criteria, context, tasks_summary)
+
+    def extract_session_learnings(self, session_output: str, existing_context: str = "") -> str:
+        """Extract terse, reusable learnings from a completed work session.
+
+        Powers context.md accumulation: the returned bullets are persisted by
+        the orchestrator so later sessions build on prior learnings.
+
+        Delegates to AgentPhaseExecutor for implementation.
+        """
+        return self._phase_executor.extract_session_learnings(session_output, existing_context)
 
     async def _run_query(
         self, prompt: str, tools: list[str], model_override: ModelType | None = None

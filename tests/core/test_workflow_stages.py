@@ -39,6 +39,11 @@ def mock_agent():
     """Create a mock agent wrapper."""
     agent = MagicMock()
     agent.run_work_session = MagicMock(return_value={"output": "Fixed", "success": True})
+    # Release verification runs through run_release_check (verify-only, no PR
+    # contract), separate from run_work_session used by work/fix sessions.
+    agent.run_release_check = MagicMock(
+        return_value={"output": "RELEASE_CHECK: PASS", "success": True}
+    )
     return agent
 
 
@@ -2087,6 +2092,136 @@ class TestPRHeadBranchSessions:
 
 
 # =============================================================================
+# Test Fix Session Push-Only Mode + Rebase Policy
+# =============================================================================
+
+
+class TestFixSessionPushOnlyMode:
+    """Fix sessions operate on an EXISTING PR: they must push (create_pr=False,
+    push_only=True) so the agent updates that PR instead of opening a duplicate,
+    and their prompts must not mandate rebase/force-push — that rewrites
+    already-reviewed commits and breaks the PR's review threads."""
+
+    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
+    @patch("claude_task_master.core.workflow_stages.console")
+    def test_ci_failed_stage_runs_push_only(
+        self,
+        mock_console,
+        mock_sleep,
+        workflow_handler,
+        state_manager,
+        basic_task_state,
+        mock_agent,
+        mock_github_client,
+        mock_pr_status,
+    ):
+        """handle_ci_failed_stage pushes to the existing PR (no new PR, no rebase)."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        basic_task_state.current_pr = 42
+        mock_pr_status.head_branch = "feat/pr-branch"
+        mock_github_client.get_pr_status.return_value = mock_pr_status
+        mock_sleep.return_value = True
+
+        with (
+            patch.object(
+                WorkflowStageHandler, "_get_current_branch", return_value="feat/pr-branch"
+            ),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stdout="")
+            workflow_handler.handle_ci_failed_stage(basic_task_state)
+
+        call_kwargs = mock_agent.run_work_session.call_args.kwargs
+        assert call_kwargs["push_only"] is True
+        assert call_kwargs["create_pr"] is False
+
+    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
+    @patch("claude_task_master.core.workflow_stages.console")
+    def test_addressing_reviews_stage_runs_push_only(
+        self,
+        mock_console,
+        mock_sleep,
+        workflow_handler,
+        state_manager,
+        basic_task_state,
+        mock_agent,
+        mock_github_client,
+        mock_pr_status,
+    ):
+        """handle_addressing_reviews_stage pushes to the existing PR (no new PR)."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        basic_task_state.current_pr = 42
+        mock_pr_status.head_branch = "feat/pr-branch"
+        mock_github_client.get_pr_status.return_value = mock_pr_status
+        mock_sleep.return_value = True
+
+        with (
+            patch.object(
+                WorkflowStageHandler, "_get_current_branch", return_value="feat/pr-branch"
+            ),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stdout="")
+            workflow_handler.handle_addressing_reviews_stage(basic_task_state)
+
+        call_kwargs = mock_agent.run_work_session.call_args.kwargs
+        assert call_kwargs["push_only"] is True
+        assert call_kwargs["create_pr"] is False
+
+    @pytest.mark.parametrize(
+        "has_ci,has_comments",
+        [(True, True), (True, False), (False, True)],
+    )
+    def test_ci_comments_task_body_has_no_rebase_mandate(
+        self, workflow_handler, has_ci, has_comments
+    ):
+        """CI/comment fix bodies must not mandate rebase or force-push — the single
+        push_only policy owns the git mechanics (`git push origin HEAD`)."""
+        task = workflow_handler._build_combined_ci_comments_task(
+            42, has_ci, has_comments, "/tmp/pr-42"
+        )
+        lowered = task.lower()
+        assert "rebase onto" not in lowered
+        assert "force-with-lease" not in lowered
+        assert "git rebase origin" not in lowered
+        assert "git push origin head" in lowered
+
+    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
+    @patch("claude_task_master.core.workflow_stages.console")
+    def test_addressing_reviews_body_has_no_rebase_mandate(
+        self,
+        mock_console,
+        mock_sleep,
+        workflow_handler,
+        state_manager,
+        basic_task_state,
+        mock_agent,
+        mock_github_client,
+        mock_pr_status,
+    ):
+        """The review-fix prompt must not mandate rebase-onto-target or force-push."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        basic_task_state.current_pr = 42
+        mock_pr_status.head_branch = "feat/pr-branch"
+        mock_github_client.get_pr_status.return_value = mock_pr_status
+        mock_sleep.return_value = True
+
+        with (
+            patch.object(
+                WorkflowStageHandler, "_get_current_branch", return_value="feat/pr-branch"
+            ),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stdout="")
+            workflow_handler.handle_addressing_reviews_stage(basic_task_state)
+
+        task = mock_agent.run_work_session.call_args.kwargs["task_description"].lower()
+        assert "rebase onto" not in task
+        assert "force-with-lease" not in task
+        assert "git push origin head" in task
+
+
+# =============================================================================
 # Test CI Poll Timer Helpers
 # =============================================================================
 
@@ -2368,6 +2503,192 @@ class TestPRHeadBranchResolution:
 # =============================================================================
 
 
+class TestReleasingStageVerifyOnlyContract:
+    """Release verification must run verify-only — NOT wrapped in the create-PR
+    contract — so the RELEASE_CHECK marker survives and the check can FAIL."""
+
+    @pytest.fixture
+    def _release_state(self, state_manager, basic_task_state, mock_github_client, mock_pr_status):
+        """Persist a release guide + plan and wire a merged PR ready for release."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan("- [ ] Task 1")
+        state_manager.save_release_guide("# Release\n\n1. Check /health returns 200")
+        basic_task_state.options.auto_merge = True
+        basic_task_state.options.enable_release = True
+        basic_task_state.current_pr = 42
+        mock_github_client.get_pr_status.return_value = mock_pr_status
+        return basic_task_state
+
+    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
+    @patch("claude_task_master.core.workflow_stages.console")
+    def test_releasing_uses_release_check_not_work_session(
+        self, mock_console, mock_sleep, workflow_handler, mock_agent, _release_state
+    ):
+        """handle_releasing_stage routes through run_release_check (verify-only),
+        never run_work_session (which carries the create-PR contract)."""
+        from claude_task_master.core.agent import ModelType
+
+        mock_sleep.return_value = True
+
+        workflow_handler.handle_releasing_stage(_release_state)
+
+        mock_agent.run_release_check.assert_called_once()
+        mock_agent.run_work_session.assert_not_called()
+        # Sonnet for speed, and the built release-verification prompt is passed.
+        call = mock_agent.run_release_check.call_args
+        assert call.kwargs["model_override"] == ModelType.SONNET
+        prompt = call.args[0]
+        assert "RELEASE VERIFICATION" in prompt
+
+    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
+    @patch("claude_task_master.core.workflow_stages.console")
+    def test_release_check_can_fail(
+        self, mock_console, mock_sleep, workflow_handler, mock_agent, _release_state
+    ):
+        """A FAIL marker transitions to release_fix — proving the check is not
+        silently swallowed into SKIP the way the work-session wrapper caused."""
+        mock_sleep.return_value = True
+        mock_agent.run_release_check.return_value = {
+            "output": "RELEASE_CHECK: FAIL — /health returned 500",
+            "success": True,
+        }
+
+        result = workflow_handler.handle_releasing_stage(_release_state)
+
+        assert result is None
+        assert _release_state.workflow_stage == "release_fix"
+
+    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
+    @patch("claude_task_master.core.workflow_stages.console")
+    def test_release_check_pass_advances(
+        self, mock_console, mock_sleep, workflow_handler, mock_agent, _release_state
+    ):
+        """A PASS marker advances to the next task."""
+        mock_sleep.return_value = True
+        mock_agent.run_release_check.return_value = {
+            "output": "RELEASE_CHECK: PASS",
+            "success": True,
+        }
+
+        result = workflow_handler.handle_releasing_stage(_release_state)
+
+        assert result is None
+        assert _release_state.workflow_stage == "working"
+        assert _release_state.current_task_index == 1
+
+
+class TestReleaseFixDetails:
+    """A failed release check must hand its failure details to the fix session
+    (persisted through the release_fix stage transition) instead of running blind."""
+
+    @pytest.fixture
+    def _release_state(self, state_manager, basic_task_state, mock_github_client, mock_pr_status):
+        """Persist a release guide + plan and wire a merged PR ready for release."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan("- [ ] Task 1")
+        state_manager.save_release_guide("# Release\n\n1. Check /health returns 200")
+        basic_task_state.options.auto_merge = True
+        basic_task_state.options.enable_release = True
+        basic_task_state.current_pr = 42
+        mock_github_client.get_pr_status.return_value = mock_pr_status
+        return basic_task_state
+
+    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
+    @patch("claude_task_master.core.workflow_stages.console")
+    def test_releasing_fail_persists_details(
+        self, mock_console, mock_sleep, workflow_handler, mock_agent, _release_state
+    ):
+        """A FAILED release check persists its output into state for the fix session."""
+        mock_sleep.return_value = True
+        mock_agent.run_release_check.return_value = {
+            "output": "RELEASE_CHECK: FAIL — /health returned 500 on api.example.com",
+            "success": True,
+        }
+
+        workflow_handler.handle_releasing_stage(_release_state)
+
+        assert _release_state.workflow_stage == "release_fix"
+        assert _release_state.release_fix_details is not None
+        assert "/health returned 500" in _release_state.release_fix_details
+
+    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
+    @patch("claude_task_master.core.workflow_stages.console")
+    def test_releasing_fail_caps_details_to_tail(
+        self, mock_console, mock_sleep, workflow_handler, mock_agent, _release_state
+    ):
+        """Persisted details are tail-capped so state.json stays small."""
+        mock_sleep.return_value = True
+        big_output = "x" * 10000 + "RELEASE_CHECK: FAIL"
+        mock_agent.run_release_check.return_value = {"output": big_output, "success": True}
+
+        workflow_handler.handle_releasing_stage(_release_state)
+
+        cap = WorkflowStageHandler.RELEASE_FAIL_DETAILS_MAX_CHARS
+        assert _release_state.release_fix_details is not None
+        assert len(_release_state.release_fix_details) == cap
+        # Tail is kept, so the FAIL marker at the end survives the cap.
+        assert _release_state.release_fix_details.endswith("RELEASE_CHECK: FAIL")
+
+    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
+    @patch("claude_task_master.core.workflow_stages.console")
+    def test_release_fix_injects_failed_checks_section(
+        self,
+        mock_console,
+        mock_sleep,
+        workflow_handler,
+        state_manager,
+        basic_task_state,
+        mock_agent,
+    ):
+        """handle_release_fix_stage injects persisted details under ## Failed Checks."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_release_guide("# Release guide")
+        basic_task_state.current_pr = 42
+        basic_task_state.release_fix_details = "Health check failed: 503 at /healthz"
+        mock_sleep.return_value = True
+
+        workflow_handler.handle_release_fix_stage(basic_task_state)
+
+        task = mock_agent.run_work_session.call_args.kwargs["task_description"]
+        assert "## Failed Checks" in task
+        assert "Health check failed: 503 at /healthz" in task
+
+    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
+    @patch("claude_task_master.core.workflow_stages.console")
+    def test_release_fix_handles_missing_details(
+        self,
+        mock_console,
+        mock_sleep,
+        workflow_handler,
+        state_manager,
+        basic_task_state,
+        mock_agent,
+    ):
+        """With no persisted details the prompt still carries a ## Failed Checks section."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_release_guide("# Release guide")
+        basic_task_state.current_pr = 42
+        basic_task_state.release_fix_details = None
+        mock_sleep.return_value = True
+
+        workflow_handler.handle_release_fix_stage(basic_task_state)
+
+        task = mock_agent.run_work_session.call_args.kwargs["task_description"]
+        assert "## Failed Checks" in task
+        assert "No failure details captured." in task
+
+    def test_advance_clears_release_fix_details(
+        self, workflow_handler, state_manager, basic_task_state
+    ):
+        """_advance_to_next_task clears details so they never leak to the next task."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        basic_task_state.release_fix_details = "stale failure text"
+
+        workflow_handler._advance_to_next_task(basic_task_state)
+
+        assert basic_task_state.release_fix_details is None
+
+
 class TestReleaseFixCounterPersistence:
     """release_fix_attempts must survive the fix-PR merge so the 5-attempt cap stays reachable."""
 
@@ -2420,7 +2741,9 @@ class TestReleaseFixCounterPersistence:
         basic_task_state.current_pr = 42
         mock_github_client.get_pr_status.return_value = mock_pr_status
         mock_sleep.return_value = True
-        mock_agent.run_work_session.return_value = {
+        # Release verification (run_release_check) fails; the fix session
+        # (run_work_session) keeps its default success return.
+        mock_agent.run_release_check.return_value = {
             "output": "RELEASE_CHECK: FAIL — health endpoint 500",
             "success": True,
         }
@@ -2452,14 +2775,14 @@ class TestReleaseFixCounterPersistence:
         assert basic_task_state.workflow_stage == "releasing"
 
         # 6th verification failure hits the cap: advance WITHOUT another fix cycle
-        agent_calls_before = mock_agent.run_work_session.call_count
+        release_checks_before = mock_agent.run_release_check.call_count
         result = workflow_handler.handle_releasing_stage(basic_task_state)
         assert result is None
         assert basic_task_state.workflow_stage == "working"
         assert basic_task_state.release_fix_attempts == 0  # reset by _advance_to_next_task
         assert basic_task_state.current_task_index == 1
         # One final verification runs, then the cap blocks any further fix cycle
-        assert mock_agent.run_work_session.call_count == agent_calls_before + 1
+        assert mock_agent.run_release_check.call_count == release_checks_before + 1
 
     @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
     @patch("claude_task_master.core.workflow_stages.console")
@@ -2495,7 +2818,7 @@ class TestReleaseFixCounterPersistence:
         assert basic_task_state.release_fix_attempts == 2
 
         # Release verification now passes: advance resets the counter
-        mock_agent.run_work_session.return_value = {
+        mock_agent.run_release_check.return_value = {
             "output": "RELEASE_CHECK: PASS",
             "success": True,
         }

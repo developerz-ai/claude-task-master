@@ -8,6 +8,7 @@ following the Single Responsibility Principle (SRP). It handles:
 """
 
 import asyncio
+import re
 import threading
 from collections.abc import Coroutine
 from typing import TYPE_CHECKING, Any, TypeVar
@@ -16,6 +17,7 @@ from . import console
 from .agent_models import ModelType, get_tools_for_phase
 from .prompts import (
     build_coding_style_prompt,
+    build_context_extraction_prompt,
     build_planning_prompt,
     build_release_discovery_prompt,
     build_verification_prompt,
@@ -31,6 +33,41 @@ if TYPE_CHECKING:
     from .logger import TaskLogger
 
 T = TypeVar("T")
+
+# Trailing ``PLANNING COMPLETE`` stop-marker (optionally wrapped in backticks or
+# bold) that the planning prompt instructs the model to end with. It is a
+# control token for the parser, not plan content — anchored to end-of-string so
+# only a trailing occurrence is stripped and marker-free output is untouched.
+_TRAILING_PLANNING_COMPLETE_RE = re.compile(
+    r"\s*[`*_]*\s*PLANNING\s+COMPLETE\s*[`*_]*\s*$",
+    re.IGNORECASE,
+)
+
+
+def _strip_planning_complete(text: str) -> str:
+    """Strip a trailing ``PLANNING COMPLETE`` marker from planner output.
+
+    The planning prompt tells the model to end with ``PLANNING COMPLETE`` as a
+    stop signal. Persisted verbatim it pollutes plan.md / criteria.txt and is
+    re-injected into every later prompt. This removes a trailing occurrence
+    (optionally wrapped in backticks/bold) while leaving marker-free output
+    unchanged byte-for-byte.
+
+    Args:
+        text: Raw planner output.
+
+    Returns:
+        ``text`` with a trailing ``PLANNING COMPLETE`` marker removed, or the
+        original string when no marker is present.
+    """
+    stripped = _TRAILING_PLANNING_COMPLETE_RE.sub("", text)
+    if stripped == text:
+        return text
+    cleaned = stripped.rstrip()
+    # Marker-only (or whitespace+marker) input collapses to empty, not a lone
+    # newline. Otherwise normalise to a single trailing newline.
+    return f"{cleaned}\n" if cleaned else ""
+
 
 # How often the shutdown watcher re-checks for a cancellation request while a
 # coroutine is in flight. Small enough that Ctrl+C (or a durable cross-process
@@ -360,7 +397,70 @@ class AgentPhaseExecutor:
             "model_used": (model_override or self.model).value,
         }
 
-    def verify_success_criteria(self, criteria: str, context: str = "") -> dict[str, Any]:
+    def run_release_check(
+        self,
+        prompt: str,
+        model_override: ModelType | None = None,
+    ) -> dict[str, Any]:
+        """Run a verify-only post-merge release check.
+
+        Unlike ``run_work_session``, this does NOT wrap ``prompt`` in the
+        create-PR contract. The release check is a read-only verification that
+        must terminate with a ``RELEASE_CHECK: PASS/FAIL/SKIP`` marker. Routing
+        it through ``run_work_session`` buries that instruction inside a work
+        prompt whose outer contract demands "push + open a PR, don't finish
+        without a PR URL" — a contradiction that makes the model drop the
+        marker (``parse_release_check_result`` then defaults to SKIP, so the
+        check can never FAIL) or open a junk PR. This runs the already-built
+        prompt directly, and with verification-only tools (Read/Glob/Grep/Bash,
+        no Edit/Write) so opening a PR is structurally impossible.
+
+        Args:
+            prompt: The fully-built release verification prompt (see
+                ``build_release_check_prompt``).
+            model_override: Optional model to use (callers pass Sonnet for
+                speed); falls back to the executor's default model.
+
+        Returns:
+            Dict with 'output', 'success', 'subtype', and 'model_used' keys —
+            the same shape as ``run_work_session``.
+        """
+        # Reset terminal-result capture so a prior session's outcome cannot
+        # leak into this session's derived success.
+        if self.message_processor is not None:
+            self.message_processor.reset_result_state()
+
+        # Run the prompt directly with verification tools (read + bash for
+        # gh/curl/migration checks) — no create-PR wrapper, no write tools.
+        result = run_async_with_cleanup(
+            self.query_executor.run_query(
+                prompt=prompt,
+                tools=self.get_tools_for_phase("verification"),
+                model_override=model_override,
+                get_model_name_func=self.get_model_name_func,
+                get_agents_func=self.get_agents_func,
+                process_message_func=self.process_message_func,
+            )
+        )
+
+        # Derive success from the SDK's terminal ResultMessage (see
+        # run_work_session) rather than assuming it.
+        success = True
+        subtype: str | None = None
+        if self.message_processor is not None:
+            success = not self.message_processor.last_result_is_error
+            subtype = self.message_processor.last_result_subtype
+
+        return {
+            "output": result,
+            "success": success,
+            "subtype": subtype,
+            "model_used": (model_override or self.model).value,
+        }
+
+    def verify_success_criteria(
+        self, criteria: str, context: str = "", tasks_summary: str = ""
+    ) -> dict[str, Any]:
         """Verify if success criteria are met.
 
         Uses verification tools (Read, Glob, Grep, Bash) to actually run tests
@@ -368,13 +468,22 @@ class AgentPhaseExecutor:
 
         Args:
             criteria: The success criteria to verify.
-            context: Additional context (e.g., tasks summary).
+            context: Accumulated learnings from prior sessions (context.md),
+                injected under its own "Previous Context" header.
+            tasks_summary: Summary of the tasks actually completed (checked-off
+                plan tasks, merged PRs), injected under "Completed Tasks".
 
         Returns:
             Dict with 'success' and 'details' keys.
         """
-        # Build prompt using centralized prompts module
-        prompt = build_verification_prompt(criteria=criteria, tasks_summary=context)
+        # Build prompt using centralized prompts module. Context and the
+        # completed-tasks summary are passed separately so accumulated context
+        # is never rendered under the "Completed Tasks" header.
+        prompt = build_verification_prompt(
+            criteria=criteria,
+            tasks_summary=tasks_summary or None,
+            context=context or None,
+        )
 
         # Run async query with verification tools (read + bash for running tests)
         result = run_async_with_cleanup(
@@ -394,6 +503,47 @@ class AgentPhaseExecutor:
             "success": success,
             "details": result,
         }
+
+    def extract_session_learnings(self, session_output: str, existing_context: str = "") -> str:
+        """Extract terse, reusable learnings from a completed work session.
+
+        Runs the (previously dead) context-extraction prompt over the session
+        output so accumulated learnings can be persisted to context.md and
+        injected into later planning/work/verification prompts. Uses read-only
+        tools and Sonnet — this is a per-session summarization step, so it is
+        kept cheap and fast rather than burning the work model on it.
+
+        Args:
+            session_output: The raw text output of the work session to summarize.
+            existing_context: Already-accumulated context, passed so the model
+                avoids repeating learnings it has captured before.
+
+        Returns:
+            The extracted learnings as terse markdown bullets, or ``""`` when
+            ``session_output`` is empty.
+        """
+        if not session_output.strip():
+            return ""
+
+        prompt = build_context_extraction_prompt(
+            session_output=session_output,
+            existing_context=existing_context or None,
+        )
+
+        # Read-only tools (planning phase) — extraction only summarizes text
+        # already in the prompt; it must never modify the repo or run commands.
+        result = run_async_with_cleanup(
+            self.query_executor.run_query(
+                prompt=prompt,
+                tools=self.get_tools_for_phase("planning"),
+                model_override=ModelType.SONNET,  # Sonnet for speed/cost
+                get_model_name_func=self.get_model_name_func,
+                get_agents_func=self.get_agents_func,
+                process_message_func=self.process_message_func,
+            )
+        )
+
+        return result.strip()
 
     def _parse_verification_result(self, result: str) -> bool:
         """Parse the verification result to determine success.
@@ -424,12 +574,15 @@ class AgentPhaseExecutor:
             "verification failed",
             "cannot verify",
         ]
+        # NOTE: a bare "success" substring is deliberately NOT an indicator.
+        # Output like "runs successfully but 2 criteria unmet" contains
+        # "success" and would otherwise be scored PASS. Each indicator here
+        # asserts *all* criteria are met, not merely that something succeeded.
         positive_indicators = [
             "all criteria met",
             "all criteria verified",
             "overall success: yes",
             "verification successful",
-            "success",  # Generic success indicator
         ]
 
         # Check for negative indicators first (these are disqualifying)
@@ -466,7 +619,10 @@ class AgentPhaseExecutor:
         Returns:
             The extracted or wrapped plan.
         """
-        # For MVP, return the full result - we'll parse later
+        # Strip the PLANNING COMPLETE stop-marker so it is never persisted into
+        # plan.md or re-injected into later prompts.
+        result = _strip_planning_complete(result)
+
         if "## Task List" in result:
             return result
 
@@ -482,6 +638,10 @@ class AgentPhaseExecutor:
         Returns:
             The extracted success criteria.
         """
+        # Strip the PLANNING COMPLETE stop-marker so it is never persisted into
+        # criteria.txt or re-injected into later prompts.
+        result = _strip_planning_complete(result)
+
         # Look for success criteria section
         if "## Success Criteria" in result:
             parts = result.split("## Success Criteria")

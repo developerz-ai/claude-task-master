@@ -55,6 +55,7 @@ def mock_agent():
         return_value={"output": "Task completed successfully", "success": True}
     )
     agent.verify_success_criteria = MagicMock(return_value={"success": True})
+    agent.extract_session_learnings = MagicMock(return_value="")
     return agent
 
 

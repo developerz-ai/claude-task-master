@@ -142,6 +142,11 @@ class TaskRunner:
         self._parsed_groups_cache: list[TaskGroup] | None = None
         self._plan_hash: int | None = None
 
+        # Raw text output of the most recent work session, exposed so the
+        # orchestrator can extract accumulated context.md learnings from it.
+        # "" when no session has run yet or the session produced no output.
+        self.last_session_output: str = ""
+
     def _get_parsed_tasks(self, plan: str) -> tuple[list[ParsedTask], list[TaskGroup]]:
         """Get parsed tasks and groups, with caching.
 
@@ -399,6 +404,10 @@ Please complete this task."""
         # Log the response
         if self.logger and result.get("output"):
             self.logger.log_response(result.get("output", ""))
+
+        # Expose the session output so the orchestrator can distil it into
+        # accumulated context.md learnings after the task is marked complete.
+        self.last_session_output = result.get("output", "") or ""
 
         return "ran"
 

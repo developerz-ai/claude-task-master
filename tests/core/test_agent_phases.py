@@ -273,6 +273,137 @@ class TestAgentPhaseExecutorExtractMethods:
         extracted = phase_executor._extract_criteria("")
         assert "All tasks in the task list are completed successfully." in extracted
 
+    def test_extract_plan_strips_planning_complete_marker(self, phase_executor):
+        """_extract_plan removes a trailing PLANNING COMPLETE stop-marker."""
+        result = (
+            "## Task List\n\n- [ ] Task 1\n\n## Success Criteria\n\n1. Tests pass\n\n"
+            "PLANNING COMPLETE\n"
+        )
+        extracted = phase_executor._extract_plan(result)
+        assert "PLANNING COMPLETE" not in extracted
+        assert "## Task List" in extracted
+        assert "1. Tests pass" in extracted
+
+    def test_extract_plan_preserves_marker_free_output(self, phase_executor):
+        """Marker-free planner output is returned byte-for-byte unchanged."""
+        result = "## Task List\n\n- [ ] Task 1\n"
+        assert phase_executor._extract_plan(result) == result
+
+    def test_extract_criteria_strips_planning_complete_marker(self, phase_executor):
+        """_extract_criteria removes a trailing PLANNING COMPLETE stop-marker."""
+        result = (
+            "## Task List\n\n- [ ] Task 1\n\n## Success Criteria\n\n1. Tests pass\n"
+            "2. Lint clean\n\nPLANNING COMPLETE\n"
+        )
+        extracted = phase_executor._extract_criteria(result)
+        assert "PLANNING COMPLETE" not in extracted
+        assert "1. Tests pass" in extracted
+        assert "2. Lint clean" in extracted
+
+    def test_extract_criteria_strips_backtick_wrapped_marker(self, phase_executor):
+        """A backtick-wrapped `PLANNING COMPLETE` marker is also stripped."""
+        result = "## Success Criteria\n\n1. Tests pass\n\n`PLANNING COMPLETE`"
+        extracted = phase_executor._extract_criteria(result)
+        assert "PLANNING COMPLETE" not in extracted
+        assert "1. Tests pass" in extracted
+
+    def test_strip_planning_complete_marker_only_collapses_to_empty(self) -> None:
+        """Marker-only input collapses to '', never a lone newline."""
+        from claude_task_master.core.agent_phases import _strip_planning_complete
+
+        assert _strip_planning_complete("PLANNING COMPLETE") == ""
+        assert _strip_planning_complete("planning complete\n") == ""
+
+
+# =============================================================================
+# AgentPhaseExecutor Extract Session Learnings Tests
+# =============================================================================
+
+
+class TestAgentPhaseExecutorExtractSessionLearnings:
+    """Tests for extract_session_learnings (context.md accumulation source)."""
+
+    @pytest.fixture
+    def phase_executor(self):
+        """Create an AgentPhaseExecutor whose default model is NOT Sonnet.
+
+        Uses Opus as the executor default so tests can prove the extraction
+        forces the cheaper Sonnet override regardless of the work model.
+        """
+        from claude_task_master.core.agent_phases import AgentPhaseExecutor
+
+        return AgentPhaseExecutor(
+            query_executor=MagicMock(),
+            model=ModelType.OPUS,
+            logger=None,
+        )
+
+    def test_empty_output_returns_empty_without_querying(self, phase_executor):
+        """Empty session output short-circuits — no query is issued."""
+        mock_run_query = AsyncMock(return_value="ignored")
+        phase_executor.query_executor.run_query = mock_run_query
+
+        assert phase_executor.extract_session_learnings("") == ""
+        mock_run_query.assert_not_called()
+
+    def test_whitespace_output_returns_empty_without_querying(self, phase_executor):
+        """Whitespace-only session output is treated as empty."""
+        mock_run_query = AsyncMock(return_value="ignored")
+        phase_executor.query_executor.run_query = mock_run_query
+
+        assert phase_executor.extract_session_learnings("   \n\t  ") == ""
+        mock_run_query.assert_not_called()
+
+    def test_returns_stripped_learnings(self, phase_executor):
+        """Non-empty output runs the query and returns the stripped result."""
+        mock_run_query = AsyncMock(return_value="  - Uses fcntl locking\n  ")
+        phase_executor.query_executor.run_query = mock_run_query
+
+        with patch(
+            "claude_task_master.core.agent_phases.run_async_with_cleanup",
+            return_value="  - Uses fcntl locking\n  ",
+        ):
+            learnings = phase_executor.extract_session_learnings("Did some work")
+
+        assert learnings == "- Uses fcntl locking"
+        mock_run_query.assert_called_once()
+
+    def test_uses_sonnet_and_read_only_tools(self, phase_executor):
+        """Extraction runs on Sonnet with a read-only tool set (no Bash/Edit/Write)."""
+        mock_run_query = AsyncMock(return_value="- learning")
+        phase_executor.query_executor.run_query = mock_run_query
+
+        with patch(
+            "claude_task_master.core.agent_phases.run_async_with_cleanup",
+            return_value="- learning",
+        ):
+            phase_executor.extract_session_learnings("Session output here")
+
+        call_kwargs = mock_run_query.call_args[1]
+        assert call_kwargs["model_override"] == ModelType.SONNET
+        tools = call_kwargs["tools"]
+        assert "Read" in tools
+        for forbidden in ("Bash", "Edit", "Write"):
+            assert forbidden not in tools
+
+    def test_existing_context_flows_into_prompt(self, phase_executor):
+        """existing_context is embedded in the extraction prompt."""
+        mock_run_query = AsyncMock(return_value="- learning")
+        phase_executor.query_executor.run_query = mock_run_query
+
+        with patch(
+            "claude_task_master.core.agent_phases.run_async_with_cleanup",
+            return_value="- learning",
+        ):
+            phase_executor.extract_session_learnings(
+                "New session output",
+                existing_context="EARLIER_LEARNING_MARKER",
+            )
+
+        prompt = mock_run_query.call_args[1]["prompt"]
+        assert "EARLIER_LEARNING_MARKER" in prompt
+        assert "New session output" in prompt
+
 
 # =============================================================================
 # AgentPhaseExecutor Parse Verification Result Tests
@@ -330,14 +461,24 @@ class TestAgentPhaseExecutorParseVerificationResult:
         result = "Verification failed due to errors"
         assert phase_executor._parse_verification_result(result) is False
 
-    def test_parse_generic_success(self, phase_executor):
-        """Test parsing generic 'success' indicator."""
+    def test_bare_success_substring_does_not_pass(self, phase_executor):
+        """A bare 'success' substring is NOT a PASS.
+
+        Previously "success" was a generic positive indicator, so output like
+        "Implementation is a success" (with criteria possibly unmet and no
+        explicit marker) scored PASS. It must not.
+        """
         result = "Implementation is a success"
-        assert phase_executor._parse_verification_result(result) is True
+        assert phase_executor._parse_verification_result(result) is False
+
+    def test_runs_successfully_but_criteria_unmet_fails(self, phase_executor):
+        """'runs successfully but N criteria unmet' must never score PASS."""
+        result = "The suite runs successfully but 2 criteria are unmet"
+        assert phase_executor._parse_verification_result(result) is False
 
     def test_parse_negative_overrides_positive(self, phase_executor):
         """Test negative indicators override positive ones."""
-        result = "Success noted but criteria not met"
+        result = "All criteria met, but one check is not met"
         assert phase_executor._parse_verification_result(result) is False
 
 
@@ -667,6 +808,130 @@ class TestAgentWrapperRunWorkSession:
 
 
 # =============================================================================
+# AgentWrapper run_release_check Tests
+# =============================================================================
+
+
+class TestAgentWrapperRunReleaseCheck:
+    """Tests for run_release_check — the verify-only post-merge release check."""
+
+    @pytest.fixture
+    def agent_with_mock(self, temp_dir):
+        """Create an AgentWrapper with mocked methods."""
+        mock_sdk = MagicMock()
+        mock_sdk.query = AsyncMock()
+        mock_sdk.ClaudeAgentOptions = MagicMock()
+
+        with patch.dict("sys.modules", {"claude_agent_sdk": mock_sdk}):
+            agent = AgentWrapper(
+                access_token="test-token",
+                model=ModelType.SONNET,
+                working_dir=str(temp_dir),
+            )
+        return agent
+
+    def test_run_release_check_returns_required_keys(self, agent_with_mock):
+        """Returns the same dict shape as run_work_session."""
+        with patch(
+            "claude_task_master.core.agent_phases.run_async_with_cleanup",
+            return_value="RELEASE_CHECK: PASS",
+        ):
+            result = agent_with_mock.run_release_check("check the deploy")
+
+        assert result["output"] == "RELEASE_CHECK: PASS"
+        assert "success" in result
+        assert "subtype" in result
+        assert "model_used" in result
+
+    def test_run_release_check_uses_verification_tools_not_working(self, agent_with_mock):
+        """The check runs with verification tools (no Edit/Write), so the agent
+        structurally cannot open a junk PR — the core fix for the create-PR
+        contract leaking into release verification."""
+        from claude_task_master.core.agent_models import get_tools_for_phase
+
+        run_query = MagicMock()
+        agent_with_mock._phase_executor.query_executor.run_query = run_query
+        with patch(
+            "claude_task_master.core.agent_phases.run_async_with_cleanup",
+            return_value="RELEASE_CHECK: PASS",
+        ):
+            agent_with_mock.run_release_check("check the deploy")
+
+        tools = run_query.call_args.kwargs["tools"]
+        assert tools == get_tools_for_phase("verification")
+        assert "Edit" not in tools
+        assert "Write" not in tools
+
+    def test_run_release_check_passes_prompt_verbatim(self, agent_with_mock):
+        """The prompt is executed as-is — NOT wrapped in build_work_prompt (which
+        would inject the create-PR contract that contradicts RELEASE_CHECK)."""
+        prompt = "You are in RELEASE VERIFICATION mode. Output RELEASE_CHECK: PASS/FAIL/SKIP"
+        run_query = MagicMock()
+        agent_with_mock._phase_executor.query_executor.run_query = run_query
+        with patch(
+            "claude_task_master.core.agent_phases.run_async_with_cleanup",
+            return_value="RELEASE_CHECK: FAIL",
+        ):
+            agent_with_mock.run_release_check(prompt)
+
+        sent = run_query.call_args.kwargs["prompt"]
+        assert sent == prompt
+        assert "Create PR" not in sent
+        assert "TASK COMPLETE" not in sent
+
+    def test_run_release_check_forwards_model_override(self, agent_with_mock):
+        """model_override is forwarded to the query executor."""
+        run_query = MagicMock()
+        agent_with_mock._phase_executor.query_executor.run_query = run_query
+        with patch(
+            "claude_task_master.core.agent_phases.run_async_with_cleanup",
+            return_value="RELEASE_CHECK: SKIP",
+        ):
+            agent_with_mock.run_release_check("check", model_override=ModelType.SONNET)
+
+        assert run_query.call_args.kwargs["model_override"] == ModelType.SONNET
+
+    def test_run_release_check_reports_failure_on_error_result(self, agent_with_mock):
+        """A budget/turn-capped release check (ResultMessage.is_error=True) reports
+        success=False rather than hardcoding True."""
+        proc = agent_with_mock._message_processor
+
+        def fake_run(coro):
+            coro.close()  # avoid 'coroutine was never awaited' warning
+            proc.last_result_is_error = True
+            proc.last_result_subtype = "error_max_turns"
+            return "partial"
+
+        with patch(
+            "claude_task_master.core.agent_phases.run_async_with_cleanup",
+            side_effect=fake_run,
+        ):
+            result = agent_with_mock.run_release_check("check")
+
+        assert result["success"] is False
+        assert result["subtype"] == "error_max_turns"
+
+    def test_run_release_check_resets_prior_error_before_query(self, agent_with_mock):
+        """A stale error from a previous session must not leak into the check."""
+        proc = agent_with_mock._message_processor
+        proc.last_result_is_error = True
+        proc.last_result_subtype = "error_max_budget_usd"
+
+        def fake_run(coro):
+            coro.close()  # avoid 'coroutine was never awaited' warning
+            return "RELEASE_CHECK: PASS"
+
+        with patch(
+            "claude_task_master.core.agent_phases.run_async_with_cleanup",
+            side_effect=fake_run,
+        ):
+            result = agent_with_mock.run_release_check("check")
+
+        assert result["success"] is True
+        assert result["subtype"] is None
+
+
+# =============================================================================
 # AgentWrapper verify_success_criteria Tests
 # =============================================================================
 
@@ -987,8 +1252,8 @@ Also consider:
 
         assert result["success"] is True
 
-    def test_verification_with_lowercase_success(self, agent):
-        """Test verification detects lowercase 'success'."""
+    def test_verification_bare_success_does_not_pass(self, agent):
+        """A bare 'success' (no marker, no 'all criteria met') is NOT a PASS."""
         with patch.object(agent, "_run_query", new_callable=AsyncMock) as mock_query:
             mock_query.return_value = "The implementation is a success."
             with patch(
@@ -997,7 +1262,7 @@ Also consider:
             ):
                 result = agent.verify_success_criteria("Tests pass")
 
-        assert result["success"] is True
+        assert result["success"] is False
 
     def test_verification_with_uppercase_criteria_met(self, agent):
         """Test verification detects 'ALL CRITERIA MET'."""
