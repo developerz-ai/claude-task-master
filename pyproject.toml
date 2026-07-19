@@ -167,6 +167,7 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests (require external services)",
     "real_sdk: marks tests that require a real Claude Agent SDK / live credentials (opt-in via CLAUDETM_REAL_SDK=1)",
+    "property: marks property-based (Hypothesis) tests (auto-applied to tests/property/)",
 ]
 
 # Hypothesis settings for property-based tests
