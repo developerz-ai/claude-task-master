@@ -4,6 +4,7 @@ Tests message storage, retrieval, clearing, and persistence.
 """
 
 import json
+import multiprocessing
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +14,54 @@ import pytest
 from claude_task_master.core.state import StateLockError, file_lock
 from claude_task_master.mailbox.models import Priority
 from claude_task_master.mailbox.storage import MailboxStorage
+
+# ---------------------------------------------------------------------------
+# Module-level workers for cross-process tests.
+# These must be at module scope (not inside classes) so ``multiprocessing``
+# can pickle them on platforms that use the "spawn" start method.
+# ---------------------------------------------------------------------------
+
+
+def _proc_add_n(state_dir_str: str, tid: int, n: int) -> None:
+    """Add n messages to the mailbox from a child process."""
+    from pathlib import Path as _Path
+
+    from claude_task_master.mailbox.storage import MailboxStorage as _Storage
+
+    storage = _Storage(state_dir=_Path(state_dir_str))
+    for i in range(n):
+        storage.add_message(f"t{tid}-m{i}")
+
+
+def _proc_dequeue_n(
+    state_dir_str: str, n_rounds: int, result_queue: "multiprocessing.Queue[list[str]]"
+) -> None:
+    """Call get_and_clear n_rounds times and put collected contents into result_queue."""
+    from pathlib import Path as _Path
+
+    from claude_task_master.mailbox.storage import MailboxStorage as _Storage
+
+    storage = _Storage(state_dir=_Path(state_dir_str))
+    collected: list[str] = []
+    for _ in range(n_rounds):
+        msgs = storage.get_and_clear()
+        collected.extend(m.content for m in msgs)
+    result_queue.put(collected)
+
+
+def _proc_hold_lock(
+    lock_file_str: str,
+    ready: "multiprocessing.synchronize.Event",
+    done: "multiprocessing.synchronize.Event",
+) -> None:
+    """Acquire the mailbox flock, signal ``ready``, then wait for ``done``."""
+    from pathlib import Path as _Path
+
+    from claude_task_master.core.state import file_lock as _file_lock
+
+    with _file_lock(_Path(lock_file_str), timeout=5.0):
+        ready.set()
+        done.wait(timeout=5.0)
 
 
 class TestMailboxStorageBasics:
@@ -1040,3 +1089,86 @@ class TestMailboxLocking:
         # Every message present exactly once: none destroyed, none duplicated.
         assert sorted(drained) == expected
         assert storage.count() == 0
+
+
+class TestConcurrentProcesses:
+    """Cross-process safety using real OS processes and an fcntl flock.
+
+    These tests exercise the mailbox file lock across process boundaries
+    (not merely threads), which is the actual runtime topology: the REST/MCP
+    server and the orchestrator run in separate processes.
+    """
+
+    @pytest.mark.slow
+    @pytest.mark.timeout(15)
+    def test_two_processes_adding_lose_no_messages(self, state_dir):
+        """Two OS processes adding messages concurrently never clobber each other."""
+        storage = MailboxStorage(state_dir=state_dir)
+        n_per_proc = 4
+        procs = [
+            multiprocessing.Process(target=_proc_add_n, args=(str(state_dir), t, n_per_proc))
+            for t in range(2)
+        ]
+        for p in procs:
+            p.start()
+        for p in procs:
+            p.join(timeout=10)
+
+        assert storage.count() == 2 * n_per_proc
+        assert storage.get_status()["total_messages_received"] == 2 * n_per_proc
+
+    @pytest.mark.slow
+    @pytest.mark.timeout(15)
+    def test_two_processes_add_vs_get_and_clear_conserve_all(self, state_dir):
+        """Adder and dequeuer in separate processes: no message is lost or duplicated."""
+        n_adds = 5
+        # Give the dequeuer enough rounds to drain all adds.
+        n_dequeue_rounds = n_adds + 2
+
+        result_q: multiprocessing.Queue[list[str]] = multiprocessing.Queue()
+        adder = multiprocessing.Process(target=_proc_add_n, args=(str(state_dir), 0, n_adds))
+        dequeuer = multiprocessing.Process(
+            target=_proc_dequeue_n, args=(str(state_dir), n_dequeue_rounds, result_q)
+        )
+
+        adder.start()
+        dequeuer.start()
+        adder.join(timeout=10)
+        dequeuer.join(timeout=10)
+
+        # Collect any messages the dequeuer missed (add completed after last get_and_clear).
+        storage = MailboxStorage(state_dir=state_dir)
+        leftover = [m.content for m in storage.get_and_clear()]
+
+        dequeued = result_q.get(timeout=5)
+        all_seen = sorted(dequeued + leftover)
+        expected = sorted(f"t0-m{i}" for i in range(n_adds))
+
+        # Every message appears exactly once: none destroyed, none duplicated.
+        assert all_seen == expected
+
+    @pytest.mark.slow
+    @pytest.mark.timeout(10)
+    def test_lock_held_by_child_blocks_parent_mutation(self, state_dir):
+        """Lock held in a child process blocks a mutation from the parent process."""
+        state_dir.mkdir(parents=True, exist_ok=True)
+        storage = MailboxStorage(state_dir=state_dir)
+        # Shrink the timeout so the test does not block for the full 5 s.
+        storage.LOCK_TIMEOUT = 0.2
+
+        ready: multiprocessing.synchronize.Event = multiprocessing.Event()
+        done: multiprocessing.synchronize.Event = multiprocessing.Event()
+        child = multiprocessing.Process(
+            target=_proc_hold_lock,
+            args=(str(storage._lock_file), ready, done),
+        )
+        child.start()
+        try:
+            ready.wait(timeout=5.0)
+            with pytest.raises(StateLockError):
+                storage.add_message("blocked by child lock")
+        finally:
+            done.set()
+            child.join(timeout=5.0)
+            if child.is_alive():
+                child.kill()
