@@ -1220,8 +1220,8 @@ class TestGitHubClientGetRepoInfo:
                 result = github_client._get_repo_info()
                 assert result == "owner/repo"
 
-    def test_get_repo_info_various_formats(self, github_client):
-        """Test repo info with various owner/repo formats."""
+    def test_get_repo_info_various_formats(self):
+        """Test repo info with various owner/repo formats (fresh client per case)."""
         test_cases = [
             "simple/repo",
             "organization-name/repo-name",
@@ -1229,14 +1229,47 @@ class TestGitHubClientGetRepoInfo:
             "CamelCase/RepoName",
         ]
         for expected in test_cases:
+            # Fresh client per iteration so the cache is empty each time.
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(returncode=0)
+                client = GitHubClient()
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = MagicMock(
                     returncode=0,
                     stdout=f"{expected}\n",
                     stderr="",
                 )
-                result = github_client._get_repo_info()
+                result = client._get_repo_info()
                 assert result == expected
+
+    def test_get_repo_info_caches_result(self, github_client):
+        """Second call with same cwd uses cache — subprocess called only once."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="owner/repo\n",
+                stderr="",
+            )
+            result1 = github_client._get_repo_info()
+            result2 = github_client._get_repo_info()
+
+        assert result1 == "owner/repo"
+        assert result2 == "owner/repo"
+        mock_run.assert_called_once()  # subprocess invoked only on the first call
+
+    def test_get_repo_info_different_cwd_not_cached(self, github_client):
+        """Different cwd values bypass the per-cwd cache and fetch separately."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout="owner/repo-a\n", stderr=""),
+                MagicMock(returncode=0, stdout="owner/repo-b\n", stderr=""),
+            ]
+            result_a = github_client._get_repo_info(cwd="/path/a")
+            result_b = github_client._get_repo_info(cwd="/path/b")
+
+        assert result_a == "owner/repo-a"
+        assert result_b == "owner/repo-b"
+        assert mock_run.call_count == 2
 
     def test_get_repo_info_not_in_git_repo(self, github_client):
         """Test repo info when not in a git repository."""

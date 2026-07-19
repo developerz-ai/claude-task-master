@@ -33,21 +33,34 @@ DEFAULT_BRANCHES = {"main", "master", "develop", "development"}
 def _checkout_and_pull(branch: str) -> bool:
     """Checkout a branch and pull latest changes. Returns True on success."""
     try:
-        subprocess.run(["git", "checkout", branch], check=True, capture_output=True, text=True)
-        subprocess.run(["git", "pull"], check=True, capture_output=True, text=True)
+        subprocess.run(
+            ["git", "checkout", branch], check=True, capture_output=True, text=True, timeout=30
+        )
+        subprocess.run(["git", "pull"], check=True, capture_output=True, text=True, timeout=120)
         return True
     except subprocess.CalledProcessError as e:
         console.warning(f"Could not checkout/pull {branch}: {e.stderr.strip() or e}")
+        return False
+    except subprocess.TimeoutExpired:
+        console.warning(f"git operation timed out while checking out {branch}")
         return False
 
 
 def _delete_local_branch(branch: str) -> None:
     """Delete a local branch (best effort)."""
     try:
-        subprocess.run(["git", "branch", "-D", branch], check=True, capture_output=True, text=True)
+        subprocess.run(
+            ["git", "branch", "-D", branch],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
         console.success(f"Deleted local branch {branch}")
     except subprocess.CalledProcessError as e:
         console.warning(f"Could not delete local branch {branch}: {e.stderr.strip() or e}")
+    except subprocess.TimeoutExpired:
+        console.warning(f"Timed out deleting local branch {branch}")
 
 
 def _validate_not_default_branch() -> None:

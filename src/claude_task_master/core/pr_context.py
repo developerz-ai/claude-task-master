@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import shutil
-import subprocess
 from typing import TYPE_CHECKING
 
 from . import console
@@ -100,15 +99,7 @@ class PRContextManager:
 
             # Get repository info for CILogDownloader
             console.detail("Getting repository info via gh CLI...")
-            result = subprocess.run(
-                ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            repo = result.stdout.strip()
-            if not repo:
-                raise ValueError("Could not determine repository name from gh CLI")
+            repo = self.github_client._get_repo_info()
             console.detail(f"Repository: {repo}")
 
             # Download failed job logs using CILogDownloader
@@ -178,20 +169,12 @@ class PRContextManager:
 
         try:
             # Get repository info
-            result = subprocess.run(
-                ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            repo_info = result.stdout.strip()
+            repo_info = self.github_client._get_repo_info()
 
             # Use REST API to get ALL PR review comments (like tstc)
-            result = subprocess.run(
+            result = self.github_client._run_gh_command(
                 ["gh", "api", "--paginate", f"repos/{repo_info}/pulls/{pr_number}/comments"],
-                check=True,
-                capture_output=True,
-                text=True,
+                timeout=60,
             )
             all_comments = json.loads(result.stdout)
 
@@ -276,7 +259,7 @@ class PRContextManager:
         """
 
         try:
-            result = subprocess.run(
+            result = self.github_client._run_gh_command(
                 [
                     "gh",
                     "api",
@@ -290,9 +273,7 @@ class PRContextManager:
                     "-F",
                     f"pr={pr_number}",
                 ],
-                check=True,
-                capture_output=True,
-                text=True,
+                timeout=30,
             )
 
             data = json.loads(result.stdout)
@@ -439,7 +420,7 @@ class PRContextManager:
         }
         """
 
-        subprocess.run(
+        self.github_client._run_gh_command(
             [
                 "gh",
                 "api",
@@ -451,9 +432,7 @@ class PRContextManager:
                 "-F",
                 f"body={body}",
             ],
-            check=True,
-            capture_output=True,
-            text=True,
+            timeout=30,
         )
 
     def resolve_thread(self, thread_id: str) -> None:
@@ -472,7 +451,7 @@ class PRContextManager:
         }
         """
 
-        subprocess.run(
+        self.github_client._run_gh_command(
             [
                 "gh",
                 "api",
@@ -482,9 +461,7 @@ class PRContextManager:
                 "-F",
                 f"threadId={thread_id}",
             ],
-            check=True,
-            capture_output=True,
-            text=True,
+            timeout=30,
         )
 
     def resolve_addressed_threads(self, pr_number: int | None) -> int:
@@ -538,13 +515,7 @@ class PRContextManager:
             Set of thread IDs that are already resolved.
         """
         try:
-            result = subprocess.run(
-                ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            repo_info = result.stdout.strip()
+            repo_info = self.github_client._get_repo_info()
             owner, repo = repo_info.split("/")
 
             query = """
@@ -562,7 +533,7 @@ class PRContextManager:
             }
             """
 
-            result = subprocess.run(
+            result = self.github_client._run_gh_command(
                 [
                     "gh",
                     "api",
@@ -576,9 +547,7 @@ class PRContextManager:
                     "-F",
                     f"pr={pr_number}",
                 ],
-                check=True,
-                capture_output=True,
-                text=True,
+                timeout=30,
             )
 
             data = json.loads(result.stdout)

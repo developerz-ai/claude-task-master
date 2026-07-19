@@ -84,6 +84,8 @@ class GitHubClient(PROperationsMixin, CIOperationsMixin):
     def __init__(self) -> None:
         """Initialize GitHub client and verify gh CLI is available and authenticated."""
         self._check_gh_cli()
+        # Cache repo info per working-directory key to avoid repeated `gh repo view` calls.
+        self._repo_info_cache: dict[str | None, str] = {}
 
     def _run_gh_command(
         self,
@@ -174,7 +176,10 @@ class GitHubClient(PROperationsMixin, CIOperationsMixin):
             ) from e
 
     def _get_repo_info(self, cwd: str | None = None) -> str:
-        """Get current repository owner/name.
+        """Get current repository owner/name (memoized per working directory).
+
+        Results are cached per ``cwd`` value so that repeated calls within the
+        same client instance avoid redundant ``gh repo view`` round-trips.
 
         Args:
             cwd: Working directory for the gh command. Defaults to the current
@@ -187,12 +192,14 @@ class GitHubClient(PROperationsMixin, CIOperationsMixin):
             GitHubError: If command fails.
             GitHubTimeoutError: If command times out.
         """
-        result = self._run_gh_command(
-            ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
-            timeout=15,
-            cwd=cwd,
-        )
-        return result.stdout.strip()
+        if cwd not in self._repo_info_cache:
+            result = self._run_gh_command(
+                ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
+                timeout=15,
+                cwd=cwd,
+            )
+            self._repo_info_cache[cwd] = result.stdout.strip()
+        return self._repo_info_cache[cwd]
 
     def merge_pr(self, pr_number: int, use_auto: bool = True, admin: bool = False) -> None:
         """Merge a pull request using squash strategy.
