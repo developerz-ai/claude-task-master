@@ -22,6 +22,7 @@ from claude_task_master.core.state import file_lock
 from .models import MailboxMessage, MailboxState, Priority
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
     from typing import Any
 
 
@@ -35,10 +36,10 @@ class MailboxStorage:
     """Manages mailbox message storage.
 
     Persists messages to a JSON file with atomic writes for safety. Every
-    mutation (:meth:`add_message`, :meth:`get_and_clear`, :meth:`clear`) runs
-    its load→modify→save under an exclusive ``flock`` on ``.mailbox.lock`` so
-    concurrent REST/MCP/CLI writers and the orchestrator's dequeue cannot
-    interleave and lose or resurrect messages.
+    mutation (:meth:`add_message`, :meth:`get_and_clear`, :meth:`remove_messages`,
+    :meth:`clear`) runs its load→modify→save under an exclusive ``flock`` on
+    ``.mailbox.lock`` so concurrent REST/MCP/CLI writers and the orchestrator's
+    dequeue cannot interleave and lose or resurrect messages.
 
     Attributes:
         storage_path: Path to the mailbox.json file.
@@ -167,6 +168,39 @@ class MailboxStorage:
             self._save_state(state)
 
         return messages
+
+    def remove_messages(self, message_ids: Iterable[str]) -> int:
+        """Remove specific messages by ID, leaving any others untouched.
+
+        Supports the orchestrator's peek → process → clear flow: messages are
+        read with :meth:`get_messages` and only removed here once they have been
+        fully processed, so a failed merge or plan update leaves the user's
+        change requests in the mailbox to be retried instead of destroying them.
+        Removal is keyed on the specific IDs that were processed, so any message
+        that arrived concurrently during processing is preserved.
+
+        Args:
+            message_ids: IDs of the messages to remove. Unknown IDs are ignored.
+
+        Returns:
+            The number of messages actually removed.
+
+        Raises:
+            StateLockError: If the mailbox lock cannot be acquired in time.
+        """
+        ids = set(message_ids)
+        if not ids:
+            return 0
+
+        with file_lock(self._lock_file, timeout=self.LOCK_TIMEOUT):
+            state = self._load_state()
+            before = len(state.messages)
+            state.messages = [m for m in state.messages if m.id not in ids]
+            removed = before - len(state.messages)
+            state.last_checked = datetime.now()
+            self._save_state(state)
+
+        return removed
 
     def clear(self) -> int:
         """Clear all messages from the mailbox.

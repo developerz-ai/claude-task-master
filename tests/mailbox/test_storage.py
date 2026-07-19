@@ -250,6 +250,60 @@ class TestClear:
         assert storage.get_messages() == []
 
 
+class TestRemoveMessages:
+    """Test selective removal of messages by ID."""
+
+    def test_remove_messages_removes_specified_ids(self, state_dir):
+        """Test remove_messages deletes only the given IDs."""
+        storage = MailboxStorage(state_dir=state_dir)
+        keep = storage.add_message("keep me")
+        drop = storage.add_message("drop me")
+
+        removed = storage.remove_messages([drop])
+
+        assert removed == 1
+        remaining = storage.get_messages()
+        assert [m.id for m in remaining] == [keep]
+
+    def test_remove_messages_returns_removed_count(self, state_dir):
+        """Test remove_messages returns the number actually removed."""
+        storage = MailboxStorage(state_dir=state_dir)
+        a = storage.add_message("1")
+        b = storage.add_message("2")
+        storage.add_message("3")
+
+        assert storage.remove_messages([a, b]) == 2
+        assert storage.count() == 1
+
+    def test_remove_messages_ignores_unknown_ids(self, state_dir):
+        """Test unknown IDs are silently ignored, leaving messages intact."""
+        storage = MailboxStorage(state_dir=state_dir)
+        storage.add_message("keep me")
+
+        assert storage.remove_messages(["does-not-exist"]) == 0
+        assert storage.count() == 1
+
+    def test_remove_messages_empty_iterable_is_noop(self, state_dir):
+        """Test removing an empty ID list changes nothing."""
+        storage = MailboxStorage(state_dir=state_dir)
+        storage.add_message("keep me")
+
+        assert storage.remove_messages([]) == 0
+        assert storage.count() == 1
+
+    def test_remove_messages_persists_across_instances(self, state_dir):
+        """Test removal is written to disk and visible to a new instance."""
+        storage = MailboxStorage(state_dir=state_dir)
+        drop = storage.add_message("drop me")
+        storage.add_message("keep me")
+
+        storage.remove_messages([drop])
+
+        reloaded = MailboxStorage(state_dir=state_dir)
+        contents = [m.content for m in reloaded.get_messages()]
+        assert contents == ["keep me"]
+
+
 class TestCount:
     """Test counting messages."""
 
