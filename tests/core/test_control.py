@@ -12,6 +12,7 @@ from claude_task_master.core.control import (
     ControlResult,
     NoActiveTaskError,
 )
+from claude_task_master.core.control_channel import ControlChannel
 from claude_task_master.core.state import StateManager, TaskState
 from claude_task_master.mailbox.storage import MailboxStorage
 
@@ -1003,3 +1004,124 @@ class TestControlManagerCrossProcessSaves:
         resumed_state.session_count += 1
         orch_mgr.save_state_merged(resumed_state)
         assert orch_mgr.load_state().status == "working"
+
+
+# =============================================================================
+# Cross-process ControlChannel Tests
+# =============================================================================
+
+
+class TestControlChannelCrossProcess:
+    """Cross-process control channel: stop/pause written by one process, polled
+    by the orchestrator in *one* cycle.
+
+    The orchestrator reads ``control.json`` once per work-loop iteration. These
+    tests confirm that ControlManager writes are durable and immediately visible
+    to a separate ControlChannel reader — i.e., the orchestrator will honour the
+    signal in the very first poll after the write.
+    """
+
+    def test_stop_honored_in_one_cycle(self, initialized_state_manager):
+        """stop() writes control.json; a single channel.read() returns 'stop'.
+
+        Simulates the orchestrator's per-cycle poll: the stop is visible in
+        exactly one read — no multi-cycle delay.
+        """
+        control = ControlManager(state_manager=initialized_state_manager)
+        control.stop(reason="user halt")
+
+        # Simulate the orchestrator's poll: one read() call, different channel object.
+        channel = ControlChannel(initialized_state_manager.state_dir)
+        req = channel.read()
+        assert req is not None
+        assert req.action == "stop"
+        assert req.reason == "user halt"
+
+    def test_pause_honored_in_one_cycle(self, initialized_state_manager):
+        """pause() writes control.json; a single channel.read() returns 'pause'.
+
+        The orchestrator's first poll after a cross-process pause picks it up.
+        """
+        control = ControlManager(state_manager=initialized_state_manager)
+        control.pause(reason="review break")
+
+        channel = ControlChannel(initialized_state_manager.state_dir)
+        req = channel.read()
+        assert req is not None
+        assert req.action == "pause"
+        assert req.reason == "review break"
+
+    def test_resume_clears_channel(self, initialized_state_manager):
+        """resume() clears any stale stop/pause so the fresh run isn't immediately halted."""
+        # Write a stop to the channel first.
+        control = ControlManager(state_manager=initialized_state_manager)
+        control.stop(reason="old stop")
+
+        # Transition to stopped so resume() is allowed.
+        state = initialized_state_manager.load_state()
+        assert state.status == "stopped"
+
+        # Resume: should clear the channel.
+        control.resume()
+
+        channel = ControlChannel(initialized_state_manager.state_dir)
+        assert channel.read() is None
+
+    def test_stop_cleanup_no_race_with_second_state_manager(
+        self, initialized_state_manager, monkeypatch, caplog
+    ):
+        """stop(cleanup=True) skips cleanup when a *second* StateManager sees a live session.
+
+        Simulates the real cross-process scenario: the orchestrator runs in one
+        process (holds the session lock) while the REST server calls
+        stop(cleanup=True) with its own StateManager pointing to the same state
+        directory.  Cleanup must be skipped to avoid clobbering the live run.
+        """
+        # The CONTROL process has its own StateManager (second instance, same dir).
+        ctrl_mgr = StateManager(initialized_state_manager.state_dir)
+        monkeypatch.setattr(control_module, "SESSION_RELEASE_TIMEOUT_SEC", 0.05)
+        monkeypatch.setattr(control_module, "SESSION_RELEASE_POLL_INTERVAL_SEC", 0.01)
+        # Simulate the orchestrator's session still being active from ctrl_mgr's perspective.
+        monkeypatch.setattr(ctrl_mgr, "is_session_active", lambda: True)
+
+        control = ControlManager(state_manager=ctrl_mgr)
+        with caplog.at_level(logging.WARNING):
+            result = control.stop(cleanup=True)
+
+        assert result.success is True
+        assert result.details is not None
+        assert result.details["cleanup"] is False
+        assert result.details["cleanup_skipped"] == "session still active"
+        assert any("skipping cleanup" in msg for msg in caplog.messages)
+        # The original state dir must be untouched — orchestrator is still live.
+        assert initialized_state_manager.exists()
+
+    def test_stop_cleanup_proceeds_with_second_state_manager_after_release(
+        self, initialized_state_manager, monkeypatch
+    ):
+        """stop(cleanup=True) proceeds once the live session releases, using a second SM.
+
+        After the orchestrator finishes (session lock released), the control
+        process's cleanup runs normally.
+        """
+        ctrl_mgr = StateManager(initialized_state_manager.state_dir)
+        monkeypatch.setattr(control_module, "SESSION_RELEASE_TIMEOUT_SEC", 5.0)
+        monkeypatch.setattr(control_module, "SESSION_RELEASE_POLL_INTERVAL_SEC", 0.01)
+
+        calls: dict[str, int] = {"n": 0}
+
+        def fake_active() -> bool:
+            """Active for the first two probes, then releases."""
+            calls["n"] += 1
+            return calls["n"] < 3
+
+        monkeypatch.setattr(ctrl_mgr, "is_session_active", fake_active)
+
+        control = ControlManager(state_manager=ctrl_mgr)
+        result = control.stop(cleanup=True)
+
+        assert result.details is not None
+        assert result.details["cleanup"] is True
+        assert calls["n"] >= 3
+        # State dir cleaned up once the session released.
+        assert not ctrl_mgr.exists()
