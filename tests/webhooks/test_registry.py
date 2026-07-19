@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import threading
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -144,6 +145,32 @@ class TestTransaction:
                 raise RuntimeError("boom")
 
         # wh_2 must NOT have been persisted.
+        assert set(registry.load()) == {"wh_1"}
+
+    def test_kill_mid_save_leaves_original_intact(self, registry: WebhookRegistry) -> None:
+        """A failed rename during atomic write leaves the original file untouched.
+
+        Simulates a process killed between writing the temp file and completing
+        the rename (e.g. disk full or SIGKILL). Because atomic_write_json uses
+        a temp-file + os.replace pattern, the original webhooks.json is never
+        touched if os.replace fails — so the pre-crash state is preserved.
+        """
+        with registry.transaction() as webhooks:
+            webhooks["wh_1"] = _record("https://example.com/a")
+
+        assert "wh_1" in registry.load()
+
+        # Patch atomic_write_json as seen from the registry module to simulate
+        # an OS-level failure during the atomic rename step.
+        with pytest.raises(OSError, match="simulated disk full"):
+            with patch(
+                "claude_task_master.webhooks.registry.atomic_write_json",
+                side_effect=OSError("simulated disk full"),
+            ):
+                with registry.transaction() as webhooks:
+                    webhooks["wh_2"] = _record("https://example.com/b")
+
+        # wh_2 must NOT have been persisted; wh_1 must still be present.
         assert set(registry.load()) == {"wh_1"}
 
     def test_concurrent_transactions_do_not_lose_writes(self, registry: WebhookRegistry) -> None:

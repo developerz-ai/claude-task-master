@@ -3,6 +3,7 @@
 Tests the CRUD endpoints for webhook configurations and the test endpoint.
 """
 
+import concurrent.futures
 import json
 from datetime import datetime
 from pathlib import Path
@@ -225,6 +226,35 @@ class TestCreateWebhook:
         response = api_client.post("/webhooks", json=request_data)
         assert response.status_code == 422  # Validation error
 
+    def test_concurrent_creates_both_survive(self, api_client, api_state_dir):
+        """Two concurrent POST /webhooks requests both produce 201 and persist.
+
+        Exercises the flock serialisation in WebhookRegistry.transaction() at
+        the HTTP layer: each API call does a read-modify-write under an exclusive
+        lock so a concurrent pair of creates must not overwrite each other.
+        """
+        payloads = [
+            {"url": "https://concurrent.example.com/hook-a"},
+            {"url": "https://concurrent.example.com/hook-b"},
+        ]
+
+        def _post(data):
+            return api_client.post("/webhooks", json=data)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            futs = [pool.submit(_post, p) for p in payloads]
+            responses = [f.result() for f in futs]
+
+        for resp in responses:
+            assert resp.status_code == 201, f"Expected 201, got {resp.status_code}: {resp.json()}"
+
+        # Both webhook URLs must be present in the registry.
+        list_resp = api_client.get("/webhooks")
+        assert list_resp.status_code == 200
+        urls = {w["url"] for w in list_resp.json()["webhooks"]}
+        assert "https://concurrent.example.com/hook-a" in urls
+        assert "https://concurrent.example.com/hook-b" in urls
+
 
 # =============================================================================
 # Get Webhook Tests
@@ -321,7 +351,7 @@ class TestUpdateWebhook:
 
     def test_update_webhook_no_updates(self, api_client, webhooks_file):
         """Test updating a webhook with no fields provided returns 400."""
-        update_data = {}
+        update_data: dict[str, object] = {}
 
         response = api_client.put("/webhooks/wh_abc12345_def67890", json=update_data)
         assert response.status_code == 400
