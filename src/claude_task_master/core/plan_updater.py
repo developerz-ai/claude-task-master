@@ -105,12 +105,17 @@ class PlanUpdater:
         goal = self.state_manager.load_goal()
         context = self.state_manager.load_context()
 
+        # Get max_prs constraint from state options
+        state = self.state_manager.load_state()
+        max_prs = state.options.max_prs if state and state.options else None
+
         # Build the update prompt
         prompt = build_plan_update_prompt(
             current_plan=current_plan,
             change_request=change_request,
             goal=goal if goal else None,
             context=context if context else None,
+            max_prs=max_prs,
         )
 
         if self.logger:

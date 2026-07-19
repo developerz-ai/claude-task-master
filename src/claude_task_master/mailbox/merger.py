@@ -27,6 +27,9 @@ class MessageMerger:
     def merge(self, messages: list[MailboxMessage]) -> str:
         """Merge multiple messages into a single change request.
 
+        Sorts messages by priority (highest first), then formats them into
+        a consolidated change request with appropriate prioritization hints.
+
         Args:
             messages: List of MailboxMessage objects to merge.
 
@@ -42,7 +45,10 @@ class MessageMerger:
         if len(messages) == 1:
             return self._format_single_message(messages[0])
 
-        return self._format_multiple_messages(messages)
+        # Sort by priority (highest first, i.e., descending order)
+        sorted_messages = sorted(messages, key=lambda m: m.priority, reverse=True)
+
+        return self._format_multiple_messages(sorted_messages)
 
     def _format_single_message(self, message: MailboxMessage) -> str:
         """Format a single message as a change request.

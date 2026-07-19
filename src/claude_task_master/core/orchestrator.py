@@ -602,6 +602,10 @@ class WorkLoopOrchestrator:
             # already persisted, so these messages are fully processed. Remove
             # exactly the peeked IDs — not a blanket clear — so any message that
             # arrived during the update is preserved for the next check.
+            logger.info(
+                "Dropping %d processed mailbox message(s)",
+                len(messages),
+            )
             removed = self.mailbox_storage.remove_messages([msg.id for msg in messages])
             logger.debug(
                 "Removed %d processed message(s) from mailbox after plan update",
