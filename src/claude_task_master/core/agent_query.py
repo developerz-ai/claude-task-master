@@ -24,6 +24,7 @@ from .agent_exceptions import (
     APITimeoutError,
     ConsecutiveFailuresError,
     ContentFilterError,
+    ModelUnavailableError,
     QueryExecutionError,
     SDKImportError,
     SDKInitializationError,
@@ -280,6 +281,19 @@ class AgentQueryExecutor:
 
         max_failures = self.rate_limit_config.max_retries + 1  # +1 for initial attempt
 
+        # Multi-hop fallback: on ModelUnavailableError, walk the cycle-guarded
+        # fallback chain to the next untried model. The SDK's own fallback_model
+        # already covers the first hop, so seed it as attempted to avoid re-trying
+        # what it just tried. current_model overrides model_override as we descend.
+        from .agent_models import get_fallback_chain
+
+        effective_model = model_override or self.model
+        fallback_chain = get_fallback_chain(effective_model)
+        attempted_models = {effective_model}
+        if fallback_chain:
+            attempted_models.add(fallback_chain[0])
+        current_model = model_override
+
         while True:
             try:
                 # Execute through circuit breaker
@@ -287,7 +301,7 @@ class AgentQueryExecutor:
                     result = await self._execute_query(
                         prompt,
                         tools,
-                        model_override,
+                        current_model,
                         get_model_name_func,
                         get_agents_func,
                         process_message_func,
@@ -299,6 +313,26 @@ class AgentQueryExecutor:
                 # Circuit breaker tripped - don't retry
                 console.warning("Circuit breaker opened due to repeated failures")
                 raise
+            except ModelUnavailableError as e:
+                # Not an API-health failure — recover by switching models, not by
+                # retrying the same one. Don't count toward the failure budget.
+                next_model = next((m for m in fallback_chain if m not in attempted_models), None)
+                if next_model is None:
+                    console.newline()
+                    console.error(
+                        "All fallback models exhausted - model unavailable",
+                        flush=True,
+                    )
+                    raise
+                attempted_models.add(next_model)
+                current_model = next_model
+                console.newline()
+                console.warning(
+                    f"Model unavailable ({e.message}) - falling back to {next_model.value}",
+                    flush=True,
+                )
+                # Retry immediately with the next model (no backoff).
+                continue
             except TRANSIENT_ERRORS as e:
                 # Stream idle-timeouts have their own hard cap (each one
                 # takes ~10min, so the windowed counter would never trip).
@@ -420,24 +454,25 @@ class AgentQueryExecutor:
             else:
                 agents = None
 
-            # Determine effort level and fallback model based on complexity
-            from .agent_models import MODEL_FALLBACK_MAP, TaskComplexity
+            # Determine effort level and fallback model for the effective model.
+            from .agent_models import MODEL_EFFORT_MAP, get_fallback_chain
 
-            effort_level = None
+            # Effort is keyed directly off the resolved model so every tier —
+            # including FABLE, which no complexity routes to — gets extended
+            # thinking (fable → "max"). A None here means "SDK default".
+            effort_level = MODEL_EFFORT_MAP.get(effective_model)
+
+            # Hand the SDK the first hop of the cycle-guarded fallback chain for
+            # automatic single-hop recovery. Deeper hops are driven by the
+            # multi-hop retry in _run_query_with_retry on ModelUnavailableError.
             fallback_model_name = None
-
-            # Map the effective model to an effort level via complexity
-            for complexity in TaskComplexity:
-                if TaskComplexity.get_model_for_complexity(complexity) == effective_model:
-                    effort_level = TaskComplexity.get_effort_for_complexity(complexity)
-                    break
-
-            # Get fallback model name
-            fallback_type = MODEL_FALLBACK_MAP.get(effective_model)
-            if fallback_type and get_model_name_func:
-                fallback_model_name = get_model_name_func(fallback_type)
-            elif fallback_type:
-                fallback_model_name = self._default_get_model_name(fallback_type)
+            fallback_chain = get_fallback_chain(effective_model)
+            if fallback_chain:
+                fallback_type = fallback_chain[0]
+                if get_model_name_func:
+                    fallback_model_name = get_model_name_func(fallback_type)
+                else:
+                    fallback_model_name = self._default_get_model_name(fallback_type)
 
             # Pass stall-timeout env vars to the underlying CLI subprocess.
             # The Python SDK ignores these, but the bundled CLI binary respects
@@ -646,6 +681,17 @@ class AgentQueryExecutor:
         # Check for content filtering errors (not retryable)
         if "content filtering" in error_str or "output blocked" in error_str:
             return ContentFilterError(error)
+
+        # Check for model-availability errors (recover via fallback chain, not by
+        # retrying the same model). Anthropic returns not_found_error for an
+        # unknown/unavailable model id. Require both "model" and a not-found
+        # keyword so generic messages like "503 Service Unavailable" or
+        # "Network unreachable" are not misclassified.
+        if "model" in error_str and any(
+            kw in error_str
+            for kw in ("not_found", "not found", "does not exist", "unavailable", "invalid model")
+        ):
+            return ModelUnavailableError(error)
 
         # Check for rate limiting
         if "rate" in error_str and "limit" in error_str:

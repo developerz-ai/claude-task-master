@@ -6,6 +6,7 @@ and allow graceful degradation when services are unhealthy.
 
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
 from collections.abc import Callable
@@ -33,6 +34,29 @@ class CircuitBreakerConfig:
     timeout_seconds: float = 60.0  # Time before attempting recovery
     half_open_max_calls: int = 3  # Max concurrent calls in half-open state
 
+    def __post_init__(self) -> None:
+        """Validate configuration invariants.
+
+        Raises:
+            ValueError: If any threshold is below 1, or if success_threshold
+                exceeds half_open_max_calls. The latter would wedge the circuit
+                in HALF_OPEN forever: probe calls are capped at half_open_max_calls
+                but the circuit needs success_threshold successes to close, so it
+                could never accumulate enough successes to recover.
+        """
+        if self.failure_threshold < 1:
+            raise ValueError(f"failure_threshold must be >= 1, got {self.failure_threshold}")
+        if self.success_threshold < 1:
+            raise ValueError(f"success_threshold must be >= 1, got {self.success_threshold}")
+        if self.half_open_max_calls < 1:
+            raise ValueError(f"half_open_max_calls must be >= 1, got {self.half_open_max_calls}")
+        if self.success_threshold > self.half_open_max_calls:
+            raise ValueError(
+                f"success_threshold ({self.success_threshold}) must be <= "
+                f"half_open_max_calls ({self.half_open_max_calls}): the circuit could "
+                "never accumulate enough successes to close."
+            )
+
     @classmethod
     def default(cls) -> CircuitBreakerConfig:
         """Default configuration for general use."""
@@ -40,12 +64,17 @@ class CircuitBreakerConfig:
 
     @classmethod
     def aggressive(cls) -> CircuitBreakerConfig:
-        """Aggressive configuration - trips faster, recovers slower."""
+        """Aggressive configuration - trips faster, recovers slower.
+
+        half_open_max_calls matches success_threshold so recovery needs 3
+        consecutive successful probes (cautious) while still satisfying the
+        success_threshold <= half_open_max_calls invariant.
+        """
         return cls(
             failure_threshold=3,
             success_threshold=3,
             timeout_seconds=120.0,
-            half_open_max_calls=1,
+            half_open_max_calls=3,
         )
 
     @classmethod
@@ -185,11 +214,22 @@ class CircuitBreaker:
         return max(0.0, remaining)
 
     def _check_state_timeout(self) -> None:
-        """Check if timeout has elapsed and transition state."""
+        """Check if the current state's timeout has elapsed and transition.
+
+        OPEN → HALF_OPEN after timeout_seconds (attempt recovery). HALF_OPEN →
+        OPEN after timeout_seconds as well: this guards against a wedged
+        HALF_OPEN where probe calls were consumed (or stalled) without reaching
+        success_threshold and no failure arrived to re-open it. Falling back to
+        OPEN restarts the recovery clock, which then re-enters HALF_OPEN with a
+        fresh set of probe slots instead of failing fast forever.
+        """
+        elapsed = time.time() - self._last_state_change
         if self._state == CircuitState.OPEN:
-            elapsed = time.time() - self._last_state_change
             if elapsed >= self.config.timeout_seconds:
                 self._transition_to(CircuitState.HALF_OPEN)
+        elif self._state == CircuitState.HALF_OPEN:
+            if elapsed >= self.config.timeout_seconds:
+                self._transition_to(CircuitState.OPEN)
 
     def _transition_to(self, new_state: CircuitState) -> None:
         """Transition to a new state."""
@@ -302,10 +342,20 @@ class CircuitBreaker:
         exc_val: BaseException | None,
         exc_tb: object,
     ) -> None:
-        """Context manager exit - record success or failure."""
+        """Context manager exit - record success or failure.
+
+        User-initiated interrupts (asyncio.CancelledError, KeyboardInterrupt) are
+        recorded as NEITHER success nor failure: they reflect operator intent
+        (Ctrl+C / task cancellation), not an unhealthy dependency, and must not
+        trip the breaker and lock out subsequent work. The exception still
+        propagates (this returns None / does not suppress).
+        """
         with self._lock:
             if exc_type is None:
                 self._record_success()
+            elif issubclass(exc_type, (asyncio.CancelledError, KeyboardInterrupt)):
+                # Leave state and metrics untouched; let the interrupt propagate.
+                return
             else:
                 self._record_failure()
 

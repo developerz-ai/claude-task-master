@@ -14,7 +14,8 @@ Exception Hierarchy:
         ├── APITimeoutError - Request timeouts
         ├── APIAuthenticationError - Auth failures
         ├── APIServerError - Server errors (5xx)
-        └── ContentFilterError - Content filtering blocks
+        ├── ContentFilterError - Content filtering blocks
+        └── ModelUnavailableError - Requested model unavailable (fallback-chain recoverable)
 """
 
 
@@ -134,6 +135,23 @@ class ContentFilterError(QueryExecutionError):
         )
 
 
+class ModelUnavailableError(QueryExecutionError):
+    """Raised when the requested model is unavailable (unknown/not-found id).
+
+    This is NOT a transient API-health error and must not be retried against the
+    same model. The query executor recovers by walking the fallback chain
+    (get_fallback_chain) to the next model; it is deliberately excluded from
+    TRANSIENT_ERRORS so it is handled by that dedicated path instead of a plain
+    backoff-retry of the same unavailable model.
+    """
+
+    def __init__(self, original_error: Exception | None = None):
+        super().__init__(
+            "Requested model is unavailable (unknown or not-found model id)",
+            original_error,
+        )
+
+
 class WorkingDirectoryError(AgentError):
     """Raised when there's an issue with the working directory."""
 
@@ -185,6 +203,7 @@ __all__ = [
     "APIAuthenticationError",
     "APIServerError",
     "ContentFilterError",
+    "ModelUnavailableError",
     "WorkingDirectoryError",
     "ConsecutiveFailuresError",
     "TRANSIENT_ERRORS",

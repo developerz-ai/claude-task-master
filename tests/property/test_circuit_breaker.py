@@ -4,7 +4,7 @@ Tests the state machine properties and invariants of the circuit breaker pattern
 """
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 from claude_task_master.core.circuit_breaker import (
@@ -40,6 +40,9 @@ class TestCircuitBreakerConfigProperties:
         half_open_max_calls: int,
     ):
         """Configuration values should be preserved."""
+        # Respect the invariant: a config with success_threshold >
+        # half_open_max_calls is rejected (it would wedge HALF_OPEN forever).
+        assume(success_threshold <= half_open_max_calls)
         config = CircuitBreakerConfig(
             failure_threshold=failure_threshold,
             success_threshold=success_threshold,
@@ -224,6 +227,9 @@ class TestCircuitBreakerStateProperties:
         config = CircuitBreakerConfig(
             failure_threshold=failures_before,
             success_threshold=successes_needed,
+            # Must be >= success_threshold (invariant) so enough probe slots
+            # exist to actually reach the success count and close the circuit.
+            half_open_max_calls=successes_needed,
             timeout_seconds=0.01,  # Very short for testing
         )
         breaker = CircuitBreaker(name="test", config=config)

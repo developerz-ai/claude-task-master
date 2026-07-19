@@ -1,5 +1,8 @@
 """Tests for circuit breaker pattern."""
 
+import asyncio
+import time
+
 import pytest
 
 from claude_task_master.core.circuit_breaker import (
@@ -30,11 +33,39 @@ class TestCircuitBreakerConfig:
         assert config.failure_threshold == 3
         assert config.timeout_seconds == 120.0
 
+    def test_aggressive_config_satisfies_invariant(self):
+        """aggressive() must satisfy success_threshold <= half_open_max_calls."""
+        config = CircuitBreakerConfig.aggressive()
+        assert config.success_threshold <= config.half_open_max_calls
+
+    def test_all_presets_satisfy_invariant(self):
+        """Every preset config satisfies the closing invariant."""
+        for config in (
+            CircuitBreakerConfig.default(),
+            CircuitBreakerConfig.aggressive(),
+            CircuitBreakerConfig.lenient(),
+        ):
+            assert config.success_threshold <= config.half_open_max_calls
+
     def test_lenient_config(self):
         """Test lenient configuration."""
         config = CircuitBreakerConfig.lenient()
         assert config.failure_threshold == 10
         assert config.timeout_seconds == 30.0
+
+    def test_success_threshold_over_half_open_max_calls_rejected(self):
+        """A config that could never close is rejected at construction."""
+        with pytest.raises(ValueError, match="success_threshold"):
+            CircuitBreakerConfig(success_threshold=3, half_open_max_calls=1)
+
+    def test_zero_thresholds_rejected(self):
+        """Thresholds below 1 are rejected."""
+        with pytest.raises(ValueError, match="failure_threshold"):
+            CircuitBreakerConfig(failure_threshold=0)
+        with pytest.raises(ValueError, match="success_threshold"):
+            CircuitBreakerConfig(success_threshold=0)
+        with pytest.raises(ValueError, match="half_open_max_calls"):
+            CircuitBreakerConfig(half_open_max_calls=0)
 
 
 class TestCircuitBreakerMetrics:
@@ -202,6 +233,72 @@ class TestCircuitBreaker:
         # Should have time remaining
         assert cb.time_until_retry > 0
         assert cb.time_until_retry <= 60.0
+
+    def test_half_open_times_out_back_to_open(self):
+        """A wedged HALF_OPEN falls back to OPEN after timeout (recovery clock).
+
+        With half_open_max_calls=1 and success_threshold=1, a single probe slot
+        gets consumed without a success/failure resolution; without the HALF_OPEN
+        timeout the circuit would be stuck failing fast forever.
+        """
+        config = CircuitBreakerConfig(
+            failure_threshold=1,
+            success_threshold=1,
+            half_open_max_calls=1,
+            timeout_seconds=0.1,
+        )
+        cb = CircuitBreaker(name="test", config=config)
+
+        # Trip → OPEN, then wait past timeout → HALF_OPEN.
+        with pytest.raises(ValueError):
+            cb.call(lambda: (_ for _ in ()).throw(ValueError()))
+        assert cb.state == CircuitState.OPEN
+
+        time.sleep(0.15)
+        assert cb.state == CircuitState.HALF_OPEN  # type: ignore[comparison-overlap]
+
+        # Consume the single probe slot without resolving (enter, no exit record).
+        cb._can_execute()
+        cb._half_open_calls = config.half_open_max_calls  # slots exhausted
+
+        # After another timeout window, HALF_OPEN must fall back to OPEN.
+        time.sleep(0.15)
+        assert cb.state == CircuitState.OPEN
+
+    def test_context_manager_ignores_cancelled_error(self):
+        """asyncio.CancelledError must NOT be recorded as a breaker failure."""
+        cb = CircuitBreaker(name="test")
+
+        with pytest.raises(asyncio.CancelledError):
+            with cb:
+                raise asyncio.CancelledError()
+
+        assert cb.metrics.failed_calls == 0
+        assert cb.metrics.successful_calls == 0
+        assert cb.state == CircuitState.CLOSED
+
+    def test_context_manager_ignores_keyboard_interrupt(self):
+        """KeyboardInterrupt must NOT be recorded as a breaker failure."""
+        cb = CircuitBreaker(name="test")
+
+        with pytest.raises(KeyboardInterrupt):
+            with cb:
+                raise KeyboardInterrupt()
+
+        assert cb.metrics.failed_calls == 0
+        assert cb.state == CircuitState.CLOSED
+
+    def test_user_interrupts_do_not_trip_breaker(self):
+        """Repeated interrupts never open the circuit (low failure_threshold)."""
+        config = CircuitBreakerConfig(failure_threshold=1)
+        cb = CircuitBreaker(name="test", config=config)
+
+        for _ in range(5):
+            with pytest.raises(asyncio.CancelledError):
+                with cb:
+                    raise asyncio.CancelledError()
+
+        assert cb.state == CircuitState.CLOSED
 
 
 class TestCircuitBreakerRegistry:

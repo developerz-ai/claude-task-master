@@ -21,6 +21,7 @@ from claude_task_master.core.agent_exceptions import (
     APITimeoutError,
     ConsecutiveFailuresError,
     ContentFilterError,
+    ModelUnavailableError,
     QueryExecutionError,
 )
 from claude_task_master.core.rate_limit import RateLimitConfig
@@ -1112,3 +1113,172 @@ class TestAgentWrapperProcessMessage:
         result = agent._message_processor.process_message(mock_message, "Unchanged")
 
         assert result == "Unchanged"
+
+
+# =============================================================================
+# Model Effort Routing + Multi-hop Fallback Tests
+# =============================================================================
+
+
+class TestModelEffortAndFallback:
+    """Tests for effort-level routing and multi-hop model fallback."""
+
+    def _make_agent(self, temp_dir, model):
+        """Build an AgentWrapper with a mocked SDK and fast retries."""
+        mock_sdk = MagicMock()
+        mock_sdk.query = AsyncMock()
+        mock_sdk.ClaudeAgentOptions = MagicMock()
+
+        with patch.dict("sys.modules", {"claude_agent_sdk": mock_sdk}):
+            agent = AgentWrapper(
+                access_token="test-token",
+                model=model,
+                working_dir=str(temp_dir),
+                rate_limit_config=RateLimitConfig(
+                    max_retries=2, initial_backoff=0.01, max_backoff=0.05
+                ),
+            )
+        return agent
+
+    @staticmethod
+    def _capture_options(store):
+        """Return an options_class stub that records each call's kwargs."""
+
+        def capture(**kwargs):
+            store.append(kwargs)
+            return MagicMock()
+
+        return capture
+
+    @pytest.mark.asyncio
+    async def test_fable_gets_max_effort(self, temp_dir):
+        """FABLE model → options effort='max' (regression: was None)."""
+        agent = self._make_agent(temp_dir, ModelType.FABLE)
+        options_calls: list[dict] = []
+        agent.options_class = self._capture_options(options_calls)
+        agent._query_executor.options_class = agent.options_class
+
+        async def mock_query_gen(*args, **kwargs):
+            yield MagicMock(content=None)
+
+        agent.query = mock_query_gen
+        agent._query_executor.query = mock_query_gen
+
+        await agent._run_query("p", ["Read"], model_override=ModelType.FABLE)
+
+        assert options_calls[0]["effort"] == "max"
+
+    @pytest.mark.asyncio
+    async def test_sonnet_gets_medium_effort(self, temp_dir):
+        """SONNET model → options effort='medium'."""
+        agent = self._make_agent(temp_dir, ModelType.SONNET)
+        options_calls: list[dict] = []
+        agent.options_class = self._capture_options(options_calls)
+        agent._query_executor.options_class = agent.options_class
+
+        async def mock_query_gen(*args, **kwargs):
+            yield MagicMock(content=None)
+
+        agent.query = mock_query_gen
+        agent._query_executor.query = mock_query_gen
+
+        await agent._run_query("p", ["Read"])
+
+        assert options_calls[0]["effort"] == "medium"
+
+    @pytest.mark.asyncio
+    async def test_fallback_model_is_first_chain_hop(self, temp_dir):
+        """SDK fallback_model is the first hop of the cycle-guarded chain."""
+        agent = self._make_agent(temp_dir, ModelType.SONNET)
+        options_calls: list[dict] = []
+        agent.options_class = self._capture_options(options_calls)
+        agent._query_executor.options_class = agent.options_class
+
+        async def mock_query_gen(*args, **kwargs):
+            yield MagicMock(content=None)
+
+        agent.query = mock_query_gen
+        agent._query_executor.query = mock_query_gen
+
+        await agent._run_query("p", ["Read"])
+
+        # SONNET's chain[0] is HAIKU.
+        assert options_calls[0]["fallback_model"] == agent._get_model_name(ModelType.HAIKU)
+
+    def test_classify_model_not_found(self, temp_dir):
+        """A not-found model id classifies as ModelUnavailableError."""
+        agent = self._make_agent(temp_dir, ModelType.SONNET)
+        error = Exception("model: claude-xyz not_found_error")
+        classified = agent._query_executor._classify_api_error(error)
+        assert isinstance(classified, ModelUnavailableError)
+
+    def test_classify_503_not_model_unavailable(self, temp_dir):
+        """'503 Service Unavailable' (no 'model') stays a server error."""
+        agent = self._make_agent(temp_dir, ModelType.SONNET)
+        classified = agent._query_executor._classify_api_error(
+            Exception("HTTP 503 Service Unavailable")
+        )
+        assert not isinstance(classified, ModelUnavailableError)
+        assert isinstance(classified, APIServerError)
+
+    def test_classify_network_unreachable_not_model_unavailable(self, temp_dir):
+        """'Network unreachable' is a connection error, not model-unavailable."""
+        agent = self._make_agent(temp_dir, ModelType.SONNET)
+        classified = agent._query_executor._classify_api_error(Exception("Network unreachable"))
+        assert not isinstance(classified, ModelUnavailableError)
+        assert isinstance(classified, APIConnectionError)
+
+    @pytest.mark.asyncio
+    async def test_model_unavailable_falls_back_through_chain(self, temp_dir):
+        """A model-unavailable primary recovers on the next chain model."""
+        agent = self._make_agent(temp_dir, ModelType.FABLE)
+        options_calls: list[dict] = []
+        agent.options_class = self._capture_options(options_calls)
+        agent._query_executor.options_class = agent.options_class
+
+        call_count = 0
+
+        async def mock_query_gen(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise Exception("model: claude-fable-5 not_found_error")
+            yield MagicMock(content=None)
+
+        agent.query = mock_query_gen
+        agent._query_executor.query = mock_query_gen
+
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            await agent._run_query("p", ["Read"], model_override=ModelType.FABLE)
+
+        # Two attempts: fable (unavailable) then a different fallback model.
+        assert call_count == 2
+        assert options_calls[0]["model"] == agent._get_model_name(ModelType.FABLE)
+        # Second attempt skips OPUS (already the SDK's auto-fallback) → SONNET.
+        assert options_calls[1]["model"] == agent._get_model_name(ModelType.SONNET)
+
+    @pytest.mark.asyncio
+    async def test_model_unavailable_chain_exhaustion_raises(self, temp_dir):
+        """When every chain model is unavailable, ModelUnavailableError propagates."""
+        agent = self._make_agent(temp_dir, ModelType.FABLE)
+
+        call_count = 0
+
+        async def mock_query_gen(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            raise Exception("model not found")
+            yield  # pragma: no cover - marks this as a generator
+
+        agent.query = mock_query_gen
+        agent._query_executor.query = mock_query_gen
+
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            with pytest.raises(ModelUnavailableError):
+                await agent._run_query("p", ["Read"], model_override=ModelType.FABLE)
+
+        # FABLE chain = [OPUS, SONNET, HAIKU]; OPUS is the SDK's auto-fallback and
+        # pre-marked attempted, so manual hops are SONNET, HAIKU → 3 total attempts.
+        assert call_count == 3
+        # Model-unavailability must NOT consume the transient-failure budget.
+        assert agent._query_executor._consecutive_failures == 0
