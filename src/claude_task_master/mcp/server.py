@@ -12,6 +12,9 @@ Security Note:
     the CLAUDETM_PASSWORD or CLAUDETM_PASSWORD_HASH environment variable.
     When enabled, clients must provide the password as a Bearer token in the
     Authorization header.
+
+Forwarding-tool specs live in :mod:`.server_specs`.
+Runner and CLI entry-point live in :mod:`.server_runner`.
 """
 
 from __future__ import annotations
@@ -19,14 +22,41 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from claude_task_master.core.services import RepoService
 from claude_task_master.mcp import tools
-from claude_task_master.mcp.tool_forwarding import ForwardingSpec, register_forwarding_tools
+
+from .server_runner import (
+    MCP_HOST,  # noqa: F401 — re-exported for callers and CLI defaults
+    MCP_PORT,  # noqa: F401 — re-exported for callers and CLI defaults
+    TransportType,  # noqa: F401 — re-exported for callers
+    _get_authenticated_app,  # noqa: F401 — re-exported so server.py callers still work
+    main,  # noqa: F401 — re-exported for the claudetm-mcp-server entry point
+    run_server,  # noqa: F401 — re-exported for callers
+)
+from .server_specs import (
+    _FORWARDING_SPECS,
+    CleanResult,  # noqa: F401
+    ClearMailboxResult,  # noqa: F401
+    CloneRepoResult,  # noqa: F401
+    DeleteCodingStyleResult,  # noqa: F401
+    HealthCheckResult,  # noqa: F401
+    LogsResult,  # noqa: F401
+    MailboxStatusResult,  # noqa: F401
+    PauseTaskResult,  # noqa: F401
+    PlanRepoResult,  # noqa: F401
+    ResumeTaskResult,  # noqa: F401
+    SendMessageResult,  # noqa: F401
+    SetupRepoResult,  # noqa: F401
+    StartTaskResult,  # noqa: F401
+    StopTaskResult,  # noqa: F401
+    TaskStatus,  # noqa: F401
+    UpdateConfigResult,  # noqa: F401
+)
 
 if TYPE_CHECKING:
-    from starlette.applications import Starlette
+    pass
 
 # Import MCP SDK - using try/except for graceful degradation
 try:
@@ -36,15 +66,11 @@ except ImportError:
 
 # Import auth utilities - optional, only needed for network transports
 try:
-    from claude_task_master.auth import is_auth_enabled
-    from claude_task_master.mcp.auth import add_auth_middleware, check_auth_config
+    from claude_task_master.auth import is_auth_enabled  # noqa: F401
 
     AUTH_AVAILABLE = True
 except ImportError:
     AUTH_AVAILABLE = False
-    is_auth_enabled = lambda: False  # noqa: E731
-    add_auth_middleware = None  # type: ignore[assignment]
-    check_auth_config = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -52,229 +78,8 @@ logger = logging.getLogger(__name__)
 # shared with the REST transport.
 _repo_service = RepoService()
 
-# Security: Default host for network transports
-MCP_HOST = os.getenv("CLAUDETM_MCP_HOST", "127.0.0.1")
-MCP_PORT = int(os.getenv("CLAUDETM_MCP_PORT", "8080"))
-
-# =============================================================================
-# Re-export response models for convenience
-# =============================================================================
-
-TaskStatus = tools.TaskStatus
-StartTaskResult = tools.StartTaskResult
-CleanResult = tools.CleanResult
-LogsResult = tools.LogsResult
-HealthCheckResult = tools.HealthCheckResult
-PauseTaskResult = tools.PauseTaskResult
-StopTaskResult = tools.StopTaskResult
-ResumeTaskResult = tools.ResumeTaskResult
-UpdateConfigResult = tools.UpdateConfigResult
-SendMessageResult = tools.SendMessageResult
-MailboxStatusResult = tools.MailboxStatusResult
-ClearMailboxResult = tools.ClearMailboxResult
-CloneRepoResult = tools.CloneRepoResult
-SetupRepoResult = tools.SetupRepoResult
-PlanRepoResult = tools.PlanRepoResult
-DeleteCodingStyleResult = tools.DeleteCodingStyleResult
-
-
-# =============================================================================
-# Forwarding tool table
-# =============================================================================
-#
-# The task and mailbox tools all inject ``work_dir`` and forward to a matching
-# ``tools`` function. Declaring them here -- rather than hand-writing one
-# ``@mcp.tool()`` wrapper each -- means every tool's parameters are DERIVED from
-# the underlying function (see ``register_forwarding_tools``), so a parameter can
-# never be silently dropped from a wrapper again (as ``enable_verification`` was
-# from ``initialize_task``). Only the client-facing description lives here.
-_FORWARDING_SPECS: tuple[ForwardingSpec, ...] = (
-    ForwardingSpec(
-        tools.get_status,
-        "Get the current status of a claudetm task.\n\n"
-        "Returns task goal, status, model, current task index, session count,\n"
-        "and configuration options.\n\n"
-        "Args:\n"
-        "    state_dir: Optional custom state directory path.\n\n"
-        "Returns:\n"
-        "    Dictionary containing task status information.",
-    ),
-    ForwardingSpec(
-        tools.get_plan,
-        "Get the current task plan with checkboxes.\n\n"
-        "Returns the markdown task list showing completion status.\n\n"
-        "Args:\n"
-        "    state_dir: Optional custom state directory path.\n\n"
-        "Returns:\n"
-        "    Dictionary containing the plan content or error.",
-    ),
-    ForwardingSpec(
-        tools.get_logs,
-        "Get logs from the current task run.\n\n"
-        "Args:\n"
-        "    tail: Number of lines to return from the end of the log.\n"
-        "    state_dir: Optional custom state directory path.\n\n"
-        "Returns:\n"
-        "    Dictionary containing log content or error.",
-    ),
-    ForwardingSpec(
-        tools.get_progress,
-        "Get the human-readable progress summary.\n\n"
-        "Returns what has been accomplished and what remains.\n\n"
-        "Args:\n"
-        "    state_dir: Optional custom state directory path.\n\n"
-        "Returns:\n"
-        "    Dictionary containing progress content or error.",
-    ),
-    ForwardingSpec(
-        tools.get_context,
-        "Get the accumulated context and learnings.\n\n"
-        "Returns insights gathered during execution.\n\n"
-        "Args:\n"
-        "    state_dir: Optional custom state directory path.\n\n"
-        "Returns:\n"
-        "    Dictionary containing context content or error.",
-    ),
-    ForwardingSpec(
-        tools.clean_task,
-        "Clean up task state directory.\n\n"
-        "Removes all state files to allow starting fresh.\n\n"
-        "Args:\n"
-        "    force: If True, skip confirmation (always True for MCP).\n"
-        "    state_dir: Optional custom state directory path.\n\n"
-        "Returns:\n"
-        "    Dictionary indicating success or failure.",
-    ),
-    ForwardingSpec(
-        tools.delete_coding_style,
-        "Delete the coding style guide file (coding-style.md).\n\n"
-        "The coding style file is a cached guide that's preserved across runs to\n"
-        "save tokens. Call this to force regeneration on the next planning phase\n"
-        "when project conventions have changed.\n\n"
-        "Args:\n"
-        "    state_dir: Optional custom state directory path.\n\n"
-        "Returns:\n"
-        "    Dictionary indicating success or failure with deletion status.",
-    ),
-    ForwardingSpec(
-        tools.initialize_task,
-        "Initialize a new task with the given goal.\n\n"
-        "This only initializes the task state - it does NOT run the task.\n"
-        "Use this to set up a task that will be executed separately.\n\n"
-        "Args:\n"
-        "    goal: The goal to achieve.\n"
-        "    model: Model to use (opus, sonnet, fable, haiku, sonnet_1m).\n"
-        "    auto_merge: Whether to auto-merge PRs when approved.\n"
-        "    enable_release: Whether to run post-merge release verification.\n"
-        "    enable_verification: Run final success-criteria verification after\n"
-        "        all tasks complete.\n"
-        "    max_sessions: Max work sessions before pausing.\n"
-        "    max_prs: Max pull requests to create.\n"
-        "    pause_on_pr: Pause after creating PR for manual review.\n"
-        "    state_dir: Optional custom state directory path.\n\n"
-        "Returns:\n"
-        "    Dictionary indicating success with run_id or failure.",
-    ),
-    ForwardingSpec(
-        tools.list_tasks,
-        "List tasks from the current plan.\n\n"
-        "Returns parsed tasks with their completion status.\n\n"
-        "Args:\n"
-        "    state_dir: Optional custom state directory path.\n\n"
-        "Returns:\n"
-        "    Dictionary containing list of tasks with status.",
-    ),
-    ForwardingSpec(
-        tools.pause_task,
-        "Pause a running task.\n\n"
-        "Transitions the task from planning/working status to paused status.\n"
-        "The task can be resumed later using resume_task.\n\n"
-        "Args:\n"
-        "    reason: Optional reason for pausing (stored in progress).\n"
-        "    state_dir: Optional custom state directory path.\n\n"
-        "Returns:\n"
-        "    Dictionary indicating success or failure with status details.",
-    ),
-    ForwardingSpec(
-        tools.stop_task,
-        "Stop a running task and trigger graceful shutdown.\n\n"
-        "Transitions the task from any active status to stopped status and\n"
-        "triggers shutdown of any running processes. The task can be resumed\n"
-        "later if not cleaned up.\n\n"
-        "Args:\n"
-        "    reason: Optional reason for stopping (stored in progress).\n"
-        "    cleanup: If True, also cleanup state files after stopping.\n"
-        "    state_dir: Optional custom state directory path.\n\n"
-        "Returns:\n"
-        "    Dictionary indicating success or failure with status details.",
-    ),
-    ForwardingSpec(
-        tools.resume_task,
-        "Resume a paused or blocked task.\n\n"
-        "Transitions the task from paused/blocked/stopped status back to working\n"
-        "status. This is distinct from CLI resume - it only updates the state\n"
-        "without restarting the work loop.\n\n"
-        "Args:\n"
-        "    state_dir: Optional custom state directory path.\n\n"
-        "Returns:\n"
-        "    Dictionary indicating success or failure with status details.",
-    ),
-    ForwardingSpec(
-        tools.update_config,
-        "Update task configuration options at runtime.\n\n"
-        "Updates the TaskOptions stored in the task state. Only specified\n"
-        "options are updated; others retain their current values.\n\n"
-        "Args:\n"
-        "    auto_merge: Whether to auto-merge PRs when approved.\n"
-        "    max_sessions: Maximum number of work sessions before pausing.\n"
-        "    max_prs: Maximum number of pull requests to create.\n"
-        "    pause_on_pr: Whether to pause after creating PR for manual review.\n"
-        "    enable_checkpointing: Whether to enable state checkpointing.\n"
-        "    log_level: Log level (quiet, normal, verbose).\n"
-        "    log_format: Log format (text, json).\n"
-        "    pr_per_task: Whether to create PR per task vs per group.\n"
-        "    enable_release: Whether to run post-merge release verification.\n"
-        "    enable_verification: Whether to run final success-criteria verification.\n"
-        "    state_dir: Optional custom state directory path.\n\n"
-        "Returns:\n"
-        "    Dictionary indicating success or failure with updated config.",
-    ),
-    ForwardingSpec(
-        tools.send_message,
-        "Send a message to the claudetm mailbox.\n\n"
-        "Messages are processed after the current task completes. Multiple\n"
-        "messages are merged into a single change request that updates the plan\n"
-        "before continuing work.\n\n"
-        "Use this to send instructions, feedback, or change requests to a running\n"
-        "claudetm instance from external systems or other AI agents.\n\n"
-        "Args:\n"
-        "    content: The message content describing the change request.\n"
-        '    sender: Identifier of the sender (default: "anonymous").\n'
-        "    priority: Message priority - 0=low, 1=normal, 2=high, 3=urgent.\n"
-        "    state_dir: Optional custom state directory path.\n\n"
-        "Returns:\n"
-        "    Dictionary containing the message_id on success, or error info.",
-    ),
-    ForwardingSpec(
-        tools.check_mailbox,
-        "Check the status of the claudetm mailbox.\n\n"
-        "Returns the number of pending messages and previews of each.\n"
-        "Use this to see what messages are waiting to be processed.\n\n"
-        "Args:\n"
-        "    state_dir: Optional custom state directory path.\n\n"
-        "Returns:\n"
-        "    Dictionary containing mailbox status with message previews.",
-    ),
-    ForwardingSpec(
-        tools.clear_mailbox,
-        "Clear all messages from the claudetm mailbox.\n\n"
-        "Use this to discard all pending messages without processing them.\n\n"
-        "Args:\n"
-        "    state_dir: Optional custom state directory path.\n\n"
-        "Returns:\n"
-        "    Dictionary indicating success and number of messages cleared.",
-    ),
-)
+_MCP_HOST = os.getenv("CLAUDETM_MCP_HOST", "127.0.0.1")
+_MCP_PORT = int(os.getenv("CLAUDETM_MCP_PORT", "8080"))
 
 
 # =============================================================================
@@ -319,6 +124,8 @@ def create_server(
     # The task and mailbox tools are generated from the declarative
     # _FORWARDING_SPECS table so their parameters are derived from the
     # underlying tools functions and can never silently drift.
+    from claude_task_master.mcp.tool_forwarding import register_forwarding_tools  # noqa: PLC0415
+
     register_forwarding_tools(mcp, _FORWARDING_SPECS, work_dir=work_dir)
 
     @mcp.tool()
@@ -485,230 +292,6 @@ def create_server(
         return tools.resource_context(work_dir)
 
     return mcp
-
-
-# =============================================================================
-# Server Runner
-# =============================================================================
-
-
-# Transport type alias
-TransportType = Literal["stdio", "sse", "streamable-http"]
-
-
-def _get_authenticated_app(
-    mcp: FastMCP,
-    transport: TransportType,
-    mount_path: str | None = None,
-) -> Starlette:
-    """Get the Starlette app with authentication middleware if configured.
-
-    Args:
-        mcp: The FastMCP server instance.
-        transport: The transport type (sse or streamable-http).
-        mount_path: Optional mount path for SSE transport.
-
-    Returns:
-        Starlette application with optional authentication middleware.
-    """
-    # Get the appropriate app based on transport
-    if transport == "sse":
-        app = mcp.sse_app(mount_path)
-    else:  # streamable-http
-        app = mcp.streamable_http_app()
-
-    # Add authentication middleware if enabled
-    if AUTH_AVAILABLE and is_auth_enabled() and add_auth_middleware is not None:
-        logger.info("Adding password authentication to MCP server")
-        add_auth_middleware(app)
-
-    return app
-
-
-async def _run_network_transport_async(
-    mcp: FastMCP,
-    transport: TransportType,
-    host: str,
-    port: int,
-    mount_path: str | None = None,
-) -> None:
-    """Run the MCP server with network transport and authentication.
-
-    This is an async function that runs the server with uvicorn,
-    adding authentication middleware for network transports.
-
-    Args:
-        mcp: The FastMCP server instance.
-        transport: The transport type (sse or streamable-http).
-        host: Host to bind to.
-        port: Port to bind to.
-        mount_path: Optional mount path for SSE transport.
-    """
-    import uvicorn
-
-    # Get the app with authentication
-    app = _get_authenticated_app(mcp, transport, mount_path)
-
-    # Run with uvicorn
-    config = uvicorn.Config(
-        app,
-        host=host,
-        port=port,
-        log_level=mcp.settings.log_level.lower(),
-    )
-    server = uvicorn.Server(config)
-    await server.serve()
-
-
-def _log_server_config(
-    transport: TransportType,
-    host: str,
-    port: int,
-    auth_enabled: bool,
-) -> None:
-    """Log server configuration at startup.
-
-    Args:
-        transport: The transport type.
-        host: The host address.
-        port: The port number.
-        auth_enabled: Whether authentication is enabled.
-    """
-    logger.info("=" * 50)
-    logger.info("MCP Server Configuration:")
-    logger.info(f"  Transport: {transport}")
-    if transport != "stdio":
-        logger.info(f"  Host: {host}")
-        logger.info(f"  Port: {port}")
-        logger.info(f"  Password Auth: {'enabled' if auth_enabled else 'disabled'}")
-    logger.info("=" * 50)
-
-
-def run_server(
-    name: str = "claude-task-master",
-    working_dir: str | None = None,
-    transport: TransportType = "stdio",
-    host: str | None = None,
-    port: int | None = None,
-) -> None:
-    """Run the MCP server.
-
-    Args:
-        name: Server name for identification.
-        working_dir: Working directory for task execution.
-        transport: Transport type (stdio, sse, streamable-http).
-        host: Host to bind to (only for network transports). Defaults to 127.0.0.1.
-        port: Port to bind to (only for network transports). Defaults to 8080.
-
-    Security:
-        For network transports (sse, streamable-http):
-        - Defaults to localhost binding for security
-        - ⚠️  AUTHENTICATION REQUIRED: Set CLAUDETM_PASSWORD or CLAUDETM_PASSWORD_HASH to enable password-based authentication
-        - Clients must provide password as Bearer token: Authorization: Bearer <password>
-        - When binding to non-localhost addresses, authentication is REQUIRED for security
-        - Default authentication is disabled - must be explicitly enabled via CLAUDETM_PASSWORD env var or --password CLI arg
-    """
-    import anyio
-
-    effective_host = host or MCP_HOST
-    effective_port = port or MCP_PORT
-
-    # Check authentication configuration for network transports
-    if transport != "stdio" and AUTH_AVAILABLE and check_auth_config is not None:
-        auth_enabled, warning = check_auth_config(transport, effective_host)
-        if warning:
-            logger.warning(warning)
-    else:
-        auth_enabled = AUTH_AVAILABLE and is_auth_enabled()
-
-    # Log configuration
-    _log_server_config(transport, effective_host, effective_port, auth_enabled)
-
-    # Enforce auth for non-localhost network binds (as promised in docstring)
-    if transport != "stdio" and effective_host not in ("127.0.0.1", "localhost", "::1"):
-        if not auth_enabled:
-            logger.error(
-                f"MCP server cannot bind to non-localhost address ({effective_host}) "
-                "without authentication. Set CLAUDETM_PASSWORD or CLAUDETM_PASSWORD_HASH."
-            )
-            raise SystemExit(1)
-
-    # Create the MCP server
-    mcp = create_server(name=name, working_dir=working_dir)
-
-    # Configure host/port in FastMCP settings for network transports
-    if transport != "stdio":
-        mcp.settings.host = effective_host
-        mcp.settings.port = effective_port
-
-    # Run based on transport type
-    if transport == "stdio":
-        # stdio transport - no authentication needed, use FastMCP directly
-        mcp.run(transport="stdio")
-    else:
-        # Network transports - use custom runner with authentication
-        anyio.run(
-            lambda: _run_network_transport_async(mcp, transport, effective_host, effective_port)
-        )
-
-
-# =============================================================================
-# CLI Entry Point
-# =============================================================================
-
-
-def main() -> None:
-    """Main entry point for running the MCP server standalone."""
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Run Claude Task Master MCP server")
-    parser.add_argument(
-        "--name",
-        default="claude-task-master",
-        help="Server name",
-    )
-    parser.add_argument(
-        "--working-dir",
-        help="Working directory for task execution",
-    )
-    parser.add_argument(
-        "--transport",
-        choices=["stdio", "sse", "streamable-http"],
-        default="stdio",
-        help="Transport type (default: stdio)",
-    )
-    parser.add_argument(
-        "--host",
-        default=MCP_HOST,
-        help=f"Host to bind to for network transports (default: {MCP_HOST})",
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=MCP_PORT,
-        help=f"Port to bind to for network transports (default: {MCP_PORT})",
-    )
-    parser.add_argument(
-        "--password",
-        help=(
-            "Password for MCP authentication (sets CLAUDETM_PASSWORD env var). "
-            "Required for secure access when using network transports."
-        ),
-    )
-
-    args = parser.parse_args()
-
-    # If --password provided, set the environment variable for auth middleware
-    if args.password:
-        os.environ["CLAUDETM_PASSWORD"] = args.password
-
-    run_server(
-        name=args.name,
-        working_dir=args.working_dir,
-        transport=args.transport,
-        host=args.host,
-        port=args.port,
-    )
 
 
 if __name__ == "__main__":
