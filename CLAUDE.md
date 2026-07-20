@@ -317,7 +317,7 @@ Each webhook event includes:
 - Each delivery attempt includes a unique `X-Webhook-Delivery-ID` for idempotency tracking
 - Non-retryable errors (4xx except 429): fail immediately
 - Retryable errors (5xx, timeout, 429): retry with backoff
-- Max retry delay capped at 60 seconds per attempt
+- Max retry delay capped at 30 seconds per attempt (`MAX_RETRY_DELAY` in `webhooks/client_types.py`)
 
 ### API Endpoints (REST)
 Server runs on port 8000 by default (`claudetm-server`):
