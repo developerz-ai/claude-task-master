@@ -58,6 +58,13 @@ class _GitOps(StageHandlerBase):
                                 f"Could not checkout PR branch {head_branch}: "
                                 f"{e.stderr.strip() or e}"
                             )
+                            # Checkout failed — the worktree is still on the
+                            # previous branch. Report where we ACTUALLY are, not
+                            # the intended head: required_branch only reaches the
+                            # session via the prompt, so returning head_branch
+                            # here would let a push-only fix session commit/push
+                            # on the wrong local branch (e.g. straight to main).
+                            return self._get_current_branch()
                     return head_branch
             except Exception as e:
                 console.warning(f"Could not determine PR head branch: {e}")

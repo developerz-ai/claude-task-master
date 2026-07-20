@@ -2490,10 +2490,16 @@ class TestPRHeadBranchResolution:
         assert result == "local-branch"
 
     @patch("claude_task_master.core.stages.git_ops.console")
-    def test_checkout_failure_still_returns_head_branch(
+    def test_checkout_failure_falls_back_to_current_branch(
         self, mock_console, workflow_handler, basic_task_state, mock_github_client, mock_pr_status
     ):
-        """A failed head-branch checkout warns but still returns the head branch name."""
+        """A failed head-branch checkout warns and returns the ACTUAL current branch.
+
+        The worktree stays on the previous branch when checkout fails, so
+        required_branch must reflect reality (not the intended head): otherwise a
+        push-only fix session would be told it is on the PR head while sitting on
+        main, and could push commits to the wrong local branch.
+        """
         from subprocess import CalledProcessError
 
         basic_task_state.current_pr = 42
@@ -2507,9 +2513,7 @@ class TestPRHeadBranchResolution:
             mock_run.side_effect = CalledProcessError(1, "git checkout", stderr="boom")
             result = workflow_handler._get_pr_head_branch(basic_task_state)
 
-        # required_branch must stay the PR head ref so the agent session can
-        # recover/verify the branch itself
-        assert result == "feat/head"
+        assert result == "main"
         mock_console.warning.assert_called()
 
     def test_no_pr_uses_current_branch(self, workflow_handler, basic_task_state):
