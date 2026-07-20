@@ -112,10 +112,11 @@ class TestResumeWithMessage:
 
             runner.invoke(app, ["resume", "Add new security feature"])
 
-            # Should indicate plan was updated
-            if mock_updater.update_plan.called:
-                call_args = mock_updater.update_plan.call_args[0][0]
-                assert "security feature" in call_args
+            # Plan update must run for a non-empty message: assert it was called
+            # exactly once, then inspect the message it received. A conditional
+            # check here would silently pass if resume skipped message handling.
+            mock_updater.update_plan.assert_called_once()
+            assert "security feature" in mock_updater.update_plan.call_args.args[0]
 
     def test_resume_with_empty_message_behaves_like_no_message(
         self,
