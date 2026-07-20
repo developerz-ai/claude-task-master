@@ -147,6 +147,16 @@ def _url_ssrf_error(url: str) -> str | None:
     cloud metadata endpoints (169.254.169.254), localhost, and internal networks
     even when the attacker hides behind a hostname.
 
+    Note:
+        This is a pre-connection screen, not a pinned resolution: it validates a
+        fresh DNS lookup but does not bind the caller's later HTTP connection to
+        the vetted address, so a rebinding host could resolve differently at
+        connect time (a TOCTOU window). It gates the authenticated
+        ``POST /webhooks/test`` endpoint as defense-in-depth. Fully closing the
+        rebinding window requires pinning the connection to the vetted IP while
+        preserving the original Host header and TLS SNI/cert hostname; that is
+        tracked as separate hardening rather than bundled into this refactor.
+
     Args:
         url: The target URL.
 
