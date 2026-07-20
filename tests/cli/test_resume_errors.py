@@ -153,7 +153,9 @@ class TestResumeCredentialErrors:
         setup_error_state()
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.side_effect = FileNotFoundError(
                     "Credentials not found"
                 )
@@ -168,7 +170,9 @@ class TestResumeCredentialErrors:
         setup_error_state()
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.side_effect = ValueError(
                     "OAuth token expired"
                 )
@@ -184,7 +188,9 @@ class TestResumeCredentialErrors:
         setup_error_state()
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.side_effect = PermissionError(
                     "Permission denied"
                 )
@@ -423,9 +429,13 @@ class TestResumeAgentErrors:
         setup_error_state()
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper") as mock_agent:
+                with patch(
+                    "claude_task_master.cli_commands.workflow_helpers.AgentWrapper"
+                ) as mock_agent:
                     mock_agent.side_effect = ValueError("Invalid config")
                     result = cli_runner.invoke(app, ["resume"])
 
@@ -476,11 +486,13 @@ class TestResumePlanErrors:
         (mock_state_dir / "logs").mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                        "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                     ) as mock_orch:
                         mock_orch.return_value.run.return_value = 0
                         cli_runner.invoke(app, ["resume"])
@@ -495,11 +507,13 @@ class TestResumePlanErrors:
         (mock_state_dir / "logs").mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                        "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                     ) as mock_orch:
                         mock_orch.return_value.run.return_value = 0
                         cli_runner.invoke(app, ["resume"])
@@ -514,11 +528,13 @@ class TestResumePlanErrors:
         (mock_state_dir / "logs").mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                        "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                     ) as mock_orch:
                         mock_orch.return_value.run.return_value = 0
                         cli_runner.invoke(app, ["resume"])
@@ -587,7 +603,9 @@ class TestResumeErrorMessages:
         setup_error_state()
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.side_effect = FileNotFoundError(
                     "Credentials not found"
                 )

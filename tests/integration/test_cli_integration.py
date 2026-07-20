@@ -71,8 +71,8 @@ class TestStartCommandIntegration:
         self, cli_runner, cli_integration_setup, mock_credentials_data
     ):
         """Test start command loads and validates credentials."""
-        with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
-            with patch("claude_task_master.cli_commands.workflow.Planner") as mock_planner:
+        with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
+            with patch("claude_task_master.cli_commands.workflow_helpers.Planner") as mock_planner:
                 # Configure planner to fail early (we just want to test credential loading)
                 mock_planner.return_value.create_plan.side_effect = Exception("Test stop")
 
@@ -115,8 +115,8 @@ class TestStartCommandIntegration:
 
         # Token refresh is handled by Claude Agent SDK, not by us
         # We just load the token and let SDK handle expiration
-        with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
-            with patch("claude_task_master.cli_commands.workflow.Planner") as mock_planner:
+        with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
+            with patch("claude_task_master.cli_commands.workflow_helpers.Planner") as mock_planner:
                 # Configure planner to fail early (we just want to test credential loading)
                 mock_planner.return_value.create_plan.side_effect = Exception("Test stop")
 
@@ -161,12 +161,16 @@ class TestStartCommandIntegration:
         mock_sdk.set_work_response("Task 1 completed successfully")
         mock_sdk.set_work_response("Task 2 completed successfully")
 
-        with patch("claude_task_master.cli_commands.workflow.AgentWrapper") as mock_agent_class:
+        with patch(
+            "claude_task_master.cli_commands.workflow_helpers.AgentWrapper"
+        ) as mock_agent_class:
             # Create mock agent instance
             mock_agent = MagicMock()
             mock_agent_class.return_value = mock_agent
 
-            with patch("claude_task_master.cli_commands.workflow.Planner") as mock_planner_class:
+            with patch(
+                "claude_task_master.cli_commands.workflow_helpers.Planner"
+            ) as mock_planner_class:
                 mock_planner = MagicMock()
                 mock_planner_class.return_value = mock_planner
 
@@ -177,7 +181,7 @@ class TestStartCommandIntegration:
                 }
 
                 with patch(
-                    "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                    "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                 ) as mock_orch_class:
                     mock_orch = MagicMock()
                     mock_orch_class.return_value = mock_orch
@@ -201,10 +205,10 @@ class TestResumeCommandIntegration:
         self, cli_runner, cli_integration_setup, pre_planned_state
     ):
         """Test resume command loads credentials."""
-        with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
-            with patch("claude_task_master.cli_commands.workflow.Planner"):
+        with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
+            with patch("claude_task_master.cli_commands.workflow_helpers.Planner"):
                 with patch(
-                    "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                    "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                 ) as mock_orch:
                     mock_orch.return_value.run.return_value = 0
 
@@ -248,10 +252,10 @@ class TestResumeCommandIntegration:
 
         # Token refresh is handled by Claude Agent SDK, not by us
         # We just load the token and let SDK handle expiration
-        with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
-            with patch("claude_task_master.cli_commands.workflow.Planner"):
+        with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
+            with patch("claude_task_master.cli_commands.workflow_helpers.Planner"):
                 with patch(
-                    "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                    "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                 ) as mock_orch:
                     mock_orch.return_value.run.return_value = 0
 
@@ -264,10 +268,10 @@ class TestResumeCommandIntegration:
         self, cli_runner, cli_integration_setup, paused_state
     ):
         """Test resuming paused task with credentials."""
-        with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
-            with patch("claude_task_master.cli_commands.workflow.Planner"):
+        with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
+            with patch("claude_task_master.cli_commands.workflow_helpers.Planner"):
                 with patch(
-                    "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                    "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                 ) as mock_orch:
                     mock_orch.return_value.run.return_value = 0
 
@@ -281,10 +285,10 @@ class TestResumeCommandIntegration:
         self, cli_runner, cli_integration_setup, blocked_state
     ):
         """Test resuming blocked task with credentials."""
-        with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
-            with patch("claude_task_master.cli_commands.workflow.Planner"):
+        with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
+            with patch("claude_task_master.cli_commands.workflow_helpers.Planner"):
                 with patch(
-                    "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                    "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                 ) as mock_orch:
                     mock_orch.return_value.run.return_value = 2
 
@@ -509,8 +513,8 @@ class TestMultiCommandWorkflow:
         mock_sdk.set_planning_response(plan_content)
 
         # Step 1: Start
-        with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
-            with patch("claude_task_master.cli_commands.workflow.Planner") as mock_planner:
+        with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
+            with patch("claude_task_master.cli_commands.workflow_helpers.Planner") as mock_planner:
                 # Create real planner to actually save plan file
                 def create_plan_side_effect(goal):
                     state_manager = StateManager()
@@ -523,7 +527,7 @@ class TestMultiCommandWorkflow:
                 mock_planner.return_value.create_plan.side_effect = create_plan_side_effect
 
                 with patch(
-                    "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                    "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                 ) as mock_orch:
                     mock_orch.return_value.run.return_value = 2  # Paused
 
@@ -558,10 +562,10 @@ class TestMultiCommandWorkflow:
         assert "paused" in status_result.output
 
         # Step 2: Resume
-        with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
-            with patch("claude_task_master.cli_commands.workflow.Planner"):
+        with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
+            with patch("claude_task_master.cli_commands.workflow_helpers.Planner"):
                 with patch(
-                    "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                    "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                 ) as mock_orch:
                     mock_orch.return_value.run.return_value = 0
 
@@ -590,8 +594,8 @@ class TestCredentialValidation:
         assert "expiresAt" in creds_data["claudeAiOauth"]
 
         # Start command should accept these credentials
-        with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
-            with patch("claude_task_master.cli_commands.workflow.Planner") as mock_planner:
+        with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
+            with patch("claude_task_master.cli_commands.workflow_helpers.Planner") as mock_planner:
                 mock_planner.return_value.create_plan.side_effect = Exception("Test stop")
 
                 result = cli_runner.invoke(app, ["start", "Test"])
@@ -690,10 +694,10 @@ class TestErrorRecovery:
         creds_file.write_text(json.dumps(valid_creds))
 
         # Second attempt should succeed
-        with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
-            with patch("claude_task_master.cli_commands.workflow.Planner"):
+        with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
+            with patch("claude_task_master.cli_commands.workflow_helpers.Planner"):
                 with patch(
-                    "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                    "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                 ) as mock_orch:
                     mock_orch.return_value.run.return_value = 0
 

@@ -120,8 +120,8 @@ def release_ready(
 class TestReleasingStageNoReleaseGuide:
     """Without a release guide the stage must skip and advance immediately."""
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_no_guide_advances_to_next_task(
         self, mock_console, mock_sleep, workflow_handler, state_manager, task_state
     ) -> None:
@@ -136,8 +136,8 @@ class TestReleasingStageNoReleaseGuide:
         assert task_state.current_task_index == 1
         mock_sleep.assert_not_called()
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_no_guide_never_calls_release_check(
         self, mock_console, mock_sleep, workflow_handler, state_manager, task_state, mock_agent
     ) -> None:
@@ -157,8 +157,8 @@ class TestReleasingStageNoReleaseGuide:
 class TestReleasingStageInterruptedSleep:
     """interruptible_sleep returning False means shutdown was requested."""
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_interrupted_sleep_returns_none(
         self, mock_console, mock_sleep, workflow_handler, release_ready, mock_agent
     ) -> None:
@@ -171,8 +171,8 @@ class TestReleasingStageInterruptedSleep:
         assert result is None
         mock_agent.run_release_check.assert_not_called()
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_interrupted_sleep_does_not_advance(
         self, mock_console, mock_sleep, workflow_handler, release_ready
     ) -> None:
@@ -194,8 +194,8 @@ class TestReleasingStageInterruptedSleep:
 class TestReleasingStageSkipStatus:
     """A SKIP status in the release-check output must advance, not fail."""
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_skip_advances_to_next_task(
         self, mock_console, mock_sleep, workflow_handler, release_ready, mock_agent
     ) -> None:
@@ -212,8 +212,8 @@ class TestReleasingStageSkipStatus:
         assert release_ready.workflow_stage == "working"
         assert release_ready.current_task_index == 1
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_skip_does_not_set_release_fix_stage(
         self, mock_console, mock_sleep, workflow_handler, release_ready, mock_agent
     ) -> None:
@@ -237,8 +237,8 @@ class TestReleasingStageSkipStatus:
 class TestReleasingStageExceptionHandling:
     """Exceptions from run_release_check must never block the pipeline."""
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_release_check_exception_advances(
         self, mock_console, mock_sleep, workflow_handler, release_ready, mock_agent
     ) -> None:
@@ -252,8 +252,8 @@ class TestReleasingStageExceptionHandling:
         assert release_ready.workflow_stage == "working"
         assert release_ready.current_task_index == 1
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_release_check_exception_does_not_enter_release_fix(
         self, mock_console, mock_sleep, workflow_handler, release_ready, mock_agent
     ) -> None:
@@ -274,8 +274,8 @@ class TestReleasingStageExceptionHandling:
 class TestReleasingStagePerPRChecks:
     """Per-PR release checks from plan.md are extracted and injected into prompt."""
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_per_pr_checks_appear_in_prompt(
         self,
         mock_console,
@@ -298,8 +298,8 @@ class TestReleasingStagePerPRChecks:
         prompt = call_args.args[0]
         assert "/health" in prompt
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_no_matching_pr_group_still_runs_check(
         self,
         mock_console,
@@ -333,8 +333,8 @@ class TestReleasingStagePerPRChecks:
 class TestReleasingStagePromptContent:
     """The built prompt must include expected markers."""
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_prompt_contains_release_verification_marker(
         self, mock_console, mock_sleep, workflow_handler, release_ready, mock_agent
     ) -> None:
@@ -346,8 +346,8 @@ class TestReleasingStagePromptContent:
         prompt = mock_agent.run_release_check.call_args.args[0]
         assert "RELEASE VERIFICATION" in prompt
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_release_check_uses_sonnet_model(
         self, mock_console, mock_sleep, workflow_handler, release_ready, mock_agent
     ) -> None:
@@ -359,8 +359,8 @@ class TestReleasingStagePromptContent:
         kwargs = mock_agent.run_release_check.call_args.kwargs
         assert kwargs.get("model_override") == ModelType.SONNET
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_pr_title_included_in_prompt(
         self,
         mock_console,
@@ -381,8 +381,8 @@ class TestReleasingStagePromptContent:
         prompt = mock_agent.run_release_check.call_args.args[0]
         assert "unique-title-xyz" in prompt
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_github_error_fetching_title_still_runs_check(
         self,
         mock_console,
@@ -410,8 +410,8 @@ class TestReleasingStagePromptContent:
 class TestReleasingStageMaxAttemptsCap:
     """When release_fix_attempts already equals max_release_fixes, skip the fix cycle."""
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_at_cap_advances_instead_of_entering_release_fix(
         self, mock_console, mock_sleep, workflow_handler, release_ready, mock_agent
     ) -> None:
@@ -450,8 +450,8 @@ class TestHandleReleaseFixStage:
         task_state.release_fix_details = "Health check returned 503"
         return task_state
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_uses_run_work_session_not_release_check(
         self, mock_console, mock_sleep, workflow_handler, fix_state, mock_agent
     ) -> None:
@@ -463,8 +463,8 @@ class TestHandleReleaseFixStage:
         mock_agent.run_work_session.assert_called_once()
         mock_agent.run_release_check.assert_not_called()
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_transitions_to_pr_created_on_success(
         self, mock_console, mock_sleep, workflow_handler, fix_state, mock_agent
     ) -> None:
@@ -475,8 +475,8 @@ class TestHandleReleaseFixStage:
 
         assert fix_state.workflow_stage == "pr_created"
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_resets_current_pr_for_rediscovery(
         self, mock_console, mock_sleep, workflow_handler, fix_state, mock_agent
     ) -> None:
@@ -487,8 +487,8 @@ class TestHandleReleaseFixStage:
 
         assert fix_state.current_pr is None
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_increments_attempt_counter(
         self, mock_console, mock_sleep, workflow_handler, fix_state, mock_agent
     ) -> None:
@@ -500,8 +500,8 @@ class TestHandleReleaseFixStage:
 
         assert fix_state.release_fix_attempts == 3
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_sets_in_release_fix_flag(
         self, mock_console, mock_sleep, workflow_handler, fix_state, mock_agent
     ) -> None:
@@ -513,8 +513,8 @@ class TestHandleReleaseFixStage:
 
         assert fix_state.in_release_fix is True
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_work_session_exception_advances(
         self, mock_console, mock_sleep, workflow_handler, fix_state, mock_agent
     ) -> None:
@@ -528,8 +528,8 @@ class TestHandleReleaseFixStage:
         assert fix_state.workflow_stage == "working"
         assert fix_state.current_task_index == 1
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_interrupted_sleep_returns_none(
         self, mock_console, mock_sleep, workflow_handler, fix_state, mock_agent
     ) -> None:
@@ -541,8 +541,8 @@ class TestHandleReleaseFixStage:
 
         assert result is None
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_fix_uses_sonnet_model(
         self, mock_console, mock_sleep, workflow_handler, fix_state, mock_agent
     ) -> None:
@@ -554,8 +554,8 @@ class TestHandleReleaseFixStage:
         kwargs = mock_agent.run_work_session.call_args.kwargs
         assert kwargs.get("model_override") == ModelType.SONNET
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_failed_checks_injected_when_present(
         self, mock_console, mock_sleep, workflow_handler, fix_state, mock_agent
     ) -> None:
@@ -569,8 +569,8 @@ class TestHandleReleaseFixStage:
         assert "## Failed Checks" in task_desc
         assert "NullPointerException in checkout" in task_desc
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_no_release_guide_fallback_prompt_still_runs(
         self, mock_console, mock_sleep, workflow_handler, state_manager, task_state, mock_agent
     ) -> None:

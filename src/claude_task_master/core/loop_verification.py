@@ -203,9 +203,7 @@ After completing your fixes, end with: TASK COMPLETE"""
                     console.warning("Fix PR CI failed")
                     return "failure"
                 else:
-                    console.info(
-                        f"Waiting for fix PR CI... ({pr_status.checks_pending} pending)"
-                    )
+                    console.info(f"Waiting for fix PR CI... ({pr_status.checks_pending} pending)")
                     import claude_task_master.core.orchestrator_loop as _oloop  # noqa: PLC0415
 
                     if not _oloop.interruptible_sleep(poll_interval):
@@ -241,9 +239,7 @@ After completing your fixes, end with: TASK COMPLETE"""
                 console.warning("No CI failures or comments found to fix")
                 return False
 
-            ci_path = (
-                f"{pr_dir_path}/ci/" if pr_dir_path else ".claude-task-master/debugging/"
-            )
+            ci_path = f"{pr_dir_path}/ci/" if pr_dir_path else ".claude-task-master/debugging/"
 
             task_description = f"""
 Fix PR CI Failure

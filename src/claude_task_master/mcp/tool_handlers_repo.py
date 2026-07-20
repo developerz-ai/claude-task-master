@@ -177,8 +177,18 @@ def clone_repo(
                 error="path_outside_workspace",
             ).model_dump()
     else:
-        # Default to ~/workspace/claude-task-master/{repo-name}
-        target_path = _workspace_base() / repo_name
+        # Default to ~/workspace/claude-task-master/{repo-name}, confined like the
+        # explicit target_dir branch: repo_name is derived from the URL, so a value
+        # such as ".." must not resolve outside the workspace base.
+        try:
+            target_path = _resolve_within_workspace(_workspace_base() / repo_name)
+        except WorkspaceConfinementError as e:
+            return CloneRepoResult(
+                success=False,
+                message=str(e),
+                repo_url=url,
+                error="path_outside_workspace",
+            ).model_dump()
 
     # Check if target already exists
     if target_path.exists():

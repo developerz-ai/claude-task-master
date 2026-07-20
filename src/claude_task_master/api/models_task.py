@@ -165,7 +165,7 @@ class ConfigUpdateRequest(BaseModel):
 
     def has_updates(self) -> bool:
         """Check if any configuration updates were provided."""
-        return any(getattr(self, field) is not None for field in self.model_fields.keys())
+        return any(getattr(self, field) is not None for field in type(self).model_fields.keys())
 
     def to_update_dict(self) -> dict[str, bool | int | str]:
         """Convert to dictionary of non-None updates.
@@ -175,7 +175,7 @@ class ConfigUpdateRequest(BaseModel):
             with enum values converted to strings.
         """
         updates: dict[str, bool | int | str] = {}
-        for field_name in self.model_fields.keys():
+        for field_name in type(self).model_fields.keys():
             value = getattr(self, field_name)
             if value is not None:
                 # Convert enums to their string values

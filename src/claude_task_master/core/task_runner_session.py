@@ -40,15 +40,11 @@ class _TaskRunnerSessionMixin:
         """Check if a task is already marked as complete."""
         raise NotImplementedError
 
-    def _get_group_context(
-        self, state: TaskState, plan: str | None = None
-    ) -> dict | None:
+    def _get_group_context(self, state: TaskState, plan: str | None = None) -> dict | None:
         """Get PR group context for the current task."""
         raise NotImplementedError
 
-    def _get_parsed_tasks(
-        self, plan: str
-    ) -> tuple[list[ParsedTask], list[TaskGroup]]:
+    def _get_parsed_tasks(self, plan: str) -> tuple[list[ParsedTask], list[TaskGroup]]:
         """Get parsed tasks and groups, with caching."""
         raise NotImplementedError
 

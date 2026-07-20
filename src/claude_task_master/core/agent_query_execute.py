@@ -42,7 +42,6 @@ class _AgentQueryExecuteMixin:
     logger: TaskLogger | None
     max_budget_usd: float | None
 
-
     async def _execute_query(
         self,
         prompt: str,

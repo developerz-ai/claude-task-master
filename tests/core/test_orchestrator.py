@@ -602,7 +602,7 @@ class TestHandleWorkingStage:
     """Tests for _handle_working_stage method."""
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_handle_working_stage_basic(
         self,
@@ -629,7 +629,7 @@ class TestHandleWorkingStage:
         mock_reset.assert_called_once()
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_handle_working_stage_pr_per_task_mode(
         self,
@@ -653,7 +653,7 @@ class TestHandleWorkingStage:
         assert basic_task_state.workflow_stage == "pr_created"
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_handle_working_stage_logs_with_logger(
         self,
@@ -678,7 +678,7 @@ class TestHandleWorkingStage:
         mock_logger.end_session.assert_called_once_with("completed")
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     def test_handle_working_stage_tracks_error(
         self,
         mock_console,
@@ -705,7 +705,7 @@ class TestHandleWorkingStage:
         # The tracker records the error before re-raising
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_handle_working_stage_single_task_pr(
         self,
@@ -756,7 +756,7 @@ class TestHandleWorkingStage:
         mock_reset.assert_called_once()
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_handle_working_stage_multi_task_first_stays_in_working(
         self,
@@ -802,7 +802,7 @@ class TestHandleWorkingStage:
         assert basic_task_state.current_task_index == 1
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_handle_working_stage_multi_task_last_creates_pr(
         self,
@@ -870,7 +870,7 @@ class TestRunWorkflowCycle:
         assert basic_task_state.workflow_stage == "working"
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_workflow_cycle_working_stage(
         self,
@@ -1598,7 +1598,7 @@ class TestHandleWorkingStageSkipPath:
     """Tests for _handle_working_stage when the task is already complete."""
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_handle_working_stage_skipped_task_does_not_double_mark(
         self,
@@ -1652,7 +1652,7 @@ class TestHandleWorkingStageSkipPath:
         assert "task.completed" not in emitted_types
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_handle_working_stage_ran_marks_task_at_captured_index(
         self,

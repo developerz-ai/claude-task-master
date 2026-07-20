@@ -191,6 +191,13 @@ class WebhookEmitter:
                 self._deliver_job(job)
             return
         self._ensure_worker()
+        # close() may have flipped _closed after the check above; if the worker
+        # can no longer start, deliver inline so nothing is silently dropped.
+        with self._worker_lock:
+            if self._closed or self._worker is None:
+                for job in jobs:
+                    self._deliver_job(job)
+                return
         for job in jobs:
             self._queue.put(job)
 

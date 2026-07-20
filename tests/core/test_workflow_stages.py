@@ -12,6 +12,7 @@ Tests cover:
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
@@ -20,6 +21,40 @@ import pytest
 from claude_task_master.core.state import TaskOptions, TaskState
 from claude_task_master.core.workflow_stages import WorkflowStageHandler
 from claude_task_master.github.exceptions import GitHubError
+
+# Stage sub-modules that own their own ``console`` / ``interruptible_sleep``
+# bindings after the workflow_stages.py split. Single-stage tests patch the one
+# sub-module they exercise; integration-style tests that drive several stages in
+# one flow use the ``silence_all_stages`` fixture below to neutralise IO in all
+# of them at once (there is no single interception point post-split).
+_STAGE_SLEEP_MODULES = (
+    "ci_stage",
+    "pr_fix_stage",
+    "review_stage",
+    "merge_stage",
+    "release_stage",
+)
+_STAGE_CONSOLE_MODULES = (*_STAGE_SLEEP_MODULES, "git_ops")
+
+
+@pytest.fixture
+def silence_all_stages():
+    """Patch ``console`` + ``interruptible_sleep`` across every stage sub-module.
+
+    Sleep returns ``True`` (not interrupted) so poll loops advance without real
+    waits. Used by tests that drive multiple stages in a single flow.
+    """
+    with ExitStack() as stack:
+        for mod in _STAGE_CONSOLE_MODULES:
+            stack.enter_context(patch(f"claude_task_master.core.stages.{mod}.console"))
+        for mod in _STAGE_SLEEP_MODULES:
+            stack.enter_context(
+                patch(
+                    f"claude_task_master.core.stages.{mod}.interruptible_sleep",
+                    return_value=True,
+                )
+            )
+        yield
 
 
 @pytest.fixture(autouse=True)
@@ -190,7 +225,7 @@ class TestGetCurrentBranch:
 class TestCheckoutBranch:
     """Tests for _checkout_branch static method."""
 
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.git_ops.console")
     def test_checkout_branch_success(self, mock_console):
         """Should return True on successful checkout."""
         with patch("subprocess.run") as mock_run:
@@ -199,7 +234,7 @@ class TestCheckoutBranch:
             assert result is True
             assert mock_run.call_count == 2  # checkout + pull
 
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.git_ops.console")
     def test_checkout_branch_failure(self, mock_console):
         """Should return False on checkout failure."""
         with patch("subprocess.run") as mock_run:
@@ -245,7 +280,7 @@ class TestWorkflowStageHandlerInit:
 class TestHandlePRCreatedStage:
     """Tests for handle_pr_created_stage method."""
 
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.ci_stage.console")
     def test_detects_pr_from_branch(
         self, mock_console, workflow_handler, state_manager, basic_task_state, mock_github_client
     ):
@@ -260,7 +295,7 @@ class TestHandlePRCreatedStage:
         assert basic_task_state.workflow_stage == "waiting_ci"
         mock_console.success.assert_called()
 
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.ci_stage.console")
     def test_no_pr_found_blocks(
         self, mock_console, workflow_handler, state_manager, basic_task_state, mock_github_client
     ):
@@ -274,7 +309,7 @@ class TestHandlePRCreatedStage:
         assert basic_task_state.status == "blocked"
         mock_console.error.assert_called()
 
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.ci_stage.console")
     def test_pr_detection_error_blocks(
         self, mock_console, workflow_handler, state_manager, basic_task_state, mock_github_client
     ):
@@ -288,7 +323,7 @@ class TestHandlePRCreatedStage:
         assert basic_task_state.status == "blocked"
         mock_console.warning.assert_called()
 
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.ci_stage.console")
     def test_sanitizes_pr_body_on_detection(
         self, mock_console, workflow_handler, state_manager, basic_task_state, mock_github_client
     ):
@@ -304,7 +339,7 @@ class TestHandlePRCreatedStage:
         assert "✓" not in cleaned
         assert "tests pass" in cleaned
 
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.ci_stage.console")
     def test_clean_pr_body_not_rewritten(
         self, mock_console, workflow_handler, state_manager, basic_task_state, mock_github_client
     ):
@@ -317,7 +352,7 @@ class TestHandlePRCreatedStage:
 
         mock_github_client.update_pr_body.assert_not_called()
 
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.ci_stage.console")
     def test_existing_pr_moves_to_ci(
         self, mock_console, workflow_handler, state_manager, basic_task_state
     ):
@@ -340,7 +375,7 @@ class TestHandlePRCreatedStage:
 class TestHandleWaitingCIStage:
     """Tests for handle_waiting_ci_stage method."""
 
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.ci_stage.console")
     def test_no_pr_moves_to_reviews(
         self, mock_console, workflow_handler, state_manager, basic_task_state
     ):
@@ -353,8 +388,8 @@ class TestHandleWaitingCIStage:
         assert result is None
         assert basic_task_state.workflow_stage == "waiting_reviews"
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.ci_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.ci_stage.console")
     def test_ci_success_moves_to_reviews(
         self,
         mock_console,
@@ -380,8 +415,8 @@ class TestHandleWaitingCIStage:
         # Verify the review delay was applied
         mock_sleep.assert_called_with(workflow_handler.REVIEW_DELAY)
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.ci_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.ci_stage.console")
     def test_ci_failure_all_complete_moves_to_ci_failed(
         self,
         mock_console,
@@ -410,8 +445,8 @@ class TestHandleWaitingCIStage:
         assert basic_task_state.workflow_stage == "ci_failed"
         mock_console.warning.assert_called()
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.ci_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.ci_stage.console")
     def test_ci_failure_with_pending_waits(
         self,
         mock_console,
@@ -438,8 +473,8 @@ class TestHandleWaitingCIStage:
         assert basic_task_state.workflow_stage == "working"  # Original state unchanged
         mock_sleep.assert_called_once()
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.ci_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.ci_stage.console")
     def test_ci_pending_shows_status(
         self,
         mock_console,
@@ -468,8 +503,8 @@ class TestHandleWaitingCIStage:
         mock_console.info.assert_called()
         mock_sleep.assert_called_once()
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.ci_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.ci_stage.console")
     def test_ci_check_error_retries(
         self,
         mock_console,
@@ -500,8 +535,8 @@ class TestHandleWaitingCIStage:
 class TestHandleCIFailedStage:
     """Tests for handle_ci_failed_stage method."""
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.pr_fix_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.pr_fix_stage.console")
     def test_runs_agent_to_fix(
         self,
         mock_console,
@@ -526,8 +561,8 @@ class TestHandleCIFailedStage:
         assert basic_task_state.workflow_stage == "waiting_ci"
         assert basic_task_state.session_count == 2  # Incremented
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.pr_fix_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.pr_fix_stage.console")
     def test_uses_opus_model(
         self,
         mock_console,
@@ -550,8 +585,8 @@ class TestHandleCIFailedStage:
         call_kwargs = mock_agent.run_work_session.call_args.kwargs
         assert call_kwargs["model_override"] == ModelType.OPUS
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.pr_fix_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.pr_fix_stage.console")
     def test_context_load_error_continues(
         self,
         mock_console,
@@ -584,7 +619,7 @@ class TestHandleCIFailedStage:
 class TestHandleWaitingReviewsStage:
     """Tests for handle_waiting_reviews_stage method."""
 
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.review_stage.console")
     def test_no_pr_moves_to_merged(
         self, mock_console, workflow_handler, state_manager, basic_task_state
     ):
@@ -597,7 +632,7 @@ class TestHandleWaitingReviewsStage:
         assert result is None
         assert basic_task_state.workflow_stage == "merged"
 
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.review_stage.console")
     def test_no_comments_moves_to_ready(
         self,
         mock_console,
@@ -621,7 +656,7 @@ class TestHandleWaitingReviewsStage:
         assert basic_task_state.workflow_stage == "ready_to_merge"
         mock_console.success.assert_called()
 
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.review_stage.console")
     def test_unresolved_comments_moves_to_addressing(
         self,
         mock_console,
@@ -645,8 +680,8 @@ class TestHandleWaitingReviewsStage:
         assert basic_task_state.workflow_stage == "addressing_reviews"
         mock_console.warning.assert_called()
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.review_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.review_stage.console")
     def test_pending_checks_waits(
         self,
         mock_console,
@@ -672,7 +707,7 @@ class TestHandleWaitingReviewsStage:
         assert result is None
         mock_sleep.assert_called_once()
 
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.review_stage.console")
     def test_all_comments_resolved_moves_to_ready(
         self,
         mock_console,
@@ -697,8 +732,8 @@ class TestHandleWaitingReviewsStage:
         assert basic_task_state.workflow_stage == "ready_to_merge"
         mock_console.success.assert_called()
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.review_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.review_stage.console")
     def test_review_check_error_retries(
         self,
         mock_console,
@@ -729,8 +764,8 @@ class TestHandleWaitingReviewsStage:
 class TestHandleAddressingReviewsStage:
     """Tests for handle_addressing_reviews_stage method."""
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.review_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.review_stage.console")
     def test_runs_agent_to_address(
         self,
         mock_console,
@@ -756,7 +791,7 @@ class TestHandleAddressingReviewsStage:
         assert basic_task_state.workflow_stage == "waiting_ci"
         assert basic_task_state.session_count == 2
 
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.review_stage.console")
     def test_skips_agent_when_no_actionable_comments(
         self,
         mock_console,
@@ -781,8 +816,8 @@ class TestHandleAddressingReviewsStage:
         mock_pr_context.resolve_addressed_threads.assert_called_once_with(42)
         assert basic_task_state.workflow_stage == "waiting_reviews"
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.review_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.review_stage.console")
     def test_uses_opus_model(
         self,
         mock_console,
@@ -814,7 +849,7 @@ class TestHandleAddressingReviewsStage:
 class TestHandleReadyToMergeStage:
     """Tests for handle_ready_to_merge_stage method."""
 
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.merge_stage.console")
     def test_no_pr_moves_to_merged(
         self, mock_console, workflow_handler, state_manager, basic_task_state
     ):
@@ -827,8 +862,8 @@ class TestHandleReadyToMergeStage:
         assert result is None
         assert basic_task_state.workflow_stage == "merged"
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.merge_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.merge_stage.console")
     def test_auto_merge_enabled_merges(
         self,
         mock_console,
@@ -855,7 +890,7 @@ class TestHandleReadyToMergeStage:
         assert basic_task_state.workflow_stage == "merged"
         mock_console.success.assert_called()
 
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.merge_stage.console")
     def test_auto_merge_disabled_pauses(
         self,
         mock_console,
@@ -877,7 +912,7 @@ class TestHandleReadyToMergeStage:
         assert basic_task_state.status == "paused"
         mock_console.info.assert_called()
 
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.merge_stage.console")
     def test_merge_conflict_blocks(
         self,
         mock_console,
@@ -900,8 +935,8 @@ class TestHandleReadyToMergeStage:
         assert basic_task_state.status == "blocked"
         mock_console.warning.assert_called()
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.merge_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.merge_stage.console")
     def test_mergeable_unknown_waits(
         self,
         mock_console,
@@ -926,8 +961,8 @@ class TestHandleReadyToMergeStage:
         assert workflow_handler._merge_unknown_attempts[42] == 1
         mock_sleep.assert_called_once()
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.merge_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.merge_stage.console")
     def test_merge_error_blocks(
         self,
         mock_console,
@@ -952,8 +987,8 @@ class TestHandleReadyToMergeStage:
         assert basic_task_state.status == "blocked"
         mock_console.warning.assert_called()
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.merge_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.merge_stage.console")
     def test_mergeable_check_error_retries_without_merging(
         self,
         mock_console,
@@ -977,8 +1012,8 @@ class TestHandleReadyToMergeStage:
         mock_github_client.merge_pr.assert_not_called()
         mock_sleep.assert_called_once()
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.merge_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.merge_stage.console")
     def test_mergeable_check_error_blocks_after_max_attempts(
         self,
         mock_console,
@@ -1003,8 +1038,8 @@ class TestHandleReadyToMergeStage:
         assert basic_task_state.status == "blocked"
         mock_github_client.merge_pr.assert_not_called()
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.merge_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.merge_stage.console")
     def test_mergeable_unknown_blocks_after_max_attempts(
         self,
         mock_console,
@@ -1031,8 +1066,8 @@ class TestHandleReadyToMergeStage:
         assert basic_task_state.status == "blocked"
         mock_github_client.merge_pr.assert_not_called()
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.merge_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.merge_stage.console")
     def test_merge_confirmed_advances_to_merged(
         self,
         mock_console,
@@ -1058,8 +1093,8 @@ class TestHandleReadyToMergeStage:
         assert basic_task_state.workflow_stage == "merged"
         mock_github_client.merge_pr.assert_called_once_with(42, admin=False)
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.merge_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.merge_stage.console")
     def test_merge_not_confirmed_stays_ready_to_merge(
         self,
         mock_console,
@@ -1099,7 +1134,7 @@ class TestHandleReadyToMergeStage:
 class TestHandleMergedStage:
     """Tests for handle_merged_stage method."""
 
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.merge_stage.console")
     def test_marks_task_complete(
         self, mock_console, workflow_handler, state_manager, basic_task_state
     ):
@@ -1117,7 +1152,7 @@ class TestHandleMergedStage:
         assert basic_task_state.workflow_stage == "working"
         mock_console.success.assert_called()
 
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.merge_stage.console")
     def test_clears_pr_context_when_pr_exists(
         self,
         mock_console,
@@ -1143,7 +1178,7 @@ class TestHandleMergedStage:
         assert result is None
         mock_checkout.assert_called_once_with("main")
 
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.merge_stage.console")
     def test_checkout_to_base_branch(
         self,
         mock_console,
@@ -1169,7 +1204,7 @@ class TestHandleMergedStage:
 
         mock_checkout.assert_called_once_with("develop")
 
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.merge_stage.console")
     def test_checkout_failure_blocks(
         self,
         mock_console,
@@ -1195,7 +1230,7 @@ class TestHandleMergedStage:
         assert basic_task_state.status == "blocked"
         mock_console.error.assert_called()
 
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.merge_stage.console")
     def test_release_fix_pr_merge_preserves_attempt_counter(
         self,
         mock_console,
@@ -1222,7 +1257,7 @@ class TestHandleMergedStage:
         assert basic_task_state.workflow_stage == "releasing"
         assert basic_task_state.release_fix_attempts == 4
 
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.merge_stage.console")
     def test_normal_pr_merge_resets_release_fix_attempts(
         self,
         mock_console,
@@ -1249,7 +1284,7 @@ class TestHandleMergedStage:
         assert basic_task_state.workflow_stage == "releasing"
         assert basic_task_state.release_fix_attempts == 0
 
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.merge_stage.console")
     def test_pr_merged_event_fn_invoked_for_externally_merged_pr(
         self,
         mock_console,
@@ -1276,7 +1311,7 @@ class TestHandleMergedStage:
         assert result is None
         event_fn.assert_called_once_with(basic_task_state)
 
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.merge_stage.console")
     def test_pr_merged_event_fn_not_double_called_across_stages(
         self,
         mock_console,
@@ -1306,7 +1341,7 @@ class TestHandleMergedStage:
         # Each stage entry fires the callback once; the callback itself dedupes
         assert event_fn.call_count == 2
 
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.merge_stage.console")
     def test_no_plan_continues(
         self, mock_console, workflow_handler, state_manager, basic_task_state
     ):
@@ -1322,7 +1357,7 @@ class TestHandleMergedStage:
         mark_fn.assert_not_called()
         assert basic_task_state.workflow_stage == "working"
 
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.merge_stage.console")
     def test_pr_status_error_uses_default_branch(
         self, mock_console, workflow_handler, state_manager, basic_task_state, mock_github_client
     ):
@@ -1350,12 +1385,9 @@ class TestHandleMergedStage:
 class TestWorkflowIntegration:
     """Integration tests for workflow stage transitions."""
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
     def test_full_successful_pr_flow(
         self,
-        mock_console,
-        mock_sleep,
+        silence_all_stages,
         workflow_handler,
         state_manager,
         basic_task_state,
@@ -1366,7 +1398,6 @@ class TestWorkflowIntegration:
         state_manager.state_dir.mkdir(exist_ok=True)
         state_manager.save_plan("- [ ] Task 1")
         basic_task_state.options.auto_merge = True
-        mock_sleep.return_value = True  # Sleep not interrupted
 
         # Stage 1: PR Created
         mock_github_client.get_pr_for_current_branch.return_value = 42
@@ -1402,12 +1433,9 @@ class TestWorkflowIntegration:
         assert basic_task_state.current_task_index == 1
         assert basic_task_state.current_pr is None
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
     def test_pr_with_ci_failure_and_fix(
         self,
-        mock_console,
-        mock_sleep,
+        silence_all_stages,
         workflow_handler,
         state_manager,
         basic_task_state,
@@ -1420,7 +1448,6 @@ class TestWorkflowIntegration:
         state_manager.state_dir.mkdir(exist_ok=True)
         basic_task_state.current_pr = 42
         basic_task_state.workflow_stage = "waiting_ci"
-        mock_sleep.return_value = True
 
         # CI fails
         mock_pr_status.ci_state = "FAILURE"
@@ -1449,8 +1476,8 @@ class TestWorkflowIntegration:
 class TestCIPollingTimeout:
     """Tests for CI polling timeout to prevent infinite hangs."""
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.ci_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.ci_stage.console")
     def test_ci_poll_timeout_blocks_when_checks_pending(
         self,
         mock_console,
@@ -1486,8 +1513,8 @@ class TestCIPollingTimeout:
         assert basic_task_state.status == "blocked"
         assert basic_task_state.ci_poll_start_time is None
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.ci_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.ci_stage.console")
     def test_ci_poll_timeout_advances_when_admin(
         self,
         mock_console,
@@ -1523,8 +1550,8 @@ class TestCIPollingTimeout:
         assert basic_task_state.ci_poll_start_time is None
         assert basic_task_state.status != "blocked"
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.ci_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.ci_stage.console")
     def test_ci_poll_timeout_advances_when_required_checks_missing(
         self,
         mock_console,
@@ -1556,8 +1583,8 @@ class TestCIPollingTimeout:
         assert basic_task_state.status == "blocked"
         assert basic_task_state.ci_poll_start_time is None
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.ci_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.ci_stage.console")
     def test_ci_poll_keeps_waiting_before_timeout(
         self,
         mock_console,
@@ -1593,8 +1620,8 @@ class TestCIPollingTimeout:
         assert result is None
         assert basic_task_state.workflow_stage == "waiting_ci"
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.ci_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.ci_stage.console")
     def test_no_ci_first_poll_starts_timer_and_keeps_polling(
         self,
         mock_console,
@@ -1626,8 +1653,8 @@ class TestCIPollingTimeout:
         assert basic_task_state.ci_poll_start_time is not None
         mock_sleep.assert_called_once()
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.ci_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.ci_stage.console")
     def test_no_ci_configured_skips_to_reviews_after_confirmation_window(
         self,
         mock_console,
@@ -1659,8 +1686,8 @@ class TestCIPollingTimeout:
         assert basic_task_state.workflow_stage == "waiting_reviews"
         assert basic_task_state.ci_poll_start_time is None
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.ci_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.ci_stage.console")
     def test_required_checks_fetch_error_keeps_polling(
         self,
         mock_console,
@@ -1690,8 +1717,8 @@ class TestCIPollingTimeout:
         assert basic_task_state.workflow_stage == "waiting_ci"
         mock_sleep.assert_called_once()
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.ci_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.ci_stage.console")
     def test_required_checks_fetch_error_blocks_on_timeout(
         self,
         mock_console,
@@ -1723,8 +1750,8 @@ class TestCIPollingTimeout:
         assert basic_task_state.status == "blocked"
         assert basic_task_state.ci_poll_start_time is None
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.ci_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.ci_stage.console")
     def test_ci_success_with_empty_details_still_passes(
         self,
         mock_console,
@@ -1755,8 +1782,8 @@ class TestCIPollingTimeout:
 
         assert basic_task_state.workflow_stage == "waiting_reviews"
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.ci_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.ci_stage.console")
     def test_ci_poll_timeout_on_error(
         self,
         mock_console,
@@ -1782,8 +1809,8 @@ class TestCIPollingTimeout:
         assert basic_task_state.status == "blocked"
         assert basic_task_state.ci_poll_start_time is None
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.ci_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.ci_stage.console")
     def test_ci_failure_timeout_treats_as_failure(
         self,
         mock_console,
@@ -1817,8 +1844,8 @@ class TestCIPollingTimeout:
         assert basic_task_state.workflow_stage == "ci_failed"
         assert basic_task_state.ci_poll_start_time is None
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.ci_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.ci_stage.console")
     def test_pr_created_stage_initializes_ci_poll_timer(
         self,
         mock_console,
@@ -1848,17 +1875,17 @@ class TestWaitingReviewsTimeout:
         assert not hasattr(WorkflowStageHandler, "REVIEW_POLL_TIMEOUT")
 
     def test_is_check_pending_used_for_pending_detection(self):
-        """workflow_stages uses the shared is_check_pending helper from ci_helpers."""
+        """review_stage uses the shared is_check_pending helper from ci_helpers."""
         import inspect
 
-        from claude_task_master.core import workflow_stages
+        from claude_task_master.core.stages import review_stage
 
         # Imported lazily inside the polling method, so assert on the source
-        source = inspect.getsource(workflow_stages)
-        assert "from ..cli_commands.ci_helpers import is_check_pending" in source
+        source = inspect.getsource(review_stage)
+        assert "from ...cli_commands.ci_helpers import is_check_pending" in source
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.review_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.review_stage.console")
     def test_review_checks_timeout_advances(
         self,
         mock_console,
@@ -1900,8 +1927,8 @@ class TestWaitingReviewsTimeout:
 class TestHandleCIFailedStageCap:
     """Tests for the MAX_CI_FIX_ATTEMPTS cap in handle_ci_failed_stage."""
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.pr_fix_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.pr_fix_stage.console")
     def test_ci_fix_at_cap_blocks_without_agent(
         self,
         mock_console,
@@ -1924,8 +1951,8 @@ class TestHandleCIFailedStageCap:
         mock_console.error.assert_called()
         mock_sleep.assert_not_called()
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.pr_fix_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.pr_fix_stage.console")
     def test_ci_fix_below_cap_increments_and_runs_agent(
         self,
         mock_console,
@@ -1985,8 +2012,8 @@ class TestAdvanceToNextTask:
 class TestPRHeadBranchSessions:
     """Fix sessions must target the PR head ref, not whatever branch is checked out."""
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.pr_fix_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.pr_fix_stage.console")
     def test_ci_failed_stage_passes_head_branch_as_required_branch(
         self,
         mock_console,
@@ -2018,8 +2045,8 @@ class TestPRHeadBranchSessions:
         call_kwargs = mock_agent.run_work_session.call_args.kwargs
         assert call_kwargs["required_branch"] == "feat/pr-branch"
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.pr_fix_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.pr_fix_stage.console")
     def test_ci_failed_stage_checks_out_head_branch_when_different(
         self,
         mock_console,
@@ -2054,8 +2081,8 @@ class TestPRHeadBranchSessions:
         call_kwargs = mock_agent.run_work_session.call_args.kwargs
         assert call_kwargs["required_branch"] == "feat/pr-branch"
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.review_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.review_stage.console")
     def test_addressing_reviews_stage_passes_head_branch_as_required_branch(
         self,
         mock_console,
@@ -2102,8 +2129,8 @@ class TestFixSessionPushOnlyMode:
     and their prompts must not mandate rebase/force-push — that rewrites
     already-reviewed commits and breaks the PR's review threads."""
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.pr_fix_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.pr_fix_stage.console")
     def test_ci_failed_stage_runs_push_only(
         self,
         mock_console,
@@ -2135,8 +2162,8 @@ class TestFixSessionPushOnlyMode:
         assert call_kwargs["push_only"] is True
         assert call_kwargs["create_pr"] is False
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.review_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.review_stage.console")
     def test_addressing_reviews_stage_runs_push_only(
         self,
         mock_console,
@@ -2186,8 +2213,8 @@ class TestFixSessionPushOnlyMode:
         assert "git rebase origin" not in lowered
         assert "git push origin head" in lowered
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.review_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.review_stage.console")
     def test_addressing_reviews_body_has_no_rebase_mandate(
         self,
         mock_console,
@@ -2267,7 +2294,7 @@ class TestCIPollTimerHelpers:
 class TestCheckoutBranchStashRecovery:
     """Tests for _checkout_branch dirty-tree stash recovery."""
 
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.git_ops.console")
     def test_stash_recovery_logs_stash_ref_loudly(self, mock_console):
         """Dirty-tree recovery must warn loudly with the stash ref."""
         from subprocess import CalledProcessError
@@ -2288,7 +2315,7 @@ class TestCheckoutBranchStashRecovery:
         warning_texts = [str(c.args[0]) for c in mock_console.warning.call_args_list]
         assert any("stash" in text.lower() for text in warning_texts)
 
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.git_ops.console")
     def test_stash_failure_aborts_checkout(self, mock_console):
         """A failed stash aborts the checkout instead of losing track of local work."""
         from subprocess import CalledProcessError
@@ -2313,7 +2340,7 @@ class TestCheckoutBranchStashRecovery:
         warning_texts = [str(c.args[0]) for c in mock_console.warning.call_args_list]
         assert any("Aborting checkout" in text for text in warning_texts)
 
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.git_ops.console")
     def test_stash_failure_returns_false_without_recovery_attempt(self, mock_console):
         """Stash failure returns False immediately - no stash list, no pull attempted."""
         from subprocess import CalledProcessError
@@ -2340,8 +2367,8 @@ class TestCheckoutBranchStashRecovery:
 class TestCIFixCycleCap:
     """Repeated ci_failed cycles must block exactly at MAX_CI_FIX_ATTEMPTS + 1 entries."""
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.pr_fix_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.pr_fix_stage.console")
     def test_repeated_cycles_run_agent_until_cap_then_block(
         self,
         mock_console,
@@ -2385,8 +2412,8 @@ class TestCIFixCycleCap:
         # Attempt counter is persisted and not reset by blocking
         assert basic_task_state.ci_fix_attempts == cap + 1
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.pr_fix_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.pr_fix_stage.console")
     def test_blocked_at_cap_saves_state_without_running_agent(
         self,
         mock_console,
@@ -2462,7 +2489,7 @@ class TestPRHeadBranchResolution:
 
         assert result == "local-branch"
 
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.git_ops.console")
     def test_checkout_failure_still_returns_head_branch(
         self, mock_console, workflow_handler, basic_task_state, mock_github_client, mock_pr_status
     ):
@@ -2519,8 +2546,8 @@ class TestReleasingStageVerifyOnlyContract:
         mock_github_client.get_pr_status.return_value = mock_pr_status
         return basic_task_state
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_releasing_uses_release_check_not_work_session(
         self, mock_console, mock_sleep, workflow_handler, mock_agent, _release_state
     ):
@@ -2540,8 +2567,8 @@ class TestReleasingStageVerifyOnlyContract:
         prompt = call.args[0]
         assert "RELEASE VERIFICATION" in prompt
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_release_check_can_fail(
         self, mock_console, mock_sleep, workflow_handler, mock_agent, _release_state
     ):
@@ -2558,8 +2585,8 @@ class TestReleasingStageVerifyOnlyContract:
         assert result is None
         assert _release_state.workflow_stage == "release_fix"
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_release_check_pass_advances(
         self, mock_console, mock_sleep, workflow_handler, mock_agent, _release_state
     ):
@@ -2593,8 +2620,8 @@ class TestReleaseFixDetails:
         mock_github_client.get_pr_status.return_value = mock_pr_status
         return basic_task_state
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_releasing_fail_persists_details(
         self, mock_console, mock_sleep, workflow_handler, mock_agent, _release_state
     ):
@@ -2611,8 +2638,8 @@ class TestReleaseFixDetails:
         assert _release_state.release_fix_details is not None
         assert "/health returned 500" in _release_state.release_fix_details
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_releasing_fail_caps_details_to_tail(
         self, mock_console, mock_sleep, workflow_handler, mock_agent, _release_state
     ):
@@ -2629,8 +2656,8 @@ class TestReleaseFixDetails:
         # Tail is kept, so the FAIL marker at the end survives the cap.
         assert _release_state.release_fix_details.endswith("RELEASE_CHECK: FAIL")
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_release_fix_injects_failed_checks_section(
         self,
         mock_console,
@@ -2653,8 +2680,8 @@ class TestReleaseFixDetails:
         assert "## Failed Checks" in task
         assert "Health check failed: 503 at /healthz" in task
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_release_fix_handles_missing_details(
         self,
         mock_console,
@@ -2692,8 +2719,8 @@ class TestReleaseFixDetails:
 class TestReleaseFixCounterPersistence:
     """release_fix_attempts must survive the fix-PR merge so the 5-attempt cap stays reachable."""
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
+    @patch("claude_task_master.core.stages.release_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.release_stage.console")
     def test_release_fix_stage_increments_and_persists_counter(
         self,
         mock_console,
@@ -2718,12 +2745,9 @@ class TestReleaseFixCounterPersistence:
         assert basic_task_state.workflow_stage == "pr_created"
         mock_agent.run_work_session.assert_called_once()
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
     def test_repeated_failure_cycles_stop_at_max_attempts(
         self,
-        mock_console,
-        mock_sleep,
+        silence_all_stages,
         workflow_handler,
         state_manager,
         basic_task_state,
@@ -2740,7 +2764,6 @@ class TestReleaseFixCounterPersistence:
         basic_task_state.options.enable_release = True
         basic_task_state.current_pr = 42
         mock_github_client.get_pr_status.return_value = mock_pr_status
-        mock_sleep.return_value = True
         # Release verification (run_release_check) fails; the fix session
         # (run_work_session) keeps its default success return.
         mock_agent.run_release_check.return_value = {
@@ -2784,12 +2807,9 @@ class TestReleaseFixCounterPersistence:
         # One final verification runs, then the cap blocks any further fix cycle
         assert mock_agent.run_release_check.call_count == release_checks_before + 1
 
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
-    @patch("claude_task_master.core.workflow_stages.console")
     def test_release_fix_counter_reset_only_by_task_advance(
         self,
-        mock_console,
-        mock_sleep,
+        silence_all_stages,
         workflow_handler,
         state_manager,
         basic_task_state,
@@ -2805,7 +2825,6 @@ class TestReleaseFixCounterPersistence:
         basic_task_state.options.auto_merge = True
         basic_task_state.options.enable_release = True
         mock_github_client.get_pr_status.return_value = mock_pr_status
-        mock_sleep.return_value = True
 
         # Release-fix PR merged: counter preserved while entering releasing
         basic_task_state.current_pr = 42

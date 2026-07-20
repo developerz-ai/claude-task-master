@@ -192,9 +192,7 @@ class PROperationsMixin:
         contexts = json.loads(result.stdout)
         return contexts if isinstance(contexts, list) else []
 
-    def get_pr_for_current_branch(
-        self: GitHubClientProtocol, cwd: str | None = None
-    ) -> int | None:
+    def get_pr_for_current_branch(self: GitHubClientProtocol, cwd: str | None = None) -> int | None:
         """Get PR number for the current branch, if one exists.
 
         Args:

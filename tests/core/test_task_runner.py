@@ -755,7 +755,7 @@ class TestRunWorkSession:
             task_runner.run_work_session(basic_task_state)
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     def test_run_work_session_skips_complete_task(
         self,
         mock_console,
@@ -780,7 +780,7 @@ class TestRunWorkSession:
         assert basic_task_state.current_task_index == 1
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     def test_run_work_session_calls_agent(
         self,
         mock_console,
@@ -803,7 +803,7 @@ class TestRunWorkSession:
         mock_agent.run_work_session.assert_called_once()
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     def test_run_work_session_all_tasks_done(
         self,
         mock_console,
@@ -834,7 +834,7 @@ class TestRunWorkSession:
         mock_agent.run_work_session.assert_not_called()
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     def test_run_work_session_exactly_at_end_returns_no_tasks_remaining(
         self,
         mock_console,
@@ -862,7 +862,7 @@ class TestRunWorkSession:
         mock_agent.run_work_session.assert_not_called()
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     def test_run_work_session_logs_with_logger(
         self,
         mock_console,
@@ -885,7 +885,7 @@ class TestRunWorkSession:
         mock_logger.log_response.assert_called_once()
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     def test_run_work_session_handles_agent_error(
         self,
         mock_console,
@@ -913,7 +913,7 @@ class TestRunWorkSession:
         mock_logger.log_error.assert_called_once()
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     def test_run_work_session_wraps_generic_error(
         self,
         mock_console,
@@ -939,7 +939,7 @@ class TestRunWorkSession:
         assert isinstance(exc_info.value.original_error, RuntimeError)
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     def test_run_work_session_with_pr_group(
         self,
         mock_console,
@@ -964,7 +964,7 @@ class TestRunWorkSession:
         assert call_kwargs["pr_group_info"]["name"] == "Setup Changes"
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     def test_run_work_session_pr_per_task(
         self,
         mock_console,
@@ -989,7 +989,7 @@ class TestRunWorkSession:
         assert call_kwargs["create_pr"] is True
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     def test_run_work_session_already_complete_returns_skipped(
         self,
         mock_console,
@@ -1022,7 +1022,7 @@ class TestRunWorkSession:
         assert saved_state.current_task_index == 1
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     def test_run_work_session_incomplete_task_returns_ran(
         self,
         mock_console,
@@ -1045,7 +1045,7 @@ class TestRunWorkSession:
         mock_agent.run_work_session.assert_called_once()
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     def test_run_work_session_exposes_output_for_context(
         self,
         mock_console,
@@ -1073,7 +1073,7 @@ class TestRunWorkSession:
         assert task_runner.last_session_output == "Task completed successfully"
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     def test_run_work_session_consecutive_complete_tasks_each_skip(
         self,
         mock_console,
@@ -1201,7 +1201,7 @@ class TestErrorHandling:
 
             assert "Failed to parse plan" in str(exc_info.value)
 
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     def test_context_load_warning(
         self, mock_console, task_runner, state_manager, mock_agent, basic_task_state
     ):
@@ -1222,7 +1222,7 @@ class TestErrorHandling:
         # Should log warning
         mock_console.warning.assert_called()
 
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     def test_goal_load_warning(
         self, mock_console, task_runner, state_manager, mock_agent, basic_task_state
     ):

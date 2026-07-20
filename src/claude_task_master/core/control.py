@@ -193,6 +193,7 @@ class ControlManager(_ControlOpsMixin):
         except StateNotFoundError:
             return False
 
+
 __all__ = [
     "SESSION_RELEASE_TIMEOUT_SEC",
     "SESSION_RELEASE_POLL_INTERVAL_SEC",

@@ -95,7 +95,9 @@ class TestResumeWithMessage:
         monkeypatch.setattr(CredentialManager, "CREDENTIALS_PATH", mock_credentials_file)
 
         # We need to mock the PlanUpdater
-        with patch("claude_task_master.cli_commands.workflow.PlanUpdater") as MockPlanUpdater:
+        with patch(
+            "claude_task_master.cli_commands.workflow_resume.PlanUpdater"
+        ) as MockPlanUpdater:
             mock_updater = MagicMock()
             mock_updater.update_plan.return_value = {
                 "success": True,
@@ -421,7 +423,9 @@ class TestResumeWithMailboxIntegration:
         patched_sdk.set_verify_response("Verified")
 
         # Resume with a different message
-        with patch("claude_task_master.cli_commands.workflow.PlanUpdater") as MockPlanUpdater:
+        with patch(
+            "claude_task_master.cli_commands.workflow_resume.PlanUpdater"
+        ) as MockPlanUpdater:
             mock_updater = MagicMock()
             mock_updater.update_plan.return_value = {
                 "success": True,
@@ -519,7 +523,9 @@ class TestResumeWithMessageEdgeCases:
 
         long_message = "A" * 5000  # Very long message
 
-        with patch("claude_task_master.cli_commands.workflow.PlanUpdater") as MockPlanUpdater:
+        with patch(
+            "claude_task_master.cli_commands.workflow_resume.PlanUpdater"
+        ) as MockPlanUpdater:
             mock_updater = MagicMock()
             mock_updater.update_plan.return_value = {
                 "success": True,
@@ -552,7 +558,9 @@ class TestResumeWithMessageEdgeCases:
 
         special_message = 'Fix "bug" with <script> & special chars'
 
-        with patch("claude_task_master.cli_commands.workflow.PlanUpdater") as MockPlanUpdater:
+        with patch(
+            "claude_task_master.cli_commands.workflow_resume.PlanUpdater"
+        ) as MockPlanUpdater:
             mock_updater = MagicMock()
             mock_updater.update_plan.return_value = {
                 "success": True,
@@ -585,7 +593,9 @@ class TestResumeWithMessageEdgeCases:
 
         unicode_message = "Add feature: 日本語対応 and emoji support 🚀"
 
-        with patch("claude_task_master.cli_commands.workflow.PlanUpdater") as MockPlanUpdater:
+        with patch(
+            "claude_task_master.cli_commands.workflow_resume.PlanUpdater"
+        ) as MockPlanUpdater:
             mock_updater = MagicMock()
             mock_updater.update_plan.return_value = {
                 "success": True,

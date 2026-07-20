@@ -228,10 +228,7 @@ class OrchestratorLoop(
                 )
 
                 # Session limit check.
-                if (
-                    state.options.max_sessions
-                    and state.session_count >= state.options.max_sessions
-                ):
+                if state.options.max_sessions and state.session_count >= state.options.max_sessions:
                     console.warning(f"Max sessions ({state.options.max_sessions}) reached")
                     previous_status = state.status
                     state.status = "blocked"

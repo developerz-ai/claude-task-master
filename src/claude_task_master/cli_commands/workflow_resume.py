@@ -19,6 +19,7 @@ from .workflow_helpers import (
     _initialize_components,
     _initialize_logger,
     _run_work_loop,
+    auto_merge_notice,
     console,
 )
 
@@ -150,6 +151,12 @@ def resume(
                     )
             else:
                 console.print("[cyan]Admin force-merge disabled[/cyan]")
+
+        # A resumed run merges PRs automatically too, so surface the persisted
+        # auto-merge setting with the same warning `start` shows.
+        notice = auto_merge_notice(state.options.auto_merge)
+        if notice:
+            console.print(f"[yellow]⚠ {notice}[/yellow]")
 
         # Display current status
         goal = state_manager.load_goal()

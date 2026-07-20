@@ -156,8 +156,11 @@ async def _run_servers_async(
     # Wait for both servers (they run until shutdown)
     try:
         await asyncio.gather(rest_task, mcp_task)
-    except asyncio.CancelledError:
-        # Graceful shutdown - cancel remaining tasks
+    except BaseException:
+        # Any failure (cancellation, or one server raising) must tear down the
+        # sibling: gather(return_exceptions=False) propagates the first error
+        # immediately and would otherwise leave the other task running
+        # unmanaged until run_servers() closes the loop.
         logger.info("Shutting down servers...")
         rest_task.cancel()
         mcp_task.cancel()

@@ -285,9 +285,7 @@ def setup_repo(
                             dependencies_installed = True
                             steps_completed.append("Installed project with pip (editable)")
                         else:
-                            steps_completed.append(
-                                f"Warning: pip install failed: {result.stderr}"
-                            )
+                            steps_completed.append(f"Warning: pip install failed: {result.stderr}")
                 elif has_requirements:
                     result = subprocess.run(
                         [str(pip_path), "install", "-r", "requirements.txt"],

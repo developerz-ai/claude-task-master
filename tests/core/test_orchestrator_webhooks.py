@@ -323,7 +323,7 @@ class TestTaskLifecycleWebhooks:
 
     @patch("claude_task_master.core.orchestrator_loop.subprocess.run")
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_task_started_event_emitted(
         self,
@@ -363,7 +363,7 @@ class TestTaskLifecycleWebhooks:
 
     @patch("claude_task_master.core.orchestrator_loop.subprocess.run")
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_task_completed_event_emitted(
         self,
@@ -404,7 +404,7 @@ class TestTaskLifecycleWebhooks:
 
     @patch("claude_task_master.core.orchestrator_loop.subprocess.run")
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     def test_task_failed_event_emitted_on_error(
         self,
         mock_console,
@@ -457,7 +457,7 @@ class TestSessionLifecycleWebhooks:
     """Tests for webhook events during session lifecycle."""
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_session_started_event_emitted(
         self,
@@ -492,7 +492,7 @@ class TestSessionLifecycleWebhooks:
         assert event_data["phase"] == "working"
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_session_completed_event_emitted(
         self,
@@ -529,7 +529,7 @@ class TestSessionLifecycleWebhooks:
         assert "duration_seconds" in event_data
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     def test_session_completed_with_failure_result(
         self,
         mock_console,
@@ -672,7 +672,7 @@ class TestEventOrderingAndCorrelation:
 
     @patch("claude_task_master.core.orchestrator_loop.subprocess.run")
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_events_emitted_in_correct_order(
         self,
@@ -710,7 +710,7 @@ class TestEventOrderingAndCorrelation:
         ]
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_all_events_have_same_run_id(
         self,
@@ -754,7 +754,7 @@ class TestWebhookErrorHandling:
     """Tests for webhook error handling and edge cases."""
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_webhook_failure_does_not_block_execution(
         self,
@@ -781,7 +781,7 @@ class TestWebhookErrorHandling:
         assert result is None
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_webhook_exception_does_not_block_execution(
         self,
@@ -808,7 +808,7 @@ class TestWebhookErrorHandling:
         assert result is None
 
     @patch("claude_task_master.core.task_runner.get_current_branch")
-    @patch("claude_task_master.core.task_runner.console")
+    @patch("claude_task_master.core.task_runner_session.console")
     @patch("claude_task_master.core.orchestrator_loop.reset_escape")
     def test_orchestrator_without_webhook_client_works(
         self,
@@ -1128,8 +1128,8 @@ class TestStatusChangedWebhooks:
 class TestCIWebhooks:
     """Tests for ci.passed and ci.failed webhook events."""
 
-    @patch("claude_task_master.core.workflow_stages.console")
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
+    @patch("claude_task_master.core.stages.ci_stage.console")
+    @patch("claude_task_master.core.stages.ci_stage.interruptible_sleep")
     def test_ci_passed_event_emitted_when_checks_succeed(
         self,
         mock_sleep,
@@ -1171,8 +1171,8 @@ class TestCIWebhooks:
         assert event_data["pr_number"] == 42
         assert "branch" in event_data
 
-    @patch("claude_task_master.core.workflow_stages.console")
-    @patch("claude_task_master.core.workflow_stages.interruptible_sleep")
+    @patch("claude_task_master.core.stages.ci_stage.console")
+    @patch("claude_task_master.core.stages.ci_stage.interruptible_sleep")
     def test_ci_failed_event_emitted_when_checks_fail(
         self,
         mock_sleep,

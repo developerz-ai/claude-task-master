@@ -256,8 +256,8 @@ class TestRunServersAsync:
             mcp_called = True
 
         with (
-            patch("claude_task_master.server._run_rest_server", side_effect=mock_rest),
-            patch("claude_task_master.server._run_mcp_server", side_effect=mock_mcp),
+            patch("claude_task_master.server_runners._run_rest_server", side_effect=mock_rest),
+            patch("claude_task_master.server_runners._run_mcp_server", side_effect=mock_mcp),
         ):
             await _run_servers_async(
                 rest_port=8000,
@@ -284,8 +284,8 @@ class TestRunServersAsync:
             raise asyncio.CancelledError()
 
         with (
-            patch("claude_task_master.server._run_rest_server", side_effect=mock_rest),
-            patch("claude_task_master.server._run_mcp_server", side_effect=mock_mcp),
+            patch("claude_task_master.server_runners._run_rest_server", side_effect=mock_rest),
+            patch("claude_task_master.server_runners._run_mcp_server", side_effect=mock_mcp),
         ):
             with pytest.raises(asyncio.CancelledError):
                 await _run_servers_async(
@@ -297,6 +297,41 @@ class TestRunServersAsync:
                     cors_origins=None,
                     log_level="info",
                 )
+
+    @pytest.mark.asyncio
+    async def test_run_servers_async_cancels_sibling_on_error(self) -> None:
+        """A non-cancellation failure in one server tears down the other."""
+        sibling_cancelled = False
+
+        async def mock_rest(*args: object, **kwargs: object) -> None:
+            nonlocal sibling_cancelled
+            try:
+                await asyncio.sleep(10)  # Long running; must be cancelled
+            except asyncio.CancelledError:
+                sibling_cancelled = True
+                raise
+
+        async def mock_mcp(*args: object, **kwargs: object) -> None:
+            raise RuntimeError("mcp boom")
+
+        with (
+            patch("claude_task_master.server_runners._run_rest_server", side_effect=mock_rest),
+            patch("claude_task_master.server_runners._run_mcp_server", side_effect=mock_mcp),
+        ):
+            with pytest.raises(RuntimeError, match="mcp boom"):
+                await _run_servers_async(
+                    rest_port=8000,
+                    mcp_port=8080,
+                    host="127.0.0.1",
+                    working_dir=Path("/tmp"),
+                    mcp_transport="sse",
+                    cors_origins=None,
+                    log_level="info",
+                )
+
+        assert sibling_cancelled, (
+            "the still-running server must be cancelled when its sibling fails"
+        )
 
 
 class TestRunServers:

@@ -158,9 +158,7 @@ async def _handle_create_webhook(
         )
 
 
-async def _handle_get_webhook(
-    request: Request, webhook_id: str
-) -> WebhookResponse | JSONResponse:
+async def _handle_get_webhook(request: Request, webhook_id: str) -> WebhookResponse | JSONResponse:
     """Get a specific webhook configuration."""
     if not _is_auth_enabled():
         return _auth_required_response()
