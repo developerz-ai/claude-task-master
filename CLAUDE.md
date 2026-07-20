@@ -111,9 +111,9 @@ uv tool install claude-task-master --force --reinstall
 | GENERAL | `[general]` | Sonnet | medium | Tests, documentation, moderate refactoring, balanced tasks |
 | DEBUGGING_QA | `[debugging-qa]` | Sonnet 1M | high | CI failures, bug tracing, visual QA, log analysis (1M context) |
 
-When uncertain, default to `[coding]` (uses the smartest model). The smartest tier is **Claude Opus 4.8** (`claude-opus-4-8`) — see the `opus` default in `ModelConfig` in `core/config.py`. An opt-in `fable` tier (**Claude Fable 5**, `claude-fable-5`, premium-priced) exists alongside it — configured via the `"fable"` config key or `CLAUDETM_MODEL_FABLE`, mirroring Claude Code's `ANTHROPIC_DEFAULT_FABLE_MODEL`. No complexity level routes to it by default (2x Opus pricing); users opt in via `CLAUDETM_MODEL_OPUS=claude-fable-5` or by passing the `fable` model key explicitly. Fallback: Fable → Opus.
+When uncertain, default to `[coding]` (uses the smartest model). The smartest tier is **Claude Opus 4.8** (`claude-opus-4-8`) — see the `opus` default in `ModelConfig` in `core/config.py`. An opt-in `fable` tier (**Claude Fable 5**, `claude-fable-5`, premium-priced) exists alongside it — configured via the `"fable"` config key or `CLAUDETM_MODEL_FABLE`, mirroring Claude Code's `ANTHROPIC_DEFAULT_FABLE_MODEL`. No complexity level routes to it by default (2x Opus pricing); users opt in via `CLAUDETM_MODEL_FABLE=claude-fable-5` or by passing the `fable` model key explicitly. The `sonnet_1m` tier uses Sonnet with 1M context (e.g., `claude-sonnet-5` configured as `CLAUDETM_MODEL_SONNET_1M` for log analysis). Fallback: Fable → Opus → Sonnet → Haiku.
 
-**Fallback Models**: If primary model is unavailable, auto-fallback: Opus → Sonnet → Haiku.
+**Fallback Models**: If primary model is unavailable, auto-fallback: Fable → Opus → Sonnet → Haiku.
 
 **State Directory**:
 ```
@@ -129,9 +129,12 @@ When uncertain, default to `[coding]` (uses the smartest model). The smartest ti
 ├── mailbox.json          # Pending messages for plan updates
 ├── logs/
 │   └── run-*.txt         # Last 10 logs kept
-└── pr-{number}/          # PR-specific context
-    ├── ci/*.txt          # CI failure logs
-    └── comments/*.txt    # Review comments
+└── debugging/
+    └── pr/
+        └── {number}/     # PR-specific context
+            ├── ci/
+            │   └── *.log # CI failure logs (chunked, ~20KB per file)
+            └── comments/ # Review comments
 ```
 
 ## Exit Codes
@@ -189,7 +192,7 @@ All commands check `state_manager.exists()` first:
 - Profiles isolate credentials so multiple Claude subscriptions (or a custom Anthropic-compatible endpoint) can be used without colliding on the global `~/.claude/.credentials.json`
 - Two types: `oauth` (isolated `CLAUDE_CONFIG_DIR` per profile under `~/.claudetm/profiles/<name>/`) and `api-key` (injects `ANTHROPIC_API_KEY`/`ANTHROPIC_BASE_URL`, e.g. z.ai/GLM)
 - Registry at `~/.claudetm/profiles.json` (override base dir with `CLAUDETM_HOME`); active profile is a single pointer, overridable per-run via `CLAUDETM_PROFILE`
-- The active profile's env is injected at the SDK subprocess boundary (`core/agent_query.py`, `core/conversation.py`); `CredentialManager` reads the active oauth profile's config dir, and short-circuits the OAuth file check for `api-key` profiles
+- The active profile's env is injected at the SDK subprocess boundary (`core/agent_query_execute.py`); `CredentialManager` reads the active oauth profile's config dir, and short-circuits the OAuth file check for `api-key` profiles
 - Different accounts run in parallel safely (per-profile creds dir + per-project state); running the *same* subscription twice can trigger OAuth refresh-token rotation — use a distinct profile per concurrent run
 
 ### Mailbox System
@@ -255,7 +258,7 @@ All commands check `state_manager.exists()` first:
 - **Quick-fix PRs** — if verification fails, creates a small fix PR (max 5 attempts)
   - Fix PR goes through normal PR lifecycle (CI, reviews, merge)
   - Then re-runs release verification
-  - After 2 failed fix attempts, moves on (doesn't block the pipeline)
+  - After max 5 attempts, moves on (doesn't block the pipeline)
 - **No release phase when `auto_merge=False`** — human manages merges, they handle release
 
 ### Planning Prompt
@@ -307,6 +310,14 @@ Each webhook event includes:
 - `event_type`: The event type (one of above)
 - `timestamp`: When the event occurred
 - `data`: Event-specific payload (varies by event type)
+
+**Webhook Delivery & Retry**:
+- Deliveries are signed with `X-Webhook-Signature-256` header (HMAC-SHA256 of timestamp + payload)
+- Failed deliveries retry with exponential backoff: `retry_delay * 2^(attempt-1)`, max 3 attempts by default
+- Each delivery attempt includes a unique `X-Webhook-Delivery-ID` for idempotency tracking
+- Non-retryable errors (4xx except 429): fail immediately
+- Retryable errors (5xx, timeout, 429): retry with backoff
+- Max retry delay capped at 30 seconds per attempt (`MAX_RETRY_DELAY` in `webhooks/client_types.py`)
 
 ### API Endpoints (REST)
 Server runs on port 8000 by default (`claudetm-server`):

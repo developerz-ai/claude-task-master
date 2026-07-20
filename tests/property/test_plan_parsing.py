@@ -29,6 +29,19 @@ pr_group_name_strategy = st.text(
 ).filter(lambda x: x.strip())  # Ensure non-empty after stripping
 task_type_strategy = st.sampled_from(["quick", "coding", "general", "review", None])
 
+# Arbitrary plan content for invariant checks. Uses a constrained alphabet
+# (task chars + brackets + newlines) instead of a raw st.text() default:
+# the default full-Unicode alphabet forces Hypothesis's per-codepoint
+# intervals_from_codec("utf-8") path, whose IntervalSet.union over ~1.1M
+# single-codepoint intervals times out under the 2s pytest-timeout on CI.
+# Including "[", "]" and "\n" also lets Hypothesis actually generate
+# parseable "- [x] ..." lines, so the invariant is genuinely exercised.
+plan_content_strategy = st.text(
+    alphabet=PRINTABLE_TASK_CHARS + "[]\n",
+    min_size=0,
+    max_size=1000,
+)
+
 
 def generate_task_line(
     task_name: str, completed: bool = False, task_type: str | None = None
@@ -193,7 +206,7 @@ class TestPlanInvariants:
     """Test invariants that should always hold for plans."""
 
     @given(
-        plan_content=st.text(min_size=0, max_size=1000),
+        plan_content=plan_content_strategy,
     )
     @settings(max_examples=100, deadline=1500)
     def test_completed_never_exceeds_total(self, plan_content: str):
