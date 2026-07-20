@@ -39,11 +39,13 @@ class TestResumeFromPausedState:
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                        "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                     ) as mock_orch:
                         mock_orch.return_value.run.return_value = 0
 
@@ -81,11 +83,13 @@ class TestResumeFromPausedState:
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                        "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                     ) as mock_orch:
                         mock_orch.return_value.run.return_value = 0
 
@@ -121,11 +125,13 @@ class TestResumeAdminMerge:
     def _invoke(self, cli_runner, mock_state_dir, args):
         (mock_state_dir / "logs").mkdir(parents=True, exist_ok=True)
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                        "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                     ) as mock_orch:
                         mock_orch.return_value.run.return_value = 0
                         result = cli_runner.invoke(app, ["resume", *args])
@@ -193,11 +199,13 @@ class TestResumeFromBlockedState:
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                        "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                     ) as mock_orch:
                         mock_orch.return_value.run.return_value = 0
 
@@ -234,11 +242,13 @@ class TestResumeFromBlockedState:
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                        "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                     ) as mock_orch:
                         mock_orch.return_value.run.return_value = 2
 
@@ -267,11 +277,13 @@ class TestResumeFromWorkingState:
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                        "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                     ) as mock_orch:
                         mock_orch.return_value.run.return_value = 0
 
@@ -312,11 +324,13 @@ class TestResumeFromPlanningState:
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                        "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                     ) as mock_orch:
                         mock_orch.return_value.run.return_value = 0
 
@@ -361,12 +375,12 @@ class TestResumeWithDifferentModels:
 
             with patch.object(StateManager, "STATE_DIR", mock_state_dir):
                 with patch(
-                    "claude_task_master.cli_commands.workflow.CredentialManager"
+                    "claude_task_master.cli_commands.workflow_resume.CredentialManager"
                 ) as mock_cred:
                     mock_cred.return_value.get_valid_token.return_value = "test-token"
-                    with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                    with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                         with patch(
-                            "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                            "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                         ) as mock_orch:
                             mock_orch.return_value.run.return_value = 0
 

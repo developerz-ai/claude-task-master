@@ -205,11 +205,13 @@ def mock_resume_context(mock_state_dir: Path, return_code: int = 0, raise_except
             assert result.exit_code == 0
     """
     with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-        with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+        with patch(
+            "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+        ) as mock_cred:
             mock_cred.return_value.get_valid_token.return_value = "test-token"
-            with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+            with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                 with patch(
-                    "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                    "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                 ) as mock_orch:
                     if raise_exception:
                         mock_orch.return_value.run.side_effect = raise_exception

@@ -489,20 +489,20 @@ class TestSIGINTCancellationPath:
 
         with (
             patch(
-                "claude_task_master.core.orchestrator.is_cancellation_requested",
+                "claude_task_master.core.orchestrator_loop.is_cancellation_requested",
                 return_value=True,
             ),
             patch(
-                "claude_task_master.core.orchestrator.get_cancellation_reason",
+                "claude_task_master.core.orchestrator_loop.get_cancellation_reason",
                 return_value="SIGINT",
             ),
-            patch("claude_task_master.core.orchestrator.start_listening"),
-            patch("claude_task_master.core.orchestrator.stop_listening"),
-            patch("claude_task_master.core.orchestrator.register_handlers"),
-            patch("claude_task_master.core.orchestrator.unregister_handlers"),
-            patch("claude_task_master.core.orchestrator.reset_shutdown"),
-            patch("claude_task_master.core.orchestrator.set_durable_stop_check"),
-            patch("claude_task_master.core.orchestrator.console"),
+            patch("claude_task_master.core.orchestrator_loop.start_listening"),
+            patch("claude_task_master.core.orchestrator_loop.stop_listening"),
+            patch("claude_task_master.core.orchestrator_loop.register_handlers"),
+            patch("claude_task_master.core.orchestrator_loop.unregister_handlers"),
+            patch("claude_task_master.core.orchestrator_loop.reset_shutdown"),
+            patch("claude_task_master.core.orchestrator_loop.set_durable_stop_check"),
+            patch("claude_task_master.core.orchestrator_loop.console"),
         ):
             result = orchestrator.run()
 

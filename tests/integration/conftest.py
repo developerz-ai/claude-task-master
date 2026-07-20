@@ -864,13 +864,13 @@ def mock_key_listener():
             return_value=None,
         ),
         # Patch the imported names in orchestrator
-        patch("claude_task_master.core.orchestrator.start_listening"),
-        patch("claude_task_master.core.orchestrator.stop_listening"),
+        patch("claude_task_master.core.orchestrator_loop.start_listening"),
+        patch("claude_task_master.core.orchestrator_loop.stop_listening"),
         patch(
-            "claude_task_master.core.orchestrator.is_cancellation_requested",
+            "claude_task_master.core.orchestrator_loop.is_cancellation_requested",
             return_value=False,
         ),
-        patch("claude_task_master.core.orchestrator.reset_escape"),
+        patch("claude_task_master.core.orchestrator_loop.reset_escape"),
     ):
         yield
 
@@ -882,17 +882,37 @@ def mock_interruptible_sleep():
     The real function waits for seconds, which would cause tests to timeout.
     This fixture makes it return True immediately (not interrupted).
     """
+    # Each stage sub-module does ``from ..shutdown import interruptible_sleep``,
+    # binding its own module-level name. Patching only ``core.shutdown`` (the
+    # source) or the ``core.workflow_stages`` shim does NOT intercept those
+    # bindings, so every call site must be patched by its sub-module path.
     with (
         patch(
             "claude_task_master.core.shutdown.interruptible_sleep",
             return_value=True,
         ),
         patch(
-            "claude_task_master.core.orchestrator.interruptible_sleep",
+            "claude_task_master.core.orchestrator_loop.interruptible_sleep",
             return_value=True,
         ),
         patch(
-            "claude_task_master.core.workflow_stages.interruptible_sleep",
+            "claude_task_master.core.stages.ci_stage.interruptible_sleep",
+            return_value=True,
+        ),
+        patch(
+            "claude_task_master.core.stages.pr_fix_stage.interruptible_sleep",
+            return_value=True,
+        ),
+        patch(
+            "claude_task_master.core.stages.merge_stage.interruptible_sleep",
+            return_value=True,
+        ),
+        patch(
+            "claude_task_master.core.stages.review_stage.interruptible_sleep",
+            return_value=True,
+        ),
+        patch(
+            "claude_task_master.core.stages.release_stage.interruptible_sleep",
             return_value=True,
         ),
     ):

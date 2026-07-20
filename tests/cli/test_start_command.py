@@ -32,12 +32,14 @@ class TestStartCommand:
         with patch.object(StateManager, "STATE_DIR", temp_dir / ".claude-task-master"):
             # Mock the credential manager to avoid actual credential loading
             with patch(
-                "claude_task_master.cli_commands.workflow.CredentialManager"
+                "claude_task_master.cli_commands.workflow_start.CredentialManager"
             ) as mock_cred_manager:
                 mock_cred_manager.return_value.get_valid_token.return_value = "test-token"
                 # Mock the agent to avoid actual agent initialization
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
-                    with patch("claude_task_master.cli_commands.workflow.Planner") as mock_planner:
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
+                    with patch(
+                        "claude_task_master.cli_commands.workflow_helpers.Planner"
+                    ) as mock_planner:
                         mock_planner.return_value.create_plan.side_effect = Exception("Test stop")
 
                         result = cli_runner.invoke(app, ["start", "My test goal"])
@@ -62,11 +64,13 @@ class TestStartCommand:
         """start prints the auto-merge banner when auto-merge is on (the default)."""
         with patch.object(StateManager, "STATE_DIR", temp_dir / ".claude-task-master"):
             with patch(
-                "claude_task_master.cli_commands.workflow.CredentialManager"
+                "claude_task_master.cli_commands.workflow_start.CredentialManager"
             ) as mock_cred_manager:
                 mock_cred_manager.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
-                    with patch("claude_task_master.cli_commands.workflow.Planner") as mock_planner:
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
+                    with patch(
+                        "claude_task_master.cli_commands.workflow_helpers.Planner"
+                    ) as mock_planner:
                         mock_planner.return_value.create_plan.side_effect = Exception("Test stop")
 
                         result = cli_runner.invoke(app, ["start", "Test goal"])
@@ -77,11 +81,13 @@ class TestStartCommand:
         """--no-auto-merge suppresses the auto-merge banner."""
         with patch.object(StateManager, "STATE_DIR", temp_dir / ".claude-task-master"):
             with patch(
-                "claude_task_master.cli_commands.workflow.CredentialManager"
+                "claude_task_master.cli_commands.workflow_start.CredentialManager"
             ) as mock_cred_manager:
                 mock_cred_manager.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
-                    with patch("claude_task_master.cli_commands.workflow.Planner") as mock_planner:
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
+                    with patch(
+                        "claude_task_master.cli_commands.workflow_helpers.Planner"
+                    ) as mock_planner:
                         mock_planner.return_value.create_plan.side_effect = Exception("Test stop")
 
                         result = cli_runner.invoke(app, ["start", "Test goal", "--no-auto-merge"])
@@ -93,11 +99,13 @@ class TestStartCommand:
         state_dir = temp_dir / ".claude-task-master"
         with patch.object(StateManager, "STATE_DIR", state_dir):
             with patch(
-                "claude_task_master.cli_commands.workflow.CredentialManager"
+                "claude_task_master.cli_commands.workflow_start.CredentialManager"
             ) as mock_cred_manager:
                 mock_cred_manager.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
-                    with patch("claude_task_master.cli_commands.workflow.Planner") as mock_planner:
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
+                    with patch(
+                        "claude_task_master.cli_commands.workflow_helpers.Planner"
+                    ) as mock_planner:
                         mock_planner.return_value.create_plan.side_effect = Exception("Test stop")
 
                         cli_runner.invoke(app, ["start", "Test goal", "--admin"])
@@ -111,11 +119,13 @@ class TestStartCommand:
         state_dir = temp_dir / ".claude-task-master"
         with patch.object(StateManager, "STATE_DIR", state_dir):
             with patch(
-                "claude_task_master.cli_commands.workflow.CredentialManager"
+                "claude_task_master.cli_commands.workflow_start.CredentialManager"
             ) as mock_cred_manager:
                 mock_cred_manager.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
-                    with patch("claude_task_master.cli_commands.workflow.Planner") as mock_planner:
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
+                    with patch(
+                        "claude_task_master.cli_commands.workflow_helpers.Planner"
+                    ) as mock_planner:
                         mock_planner.return_value.create_plan.side_effect = Exception("Test stop")
 
                         cli_runner.invoke(app, ["start", "Test goal"])
@@ -127,11 +137,13 @@ class TestStartCommand:
         """--admin with --no-auto-merge warns that --admin has no effect."""
         with patch.object(StateManager, "STATE_DIR", temp_dir / ".claude-task-master"):
             with patch(
-                "claude_task_master.cli_commands.workflow.CredentialManager"
+                "claude_task_master.cli_commands.workflow_start.CredentialManager"
             ) as mock_cred_manager:
                 mock_cred_manager.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
-                    with patch("claude_task_master.cli_commands.workflow.Planner") as mock_planner:
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
+                    with patch(
+                        "claude_task_master.cli_commands.workflow_helpers.Planner"
+                    ) as mock_planner:
                         mock_planner.return_value.create_plan.side_effect = Exception("Test stop")
 
                         result = cli_runner.invoke(
@@ -144,11 +156,13 @@ class TestStartCommand:
         """Test start uses default model."""
         with patch.object(StateManager, "STATE_DIR", temp_dir / ".claude-task-master"):
             with patch(
-                "claude_task_master.cli_commands.workflow.CredentialManager"
+                "claude_task_master.cli_commands.workflow_start.CredentialManager"
             ) as mock_cred_manager:
                 mock_cred_manager.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
-                    with patch("claude_task_master.cli_commands.workflow.Planner") as mock_planner:
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
+                    with patch(
+                        "claude_task_master.cli_commands.workflow_helpers.Planner"
+                    ) as mock_planner:
                         mock_planner.return_value.create_plan.side_effect = Exception("Test stop")
 
                         result = cli_runner.invoke(app, ["start", "Test goal"])
@@ -160,11 +174,13 @@ class TestStartCommand:
         """Test start with custom model option."""
         with patch.object(StateManager, "STATE_DIR", temp_dir / ".claude-task-master"):
             with patch(
-                "claude_task_master.cli_commands.workflow.CredentialManager"
+                "claude_task_master.cli_commands.workflow_start.CredentialManager"
             ) as mock_cred_manager:
                 mock_cred_manager.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
-                    with patch("claude_task_master.cli_commands.workflow.Planner") as mock_planner:
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
+                    with patch(
+                        "claude_task_master.cli_commands.workflow_helpers.Planner"
+                    ) as mock_planner:
                         mock_planner.return_value.create_plan.side_effect = Exception("Test stop")
 
                         result = cli_runner.invoke(app, ["start", "Test goal", "--model", "opus"])
@@ -175,7 +191,7 @@ class TestStartCommand:
         """Test start handles credential errors."""
         with patch.object(StateManager, "STATE_DIR", temp_dir / ".claude-task-master"):
             with patch(
-                "claude_task_master.cli_commands.workflow.CredentialManager"
+                "claude_task_master.cli_commands.workflow_start.CredentialManager"
             ) as mock_cred_manager:
                 mock_cred_manager.return_value.get_valid_token.side_effect = FileNotFoundError(
                     "Credentials not found"
@@ -191,11 +207,13 @@ class TestStartCommand:
         """Test start with --no-auto-merge option."""
         with patch.object(StateManager, "STATE_DIR", temp_dir / ".claude-task-master"):
             with patch(
-                "claude_task_master.cli_commands.workflow.CredentialManager"
+                "claude_task_master.cli_commands.workflow_start.CredentialManager"
             ) as mock_cred_manager:
                 mock_cred_manager.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
-                    with patch("claude_task_master.cli_commands.workflow.Planner") as mock_planner:
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
+                    with patch(
+                        "claude_task_master.cli_commands.workflow_helpers.Planner"
+                    ) as mock_planner:
                         mock_planner.return_value.create_plan.side_effect = Exception("Test stop")
 
                         result = cli_runner.invoke(
@@ -209,11 +227,13 @@ class TestStartCommand:
         """Test start with --max-sessions option."""
         with patch.object(StateManager, "STATE_DIR", temp_dir / ".claude-task-master"):
             with patch(
-                "claude_task_master.cli_commands.workflow.CredentialManager"
+                "claude_task_master.cli_commands.workflow_start.CredentialManager"
             ) as mock_cred_manager:
                 mock_cred_manager.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
-                    with patch("claude_task_master.cli_commands.workflow.Planner") as mock_planner:
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
+                    with patch(
+                        "claude_task_master.cli_commands.workflow_helpers.Planner"
+                    ) as mock_planner:
                         mock_planner.return_value.create_plan.side_effect = Exception("Test stop")
 
                         result = cli_runner.invoke(
@@ -228,11 +248,13 @@ class TestStartCommand:
         """Test start with --prs option."""
         with patch.object(StateManager, "STATE_DIR", temp_dir / ".claude-task-master"):
             with patch(
-                "claude_task_master.cli_commands.workflow.CredentialManager"
+                "claude_task_master.cli_commands.workflow_start.CredentialManager"
             ) as mock_cred_manager:
                 mock_cred_manager.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
-                    with patch("claude_task_master.cli_commands.workflow.Planner") as mock_planner:
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
+                    with patch(
+                        "claude_task_master.cli_commands.workflow_helpers.Planner"
+                    ) as mock_planner:
                         mock_planner.return_value.create_plan.side_effect = Exception("Test stop")
 
                         result = cli_runner.invoke(
@@ -247,11 +269,13 @@ class TestStartCommand:
         """Test start with --pause-on-pr option."""
         with patch.object(StateManager, "STATE_DIR", temp_dir / ".claude-task-master"):
             with patch(
-                "claude_task_master.cli_commands.workflow.CredentialManager"
+                "claude_task_master.cli_commands.workflow_start.CredentialManager"
             ) as mock_cred_manager:
                 mock_cred_manager.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
-                    with patch("claude_task_master.cli_commands.workflow.Planner") as mock_planner:
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
+                    with patch(
+                        "claude_task_master.cli_commands.workflow_helpers.Planner"
+                    ) as mock_planner:
                         mock_planner.return_value.create_plan.side_effect = Exception("Test stop")
 
                         result = cli_runner.invoke(
@@ -275,17 +299,19 @@ class TestStartCommandWorkflow:
         """Test start with successful planning phase."""
         with patch.object(StateManager, "STATE_DIR", temp_dir / ".claude-task-master"):
             with patch(
-                "claude_task_master.cli_commands.workflow.CredentialManager"
+                "claude_task_master.cli_commands.workflow_start.CredentialManager"
             ) as mock_cred_manager:
                 mock_cred_manager.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
-                    with patch("claude_task_master.cli_commands.workflow.Planner") as mock_planner:
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
+                    with patch(
+                        "claude_task_master.cli_commands.workflow_helpers.Planner"
+                    ) as mock_planner:
                         mock_planner.return_value.create_plan.return_value = {
                             "plan": "## Tasks\n- [ ] Task 1",
                             "raw_output": "Planning output",
                         }
                         with patch(
-                            "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                            "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                         ) as mock_orchestrator:
                             mock_orchestrator.return_value.run.return_value = 0
 
@@ -298,17 +324,19 @@ class TestStartCommandWorkflow:
         """Test start when orchestrator returns paused status."""
         with patch.object(StateManager, "STATE_DIR", temp_dir / ".claude-task-master"):
             with patch(
-                "claude_task_master.cli_commands.workflow.CredentialManager"
+                "claude_task_master.cli_commands.workflow_start.CredentialManager"
             ) as mock_cred_manager:
                 mock_cred_manager.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
-                    with patch("claude_task_master.cli_commands.workflow.Planner") as mock_planner:
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
+                    with patch(
+                        "claude_task_master.cli_commands.workflow_helpers.Planner"
+                    ) as mock_planner:
                         mock_planner.return_value.create_plan.return_value = {
                             "plan": "## Tasks\n- [ ] Task 1",
                             "raw_output": "Planning output",
                         }
                         with patch(
-                            "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                            "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                         ) as mock_orchestrator:
                             mock_orchestrator.return_value.run.return_value = 2
 
@@ -322,17 +350,19 @@ class TestStartCommandWorkflow:
         """Test start when orchestrator returns blocked status."""
         with patch.object(StateManager, "STATE_DIR", temp_dir / ".claude-task-master"):
             with patch(
-                "claude_task_master.cli_commands.workflow.CredentialManager"
+                "claude_task_master.cli_commands.workflow_start.CredentialManager"
             ) as mock_cred_manager:
                 mock_cred_manager.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
-                    with patch("claude_task_master.cli_commands.workflow.Planner") as mock_planner:
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
+                    with patch(
+                        "claude_task_master.cli_commands.workflow_helpers.Planner"
+                    ) as mock_planner:
                         mock_planner.return_value.create_plan.return_value = {
                             "plan": "## Tasks\n- [ ] Task 1",
                             "raw_output": "Planning output",
                         }
                         with patch(
-                            "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                            "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                         ) as mock_orchestrator:
                             mock_orchestrator.return_value.run.return_value = 1
 
@@ -345,11 +375,13 @@ class TestStartCommandWorkflow:
         """Test start when planning phase fails."""
         with patch.object(StateManager, "STATE_DIR", temp_dir / ".claude-task-master"):
             with patch(
-                "claude_task_master.cli_commands.workflow.CredentialManager"
+                "claude_task_master.cli_commands.workflow_start.CredentialManager"
             ) as mock_cred_manager:
                 mock_cred_manager.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
-                    with patch("claude_task_master.cli_commands.workflow.Planner") as mock_planner:
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
+                    with patch(
+                        "claude_task_master.cli_commands.workflow_helpers.Planner"
+                    ) as mock_planner:
                         mock_planner.return_value.create_plan.side_effect = Exception(
                             "Planning failed: API error"
                         )

@@ -40,11 +40,13 @@ class TestResumeWithMessageBasic:
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                        "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                     ) as mock_orch:
                         mock_orch.return_value.run.return_value = 0
 
@@ -83,11 +85,13 @@ class TestResumeWithMessageBasic:
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.PlanUpdater"
+                        "claude_task_master.cli_commands.workflow_resume.PlanUpdater"
                     ) as mock_plan_updater:
                         mock_plan_updater.return_value.update_plan.return_value = {
                             "success": True,
@@ -95,7 +99,7 @@ class TestResumeWithMessageBasic:
                             "plan": "## Task List\n- [ ] New task",
                         }
                         with patch(
-                            "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                            "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                         ) as mock_orch:
                             mock_orch.return_value.run.return_value = 0
 
@@ -137,11 +141,13 @@ class TestResumeWithMessageBasic:
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.PlanUpdater"
+                        "claude_task_master.cli_commands.workflow_resume.PlanUpdater"
                     ) as mock_plan_updater:
                         mock_plan_updater.return_value.update_plan.return_value = {
                             "success": True,
@@ -149,7 +155,7 @@ class TestResumeWithMessageBasic:
                             "plan": "## Task List\n- [ ] New task",
                         }
                         with patch(
-                            "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                            "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                         ) as mock_orch:
                             mock_orch.return_value.run.return_value = 0
 
@@ -187,11 +193,13 @@ class TestResumeWithMessageBasic:
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.PlanUpdater"
+                        "claude_task_master.cli_commands.workflow_resume.PlanUpdater"
                     ) as mock_plan_updater:
                         # Simulate no changes needed
                         mock_plan_updater.return_value.update_plan.return_value = {
@@ -200,7 +208,7 @@ class TestResumeWithMessageBasic:
                             "plan": "## Task List\n- [ ] Existing task",
                         }
                         with patch(
-                            "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                            "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                         ) as mock_orch:
                             mock_orch.return_value.run.return_value = 0
 
@@ -242,18 +250,20 @@ class TestResumeWithMessageErrors:
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.PlanUpdater"
+                        "claude_task_master.cli_commands.workflow_resume.PlanUpdater"
                     ) as mock_plan_updater:
                         # Simulate plan update failure
                         mock_plan_updater.return_value.update_plan.side_effect = Exception(
                             "API error"
                         )
                         with patch(
-                            "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                            "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                         ) as mock_orch:
                             mock_orch.return_value.run.return_value = 0
 
@@ -297,11 +307,13 @@ class TestResumeWithMessageDisplay:
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.PlanUpdater"
+                        "claude_task_master.cli_commands.workflow_resume.PlanUpdater"
                     ) as mock_plan_updater:
                         mock_plan_updater.return_value.update_plan.return_value = {
                             "success": True,
@@ -309,7 +321,7 @@ class TestResumeWithMessageDisplay:
                             "plan": "## Task List\n- [ ] Task",
                         }
                         with patch(
-                            "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                            "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                         ) as mock_orch:
                             mock_orch.return_value.run.return_value = 0
 
@@ -349,11 +361,13 @@ class TestResumeWithMessageDisplay:
         long_message = "A" * 150
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.PlanUpdater"
+                        "claude_task_master.cli_commands.workflow_resume.PlanUpdater"
                     ) as mock_plan_updater:
                         mock_plan_updater.return_value.update_plan.return_value = {
                             "success": True,
@@ -361,7 +375,7 @@ class TestResumeWithMessageDisplay:
                             "plan": "## Task List\n- [ ] Task",
                         }
                         with patch(
-                            "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                            "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                         ) as mock_orch:
                             mock_orch.return_value.run.return_value = 0
 
@@ -404,11 +418,13 @@ class TestResumeWithMessageAndForce:
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.PlanUpdater"
+                        "claude_task_master.cli_commands.workflow_resume.PlanUpdater"
                     ) as mock_plan_updater:
                         mock_plan_updater.return_value.update_plan.return_value = {
                             "success": True,
@@ -416,7 +432,7 @@ class TestResumeWithMessageAndForce:
                             "plan": "## Task List\n- [ ] Task",
                         }
                         with patch(
-                            "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                            "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                         ) as mock_orch:
                             mock_orch.return_value.run.return_value = 0
                             # StateRecovery is imported locally, so patch in the module
@@ -487,11 +503,13 @@ class TestResumeWithMessageTaskCounts:
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.PlanUpdater"
+                        "claude_task_master.cli_commands.workflow_resume.PlanUpdater"
                     ) as mock_plan_updater:
                         mock_plan_updater.return_value.update_plan.return_value = {
                             "success": True,
@@ -499,7 +517,7 @@ class TestResumeWithMessageTaskCounts:
                             "plan": "## Task List\n- [x] Task 1\n- [ ] Task 2\n- [ ] Task 3",
                         }
                         with patch(
-                            "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                            "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                         ) as mock_orch:
                             mock_orch.return_value.run.return_value = 0
 
@@ -548,11 +566,13 @@ class TestResumeWithMessageTaskCounts:
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.PlanUpdater"
+                        "claude_task_master.cli_commands.workflow_resume.PlanUpdater"
                     ) as mock_plan_updater:
                         mock_plan_updater.return_value.update_plan.return_value = {
                             "success": True,
@@ -560,7 +580,7 @@ class TestResumeWithMessageTaskCounts:
                             "plan": "## Task List\n- [ ] Task 1\n- [ ] Task 2\n- [ ] Task 3\n- [ ] Task 4",
                         }
                         with patch(
-                            "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                            "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                         ) as mock_orch:
                             mock_orch.return_value.run.return_value = 0
 
@@ -599,11 +619,13 @@ class TestResumeWithMessageStateTransitions:
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.PlanUpdater"
+                        "claude_task_master.cli_commands.workflow_resume.PlanUpdater"
                     ) as mock_plan_updater:
                         mock_plan_updater.return_value.update_plan.return_value = {
                             "success": True,
@@ -611,7 +633,7 @@ class TestResumeWithMessageStateTransitions:
                             "plan": "## Task List\n- [ ] Updated task",
                         }
                         with patch(
-                            "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                            "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                         ) as mock_orch:
                             mock_orch.return_value.run.return_value = 0
 
@@ -646,11 +668,13 @@ class TestResumeWithMessageStateTransitions:
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.PlanUpdater"
+                        "claude_task_master.cli_commands.workflow_resume.PlanUpdater"
                     ) as mock_plan_updater:
                         mock_plan_updater.return_value.update_plan.return_value = {
                             "success": True,
@@ -658,7 +682,7 @@ class TestResumeWithMessageStateTransitions:
                             "plan": "## Task List\n- [ ] Updated task",
                         }
                         with patch(
-                            "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                            "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                         ) as mock_orch:
                             mock_orch.return_value.run.return_value = 0
 
@@ -698,11 +722,13 @@ class TestResumeWithMessageSpecialCharacters:
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.PlanUpdater"
+                        "claude_task_master.cli_commands.workflow_resume.PlanUpdater"
                     ) as mock_plan_updater:
                         mock_plan_updater.return_value.update_plan.return_value = {
                             "success": True,
@@ -710,7 +736,7 @@ class TestResumeWithMessageSpecialCharacters:
                             "plan": "## Task List\n- [ ] Task",
                         }
                         with patch(
-                            "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                            "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                         ) as mock_orch:
                             mock_orch.return_value.run.return_value = 0
 
@@ -749,11 +775,13 @@ class TestResumeWithMessageSpecialCharacters:
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.PlanUpdater"
+                        "claude_task_master.cli_commands.workflow_resume.PlanUpdater"
                     ) as mock_plan_updater:
                         mock_plan_updater.return_value.update_plan.return_value = {
                             "success": True,
@@ -761,7 +789,7 @@ class TestResumeWithMessageSpecialCharacters:
                             "plan": "## Task List\n- [ ] Task",
                         }
                         with patch(
-                            "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                            "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                         ) as mock_orch:
                             mock_orch.return_value.run.return_value = 0
 
@@ -799,11 +827,13 @@ class TestResumeWithMessageSpecialCharacters:
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                        "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                     ) as mock_orch:
                         mock_orch.return_value.run.return_value = 0
 
@@ -844,11 +874,13 @@ class TestResumeWithMessageModels:
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.PlanUpdater"
+                        "claude_task_master.cli_commands.workflow_resume.PlanUpdater"
                     ) as mock_plan_updater:
                         mock_plan_updater.return_value.update_plan.return_value = {
                             "success": True,
@@ -856,7 +888,7 @@ class TestResumeWithMessageModels:
                             "plan": "## Task List\n- [ ] Task",
                         }
                         with patch(
-                            "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                            "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                         ) as mock_orch:
                             mock_orch.return_value.run.return_value = 0
 
@@ -891,11 +923,13 @@ class TestResumeWithMessageModels:
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.PlanUpdater"
+                        "claude_task_master.cli_commands.workflow_resume.PlanUpdater"
                     ) as mock_plan_updater:
                         mock_plan_updater.return_value.update_plan.return_value = {
                             "success": True,
@@ -903,7 +937,7 @@ class TestResumeWithMessageModels:
                             "plan": "## Task List\n- [ ] Task",
                         }
                         with patch(
-                            "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                            "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                         ) as mock_orch:
                             mock_orch.return_value.run.return_value = 0
 
@@ -942,11 +976,13 @@ class TestResumeWithMessagePRHandling:
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.PlanUpdater"
+                        "claude_task_master.cli_commands.workflow_resume.PlanUpdater"
                     ) as mock_plan_updater:
                         mock_plan_updater.return_value.update_plan.return_value = {
                             "success": True,
@@ -954,7 +990,7 @@ class TestResumeWithMessagePRHandling:
                             "plan": "## Task List\n- [ ] Updated task",
                         }
                         with patch(
-                            "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                            "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                         ) as mock_orch:
                             mock_orch.return_value.run.return_value = 0
 
@@ -993,17 +1029,19 @@ class TestResumeWithMessageErrorScenarios:
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.PlanUpdater"
+                        "claude_task_master.cli_commands.workflow_resume.PlanUpdater"
                     ) as mock_plan_updater:
                         mock_plan_updater.return_value.update_plan.side_effect = ValueError(
                             "No plan exists"
                         )
                         with patch(
-                            "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                            "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                         ) as mock_orch:
                             mock_orch.return_value.run.return_value = 0
 
@@ -1040,17 +1078,19 @@ class TestResumeWithMessageErrorScenarios:
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.PlanUpdater"
+                        "claude_task_master.cli_commands.workflow_resume.PlanUpdater"
                     ) as mock_plan_updater:
                         mock_plan_updater.return_value.update_plan.side_effect = TimeoutError(
                             "Request timed out"
                         )
                         with patch(
-                            "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                            "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                         ) as mock_orch:
                             mock_orch.return_value.run.return_value = 0
 
@@ -1093,11 +1133,13 @@ class TestResumeWithMessageWebhooks:
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.PlanUpdater"
+                        "claude_task_master.cli_commands.workflow_resume.PlanUpdater"
                     ) as mock_plan_updater:
                         mock_plan_updater.return_value.update_plan.return_value = {
                             "success": True,
@@ -1105,11 +1147,11 @@ class TestResumeWithMessageWebhooks:
                             "plan": "## Task List\n- [ ] Task",
                         }
                         with patch(
-                            "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                            "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                         ) as mock_orch:
                             mock_orch.return_value.run.return_value = 0
                             with patch(
-                                "claude_task_master.cli_commands.workflow.WebhookClient"
+                                "claude_task_master.cli_commands.workflow_resume.WebhookClient"
                             ) as mock_webhook:
                                 result = cli_runner.invoke(app, ["resume", "Update task"])
 
@@ -1148,11 +1190,13 @@ class TestResumeWithMessageMultipleSessions:
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.PlanUpdater"
+                        "claude_task_master.cli_commands.workflow_resume.PlanUpdater"
                     ) as mock_plan_updater:
                         mock_plan_updater.return_value.update_plan.return_value = {
                             "success": True,
@@ -1160,7 +1204,7 @@ class TestResumeWithMessageMultipleSessions:
                             "plan": "## Task List\n- [ ] Task",
                         }
                         with patch(
-                            "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                            "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                         ) as mock_orch:
                             mock_orch.return_value.run.return_value = 0
 
@@ -1202,11 +1246,13 @@ class TestResumeWithMessagePlanUpdaterIntegration:
         test_message = "Add user authentication with JWT tokens"
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.PlanUpdater"
+                        "claude_task_master.cli_commands.workflow_resume.PlanUpdater"
                     ) as mock_plan_updater:
                         mock_plan_updater.return_value.update_plan.return_value = {
                             "success": True,
@@ -1214,7 +1260,7 @@ class TestResumeWithMessagePlanUpdaterIntegration:
                             "plan": "## Task List\n- [ ] Task",
                         }
                         with patch(
-                            "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                            "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                         ) as mock_orch:
                             mock_orch.return_value.run.return_value = 0
 
@@ -1253,11 +1299,13 @@ class TestResumeWithMessagePlanUpdaterIntegration:
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.PlanUpdater"
+                        "claude_task_master.cli_commands.workflow_resume.PlanUpdater"
                     ) as mock_plan_updater:
                         mock_plan_updater.return_value.update_plan.return_value = {
                             "success": True,
@@ -1265,7 +1313,7 @@ class TestResumeWithMessagePlanUpdaterIntegration:
                             "plan": "## Task List\n- [ ] Task",
                         }
                         with patch(
-                            "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                            "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                         ) as mock_orch:
                             mock_orch.return_value.run.return_value = 0
 

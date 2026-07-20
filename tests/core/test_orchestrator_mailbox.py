@@ -401,8 +401,8 @@ class TestMessagePriorityHandling:
 class TestWorkingStageMailboxIntegration:
     """Tests for mailbox integration within the working stage handler."""
 
-    @patch("claude_task_master.core.orchestrator.reset_escape")
-    @patch("claude_task_master.core.orchestrator.time.time")
+    @patch("claude_task_master.core.orchestrator_loop.reset_escape")
+    @patch("claude_task_master.core.orchestrator_loop.time.time")
     def test_mailbox_checked_after_task_completion(
         self, mock_time, mock_reset, orchestrator_with_mailbox, basic_task_state, state_manager
     ):
@@ -447,8 +447,8 @@ class TestWorkingStageMailboxIntegration:
         call_args = mock_plan_updater.update_plan.call_args[0][0]
         assert "Update needed after task 1" in call_args
 
-    @patch("claude_task_master.core.orchestrator.reset_escape")
-    @patch("claude_task_master.core.orchestrator.time.time")
+    @patch("claude_task_master.core.orchestrator_loop.reset_escape")
+    @patch("claude_task_master.core.orchestrator_loop.time.time")
     def test_no_mailbox_check_when_empty(
         self, mock_time, mock_reset, orchestrator_with_mailbox, basic_task_state, state_manager
     ):
@@ -743,8 +743,8 @@ class TestMergedMessagesTriggerPlanUpdate:
     workflow before continuation.
     """
 
-    @patch("claude_task_master.core.orchestrator.reset_escape")
-    @patch("claude_task_master.core.orchestrator.time.time")
+    @patch("claude_task_master.core.orchestrator_loop.reset_escape")
+    @patch("claude_task_master.core.orchestrator_loop.time.time")
     def test_plan_updated_before_task_index_incremented(
         self, mock_time, mock_reset, orchestrator_with_mailbox, basic_task_state, state_manager
     ):
@@ -817,8 +817,8 @@ class TestMergedMessagesTriggerPlanUpdate:
                 "Plan must be updated BEFORE task index is incremented"
             )
 
-    @patch("claude_task_master.core.orchestrator.reset_escape")
-    @patch("claude_task_master.core.orchestrator.time.time")
+    @patch("claude_task_master.core.orchestrator_loop.reset_escape")
+    @patch("claude_task_master.core.orchestrator_loop.time.time")
     def test_updated_plan_used_for_next_task_determination(
         self, mock_time, mock_reset, orchestrator_with_mailbox, basic_task_state, state_manager
     ):
@@ -869,8 +869,8 @@ class TestMergedMessagesTriggerPlanUpdate:
         call_args = mock_plan_updater.update_plan.call_args[0][0]
         assert "Add a new task 3" in call_args
 
-    @patch("claude_task_master.core.orchestrator.reset_escape")
-    @patch("claude_task_master.core.orchestrator.time.time")
+    @patch("claude_task_master.core.orchestrator_loop.reset_escape")
+    @patch("claude_task_master.core.orchestrator_loop.time.time")
     def test_multiple_messages_merged_then_plan_updated(
         self, mock_time, mock_reset, orchestrator_with_mailbox, basic_task_state, state_manager
     ):
@@ -924,8 +924,8 @@ class TestMergedMessagesTriggerPlanUpdate:
         normal_pos = merged_content.find("Normal priority task")
         assert urgent_pos < normal_pos, "Urgent message should appear before normal message"
 
-    @patch("claude_task_master.core.orchestrator.reset_escape")
-    @patch("claude_task_master.core.orchestrator.time.time")
+    @patch("claude_task_master.core.orchestrator_loop.reset_escape")
+    @patch("claude_task_master.core.orchestrator_loop.time.time")
     def test_total_tasks_refreshed_after_plan_update(
         self, mock_time, mock_reset, orchestrator_with_mailbox, basic_task_state, state_manager
     ):
@@ -1005,8 +1005,8 @@ class TestMergedMessagesTriggerPlanUpdate:
         result2 = orchestrator_with_mailbox._check_and_process_mailbox(basic_task_state)
         assert result2 is False, "No messages should remain for second processing"
 
-    @patch("claude_task_master.core.orchestrator.reset_escape")
-    @patch("claude_task_master.core.orchestrator.time.time")
+    @patch("claude_task_master.core.orchestrator_loop.reset_escape")
+    @patch("claude_task_master.core.orchestrator_loop.time.time")
     def test_work_continues_after_plan_update_failure(
         self, mock_time, mock_reset, orchestrator_with_mailbox, basic_task_state, state_manager
     ):
@@ -1054,8 +1054,8 @@ class TestMergedMessagesTriggerPlanUpdate:
 class TestMailboxProcessingTiming:
     """Tests for the timing of mailbox processing in the workflow."""
 
-    @patch("claude_task_master.core.orchestrator.reset_escape")
-    @patch("claude_task_master.core.orchestrator.time.time")
+    @patch("claude_task_master.core.orchestrator_loop.reset_escape")
+    @patch("claude_task_master.core.orchestrator_loop.time.time")
     def test_mailbox_processed_after_task_completion_not_before(
         self, mock_time, mock_reset, orchestrator_with_mailbox, basic_task_state, state_manager
     ):

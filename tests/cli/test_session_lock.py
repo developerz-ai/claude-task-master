@@ -16,7 +16,12 @@ from claude_task_master.core.state import StateManager
 
 from .conftest import mock_resume_context
 
-WORKFLOW = "claude_task_master.cli_commands.workflow"
+# After the workflow.py split, patch targets live in the focused sub-modules:
+# CredentialManager is looked up in workflow_start/workflow_resume (per command),
+# while AgentWrapper/Planner/WorkLoopOrchestrator live in workflow_helpers.
+WORKFLOW_HELPERS = "claude_task_master.cli_commands.workflow_helpers"
+WORKFLOW_START = "claude_task_master.cli_commands.workflow_start"
+WORKFLOW_RESUME = "claude_task_master.cli_commands.workflow_resume"
 
 
 class TestStartSessionLock:
@@ -26,7 +31,7 @@ class TestStartSessionLock:
         """A second start refuses to run (and never loads creds) when the lock is held."""
         with patch.object(StateManager, "STATE_DIR", temp_dir / ".claude-task-master"):
             with patch.object(StateManager, "acquire_session_lock", return_value=False):
-                with patch(f"{WORKFLOW}.CredentialManager") as mock_cred:
+                with patch(f"{WORKFLOW_START}.CredentialManager") as mock_cred:
                     result = cli_runner.invoke(app, ["start", "Test goal"])
                     # Lock guard runs before credential loading (closes the
                     # OAuth refresh-token rotation race), so creds are untouched.
@@ -40,11 +45,11 @@ class TestStartSessionLock:
         """A failed start frees the lock so a later run can acquire it."""
         state_dir = temp_dir / ".claude-task-master"
         with patch.object(StateManager, "STATE_DIR", state_dir):
-            with patch(f"{WORKFLOW}.CredentialManager") as mock_cred:
+            with patch(f"{WORKFLOW_START}.CredentialManager") as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
                 mock_cred.return_value.resync_from_live.return_value = False
-                with patch(f"{WORKFLOW}.AgentWrapper"):
-                    with patch(f"{WORKFLOW}.Planner") as mock_planner:
+                with patch(f"{WORKFLOW_HELPERS}.AgentWrapper"):
+                    with patch(f"{WORKFLOW_HELPERS}.Planner") as mock_planner:
                         mock_planner.return_value.create_plan.side_effect = Exception("boom")
 
                         result = cli_runner.invoke(app, ["start", "Test goal"])
@@ -57,16 +62,16 @@ class TestStartSessionLock:
         """A successful start releases the lock via the finally on exit."""
         state_dir = temp_dir / ".claude-task-master"
         with patch.object(StateManager, "STATE_DIR", state_dir):
-            with patch(f"{WORKFLOW}.CredentialManager") as mock_cred:
+            with patch(f"{WORKFLOW_START}.CredentialManager") as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
                 mock_cred.return_value.resync_from_live.return_value = False
-                with patch(f"{WORKFLOW}.AgentWrapper"):
-                    with patch(f"{WORKFLOW}.Planner") as mock_planner:
+                with patch(f"{WORKFLOW_HELPERS}.AgentWrapper"):
+                    with patch(f"{WORKFLOW_HELPERS}.Planner") as mock_planner:
                         mock_planner.return_value.create_plan.return_value = {
                             "plan": "## Tasks\n- [ ] Task 1",
                             "raw_output": "Planning output",
                         }
-                        with patch(f"{WORKFLOW}.WorkLoopOrchestrator") as mock_orch:
+                        with patch(f"{WORKFLOW_HELPERS}.WorkLoopOrchestrator") as mock_orch:
                             mock_orch.return_value.run.return_value = 0
 
                             result = cli_runner.invoke(app, ["start", "Test goal"])
@@ -85,7 +90,7 @@ class TestResumeSessionLock:
         setup_resume_state(status="paused")
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
             with patch.object(StateManager, "acquire_session_lock", return_value=False):
-                with patch(f"{WORKFLOW}.CredentialManager") as mock_cred:
+                with patch(f"{WORKFLOW_RESUME}.CredentialManager") as mock_cred:
                     result = cli_runner.invoke(app, ["resume"])
                     mock_cred.assert_not_called()
 

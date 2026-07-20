@@ -164,11 +164,13 @@ class TestResumeNoArgsWithForceFlag:
 
         # Mock the state recovery for force resume - patch at the module where it's imported
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                        "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                     ) as mock_orch:
                         mock_orch.return_value.run.return_value = 0
                         # Patch at the actual import location in state_recovery module
@@ -212,11 +214,13 @@ class TestResumeNoArgsWithForceFlag:
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                        "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                     ) as mock_orch:
                         mock_orch.return_value.run.return_value = 0
                         # Patch at the actual import location in state_recovery module
@@ -337,15 +341,17 @@ class TestResumeNoArgsWebhookSupport:
         logs_dir.mkdir(parents=True, exist_ok=True)
 
         with patch.object(StateManager, "STATE_DIR", mock_state_dir):
-            with patch("claude_task_master.cli_commands.workflow.CredentialManager") as mock_cred:
+            with patch(
+                "claude_task_master.cli_commands.workflow_resume.CredentialManager"
+            ) as mock_cred:
                 mock_cred.return_value.get_valid_token.return_value = "test-token"
-                with patch("claude_task_master.cli_commands.workflow.AgentWrapper"):
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
                     with patch(
-                        "claude_task_master.cli_commands.workflow.WorkLoopOrchestrator"
+                        "claude_task_master.cli_commands.workflow_helpers.WorkLoopOrchestrator"
                     ) as mock_orch:
                         mock_orch.return_value.run.return_value = 0
                         with patch(
-                            "claude_task_master.cli_commands.workflow.WebhookClient"
+                            "claude_task_master.cli_commands.workflow_resume.WebhookClient"
                         ) as mock_webhook:
                             # Key test: invoke resume with NO arguments, webhook should still work
                             result = cli_runner.invoke(app, ["resume"])
