@@ -6,7 +6,12 @@ following the Single Responsibility Principle (SRP). It handles:
 - Circuit breaker integration
 - Working directory management
 - API error classification
+
+Single-attempt execution lives in :mod:`.agent_query_execute`.
+Default message processing and error classification live in :mod:`.agent_query_helpers`.
 """
+
+from __future__ import annotations
 
 import asyncio
 import os
@@ -16,26 +21,17 @@ from typing import TYPE_CHECKING, Any
 from . import console
 from .agent_exceptions import (
     TRANSIENT_ERRORS,
-    AgentError,
     APIAuthenticationError,
-    APIConnectionError,
-    APIRateLimitError,
-    APIServerError,
-    APITimeoutError,
     ConsecutiveFailuresError,
     ContentFilterError,
     ModelUnavailableError,
-    QueryExecutionError,
     SDKImportError,
     SDKInitializationError,
     StreamStallError,
-    WorkingDirectoryError,
 )
-from .circuit_breaker import (
-    CircuitBreakerError,
-    CircuitState,
-)
-from .config_loader import get_config
+from .agent_query_execute import _AgentQueryExecuteMixin
+from .agent_query_helpers import _AgentQueryHelpersMixin
+from .circuit_breaker import CircuitBreakerError, CircuitState
 
 if TYPE_CHECKING:
     from .agent_models import ModelType
@@ -67,7 +63,7 @@ POST_COMPLETION_IDLE_TIMEOUT_SEC = float(
 )
 
 
-class AgentQueryExecutor:
+class AgentQueryExecutor(_AgentQueryExecuteMixin, _AgentQueryHelpersMixin):
     """Handles query execution with retry logic and circuit breaker.
 
     This class is responsible for executing queries against the Claude Agent SDK,
@@ -80,11 +76,11 @@ class AgentQueryExecutor:
         query_func: Any,
         options_class: Any,
         working_dir: str,
-        model: "ModelType",
-        rate_limit_config: "RateLimitConfig",
-        circuit_breaker: "CircuitBreaker",
+        model: ModelType,
+        rate_limit_config: RateLimitConfig,
+        circuit_breaker: CircuitBreaker,
         hooks: dict[str, Any] | None = None,
-        logger: "TaskLogger | None" = None,
+        logger: TaskLogger | None = None,
         max_budget_usd: float | None = None,
     ):
         """Initialize the query executor.
@@ -126,7 +122,7 @@ class AgentQueryExecutor:
         self,
         prompt: str,
         tools: list[str],
-        model_override: "ModelType | None" = None,
+        model_override: ModelType | None = None,
         get_model_name_func: Any = None,
         get_agents_func: Any = None,
         process_message_func: Any = None,
@@ -226,6 +222,8 @@ class AgentQueryExecutor:
         Returns:
             The delay in seconds before the next retry attempt.
         """
+        from .agent_exceptions import APIRateLimitError  # noqa: PLC0415
+
         # For rate limit errors, respect Retry-After if the API provided it.
         # Cap at max_backoff so a pathological server can't stall retries
         # indefinitely and trip the consecutive-failure window.
@@ -241,7 +239,7 @@ class AgentQueryExecutor:
         self,
         prompt: str,
         tools: list[str],
-        model_override: "ModelType | None" = None,
+        model_override: ModelType | None = None,
         get_model_name_func: Any = None,
         get_agents_func: Any = None,
         process_message_func: Any = None,
@@ -287,7 +285,7 @@ class AgentQueryExecutor:
         # fallback chain to the next untried model. The SDK's own fallback_model
         # already covers the first hop, so seed it as attempted to avoid re-trying
         # what it just tried. current_model overrides model_override as we descend.
-        from .agent_models import get_fallback_chain
+        from .agent_models import get_fallback_chain  # noqa: PLC0415
 
         effective_model = model_override or self.model
         fallback_chain = get_fallback_chain(effective_model)
@@ -370,10 +368,13 @@ class AgentQueryExecutor:
             ):
                 # These errors should not be retried
                 raise
-            except AgentError:
-                # Other agent errors - re-raise as is
-                raise
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
+                # AgentError subclasses not handled above are re-raised immediately.
+                from .agent_exceptions import AgentError  # noqa: PLC0415
+
+                if isinstance(e, AgentError):
+                    raise
+
                 # Unexpected errors count toward consecutive failures
                 self._record_failure(e)
 
@@ -388,331 +389,3 @@ class AgentQueryExecutor:
                 )
                 console.detail(f"Retrying in {retry_delay:.0f} seconds...", flush=True)
                 await asyncio.sleep(retry_delay)
-
-    async def _execute_query(
-        self,
-        prompt: str,
-        tools: list[str],
-        model_override: "ModelType | None" = None,
-        get_model_name_func: Any = None,
-        get_agents_func: Any = None,
-        process_message_func: Any = None,
-    ) -> str:
-        """Execute a single query attempt.
-
-        Args:
-            prompt: The prompt to send to the model.
-            tools: List of tools to enable.
-            model_override: Optional model to use instead of default.
-            get_model_name_func: Function to convert ModelType to API model name.
-            get_agents_func: Function to get subagents for working directory.
-            process_message_func: Function to process messages from query stream.
-
-        Returns:
-            The result text from the query.
-
-        Raises:
-            WorkingDirectoryError: If working directory cannot be accessed.
-            APIRateLimitError: If rate limited.
-            APIConnectionError: If connection fails.
-            APITimeoutError: If request times out.
-            APIAuthenticationError: If authentication fails.
-            APIServerError: If server returns 5xx error.
-            QueryExecutionError: For other query errors.
-        """
-        result_text = ""
-
-        # Determine which model to use
-        effective_model = model_override or self.model
-
-        # Get model name using provided function or default
-        if get_model_name_func:
-            model_name = get_model_name_func(effective_model)
-        else:
-            model_name = self._default_get_model_name(effective_model)
-
-        # Log the model and tools being used
-        tools_str = ", ".join(tools) if tools else "all"
-        console.detail(
-            f"Using model: {effective_model.value} ({model_name}) | Tools: {tools_str}",
-            flush=True,
-        )
-
-        # Validate working directory exists before passing it to the SDK.
-        # The SDK receives cwd= in options_kwargs; we don't chdir (which would
-        # race concurrent queries in server mode) but we do want a clear error
-        # if the directory is missing rather than a cryptic SDK failure.
-        if not os.path.isdir(self.working_dir):
-            raise WorkingDirectoryError(
-                self.working_dir,
-                "change to",
-                FileNotFoundError(f"No such directory: {self.working_dir}"),
-            )
-
-        # Load subagents from .claude/agents/ directory
-        if get_agents_func:
-            agents = get_agents_func(self.working_dir)
-        else:
-            agents = None
-
-        # Determine effort level and fallback model for the effective model.
-        from .agent_models import MODEL_EFFORT_MAP, get_fallback_chain
-
-        # Effort is keyed directly off the resolved model so every tier —
-        # including FABLE, which no complexity routes to — gets extended
-        # thinking (fable → "max"). A None here means "SDK default".
-        effort_level = MODEL_EFFORT_MAP.get(effective_model)
-
-        # Hand the SDK the first hop of the cycle-guarded fallback chain for
-        # automatic single-hop recovery. Deeper hops are driven by the
-        # multi-hop retry in _run_query_with_retry on ModelUnavailableError.
-        fallback_model_name = None
-        fallback_chain = get_fallback_chain(effective_model)
-        if fallback_chain:
-            fallback_type = fallback_chain[0]
-            if get_model_name_func:
-                fallback_model_name = get_model_name_func(fallback_type)
-            else:
-                fallback_model_name = self._default_get_model_name(fallback_type)
-
-        # Pass stall-timeout env vars to the underlying CLI subprocess.
-        # The Python SDK ignores these, but the bundled CLI binary respects
-        # them and will fail-fast on internal stalls before our watchdog
-        # has to step in. Belt-and-suspenders for issue #30333.
-        stall_timeout_ms = str(int(STREAM_IDLE_TIMEOUT_SEC * 1000))
-        cli_env = {
-            "CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS": stall_timeout_ms,
-            "API_TIMEOUT_MS": stall_timeout_ms,
-        }
-        # Inject the active profile's auth context (isolated CLAUDE_CONFIG_DIR
-        # for oauth profiles, or ANTHROPIC_API_KEY/BASE_URL for api-key
-        # profiles). No-op when no profile is active.
-        from .profiles import resolve_runtime_env
-
-        cli_env.update(resolve_runtime_env())
-
-        # Create options with model specification and subagents
-        try:
-            options_kwargs: dict[str, Any] = {
-                "allowed_tools": tools,
-                "permission_mode": "bypassPermissions",
-                "model": model_name,
-                "cwd": str(self.working_dir),
-                "setting_sources": ["user", "local", "project"],
-                "hooks": self.hooks,
-                "agents": agents if agents else None,
-                "max_buffer_size": 5 * 1024 * 1024,
-                "env": cli_env,
-            }
-
-            # Add effort level for extended thinking depth control
-            if effort_level:
-                options_kwargs["effort"] = effort_level
-
-            # Add fallback model for auto-recovery on model unavailability
-            if fallback_model_name:
-                options_kwargs["fallback_model"] = fallback_model_name
-
-            # Add per-session budget cap if configured
-            if self.max_budget_usd is not None:
-                options_kwargs["max_budget_usd"] = self.max_budget_usd
-
-            options = self.options_class(**options_kwargs)
-        except Exception as e:
-            raise SDKInitializationError("ClaudeAgentOptions", e) from e
-
-        # Execute query with per-message idle-timeout watchdog.
-        # Two timeout regimes (see constants above):
-        #   - STREAM_IDLE_TIMEOUT_SEC: the agent may be mid-tool, mid-think,
-        #     etc. Long ceiling to accommodate real long-running tools.
-        #   - POST_COMPLETION_IDLE_TIMEOUT_SEC: the agent just signaled
-        #     end_turn with no pending tool_use. The only remaining message
-        #     is ResultMessage; if it doesn't arrive shortly, the SDK lost
-        #     it (#30333). Treat as success with accumulated text.
-        stream = self.query(prompt=prompt, options=options)
-        agent_completed = False
-        try:
-            while True:
-                current_timeout = (
-                    POST_COMPLETION_IDLE_TIMEOUT_SEC if agent_completed else STREAM_IDLE_TIMEOUT_SEC
-                )
-                try:
-                    message = await asyncio.wait_for(
-                        stream.__anext__(),
-                        timeout=current_timeout,
-                    )
-                except StopAsyncIteration:
-                    break
-                except TimeoutError as e:
-                    if agent_completed:
-                        # Agent finished; SDK swallowed ResultMessage. Don't
-                        # retry — the work succeeded, retrying would re-run
-                        # a completed task.
-                        console.newline()
-                        console.warning(
-                            f"ResultMessage missing after end_turn "
-                            f"({current_timeout:.0f}s) - SDK bug #30333, "
-                            "treating accumulated text as success",
-                            flush=True,
-                        )
-                        break
-                    console.newline()
-                    console.warning(
-                        f"Stream idle for {current_timeout:.0f}s - treating as upstream stall",
-                        flush=True,
-                    )
-                    raise StreamStallError(current_timeout, e) from e
-                except StreamStallError:
-                    raise
-                except APITimeoutError:
-                    raise
-                except Exception as e:
-                    raise self._classify_api_error(e) from e
-
-                # Detect "agent has nothing more to do" — used to switch to
-                # the post-completion short timeout. We can't import the
-                # SDK types directly without circular issues, so check by
-                # class name. An AssistantMessage with stop_reason=end_turn
-                # and no ToolUseBlock means: no more turns, ResultMessage
-                # is the only thing left.
-                if type(message).__name__ == "AssistantMessage":
-                    # Only the top-level conversation drives end-of-turn
-                    # detection. A Task-subagent's messages carry
-                    # parent_tool_use_id != None; its end_turn does NOT mean
-                    # the parent is done, so treating it as completion would
-                    # arm the short post-completion idle timeout and truncate
-                    # the still-working parent mid-task.
-                    if getattr(message, "parent_tool_use_id", None) is None:
-                        content = getattr(message, "content", None) or []
-                        has_tool_use = any(type(b).__name__ == "ToolUseBlock" for b in content)
-                        stop_reason = getattr(message, "stop_reason", None)
-                        if has_tool_use:
-                            agent_completed = False
-                        elif stop_reason == "end_turn":
-                            agent_completed = True
-
-                if process_message_func:
-                    result_text = process_message_func(message, result_text)
-                else:
-                    result_text = self._default_process_message(message, result_text)
-        finally:
-            # Release SDK transport resources (HTTP connection, subprocess).
-            aclose = getattr(stream, "aclose", None)
-            if aclose is not None:
-                try:
-                    await aclose()
-                except Exception:
-                    pass
-
-        return result_text
-
-    def _default_get_model_name(self, model: "ModelType") -> str:
-        """Default model name mapping using global config.
-
-        Model names are loaded from configuration, which can be:
-        - Set in `.claude-task-master/config.json`
-        - Overridden via environment variables (CLAUDETM_MODEL_SONNET, etc.)
-
-        Args:
-            model: The ModelType to convert.
-
-        Returns:
-            The API model name string from configuration.
-        """
-        from .agent_models import ModelType
-
-        config = get_config()
-        model_map = {
-            ModelType.SONNET: config.models.sonnet,
-            ModelType.OPUS: config.models.opus,
-            ModelType.FABLE: config.models.fable,
-            ModelType.HAIKU: config.models.haiku,
-            ModelType.SONNET_1M: config.models.sonnet_1m,
-        }
-        return model_map.get(model, config.models.sonnet)
-
-    def _default_process_message(self, message: Any, result_text: str) -> str:
-        """Default message processing - just accumulates text.
-
-        Args:
-            message: The message to process.
-            result_text: The accumulated result text.
-
-        Returns:
-            Updated result text.
-        """
-        message_type = type(message).__name__
-
-        if hasattr(message, "content") and message.content:
-            for block in message.content:
-                block_type = type(block).__name__
-                if block_type == "TextBlock":
-                    result_text += block.text
-
-        if message_type == "ResultMessage":
-            # Guard against None: error ResultMessages (max_turns, budget cap,
-            # error_during_execution) carry result=None; overwriting the
-            # accumulated text with None would drop real work and break the
-            # str return contract.
-            if hasattr(message, "result") and message.result:
-                result_text = message.result
-
-        return result_text
-
-    def _classify_api_error(self, error: Exception) -> AgentError:
-        """Classify an API error into a specific error type.
-
-        Args:
-            error: The original exception.
-
-        Returns:
-            A classified AgentError subclass.
-        """
-        error_str = str(error).lower()
-        error_type = type(error).__name__
-
-        # Check for content filtering errors (not retryable)
-        if "content filtering" in error_str or "output blocked" in error_str:
-            return ContentFilterError(error)
-
-        # Check for model-availability errors (recover via fallback chain, not by
-        # retrying the same model). Anthropic returns not_found_error for an
-        # unknown/unavailable model id. Require both "model" and a not-found
-        # keyword so generic messages like "503 Service Unavailable" or
-        # "Network unreachable" are not misclassified.
-        if "model" in error_str and any(
-            kw in error_str
-            for kw in ("not_found", "not found", "does not exist", "unavailable", "invalid model")
-        ):
-            return ModelUnavailableError(error)
-
-        # Check for rate limiting
-        if "rate" in error_str and "limit" in error_str:
-            # Try to extract retry-after if present
-            retry_after = None
-            if hasattr(error, "retry_after"):
-                retry_after = error.retry_after
-            return APIRateLimitError(retry_after, error)
-
-        # Check for authentication errors
-        if any(kw in error_str for kw in ["auth", "unauthorized", "403", "401"]):
-            return APIAuthenticationError(error)
-
-        # Check for timeout errors
-        if "timeout" in error_str or error_type in ("TimeoutError", "AsyncioTimeoutError"):
-            return APITimeoutError(30.0, error)
-
-        # Check for connection errors
-        if any(kw in error_str for kw in ["connect", "connection", "network"]):
-            return APIConnectionError(error)
-
-        # Check for server errors (5xx)
-        if "500" in error_str or "502" in error_str or "503" in error_str or "504" in error_str:
-            # Try to extract status code
-            for code in [500, 502, 503, 504]:
-                if str(code) in error_str:
-                    return APIServerError(code, error)
-            return APIServerError(500, error)
-
-        # Default to generic query execution error
-        return QueryExecutionError(f"API error: {error}", error)
