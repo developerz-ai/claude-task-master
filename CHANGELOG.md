@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.62] - 2026-07-20
+
+### Added
+- **A PR is never merged stale.** Green CI only proves the branch passed against the base *as it was when CI ran* — if `main` moved in the meantime, the merge result itself was never tested, which is how a green PR breaks production. `ready_to_merge` now compares the PR head against the live base (GitHub's compare API, plus `mergeStateStatus == "BEHIND"`), and when the branch is behind it routes to the same agent session that handles conflicts, in *sync* mode: merge the latest base in, fix whatever that surfaces — textual conflicts **or** semantic clashes the merge introduces — re-run the tests, commit, push. The push re-triggers CI, so the **combined** tree is what gets verified before the merge lands. Bounded by `MAX_BRANCH_SYNC_ATTEMPTS` (3, `state.branch_sync_attempts`); unlike a conflict, an exhausted counter **merges as-is** rather than blocking, so a base branch that moves faster than CI can never stall the pipeline. A failed or unavailable comparison degrades to "not stale" and never blocks a merge. Opt out with `claudetm start --no-sync-before-merge` (`TaskOptions.sync_before_merge`, default on).
+
 ## [0.1.61] - 2026-07-20
 
 ### Added
@@ -801,7 +806,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.61...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.62...HEAD
+[0.1.62]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.61...v0.1.62
 [0.1.61]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.60...v0.1.61
 [0.1.60]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.59...v0.1.60
 [0.1.59]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.58...v0.1.59

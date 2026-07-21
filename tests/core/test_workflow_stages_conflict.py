@@ -53,6 +53,7 @@ def mock_pr_status() -> MagicMock:
 def mock_github_client(mock_pr_status: MagicMock) -> MagicMock:
     client = MagicMock()
     client.get_pr_status = MagicMock(return_value=mock_pr_status)
+    client.get_pr_behind_by = MagicMock(return_value=0)
     return client
 
 
@@ -143,6 +144,131 @@ class TestConflictRouting:
             task_state.workflow_stage = "ready_to_merge"
             workflow_handler.handle_ready_to_merge_stage(task_state)
             assert task_state.conflict_fix_attempts == expected
+
+
+# ===========================================================================
+# Staleness: green CI against an older base is not good enough
+# ===========================================================================
+
+
+class TestSyncBeforeMerge:
+    @pytest.fixture(autouse=True)
+    def _mergeable(self, mock_pr_status: MagicMock) -> Generator[None, None, None]:
+        """These tests are about a clean-but-behind PR, not a conflicting one.
+
+        The post-merge confirmation poll sleeps between polls; patch it so the
+        merging paths run at test speed.
+        """
+        mock_pr_status.mergeable = "MERGEABLE"
+        mock_pr_status.merge_state_status = "CLEAN"
+        mock_pr_status.head_branch = "feature/x"
+        with patch(
+            "claude_task_master.core.stages.merge_stage.interruptible_sleep", return_value=True
+        ):
+            yield
+
+    @patch("claude_task_master.core.stages.merge_stage.console")
+    def test_behind_base_syncs_before_merging(
+        self, _console, workflow_handler, task_state, mock_github_client
+    ):
+        """A PR behind its base is synced, not merged."""
+        mock_github_client.get_pr_behind_by.return_value = 4
+
+        result = workflow_handler.handle_ready_to_merge_stage(task_state)
+
+        assert result is None
+        assert task_state.workflow_stage == "resolving_conflicts"
+        assert task_state.branch_sync_attempts == 1
+        mock_github_client.merge_pr.assert_not_called()
+        mock_github_client.get_pr_behind_by.assert_called_once_with(42, "main", "feature/x")
+
+    @patch("claude_task_master.core.stages.merge_stage.console")
+    def test_up_to_date_pr_merges(self, _console, workflow_handler, task_state, mock_github_client):
+        """A current branch merges without a sync detour."""
+        mock_github_client.get_pr_behind_by.return_value = 0
+
+        workflow_handler.handle_ready_to_merge_stage(task_state)
+
+        mock_github_client.merge_pr.assert_called_once()
+        assert task_state.branch_sync_attempts == 0
+
+    @patch("claude_task_master.core.stages.merge_stage.console")
+    def test_merge_state_behind_also_syncs(
+        self, _console, workflow_handler, task_state, mock_github_client, mock_pr_status
+    ):
+        """mergeStateStatus=BEHIND triggers a sync even if the compare API says 0."""
+        mock_github_client.get_pr_behind_by.return_value = 0
+        mock_pr_status.merge_state_status = "BEHIND"
+
+        result = workflow_handler.handle_ready_to_merge_stage(task_state)
+
+        assert result is None
+        assert task_state.workflow_stage == "resolving_conflicts"
+
+    @patch("claude_task_master.core.stages.merge_stage.console")
+    def test_sync_disabled_merges_stale_pr(
+        self, _console, workflow_handler, task_state, mock_github_client
+    ):
+        """--no-sync-before-merge merges without checking freshness."""
+        task_state.options.sync_before_merge = False
+        mock_github_client.get_pr_behind_by.return_value = 9
+
+        workflow_handler.handle_ready_to_merge_stage(task_state)
+
+        mock_github_client.merge_pr.assert_called_once()
+        mock_github_client.get_pr_behind_by.assert_not_called()
+
+    @patch("claude_task_master.core.stages.merge_stage.console")
+    def test_sync_attempts_are_bounded_then_merges(
+        self, _console, workflow_handler, task_state, mock_github_client
+    ):
+        """A base that outruns the PR does not stall it forever."""
+        mock_github_client.get_pr_behind_by.return_value = 2
+        task_state.branch_sync_attempts = workflow_handler.MAX_BRANCH_SYNC_ATTEMPTS
+
+        workflow_handler.handle_ready_to_merge_stage(task_state)
+
+        mock_github_client.merge_pr.assert_called_once()
+
+    @patch("claude_task_master.core.stages.merge_stage.console")
+    def test_compare_api_failure_does_not_block_merge(
+        self, _console, workflow_handler, task_state, mock_github_client
+    ):
+        """A broken compare call falls through to the merge, not to a stall."""
+        mock_github_client.get_pr_behind_by.side_effect = RuntimeError("api down")
+
+        workflow_handler.handle_ready_to_merge_stage(task_state)
+
+        mock_github_client.merge_pr.assert_called_once()
+
+    @patch("claude_task_master.core.stages.conflict_stage.interruptible_sleep", return_value=True)
+    @patch("claude_task_master.core.stages.conflict_stage.console")
+    def test_sync_session_uses_the_sync_prompt(
+        self, _console, _sleep, workflow_handler, task_state, mock_agent
+    ):
+        """A behind-but-clean PR gets the sync framing, not the conflict framing."""
+        task_state.workflow_stage = "resolving_conflicts"
+        task_state.branch_sync_attempts = 1
+
+        workflow_handler.handle_resolving_conflicts_stage(task_state)
+
+        prompt = mock_agent.run_work_session.call_args.kwargs["task_description"]
+        assert "is behind `main`" in prompt
+        assert "has merge conflicts" not in prompt
+        assert "git merge origin/main" in prompt
+
+    def test_sync_prompt_explains_why_ci_is_not_enough(self, workflow_handler):
+        prompt = workflow_handler._build_conflict_resolution_task(7, "main", 1, conflicted=False)
+
+        assert "CI passed against an older main" in prompt
+        assert "NOT `git rebase`" in prompt
+
+    def test_advance_to_next_task_resets_sync_counter(self, workflow_handler, task_state):
+        task_state.branch_sync_attempts = 2
+
+        workflow_handler._advance_to_next_task(task_state)
+
+        assert task_state.branch_sync_attempts == 0
 
 
 # ===========================================================================

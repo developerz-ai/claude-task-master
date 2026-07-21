@@ -50,6 +50,10 @@ class TaskOptions(BaseModel):
     # commit → push) instead of blocking for manual resolution. Bounded by
     # MAX_CONFLICT_FIX_ATTEMPTS; an unresolved conflict still blocks.
     resolve_conflicts: bool = True
+    # Require the PR branch to carry the latest base ("production") commits before
+    # merging: when it is behind, an agent session merges the base in, re-runs the
+    # tests, and pushes, so CI verifies the *combined* tree before the merge.
+    sync_before_merge: bool = True
 
 
 # Status type alias for type checking
@@ -125,6 +129,7 @@ class TaskState(BaseModel):
     ci_fix_attempts: int = 0  # Number of CI-fix agent sessions for current PR
     # Conflict-resolution fields
     conflict_fix_attempts: int = 0  # Number of conflict-resolution agent sessions for current PR
+    branch_sync_attempts: int = 0  # Number of base-sync agent sessions for current PR
     # Release phase fields
     release_fix_attempts: int = 0  # Number of release fix attempts for current PR
     in_release_fix: bool = False  # True while current PR is a release-fix PR

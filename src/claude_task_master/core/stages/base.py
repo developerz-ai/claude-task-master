@@ -41,6 +41,10 @@ class StageHandlerBase:
     # Max conflict-resolution agent sessions per PR before blocking. A conflict the
     # agent cannot resolve in this many passes is not going to resolve itself.
     MAX_CONFLICT_FIX_ATTEMPTS = 3
+    # Max base-sync agent sessions per PR before merging as-is. Each sync costs a
+    # full CI round-trip, so a busy base branch could otherwise outrun the PR
+    # forever; after this many chases, a green-but-slightly-behind PR merges.
+    MAX_BRANCH_SYNC_ATTEMPTS = 3
     # Grace period after CI passes before checking reviews. Review bots (CodeRabbit) post their
     # review comments a little *after* CI completes, not as a blocking status check — so a short
     # delay would race the merge ahead of the comments. 120s gives them time to land.

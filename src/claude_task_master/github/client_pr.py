@@ -216,6 +216,52 @@ class PROperationsMixin:
             # No PR exists for current branch or command failed
             return None
 
+    def get_pr_behind_by(
+        self: GitHubClientProtocol,
+        pr_number: int,
+        base_branch: str,
+        head_branch: str,
+        cwd: str | None = None,
+    ) -> int:
+        """Return how many commits the PR branch is behind its base.
+
+        GitHub's ``mergeStateStatus`` only reports ``BEHIND`` when the repository
+        enforces "require branches to be up to date", so it cannot answer this on
+        its own. The compare API always can.
+
+        Args:
+            pr_number: The PR number (used for error context only).
+            base_branch: The branch the PR targets.
+            head_branch: The PR's head branch.
+            cwd: Working directory for the gh command.
+
+        Returns:
+            Number of commits on the base that are missing from the PR branch.
+            0 when they are level — or when the comparison cannot be made, so a
+            transient API failure never blocks a merge.
+        """
+        from .exceptions import GitHubError, GitHubTimeoutError  # noqa: PLC0415
+
+        if not base_branch or not head_branch:
+            return 0
+
+        try:
+            repo_info = self._get_repo_info(cwd=cwd)
+            result = self._run_gh_command(
+                [
+                    "gh",
+                    "api",
+                    f"repos/{repo_info}/compare/{base_branch}...{head_branch}",
+                    "-q",
+                    ".behind_by",
+                ],
+                timeout=30,
+                cwd=cwd,
+            )
+            return int(result.stdout.strip() or 0)
+        except (GitHubError, GitHubTimeoutError, ValueError):
+            return 0
+
     def get_pr_comments(
         self: GitHubClientProtocol, pr_number: int, only_unresolved: bool = True
     ) -> str:

@@ -208,6 +208,13 @@ All commands check `state_manager.exists()` first:
 - Uses `PlanUpdater` to integrate change request into existing plan
 - Preserves completed tasks, modifies pending tasks as needed
 
+### Up-to-date-before-merge (--sync-before-merge)
+- Green CI only proves the branch passed against the base **as it was when CI ran**. Before merging, `ready_to_merge` compares the PR head against the live base (`get_pr_behind_by`, GitHub's compare API; `mergeStateStatus == "BEHIND"` is also honored)
+- If the branch is behind, the same agent session that handles conflicts runs in *sync* mode: merge the latest base in, fix whatever it surfaces (textual **or** semantic), re-run tests, commit, push → back to `waiting_ci`, so CI verifies the **combined** tree before the merge
+- Bounded by `MAX_BRANCH_SYNC_ATTEMPTS` (3) via `state.branch_sync_attempts`. Unlike conflicts, an exhausted counter **merges as-is** rather than blocking — a base that moves faster than CI must not stall the pipeline forever
+- A failed/unavailable comparison never blocks a merge (degrades to "not stale")
+- Disable with `claudetm start --no-sync-before-merge` (`TaskOptions.sync_before_merge`, default True)
+
 ### Merge Conflict Resolution (--resolve-conflicts)
 - When `ready_to_merge` sees `mergeable == "CONFLICTING"`, the conflict is handed to an agent session instead of blocking the run (`core/stages/conflict_stage.py`, stage `resolving_conflicts`)
 - The session **merges** the base branch (`git merge origin/<base>`) — never rebases, which would rewrite reviewed commits and break review threads — resolves every hunk keeping both sides' intent, re-runs tests, commits, pushes

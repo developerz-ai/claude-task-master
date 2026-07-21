@@ -53,6 +53,11 @@ def start(
         "--resolve-conflicts/--no-resolve-conflicts",
         help="Let an agent resolve merge conflicts on a PR instead of blocking (bounded retries)",
     ),
+    sync_before_merge: bool = typer.Option(
+        True,
+        "--sync-before-merge/--no-sync-before-merge",
+        help="Merge the latest base into the PR and re-run CI before merging (agent-driven)",
+    ),
     enable_release: bool = typer.Option(
         False,
         "--release/--no-release",
@@ -230,6 +235,7 @@ def start(
             auto_merge=auto_merge,
             admin_merge=admin,
             resolve_conflicts=resolve_conflicts,
+            sync_before_merge=sync_before_merge,
             enable_release=enable_release,
             enable_verification=enable_verification,
             max_sessions=max_sessions,

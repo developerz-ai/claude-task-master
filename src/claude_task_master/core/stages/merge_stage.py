@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from .. import console
 from ..shutdown import interruptible_sleep
 from .review_stage import _ReviewStage
 
 if TYPE_CHECKING:
+    from ...github.client_pr_models import PRStatus
     from ..state import TaskState
+
+#: Sentinel returned by :meth:`_MergeStage._handle_stale_branch` when the branch
+#: is current and the merge should proceed. ``None`` already means "continue the
+#: loop", so it cannot double as "not stale".
+_NOT_STALE = object()
 
 
 class _MergeStage(_ReviewStage):
@@ -42,6 +48,60 @@ class _MergeStage(_ReviewStage):
         console.warning(f"{reason} - retry {attempt}/{self.MAX_MERGE_UNKNOWN_ATTEMPTS} in {delay}s")
         if not interruptible_sleep(delay):
             return None
+        return None
+
+    def _handle_stale_branch(self, state: TaskState, pr_status: PRStatus) -> int | None | object:
+        """Route a PR whose branch is behind its base to the sync agent session.
+
+        "CI is green" only proves the branch passed against the base as it stood
+        when CI ran. If the base has moved since, the merge result is untested —
+        so the base is merged into the branch, the tests re-run, and CI verifies
+        the combined tree before the merge goes through.
+
+        Args:
+            state: Current task state.
+            pr_status: Freshly fetched status for the PR.
+
+        Returns:
+            :data:`_NOT_STALE` when the branch is current (or the check is
+            disabled/exhausted) and the merge should proceed, otherwise the loop
+            result to return from the merge stage.
+        """
+        if not state.options.sync_before_merge or state.current_pr is None:
+            return _NOT_STALE
+
+        try:
+            raw = self.github_client.get_pr_behind_by(
+                state.current_pr, pr_status.base_branch, pr_status.head_branch
+            )
+        except Exception:
+            raw = 0
+        # Anything but a real int means the comparison could not be made (the
+        # client already swallows API errors into 0). Treat it as "unknown" and
+        # fall through to mergeStateStatus rather than wedging the merge — being
+        # unable to measure staleness must never stop a green PR from landing.
+        behind = raw if isinstance(raw, int) and not isinstance(raw, bool) else 0
+        if behind <= 0 and pr_status.merge_state_status != "BEHIND":
+            return _NOT_STALE
+
+        if state.branch_sync_attempts >= self.MAX_BRANCH_SYNC_ATTEMPTS:
+            # The base is moving faster than this PR can chase it. Merging a
+            # slightly-stale-but-green PR beats never merging at all; branch
+            # protection, if it requires up-to-date branches, still has the
+            # final say.
+            console.warning(
+                f"PR #{state.current_pr} still behind {pr_status.base_branch} after "
+                f"{state.branch_sync_attempts} sync attempts - merging as-is"
+            )
+            return _NOT_STALE
+
+        console.info(
+            f"PR #{state.current_pr} is {behind or 'some'} commits behind "
+            f"{pr_status.base_branch} - syncing before merge"
+        )
+        state.branch_sync_attempts += 1
+        state.workflow_stage = "resolving_conflicts"
+        self.state_manager.save_state(state)
         return None
 
     def _handle_conflicting_pr(self, state: TaskState, pr_number: int) -> int | None:
@@ -147,6 +207,12 @@ class _MergeStage(_ReviewStage):
             attempt = self._merge_unknown_attempts.get(pr_number, 0) + 1
             self._merge_unknown_attempts[pr_number] = attempt
             return self._merge_status_retry(state, f"Error checking mergeable status: {e}")
+
+        # Mergeable and reviewed — but is it merging the *current* base? A PR that
+        # went green against a base that has since moved can still break main.
+        stale = self._handle_stale_branch(state, pr_status)
+        if stale is not _NOT_STALE:
+            return cast("int | None", stale)
 
         if state.options.auto_merge:
             console.info(f"Merging PR #{pr_number}...")
@@ -299,6 +365,7 @@ class _MergeStage(_ReviewStage):
         state.release_fix_details = None
         state.ci_fix_attempts = 0
         state.conflict_fix_attempts = 0
+        state.branch_sync_attempts = 0
         state.in_release_fix = False
         state.ci_poll_start_time = None
         self.state_manager.save_state(state)

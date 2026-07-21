@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/developerz-ai/claude-task-master/main/assets/logo.png" alt="Claude Task Master" width="220">
+  <img src="https://raw.githubusercontent.com/developerz-ai/claude-task-master/main/assets/logo.png" alt="Claude Task Master" width="340">
 </p>
 
 <h1 align="center">Claude Task Master</h1>
@@ -165,6 +165,7 @@ Claude Task Master uses the Claude Agent SDK to autonomously work on complex tas
 - **PR-Based Workflow** - All work flows through pull requests for review
 - **CI Integration** - Handles CI failures and review comments together
 - **Conflict Resolution** - Merges the base branch and resolves conflicts with an agent instead of blocking
+- **Never Merges Stale** - A PR behind production is re-synced and re-tested by an agent before it merges
 - **Mailbox System** - Receive dynamic plan updates while working (via REST API, MCP, or CLI)
 - **Multi-Instance Coordination** - Multiple instances can communicate via mailbox
 - **State Persistence** - Survives interruptions, resumes where it left off
@@ -409,6 +410,7 @@ claudetm start "Your goal here" [OPTIONS]
 | `--prs` | Limit number of PRs to create | unlimited |
 | `--pause-on-pr` | Pause after creating PR | False |
 | `--resolve-conflicts/--no-resolve-conflicts` | Let an agent resolve merge conflicts (3 attempts, then block) | True |
+| `--sync-before-merge/--no-sync-before-merge` | Merge the latest base in and re-run CI before merging (3 attempts, then merge as-is) | True |
 | `--budget` | Max spending per session in USD | unlimited |
 
 ### Common Workflows
