@@ -64,3 +64,6 @@ Thumbs.db
 # Logs
 *.log
 .hypothesis/
+
+# Claude Code agent worktrees
+.claude/worktrees/

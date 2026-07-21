@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.59] - 2026-07-20
+
+Deep-audit hardening release: an 8-agent audit of the codebase produced 17 fix slices, and this release lands them. 5514 tests pass; ruff and mypy are clean.
+
+### Added
+- **Webhook registry + delivery pipeline** — registered webhooks now receive signed (`X-Webhook-Signature-256`, HMAC-SHA256 over timestamp + payload) deliveries with a unique `X-Webhook-Delivery-ID` per attempt, exponential backoff (`retry_delay * 2^(attempt-1)`, 3 attempts, 30s cap), and correct retry classification: 5xx/timeout/429 retry, other 4xx fail immediately.
+- **`/planx` and `/feature` slash commands** for plan authoring and the end-to-end feature workflow.
+
+### Security
+- **Closed an RCE chain** in agent input handling, plus SSRF hardening on outbound fetches and an event-loop fix that could leave queries running after cancellation. Backed by a dedicated security test suite.
+
+### Fixed
+- **State durability** — state writes are atomic and survive interruption mid-write; plan parsing and orchestrator core paths hardened against malformed or partially-written plans.
+- **Mailbox durability** — cross-process locking, message re-enqueue on failed plan updates, plan-safety checks, and index reconciliation.
+- **Cross-process control channel** (`stop`/`pause`/`resume`) now behaves correctly when the signalling process is not the orchestrator.
+- **CLI, config, and credential hardening**, and removal of packaging drift that shipped stale metadata.
+- **GitHub API robustness** — result pagination, the >50-check case, rate-limit backoff, and run-id resolution.
+
+### Changed
+- **REST/MCP service layer extracted**; dead routers deleted so both transports share one implementation.
+- **Every file ≥500 LOC split into single-responsibility sub-modules**, per the project's code-style rule.
+- **Test suite de-flaked** — removed sleeps, tightened brittle assertions, and cleaned up coverage flags and markers.
+
 ## [0.1.58] - 2026-07-16
 
 ### Added
@@ -762,7 +785,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.58...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.59...HEAD
+[0.1.59]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.58...v0.1.59
 [0.1.58]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.57...v0.1.58
 [0.1.57]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.56...v0.1.57
 [0.1.56]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.55...v0.1.56
