@@ -77,7 +77,10 @@ class _PRContextCIMixin:
             ]
             run_ids: set[int] = set()
             for check in failing_checks:
-                details_url = check.get("url", "")
+                # `or ""`: a StatusContext's targetUrl is often null, so the
+                # key is present-but-None and would break the `in` check —
+                # aborting run-ID extraction for every other failing check too.
+                details_url = check.get("url") or ""
                 # URL format: .../actions/runs/123456/job/789
                 if "/runs/" in details_url:
                     try:

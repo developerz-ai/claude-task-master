@@ -85,15 +85,16 @@ class PRContextMixin:
             thread_id = comment.get("thread_id", "")
             comment_id = comment.get("comment_id", "")
             author = comment.get("author", "unknown")
-            path = comment.get("path", "general")
-            line = comment.get("line", "N/A")
+            # `or` (not a .get default): the keys are present with value None
+            # for conversation comments and outdated-diff review comments.
+            path = comment.get("path") or "general"
+            line = comment.get("line") or "N/A"
             body = comment.get("body", "")
             is_resolved = comment.get("is_resolved", False)
 
             # Create filename from sanitized path
-            safe_path = path.replace("/", "_").replace("\\", "_") if path else "general"
-            # Sanitize line number (could be "N/A" or None)
-            safe_line = str(line).replace("/", "_").replace("\\", "_") if line else "0"
+            safe_path = path.replace("/", "_").replace("\\", "_")
+            safe_line = str(line).replace("/", "_").replace("\\", "_")
             filename = f"{i:03d}_{safe_path}_L{safe_line}.txt"
 
             content = f"""Thread ID: {thread_id}
@@ -115,7 +116,9 @@ Status: {"Resolved" if is_resolved else "Unresolved"}
             "",
             "Files with comments:",
         ]
-        paths = {c.get("path", "general") for c in comments}
+        # `or "general"`, not a .get default: path is often present-but-None,
+        # and a None in the set makes sorted() raise (None < str).
+        paths = {c.get("path") or "general" for c in comments}
         for p in sorted(paths):
             summary_lines.append(f"  - {p}")
 

@@ -7,7 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.63] - 2026-07-21
+
+### Added
+- **`/fix-bug` Claude command** (`.claude/commands/fix-bug.md`) — end-to-end bug-fix workflow mirroring `/feature`: root-cause in depth from a description or pasted log, fix at the root with a mandatory regression test, sweep for the same bug family, PR → green CI → review comments → merge, then optional release + local `uv tool install`.
+
 ### Fixed
+- **Review-comment saves no longer crash on comments without a file path — which was spinning the review loop hot.** PR conversation comments (and inline comments on outdated diffs) carry `"path": None` in the GitHub payload, so `comment.get("path", "general")` returned `None` (the key is *present*, the default never applies) and the summary's `sorted(paths)` raised `'<' not supported between instances of 'NoneType' and 'str'`. That exception aborted the entire `save_pr_comments` call, which reported 0 actionable comments, which bounced the orchestrator straight back to `waiting_reviews` — an infinite `waiting_reviews` ↔ `addressing_reviews` loop hitting the GitHub API every ~2.5s while the real feedback never reached the agent. The fix normalizes `path`/`line` with `or`-fallbacks (`state_pr.py`), so None-path comments save cleanly (and their files now read `File: general` / `Line: N/A` instead of `None`). Same present-but-None cosmetic fix in `_format_pr_comments_from_rest` (`github/client_pr_helpers.py`), which printed `**author** on None:N/A`.
+- **Same-family sweep: four more present-but-None GitHub-payload hazards fixed.** Ghost/deleted accounts send `"user": null`, so `comment.get("user", {}).get("login", ...)` raised `AttributeError` in three places — `save_pr_comments` and `_fetch_conversation_comments` (`core/pr_context.py`, each aborting the whole comment save exactly like the path bug) and `_format_pr_comments_from_rest` (crashing the `pr-comments` CLI command). And a failing StatusContext with `targetUrl: null` made `check.get("url", "")` return None, so `"/runs/" in None` raised `TypeError` in `core/pr_context_ci.py` — aborting CI-log run-ID extraction even when another failing check had a valid run URL. All normalized with `or`-guards (the pattern the codebase already uses elsewhere, e.g. `pr_context_resolve.py`); the dead-but-exported GraphQL formatter `_format_pr_comments` got the same author guard for parity. Regression tests for each reachable case.
+- **The "0 saved, 0 resolved" review path now pauses before re-checking.** Defense-in-depth for the loop above: when `addressing_reviews` finds nothing to save *and* nothing to resolve, it sleeps `CI_POLL_INTERVAL` before returning to `waiting_reviews`, so any future steady-state anomaly degrades to slow polling instead of a hot loop.
 - **Property tests no longer fail as timeouts under `pytest -n auto`.** A property test is tens of examples in one test item, so the suite-wide `--timeout=2` (sized for one-shot unit tests) was the wrong budget: on a loaded xdist worker, the filesystem-backed mailbox properties — up to 30 locked, atomically-written messages per example — could exceed it and fail on the clock rather than on their own merits. `tests/property/conftest.py` now gives every property item a 60s timeout unless it sets its own.
 
 ## [0.1.62] - 2026-07-20
@@ -809,7 +817,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.62...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.63...HEAD
+[0.1.63]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.62...v0.1.63
 [0.1.62]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.61...v0.1.62
 [0.1.61]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.60...v0.1.61
 [0.1.60]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.59...v0.1.60

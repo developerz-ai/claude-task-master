@@ -101,8 +101,10 @@ class PRContextManager(_PRContextCIMixin, _PRContextResolveMixin):
                 if thread_id and thread_id in addressed_threads:
                     continue
 
-                body = comment.get("body", "")
-                author = comment.get("user", {}).get("login", "unknown")
+                # `or`-guards: "body" and "user" can be present-but-None
+                # (ghost/deleted accounts send "user": null).
+                body = comment.get("body") or ""
+                author = (comment.get("user") or {}).get("login") or "unknown"
 
                 # Skip non-actionable bot comments
                 if self._is_non_actionable_comment(author, body):
@@ -199,8 +201,9 @@ class PRContextManager(_PRContextCIMixin, _PRContextResolveMixin):
             if thread_key in addressed_threads:
                 continue  # Already handled in a prior cycle.
 
-            body = comment.get("body", "")
-            author = comment.get("user", {}).get("login", "unknown")
+            # `or`-guards: ghost/deleted accounts send "user": null.
+            body = comment.get("body") or ""
+            author = (comment.get("user") or {}).get("login") or "unknown"
             if self._is_non_actionable_comment(author, body):
                 continue
 
