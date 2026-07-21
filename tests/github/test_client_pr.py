@@ -1197,6 +1197,36 @@ class TestGitHubClientGetPRComments:
                 assert "100" in comments
                 assert "This needs refactoring" in comments
 
+    def test_get_pr_comments_ghost_user(self, github_client):
+        """A ghost-user comment ("user": null) formats as unknown, not a crash.
+
+        Regression: the "user" key is present with value null for deleted
+        accounts, so .get("user", {}) returned None and .get("login") raised
+        AttributeError, crashing the pr-comments CLI command.
+        """
+        rest_comments = [
+            {
+                "id": 1,
+                "user": None,
+                "body": "Leftover comment from a deleted account.",
+                "path": None,
+                "line": None,
+            },
+        ]
+        graphql_response = _make_graphql_resolved_response({1: False})
+
+        with patch.object(github_client, "_get_repo_info", return_value="owner/repo"):
+            with patch("subprocess.run") as mock_run:
+                mock_run.side_effect = [
+                    MagicMock(returncode=0, stdout=_comments_to_ndjson(rest_comments), stderr=""),
+                    MagicMock(returncode=0, stdout=json.dumps(graphql_response), stderr=""),
+                ]
+                comments = github_client.get_pr_comments(123, only_unresolved=True)
+
+                assert "**unknown**" in comments
+                assert "on PR:N/A" in comments
+                assert "Leftover comment" in comments
+
     def test_get_pr_comments_bot_user_marker(self, github_client):
         """Test that bot users are properly marked."""
         rest_comments = [

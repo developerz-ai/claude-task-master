@@ -300,7 +300,8 @@ def _format_pr_comments(threads: list[dict[str, Any]], only_unresolved: bool) ->
             continue
 
         for comment in thread["comments"]["nodes"]:
-            author = comment["author"]["login"]
+            # GraphQL author is null for ghost/deleted accounts.
+            author = (comment.get("author") or {}).get("login") or "unknown"
             is_bot = author.endswith("[bot]")
             bot_marker = " (bot)" if is_bot else ""
 
@@ -333,13 +334,14 @@ def _format_pr_comments_from_rest(
         if only_unresolved and is_resolved:
             continue
 
-        author = comment.get("user", {}).get("login", "unknown")
+        # Ghost/deleted accounts send "user": null (key present, default defeated).
+        author = (comment.get("user") or {}).get("login") or "unknown"
         is_bot = author.endswith("[bot]")
         bot_marker = " (bot)" if is_bot else ""
 
         path = comment.get("path") or "PR"  # key present-but-None on non-inline comments
         line = comment.get("line") or comment.get("original_line") or "N/A"
-        body = comment.get("body", "")
+        body = comment.get("body") or ""
 
         formatted.append(f"**{author}{bot_marker}** on {path}:{line}\n{body}\n")
 

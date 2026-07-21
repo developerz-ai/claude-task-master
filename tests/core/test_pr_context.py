@@ -243,6 +243,54 @@ class TestSaveCIFailures:
         content = log_file.read_text()
         assert "Test error output" in content
 
+    def test_none_url_check_does_not_abort_run_id_extraction(
+        self,
+        pr_context_manager: PRContextManager,
+        state_manager: StateManager,
+        mock_github_client: MagicMock,
+    ) -> None:
+        """A failing check with "url": None must not abort run-ID extraction.
+
+        Regression: a StatusContext's targetUrl is often null, so the "url"
+        key is present-but-None; `"/runs/" in None` raised TypeError and no
+        CI logs were downloaded even when another failing check had a valid
+        run URL.
+        """
+        mock_github_client.get_pr_status.return_value = MagicMock(
+            check_details=[
+                {"name": "external-status", "conclusion": "FAILURE", "url": None},
+                {
+                    "name": "test-job",
+                    "conclusion": "FAILURE",
+                    "url": "https://github.com/owner/repo/actions/runs/12345/job/789",
+                },
+            ]
+        )
+
+        mock_github_client._get_repo_info.return_value = "owner/repo"
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(
+                    returncode=0,
+                    stdout=json.dumps(
+                        {
+                            "id": 1,
+                            "name": "test-job",
+                            "status": "completed",
+                            "conclusion": "failure",
+                        }
+                    ),
+                    stderr="",
+                ),
+                MagicMock(returncode=0, stdout=b"Test error\n##[error]failed", stderr=b""),
+            ]
+
+            pr_context_manager.save_ci_failures(123, _also_save_comments=False)
+
+        log_file = state_manager.get_pr_dir(123) / "ci" / "test-job" / "1.log"
+        assert log_file.exists()
+        assert "Test error" in log_file.read_text()
+
     def test_saves_failure_for_error_conclusion(
         self,
         pr_context_manager: PRContextManager,
@@ -334,6 +382,57 @@ class TestSaveCIFailures:
 
 class TestSavePRComments:
     """Tests for save_pr_comments method."""
+
+    def test_ghost_user_and_none_path_do_not_abort_save(
+        self,
+        pr_context_manager: PRContextManager,
+        state_manager: StateManager,
+        mock_github_client: MagicMock,
+    ) -> None:
+        """A ghost-user comment ("user": null) must not abort the whole save.
+
+        Regression: GitHub sends "user": null for deleted accounts — the key
+        is present, so .get("user", {}) returned None and the chained
+        .get("login") raised AttributeError, aborting save_pr_comments
+        entirely (0 comments saved, review loop spins).
+        """
+        mock_github_client._get_repo_info.return_value = "owner/repo"
+        rest_result = MagicMock()
+        rest_result.stdout = comments_to_ndjson(
+            [
+                {
+                    "id": 1,
+                    "user": None,  # ghost/deleted account
+                    "body": "This comment still needs to be addressed properly.",
+                    "path": None,  # outdated-diff comment
+                    "line": None,
+                }
+            ]
+        )
+        graphql_result = MagicMock()
+        graphql_result.stdout = json.dumps(make_resolved_status_response({}))
+        conv_result = MagicMock()
+        conv_result.stdout = comments_to_ndjson(
+            [
+                {
+                    "id": 2,
+                    "user": None,  # ghost user on a conversation comment
+                    "body": "Please also update the documentation for this.",
+                }
+            ]
+        )
+        mock_github_client._run_gh_command.side_effect = [
+            rest_result,
+            graphql_result,
+            conv_result,
+        ]
+
+        saved = pr_context_manager.save_pr_comments(123, _also_save_ci=False)
+
+        assert saved == 2
+        comments_dir = state_manager.get_pr_dir(123) / "comments"
+        contents = [f.read_text() for f in sorted(comments_dir.glob("*.txt"))]
+        assert all("Author: unknown" in c for c in contents)
 
     def test_returns_early_for_none_pr(
         self, pr_context_manager: PRContextManager, mock_github_client: MagicMock
