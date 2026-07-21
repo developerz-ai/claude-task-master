@@ -11,8 +11,12 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  # Single supported-and-tested interpreter. The package still declares
+  # requires-python >=3.12; CI verifies the latest release only.
+  PYTHON_VERSION: "3.14"
   # Hypothesis profile for CI - more examples, no deadline
   HYPOTHESIS_PROFILE: ci
+  UV_SYSTEM_PYTHON: "1"
 
 jobs:
   lint:
@@ -25,15 +29,16 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
 
       - name: Install dependencies
-        run: |
-          uv pip install --system ruff mypy
-          uv pip install --system -e ".[dev]"
+        run: uv pip install -e ".[all]"
 
       - name: Run Ruff linter
         run: ruff check src/ tests/
@@ -44,202 +49,63 @@ jobs:
       - name: Run mypy
         run: mypy .
 
-  # Unit tests - fast, Python 3.12 and 3.13
-  test-unit:
-    name: Unit Tests
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+  # Unit + integration + property tests in one xdist-parallel run.
+  # 4 vCPU: the suite is CPU-bound and scales with workers.
+  test:
+    name: Tests
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
-    strategy:
-      matrix:
-        python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v6
 
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
 
       - name: Install dependencies
-        run: |
-          uv pip install --system -e ".[all]"
+        run: uv pip install -e ".[all]"
 
-      - name: Run unit tests
+      - name: Run test suite
         run: |
-          # Run unit tests (exclude integration and property tests)
           pytest tests/ \
-            --ignore=tests/integration/ \
-            --ignore=tests/property/ \
-            --cov=claude_task_master \
-            --cov-report=xml:coverage-unit.xml \
-            --cov-report=term-missing \
-            -v \
-            2>&1 | tee pytest-unit.txt
-          exit ${PIPESTATUS[0]}
-
-      - name: Upload test output on failure
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: pytest-unit
-          path: pytest-unit.txt
-          retention-days: 7
-
-      - name: Upload coverage artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: coverage-unit
-          path: coverage-unit.xml
-          retention-days: 7
-
-  # Integration tests - may be slower, test component interactions
-  test-integration:
-    name: Integration Tests
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 15
-    strategy:
-      matrix:
-        python-version: ["3.12", "3.13"]
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-
-      - name: Install dependencies
-        run: |
-          uv pip install --system -e ".[all]"
-
-      - name: Run integration tests
-        run: |
-          pytest tests/integration/ \
-            --cov=claude_task_master \
-            --cov-report=xml:coverage-integration.xml \
-            --cov-report=term-missing \
-            -v \
+            -n auto \
+            -q \
             --timeout=120 \
-            2>&1 | tee pytest-integration.txt
-          exit ${PIPESTATUS[0]}
-
-      - name: Upload test output on failure
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: pytest-integration
-          path: pytest-integration.txt
-          retention-days: 7
-
-      - name: Upload coverage artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: coverage-integration
-          path: coverage-integration.xml
-          retention-days: 7
-
-  # Property-based tests using Hypothesis
-  test-property:
-    name: Property-based Tests (Hypothesis)
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 15
-    strategy:
-      matrix:
-        python-version: ["3.12", "3.13"]
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-
-      - name: Install dependencies
-        run: |
-          uv pip install --system -e ".[all]"
-
-      - name: Run property-based tests
-        run: |
-          # Run with CI profile (100 examples, no deadline)
-          pytest tests/property/ \
             --cov=claude_task_master \
-            --cov-report=xml:coverage-property.xml \
+            --cov-report=xml:coverage.xml \
             --cov-report=term-missing \
-            -v \
-            --hypothesis-show-statistics \
-            2>&1 | tee pytest-property.txt
+            2>&1 | tee pytest.txt
           exit ${PIPESTATUS[0]}
 
       - name: Upload test output on failure
         if: failure()
         uses: actions/upload-artifact@v6
         with:
-          name: pytest-property
-          path: pytest-property.txt
+          name: pytest-output
+          path: pytest.txt
           retention-days: 7
-
-      - name: Upload coverage artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: coverage-property
-          path: coverage-property.xml
-          retention-days: 7
-
-  # Combine coverage reports and upload to Codecov
-  coverage:
-    name: Coverage Report
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 15
-    needs: [test-unit, test-integration, test-property]
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Download all coverage artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: coverage-*
-          merge-multiple: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-
-      - name: Install coverage
-        run: pip install coverage
-
-      - name: Combine coverage reports
-        run: |
-          # List downloaded files for debugging
-          ls -la coverage-*.xml || true
-
-          # Just use the individual reports for codecov
-          echo "Coverage files ready for upload"
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
-          files: ./coverage-unit.xml,./coverage-integration.xml,./coverage-property.xml
+          files: ./coverage.xml
           fail_ci_if_error: false
-          verbose: true
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
-  build:
-    name: Build Package
+  # Build + CLI smoke test. Independent of `test` on purpose — running them in
+  # parallel rather than after it keeps wall-clock at max(job), not sum(jobs).
+  package:
+    name: Build & CLI Smoke Test
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 15
-    needs: [lint, test-unit, test-integration, test-property]
-    # Only run on PRs to verify build works, not on main pushes
+    timeout-minutes: 10
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v6
@@ -247,16 +113,16 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
-
-      - name: Install build tools
-        run: uv pip install --system build
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
 
       - name: Build package
-        run: python -m build
+        run: uv build
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v6
@@ -264,26 +130,8 @@ jobs:
           name: dist
           path: dist/
 
-  cli-test:
-    name: CLI Integration Test
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 15
-    needs: [lint, test-unit, test-integration, test-property]
-    # Only run on PRs to verify CLI works, not on main pushes
-    if: github.event_name == 'pull_request'
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-
       - name: Install package
-        run: uv pip install --system -e ".[all]"
+        run: uv pip install -e ".[all]"
 
       - name: Test CLI help command
         run: claudetm --help

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.60] - 2026-07-20
+
+### Added
+- **Project logo** — the orc-warrior mascot now ships in `assets/` (`logo-full.png` 726px source, plus 512/256/128px variants; background trimmed to transparency and palette-quantized, ~80 KB for the 512px) and heads the README (rendered from a raw-GitHub URL so it also shows on the PyPI project page).
+- `org.opencontainers.image.documentation` label on the Docker image.
+- `pytest-xdist` in the dev extra — the suite is parallel-safe end to end (`pytest -n auto` runs 5514 tests in ~25s vs ~98s serial).
+
+### Changed
+- **CI is substantially faster and cheaper.** The Python matrix is gone: everything runs on **3.14** only (the package still declares `requires-python >=3.12`, and 3.13/3.14 are added to the classifiers). The three test jobs (unit / integration / property) — each previously duplicated across 3.12 and 3.13, six runners total — collapse into a single `Tests` job on a 4-vCPU runner using `pytest -n auto`, which also uploads coverage directly and removes the separate `Coverage Report` job. `Build Package` and `CLI Integration Test` merge into one `Build & CLI Smoke Test` job that no longer waits on lint/tests, so wall-clock is `max(job)` rather than `sum(stages)`. `uv` dependency caching is enabled on every job. Net: 9 runners → 3 (2 on main pushes).
+- **Publish workflows and the Docker image move to Python 3.14** (publish jobs were still pinned to 3.11, below the package's own `requires-python`; the image was on `python:3.12-slim`).
+
 ## [0.1.59] - 2026-07-20
 
 Deep-audit hardening release: an 8-agent audit of the codebase produced 17 fix slices, and this release lands them. 5514 tests pass; ruff and mypy are clean.
@@ -785,7 +796,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.59...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.60...HEAD
+[0.1.60]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.59...v0.1.60
 [0.1.59]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.58...v0.1.59
 [0.1.58]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.57...v0.1.58
 [0.1.57]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.56...v0.1.57

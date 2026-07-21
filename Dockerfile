@@ -27,7 +27,7 @@ ARG BUILD_DATE=unknown
 # -----------------------------------------------------------------------------
 # Stage 1: Builder - Install dependencies
 # -----------------------------------------------------------------------------
-FROM python:3.12-slim AS builder
+FROM python:3.14-slim AS builder
 
 # Set environment variables for Python
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -59,7 +59,7 @@ RUN pip install --upgrade pip && \
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime - Minimal production image
 # -----------------------------------------------------------------------------
-FROM python:3.12-slim AS runtime
+FROM python:3.14-slim AS runtime
 
 # Accept build arguments in runtime stage for labels
 ARG VERSION=dev
@@ -72,6 +72,7 @@ LABEL org.opencontainers.image.title="Claude Task Master" \
       org.opencontainers.image.url="https://github.com/developerz-ai/claude-task-master" \
       org.opencontainers.image.source="https://github.com/developerz-ai/claude-task-master" \
       org.opencontainers.image.vendor="DeveloperZ.AI" \
+      org.opencontainers.image.documentation="https://github.com/developerz-ai/claude-task-master#readme" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${GIT_COMMIT}" \

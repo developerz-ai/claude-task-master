@@ -1,4 +1,8 @@
-# Claude Task Master
+<p align="center">
+  <img src="https://raw.githubusercontent.com/developerz-ai/claude-task-master/main/assets/logo.png" alt="Claude Task Master" width="220">
+</p>
+
+<h1 align="center">Claude Task Master</h1>
 
 [![CI](https://github.com/developerz-ai/claude-task-master/actions/workflows/ci.yml/badge.svg)](https://github.com/developerz-ai/claude-task-master/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/developerz-ai/claude-task-master/graph/badge.svg)](https://codecov.io/gh/developerz-ai/claude-task-master)
