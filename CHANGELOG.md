@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.66] - 2026-07-21
+
+### Fixed
+- **`import claude_task_master.mailbox` no longer raises ImportError.** A latent import cycle: `core.control` imported `mailbox.storage` at module level, while `mailbox.storage` imports `core.atomic_io` — which executes `core/__init__`, which imports `core.control`. Whichever package was reached first decided whether it worked, so reaching `mailbox` first died with `cannot import name 'MailboxStorage' from partially initialized module`. It hit any consumer importing the mailbox package in a fresh interpreter, and it hit the test suite intermittently: under `pytest -n auto`, a worker that collected a mailbox test file before any `core` module failed *collection* — the flaky `tests/property/test_mailbox.py` error that appeared on some full-suite runs and not others. The import moves to its single use site (`_count_pending_mailbox_messages`), the deferred-import pattern the codebase already uses for this. Regression test spawns a fresh interpreter and imports `mailbox` on its own — the only way to catch an import-order bug, since an in-process test inherits whatever the runner already imported.
+
 ## [0.1.65] - 2026-07-21
 
 ### Fixed
@@ -828,7 +833,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.65...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.66...HEAD
+[0.1.66]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.65...v0.1.66
 [0.1.65]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.64...v0.1.65
 [0.1.64]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.63...v0.1.64
 [0.1.63]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.62...v0.1.63
