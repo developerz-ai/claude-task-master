@@ -1172,3 +1172,27 @@ class TestConcurrentProcesses:
             child.join(timeout=5.0)
             if child.is_alive():
                 child.kill()
+
+
+class TestImportOrder:
+    """The package must import regardless of which subpackage is reached first."""
+
+    def test_mailbox_imports_without_core_first(self):
+        """Regression: `core.control` imported `mailbox.storage` at module level,
+        while `mailbox.storage` imports `core.atomic_io` (which runs `core/__init__`,
+        which imports `core.control`). Importing `claude_task_master.mailbox` in a
+        fresh interpreter therefore died with "cannot import name 'MailboxStorage'
+        from partially initialized module" — hit by any consumer, and by pytest
+        whenever a worker collected a mailbox test file first.
+        """
+        import subprocess
+        import sys
+
+        result = subprocess.run(
+            [sys.executable, "-c", "import claude_task_master.mailbox"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        assert result.returncode == 0, f"mailbox-first import failed:\n{result.stderr}"
