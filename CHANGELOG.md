@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.68] - 2026-07-21
+
 ### Changed
 - **A PR that merges cleanly is merged, even if the base moved.** `--sync-before-merge` was default-on, so a green PR sitting one commit behind `main` was routed into an agent session and a second full CI round before it could land — on the common case, to catch a semantic clash that is rare. It is now opt-in (`TaskOptions.sync_before_merge`, default `False`); pass `--sync-before-merge` when the base is volatile enough for the untested merge result to be a real risk. A PR that genuinely *cannot* merge (`CONFLICTING`) is still always handed to the agent under `--resolve-conflicts` — that path is unchanged.
 - **The make-it-mergeable session rebases instead of merging.** `git rebase origin/<base>` (resolve → `git rebase --continue`, once per conflicting commit) then `git push --force-with-lease`, so the PR stays a clean series of commits on top of the base rather than accumulating a merge commit every time the base moves. The trade-off is deliberate and worth stating: rebasing rewrites the branch, so review threads anchored to the old commits go stale. The session now passes `allow_rebase=True` through `run_work_session` into the work prompt, which drops the blanket "NEVER rebase" rule from the push-only boilerplate — that rule contradicted the session's own instructions and told it to plain-push a branch git had just rewritten. Ordinary CI-fix and review-addressing sessions still never rebase; they only add commits.
@@ -842,7 +844,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.67...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.68...HEAD
+[0.1.68]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.67...v0.1.68
 [0.1.67]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.66...v0.1.67
 [0.1.66]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.65...v0.1.66
 [0.1.65]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.64...v0.1.65
