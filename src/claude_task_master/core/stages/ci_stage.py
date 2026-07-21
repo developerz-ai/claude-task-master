@@ -138,6 +138,41 @@ class _CIStage(_GitOps):
                 description = (check.get("description") or "").strip()
                 console.detail(f"  ~ {name}: '{description}' ignored — {reason}")
 
+    def _handle_conflicting_pr(self, state: TaskState, pr_number: int) -> int | None:
+        """Route a CONFLICTING PR to the agent resolver, or block.
+
+        Defined here — below every stage that can meet a conflict — because a PR
+        can turn conflicting at any point the base moves, not only at merge time.
+        Whichever stage notices routes through this one door.
+
+        Args:
+            state: Current task state.
+            pr_number: The conflicting PR.
+
+        Returns:
+            1 if blocked (resolution disabled or attempts exhausted), None to
+            continue the loop in the ``resolving_conflicts`` stage.
+        """
+        if not state.options.resolve_conflicts:
+            console.detail("Conflicts must be resolved before merging")
+            state.status = "blocked"
+            self.state_manager.save_state(state)
+            return 1
+
+        if state.conflict_fix_attempts >= self.MAX_CONFLICT_FIX_ATTEMPTS:
+            console.error(
+                f"Conflicts still unresolved after {state.conflict_fix_attempts} attempts — "
+                "blocking, manual resolution required"
+            )
+            state.status = "blocked"
+            self.state_manager.save_state(state)
+            return 1
+
+        state.conflict_fix_attempts += 1
+        state.workflow_stage = "resolving_conflicts"
+        self.state_manager.save_state(state)
+        return None
+
     def _is_ci_poll_timed_out(self, state: TaskState) -> bool:
         """Check if CI polling has exceeded the timeout."""
         if state.ci_poll_start_time is None:
@@ -286,13 +321,13 @@ class _CIStage(_GitOps):
                     return None
                 return None
 
-            # Check for merge conflicts
+            # Check for merge conflicts. The base can move while CI runs, so a
+            # conflict here is the same condition ready_to_merge handles — hand
+            # it to the agent resolver rather than ending the run.
             if pr_status.mergeable == "CONFLICTING":
-                console.warning("PR has merge conflicts - needs manual resolution")
+                console.warning(f"PR #{state.current_pr} has merge conflicts!")
                 self._clear_ci_poll_timer(state)
-                state.status = "blocked"
-                self.state_manager.save_state(state)
-                return 1  # Exit with error
+                return self._handle_conflicting_pr(state, state.current_pr)
 
             if pr_status.ci_state == "SUCCESS":
                 console.success(

@@ -104,37 +104,6 @@ class _MergeStage(_ReviewStage):
         self.state_manager.save_state(state)
         return None
 
-    def _handle_conflicting_pr(self, state: TaskState, pr_number: int) -> int | None:
-        """Route a CONFLICTING PR to the agent resolver, or block.
-
-        Args:
-            state: Current task state.
-            pr_number: The conflicting PR.
-
-        Returns:
-            1 if blocked (resolution disabled or attempts exhausted), None to
-            continue the loop in the ``resolving_conflicts`` stage.
-        """
-        if not state.options.resolve_conflicts:
-            console.detail("Conflicts must be resolved before merging")
-            state.status = "blocked"
-            self.state_manager.save_state(state)
-            return 1
-
-        if state.conflict_fix_attempts >= self.MAX_CONFLICT_FIX_ATTEMPTS:
-            console.error(
-                f"Conflicts still unresolved after {state.conflict_fix_attempts} attempts — "
-                "blocking, manual resolution required"
-            )
-            state.status = "blocked"
-            self.state_manager.save_state(state)
-            return 1
-
-        state.conflict_fix_attempts += 1
-        state.workflow_stage = "resolving_conflicts"
-        self.state_manager.save_state(state)
-        return None
-
     def _confirm_pr_merged(self, pr_number: int) -> bool | None:
         """Poll GitHub to confirm a PR actually merged after merge_pr succeeds.
 

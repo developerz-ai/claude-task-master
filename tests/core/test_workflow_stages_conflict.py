@@ -4,6 +4,7 @@ Covers the path a CONFLICTING PR takes now that conflicts are handed to an agent
 instead of blocking the run:
 
 - ready_to_merge routes a CONFLICTING PR into resolving_conflicts and counts it
+- waiting_ci does the same: the base can move while CI runs
 - resolve_conflicts=False keeps the old block-for-manual-resolution behavior
 - attempts are bounded by MAX_CONFLICT_FIX_ATTEMPTS, then block
 - the resolution session runs push-only on the PR's head branch and returns the
@@ -93,6 +94,72 @@ def task_state(state_manager) -> TaskState:
         model="sonnet",
         options=TaskOptions(auto_merge=True),
     )
+
+
+# ===========================================================================
+# Routing out of waiting_ci
+# ===========================================================================
+
+
+class TestConflictDuringCiWait:
+    """A PR can turn conflicting while CI runs — the base moves under it."""
+
+    @patch("claude_task_master.core.stages.ci_stage.console")
+    def test_conflict_while_waiting_for_ci_routes_to_resolution(
+        self, _console, workflow_handler, task_state, mock_pr_status
+    ):
+        """Regression: waiting_ci blocked the whole run with "PR has merge
+        conflicts - needs manual resolution" and exit 1, while the agent
+        resolver was wired only into ready_to_merge. A base branch moving
+        during a CI wait therefore killed the run.
+        """
+        task_state.workflow_stage = "waiting_ci"
+        mock_pr_status.ci_state = "PENDING"
+        mock_pr_status.check_details = [
+            {"name": "Tests", "status": "COMPLETED", "conclusion": "SUCCESS"}
+        ]
+
+        result = workflow_handler.handle_waiting_ci_stage(task_state)
+
+        assert result is None, "the run should continue, not exit"
+        assert task_state.workflow_stage == "resolving_conflicts"
+        assert task_state.status == "working"
+        assert task_state.conflict_fix_attempts == 1
+
+    @patch("claude_task_master.core.stages.ci_stage.console")
+    def test_resolution_disabled_still_blocks_from_waiting_ci(
+        self, _console, workflow_handler, task_state, mock_pr_status
+    ):
+        """--no-resolve-conflicts keeps the manual-resolution behavior here too."""
+        task_state.workflow_stage = "waiting_ci"
+        task_state.options.resolve_conflicts = False
+        mock_pr_status.ci_state = "PENDING"
+        mock_pr_status.check_details = [
+            {"name": "Tests", "status": "COMPLETED", "conclusion": "SUCCESS"}
+        ]
+
+        result = workflow_handler.handle_waiting_ci_stage(task_state)
+
+        assert result == 1
+        assert task_state.status == "blocked"
+
+    @patch("claude_task_master.core.stages.ci_stage.console")
+    def test_attempts_are_bounded_from_waiting_ci(
+        self, _console, workflow_handler, task_state, mock_pr_status
+    ):
+        """Both entry points share one counter, so a conflict that keeps coming
+        back cannot loop forever regardless of which stage notices it."""
+        task_state.workflow_stage = "waiting_ci"
+        task_state.conflict_fix_attempts = workflow_handler.MAX_CONFLICT_FIX_ATTEMPTS
+        mock_pr_status.ci_state = "PENDING"
+        mock_pr_status.check_details = [
+            {"name": "Tests", "status": "COMPLETED", "conclusion": "SUCCESS"}
+        ]
+
+        result = workflow_handler.handle_waiting_ci_stage(task_state)
+
+        assert result == 1
+        assert task_state.status == "blocked"
 
 
 # ===========================================================================
