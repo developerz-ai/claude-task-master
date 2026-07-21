@@ -197,6 +197,48 @@ class TestPRContextMethods:
         # Check that / is replaced in filename
         assert "/" not in comment_files[0].name
 
+    def test_save_pr_comments_handles_none_path_mixed_with_str(
+        self, state_manager: StateManager
+    ) -> None:
+        """A None path (conversation / outdated-diff comment) must not break the save.
+
+        Regression: comment dicts carry ``"path": None`` explicitly, so the
+        summary's ``sorted(paths)`` mixed None with str and raised
+        ``'<' not supported between instances of 'NoneType' and 'str'`` —
+        aborting the whole save and spinning the review loop forever.
+        """
+        comments: list[dict] = [
+            {
+                "thread_id": "issue_comment_1",
+                "author": "human",
+                "path": None,
+                "line": None,
+                "body": "Please also update the docs.",
+            },
+            {
+                "thread_id": "PRRT_abc",
+                "author": "reviewer",
+                "path": "src/main.py",
+                "line": 42,
+                "body": "Fix this too.",
+            },
+        ]
+        state_manager.save_pr_comments(123, comments)
+
+        pr_dir = state_manager.get_pr_dir(123)
+        comment_files = sorted((pr_dir / "comments").glob("*.txt"))
+        assert len(comment_files) == 2
+
+        summary = (pr_dir / "comments_summary.txt").read_text()
+        assert "general" in summary
+        assert "src/main.py" in summary
+
+        # None values are normalized in the comment body, not printed verbatim.
+        none_path_content = comment_files[0].read_text()
+        assert "File: general" in none_path_content
+        assert "Line: N/A" in none_path_content
+        assert "None" not in none_path_content.split("Please")[0]
+
 
 class TestAddressedThreadsTracking:
     """Tests for addressed threads tracking (avoiding re-downloading replied comments)."""

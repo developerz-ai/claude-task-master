@@ -818,6 +818,36 @@ class TestHandleAddressingReviewsStage:
 
     @patch("claude_task_master.core.stages.review_stage.interruptible_sleep")
     @patch("claude_task_master.core.stages.review_stage.console")
+    def test_pauses_when_nothing_saved_and_nothing_resolved(
+        self,
+        mock_console,
+        mock_sleep,
+        workflow_handler,
+        state_manager,
+        basic_task_state,
+        mock_agent,
+        mock_pr_context,
+    ):
+        """0 saved + 0 resolved must pause before bouncing back to waiting_reviews.
+
+        Regression: without the pause, waiting_reviews and addressing_reviews
+        ping-ponged with no delay, hammering the GitHub API in a hot loop.
+        """
+        state_manager.state_dir.mkdir(exist_ok=True)
+        basic_task_state.current_pr = 42
+        mock_sleep.return_value = True
+        mock_pr_context.save_pr_comments.return_value = 0
+        mock_pr_context.resolve_addressed_threads.return_value = 0
+
+        result = workflow_handler.handle_addressing_reviews_stage(basic_task_state)
+
+        assert result is None
+        mock_agent.run_work_session.assert_not_called()
+        mock_sleep.assert_called_once_with(WorkflowStageHandler.CI_POLL_INTERVAL)
+        assert basic_task_state.workflow_stage == "waiting_reviews"
+
+    @patch("claude_task_master.core.stages.review_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.review_stage.console")
     def test_uses_opus_model(
         self,
         mock_console,

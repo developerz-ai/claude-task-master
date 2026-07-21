@@ -139,6 +139,11 @@ class _ReviewStage(_PRFixStage):
                 )
             else:
                 console.info("No actionable comments and no threads to resolve")
+                # Nothing changed on GitHub: without a pause, waiting_reviews
+                # sends us straight back here and the two stages spin hot
+                # against the API (observed when save_pr_comments raised).
+                if not interruptible_sleep(self.CI_POLL_INTERVAL):
+                    return None
             # Go back to waiting_reviews to re-check
             state.workflow_stage = "waiting_reviews"
             self.state_manager.save_state(state)

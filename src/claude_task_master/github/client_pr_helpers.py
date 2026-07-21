@@ -337,7 +337,7 @@ def _format_pr_comments_from_rest(
         is_bot = author.endswith("[bot]")
         bot_marker = " (bot)" if is_bot else ""
 
-        path = comment.get("path", "PR")
+        path = comment.get("path") or "PR"  # key present-but-None on non-inline comments
         line = comment.get("line") or comment.get("original_line") or "N/A"
         body = comment.get("body", "")
 
