@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.65] - 2026-07-21
+
+### Fixed
+- **Every CodeRabbit quota wording is tolerated, not one exact string.** v0.1.64 matched the literal `Review rate limited`, but CodeRabbit words the same condition at least two ways — that string on the status context, and `Review limit reached` in the PR comment it posts for the same event — so the sibling wording still failed CI and looped. `ToleratedFailure` gains a `match` field (`"exact"`, the default, or `"contains"`), and the CodeRabbit rules now match the fragments `rate limit` and `limit reached` loosely. A real verdict (`1 issue found`, `Review failed`) contains neither and still fails CI, as does the same message from any other check. Env-declared rules (`CLAUDETM_TOLERATED_CHECK_FAILURES`) stay exact — loose matching is opt-in per rule, so a typo in an env var cannot silently swallow a family of failures.
+
 ## [0.1.64] - 2026-07-21
 
 ### Fixed
@@ -823,7 +828,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.64...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.65...HEAD
+[0.1.65]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.64...v0.1.65
 [0.1.64]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.63...v0.1.64
 [0.1.63]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.62...v0.1.63
 [0.1.62]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.61...v0.1.62
