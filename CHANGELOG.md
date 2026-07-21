@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.69] - 2026-07-21
+
+### Fixed
+- **A PR group that ends without a PR recovers instead of blocking the run.** Non-last tasks in a PR group commit in commit-only mode ("do NOT push or create a PR"), so the whole group's work sits unpushed on the local branch until the last task's session opens the PR. When that last task was verification-only, the agent truthfully reported "nothing to ship, no PR" — and `handle_pr_created_stage` treated the missing PR as unconditionally fatal: `status=blocked`, run dead, the group's commits stranded. A new `_PRRecovery` mixin (`core/stages/pr_recovery.py`) now recovers deterministically: a branch with commits over the base is pushed and its PR opened by the orchestrator itself (title/body derived from the plan's PR group; the next cycle detects it through the normal path), and a branch with zero commits over the base closes the group out as done via the `merged` stage. Blocking is reserved for what genuinely needs a human — dirty tree, sitting on the base branch, or a failed comparison/push/PR-creation (an unmeasurable branch is "unknown", never "empty"). The last-in-group work prompt also now states the PR must be opened even when that task itself changed nothing.
+
 ## [0.1.68] - 2026-07-21
 
 ### Changed
@@ -844,7 +849,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.68...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.69...HEAD
+[0.1.69]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.68...v0.1.69
 [0.1.68]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.67...v0.1.68
 [0.1.67]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.66...v0.1.67
 [0.1.66]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.65...v0.1.66
