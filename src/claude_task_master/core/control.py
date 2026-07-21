@@ -45,7 +45,6 @@ from claude_task_master.core.state import (
     StateNotFoundError,
 )
 from claude_task_master.core.state_exceptions import RESUMABLE_STATUSES
-from claude_task_master.mailbox.storage import MailboxStorage
 
 from .control_ops import _ControlOpsMixin
 from .control_types import (  # noqa: F401 — re-exported for backwards compat
@@ -146,6 +145,12 @@ class ControlManager(_ControlOpsMixin):
             Number of pending messages in ``mailbox.json``; ``0`` if the mailbox
             is empty, absent, or unreadable (best-effort — never blocks stop).
         """
+        # Deferred: `mailbox.storage` imports `core.atomic_io`, which runs
+        # `core/__init__`, which imports this module — so a module-level import
+        # here makes `import claude_task_master.mailbox` (mailbox reached first)
+        # fail with a partially-initialized-module ImportError.
+        from claude_task_master.mailbox.storage import MailboxStorage  # noqa: PLC0415
+
         try:
             return MailboxStorage(self.state_manager.state_dir).count()
         except OSError:
