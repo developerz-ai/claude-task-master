@@ -178,6 +178,8 @@ End with: `TASK COMPLETE`"""
 
 **You MUST push and create a PR before reporting completion.**
 
+This applies even if THIS task needed no code changes (e.g. verification-only): earlier tasks in this PR group committed work on this branch that only ships through your PR.
+
 Report (keep it short):
 - **Changes:** What was done (1-2 sentences)
 - **Tests:** Pass/fail summary

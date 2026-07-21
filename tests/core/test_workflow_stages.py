@@ -34,7 +34,7 @@ _STAGE_SLEEP_MODULES = (
     "merge_stage",
     "release_stage",
 )
-_STAGE_CONSOLE_MODULES = (*_STAGE_SLEEP_MODULES, "git_ops")
+_STAGE_CONSOLE_MODULES = (*_STAGE_SLEEP_MODULES, "git_ops", "pr_recovery")
 
 
 @pytest.fixture
@@ -295,19 +295,27 @@ class TestHandlePRCreatedStage:
         assert basic_task_state.workflow_stage == "waiting_ci"
         mock_console.success.assert_called()
 
+    @patch("claude_task_master.core.stages.pr_recovery.console")
     @patch("claude_task_master.core.stages.ci_stage.console")
-    def test_no_pr_found_blocks(
-        self, mock_console, workflow_handler, state_manager, basic_task_state, mock_github_client
+    def test_no_pr_found_unrecoverable_blocks(
+        self,
+        mock_console,
+        mock_recovery_console,
+        workflow_handler,
+        state_manager,
+        basic_task_state,
+        mock_github_client,
     ):
-        """Should block when no PR found - agent failed to create one."""
+        """Should block when no PR found and recovery is impossible (on base branch)."""
         state_manager.state_dir.mkdir(exist_ok=True)
         mock_github_client.get_pr_for_current_branch.return_value = None
 
-        result = workflow_handler.handle_pr_created_stage(basic_task_state)
+        with patch.object(WorkflowStageHandler, "_get_current_branch", return_value="main"):
+            result = workflow_handler.handle_pr_created_stage(basic_task_state)
 
         assert result == 1  # Blocked
         assert basic_task_state.status == "blocked"
-        mock_console.error.assert_called()
+        mock_recovery_console.error.assert_called()
 
     @patch("claude_task_master.core.stages.ci_stage.console")
     def test_pr_detection_error_blocks(
