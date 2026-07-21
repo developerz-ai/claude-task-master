@@ -49,6 +49,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+#: Stages that make no local progress because they are blocked on GitHub —
+#: polling CI checks, review bots, or mergeability. They run no agent session,
+#: so the tracker's 5-minute stall threshold would fire long before the stage's
+#: own bound (``CI_POLL_TIMEOUT``, 120 minutes) is reached. Each cycle spent in
+#: one of these stages heartbeats the tracker instead of being judged by it.
+EXTERNAL_WAIT_STAGES = frozenset({"waiting_ci", "waiting_reviews", "ready_to_merge"})
+
 
 class OrchestratorLoop(
     _LoopContextMixin,
@@ -197,7 +204,12 @@ class OrchestratorLoop(
                         reason = "Escape pressed"
                     return _handle_pause(reason)
 
-                # Stall check.
+                # Stall check. Waiting on CI/reviews/mergeability is not a
+                # stall — those stages carry their own (much longer) timeouts,
+                # so heartbeat the tracker and skip the check instead of
+                # blocking the run 5 minutes into a 2-hour CI run.
+                if state.workflow_stage in EXTERNAL_WAIT_STAGES:
+                    orc.tracker.record_heartbeat()
                 should_abort, abort_reason = orc.tracker.should_abort()
                 if should_abort:
                     console.warning(f"Execution issue: {abort_reason}")
@@ -212,7 +224,14 @@ class OrchestratorLoop(
                     return 1
 
                 # Route through orc.* so patch.object on orchestrator intercepts it.
+                stage_before_cycle = state.workflow_stage
                 result = orc._run_workflow_cycle(state)
+                # A stage transition is progress: fixing CI, addressing review
+                # comments or resolving conflicts each run an agent session that
+                # reports nothing to the tracker and can outlast the stall
+                # threshold on its own.
+                if state.workflow_stage != stage_before_cycle:
+                    orc.tracker.record_heartbeat()
                 if result is not None:
                     stop_listening()
                     unregister_handlers()

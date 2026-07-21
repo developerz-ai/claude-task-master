@@ -244,6 +244,25 @@ class ExecutionTracker:
         if self._current_session:
             self._current_session.errors += 1
 
+    def record_heartbeat(self) -> None:
+        """Record liveness that is not a task completion.
+
+        Only the *working* stage reports progress via :meth:`start_session` /
+        :meth:`record_task_progress`, so without this every other part of the
+        PR workflow looks like a stall. Two cases matter:
+
+        - **Blocked on an external system.** Polling CI or review bots produces
+          no agent activity at all, yet ``stall_threshold_seconds`` is 5 minutes
+          while a CI wait is bounded by ``CI_POLL_TIMEOUT`` (120 minutes) and
+          legitimately runs that long.
+        - **A workflow-stage transition.** Fixing CI, addressing review
+          comments, or resolving conflicts can each take far longer than the
+          stall threshold; advancing the state machine is progress.
+
+        Deliberately does not touch session metrics — this is liveness, not work.
+        """
+        self._last_progress_time = time.time()
+
     def record_task_progress(self, task_index: int) -> None:
         """Record progress to a new task.
 
