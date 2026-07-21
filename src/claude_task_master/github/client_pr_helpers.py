@@ -6,6 +6,7 @@ import json
 import subprocess
 from typing import Any
 
+from .check_tolerance import is_failed_check, is_tolerated_failure
 from .client_pr_models import GitHubClientProtocol, PRStatus
 
 
@@ -125,6 +126,7 @@ def _build_pr_status_query() -> str:
                       ... on StatusContext {
                         context
                         state
+                        description
                         targetUrl
                       }
                     }
@@ -203,19 +205,23 @@ def _parse_pr_status_response(pr_number: int, pr_data: dict[str, Any]) -> PRStat
         )
         unresolved = 1  # Cannot confirm zero with incomplete data
 
-    # Count check statuses (GitHub API returns uppercase values)
+    # Count check statuses (GitHub API returns uppercase values). Tolerated
+    # failures (CodeRabbit's "Review rate limited") count as skipped, not
+    # failed — see github/check_tolerance.py.
     checks_passed = sum(
         1 for c in check_details if (c.get("conclusion") or "").upper() in ("SUCCESS", "NEUTRAL")
     )
-    checks_failed = sum(
+    checks_failed = sum(1 for c in check_details if is_failed_check(c))
+    checks_skipped = sum(
         1
         for c in check_details
-        if (c.get("conclusion") or "").upper() in ("FAILURE", "ERROR", "CANCELLED", "TIMED_OUT")
-    )
-    checks_skipped = sum(
-        1 for c in check_details if (c.get("conclusion") or "").upper() == "SKIPPED"
+        if (c.get("conclusion") or "").upper() == "SKIPPED" or is_tolerated_failure(c)
     )
     checks_pending = len(check_details) - checks_passed - checks_failed - checks_skipped
+
+    # The rollup reports FAILURE when *any* context failed, including tolerated
+    # ones. Recompute it so a rate-limited review bot cannot fail the PR.
+    ci_state = _effective_ci_state(ci_state, check_details, checks_failed, checks_pending)
 
     # Parse PR state and mergeable status
     state = pr_data.get("state", "OPEN")
@@ -249,6 +255,37 @@ def _parse_pr_status_response(pr_number: int, pr_data: dict[str, Any]) -> PRStat
     )
 
 
+def _effective_ci_state(
+    rollup_state: str,
+    check_details: list[dict[str, Any]],
+    checks_failed: int,
+    checks_pending: int,
+) -> str:
+    """Recompute the CI rollup state, discounting tolerated failures.
+
+    GitHub's ``statusCheckRollup.state`` is FAILURE when *any* context failed,
+    so a rate-limited CodeRabbit review turns an otherwise green PR red. When
+    every failing context is tolerated, the state becomes what it would have
+    been without them: still PENDING if checks are running, else SUCCESS.
+
+    Args:
+        rollup_state: The state reported by GitHub.
+        check_details: Normalized check details for the PR head commit.
+        checks_failed: Count of failures that are *not* tolerated.
+        checks_pending: Count of checks that have not concluded.
+
+    Returns:
+        The state to act on. Unchanged unless the only failures are tolerated.
+    """
+    if rollup_state not in ("FAILURE", "ERROR"):
+        return rollup_state
+    if checks_failed:
+        return rollup_state
+    if not any(is_tolerated_failure(c) for c in check_details):
+        return rollup_state
+    return "PENDING" if checks_pending else "SUCCESS"
+
+
 def _parse_check_contexts(contexts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Parse check contexts from GraphQL response.
 
@@ -278,6 +315,9 @@ def _parse_check_contexts(contexts: list[dict[str, Any]]) -> list[dict[str, Any]
                     "context": ctx.get("context", "unknown"),
                     "status": ctx.get("state", "unknown"),
                     "conclusion": ctx.get("state"),  # state is the conclusion for StatusContext
+                    # Free-text reason from the reporting service; the only way to
+                    # tell "Review rate limited" from a real CodeRabbit failure.
+                    "description": ctx.get("description"),
                     "url": ctx.get("targetUrl"),
                 }
             )
