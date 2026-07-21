@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Property tests no longer fail as timeouts under `pytest -n auto`.** A property test is tens of examples in one test item, so the suite-wide `--timeout=2` (sized for one-shot unit tests) was the wrong budget: on a loaded xdist worker, the filesystem-backed mailbox properties — up to 30 locked, atomically-written messages per example — could exceed it and fail on the clock rather than on their own merits. `tests/property/conftest.py` now gives every property item a 60s timeout unless it sets its own.
+
 ## [0.1.62] - 2026-07-20
 
 ### Added

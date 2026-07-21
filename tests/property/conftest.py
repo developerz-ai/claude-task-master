@@ -52,7 +52,17 @@ def _reset_hypothesis_settings():
 
 
 def pytest_collection_modifyitems(config, items):
-    """Automatically mark property tests with the 'property' marker."""
+    """Mark property tests and give them room to run.
+
+    A property test is tens-to-hundreds of examples in a single test item, so
+    the suite-wide ``--timeout=2`` (sized for one-shot unit tests) is the wrong
+    budget: under `pytest -n auto`, a filesystem-backed property like the
+    mailbox's — up to 30 locked, atomically-written messages per example — can
+    blow through 2s on a loaded worker and fail as a timeout rather than on its
+    own merits. 60s is still far below any real hang.
+    """
     for item in items:
         if "property" in str(item.fspath):
             item.add_marker(pytest.mark.property)
+            if item.get_closest_marker("timeout") is None:
+                item.add_marker(pytest.mark.timeout(60))
