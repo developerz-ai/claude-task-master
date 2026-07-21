@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.67] - 2026-07-21
+
+### Fixed
+- **A merge conflict during the CI wait no longer ends the run.** `--resolve-conflicts` (v0.1.61) hands a `CONFLICTING` PR to an agent session instead of blocking — but it was wired into `ready_to_merge` only. `waiting_ci` kept its own older branch that set `status=blocked` and returned 1, so when the base moved while CI was running (the window where it is *most* likely to move: the branch was just pushed and polls for minutes), the run died with `PR has merge conflicts - needs manual resolution` and a 0-session cost report — with the resolver sitting unused one stage away. `_handle_conflicting_pr` moves from `_MergeStage` down to `_CIStage`, below every stage that can meet a conflict, and `waiting_ci` routes through the same door as `ready_to_merge`. Both share `state.conflict_fix_attempts`, so `MAX_CONFLICT_FIX_ATTEMPTS` bounds the loop whichever stage notices, and `--no-resolve-conflicts` still blocks from either. (`claudetm merge-pr` already fed conflicts to a fix session and is unchanged.)
+
 ## [0.1.66] - 2026-07-21
 
 ### Fixed
@@ -833,7 +838,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.66...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.67...HEAD
+[0.1.67]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.66...v0.1.67
 [0.1.66]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.65...v0.1.66
 [0.1.65]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.64...v0.1.65
 [0.1.64]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.63...v0.1.64
