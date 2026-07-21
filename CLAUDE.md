@@ -457,3 +457,7 @@ Messages are processed after each task completes. Multiple messages are merged w
 ## CI standard
 
 - CI runs on Blacksmith (`blacksmith-2vcpu-ubuntu-2404`; `publish-test` on 4vcpu — deliberate). Every workflow declares a `concurrency` group with cancel-in-progress, and every job sets `timeout-minutes`. Publish workflows (PyPI / TestPyPI / Docker tag) are hard `cancel-in-progress: false` — publishes are irreversible.
+
+## Note
+
+Do not use git worktrees — work directly in this checkout. See `.claude/commands/feature.md` and `.claude/commands/planx.md`.
