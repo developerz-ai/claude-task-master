@@ -55,12 +55,11 @@ class _PRContextCIMixin:
             # Get the latest workflow run for this PR's branch
             pr_status = self.github_client.get_pr_status(pr_number)
 
-            # Check if any CI checks failed
-            _failing_conclusions = {"FAILURE", "ERROR", "TIMED_OUT"}
-            has_failures = any(
-                (check.get("conclusion") or "").upper() in _failing_conclusions
-                for check in pr_status.check_details
-            )
+            # Check if any CI checks failed. Tolerated failures (a rate-limited
+            # CodeRabbit review) have no logs to download and are not defects.
+            from ..github.check_tolerance import is_failed_check  # noqa: PLC0415
+
+            has_failures = any(is_failed_check(check) for check in pr_status.check_details)
 
             if not has_failures:
                 # CI is now passing — clear any stale failure logs
@@ -70,11 +69,7 @@ class _PRContextCIMixin:
 
             # Extract run IDs from *failing* checks only (distinct set).
             # Avoids picking up a passing check's run ID when a different check fails.
-            failing_checks = [
-                check
-                for check in pr_status.check_details
-                if (check.get("conclusion") or "").upper() in _failing_conclusions
-            ]
+            failing_checks = [check for check in pr_status.check_details if is_failed_check(check)]
             run_ids: set[int] = set()
             for check in failing_checks:
                 # `or ""`: a StatusContext's targetUrl is often null, so the

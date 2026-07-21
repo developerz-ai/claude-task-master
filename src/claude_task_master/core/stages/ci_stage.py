@@ -5,11 +5,13 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
+from ...github.check_tolerance import is_failed_check, tolerated_reason
 from .. import console
 from ..shutdown import interruptible_sleep
 from .git_ops import _GitOps
 
 if TYPE_CHECKING:
+    from ...github.client_pr_models import PRStatus
     from ..state import TaskState
 
 
@@ -122,6 +124,19 @@ class _CIStage(_GitOps):
                 console.detail("Stripped decorative glyphs from PR body")
         except Exception as e:
             console.warning(f"Could not sanitize PR body: {e}")
+
+    def _report_tolerated_failures(self, pr_status: PRStatus) -> None:
+        """Log any failing checks that were discounted, so it is never silent.
+
+        Args:
+            pr_status: The PR status whose check details were evaluated.
+        """
+        for check in pr_status.check_details:
+            reason = tolerated_reason(check)
+            if reason is not None:
+                name = self._get_check_name(check)
+                description = (check.get("description") or "").strip()
+                console.detail(f"  ~ {name}: '{description}' ignored — {reason}")
 
     def _is_ci_poll_timed_out(self, state: TaskState) -> bool:
         """Check if CI polling has exceeded the timeout."""
@@ -284,6 +299,7 @@ class _CIStage(_GitOps):
                     f"CI passed! ({pr_status.checks_passed} passed, "
                     f"{pr_status.checks_skipped} skipped)"
                 )
+                self._report_tolerated_failures(pr_status)
                 self._clear_ci_poll_timer(state)
                 # Emit ci.passed webhook
                 self._emit_ci_event(
@@ -322,9 +338,9 @@ class _CIStage(_GitOps):
                 # Collect failed check names for webhook
                 failed_checks = []
                 for check in pr_status.check_details:
-                    conclusion = (check.get("conclusion") or "").upper()
-                    if conclusion in ("FAILURE", "ERROR"):
+                    if is_failed_check(check):
                         check_name = self._get_check_name(check)
+                        conclusion = (check.get("conclusion") or "").upper()
                         console.detail(f"  ✗ {check_name}: {conclusion}")
                         failed_checks.append(check_name)
                 # Emit ci.failed webhook
