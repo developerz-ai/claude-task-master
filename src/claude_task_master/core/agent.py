@@ -213,6 +213,7 @@ class AgentWrapper:
         pr_group_info: dict | None = None,
         target_branch: str = "main",
         coding_style: str | None = None,
+        allow_rebase: bool = False,
     ) -> dict[str, Any]:
         """Run a work session with full tools.
 
@@ -229,6 +230,8 @@ class AgentWrapper:
             pr_group_info: Optional dict with PR group context (name, completed_tasks, etc).
             target_branch: The target branch for rebasing (default: "main").
             coding_style: Optional coding style guide to inject into prompt.
+            allow_rebase: True when rebasing onto target_branch is the session's
+                own job (conflict/sync session) rather than something to avoid.
 
         Returns:
             Dict with 'output', 'success', and 'model_used' keys.
@@ -246,6 +249,7 @@ class AgentWrapper:
             pr_group_info=pr_group_info,
             target_branch=target_branch,
             coding_style=coding_style,
+            allow_rebase=allow_rebase,
         )
 
     def run_release_check(

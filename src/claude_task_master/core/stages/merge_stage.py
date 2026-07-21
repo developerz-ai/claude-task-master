@@ -53,10 +53,12 @@ class _MergeStage(_ReviewStage):
     def _handle_stale_branch(self, state: TaskState, pr_status: PRStatus) -> int | None | object:
         """Route a PR whose branch is behind its base to the sync agent session.
 
-        "CI is green" only proves the branch passed against the base as it stood
-        when CI ran. If the base has moved since, the merge result is untested —
-        so the base is merged into the branch, the tests re-run, and CI verifies
-        the combined tree before the merge goes through.
+        Opt-in (``--sync-before-merge``), because a behind-but-clean PR is the
+        normal case and merges fine. When enabled: "CI is green" only proves the
+        branch passed against the base as it stood when CI ran, so the branch is
+        rebased onto the live base, the tests re-run, and CI verifies the combined
+        tree before the merge goes through. A PR that actually conflicts takes the
+        same session whether or not this is on.
 
         Args:
             state: Current task state.

@@ -95,7 +95,7 @@ class TestTaskOptions:
             "webhook_secret": None,
             "max_budget_usd": None,
             "resolve_conflicts": True,
-            "sync_before_merge": True,
+            "sync_before_merge": False,
         }
 
 

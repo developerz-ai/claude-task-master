@@ -10,7 +10,8 @@ instead of blocking the run:
 - the resolution session runs push-only on the PR's head branch and returns the
   PR to waiting_ci so the push's CI run is picked up
 - a session that raises blocks rather than looping
-- the prompt merges (never rebases) and names the real base branch
+- the prompt rebases (force-push with lease) and names the real base branch
+- a merely-behind PR is left alone unless --sync-before-merge is passed
 - the counter resets when the task advances
 """
 
@@ -220,8 +221,11 @@ class TestConflictRouting:
 
 class TestSyncBeforeMerge:
     @pytest.fixture(autouse=True)
-    def _mergeable(self, mock_pr_status: MagicMock) -> Generator[None, None, None]:
+    def _mergeable(self, mock_pr_status: MagicMock, task_state) -> Generator[None, None, None]:
         """These tests are about a clean-but-behind PR, not a conflicting one.
+
+        Syncing a merely-behind PR is opt-in, so these tests turn it on; the
+        default-off behavior has its own test below.
 
         The post-merge confirmation poll sleeps between polls; patch it so the
         merging paths run at test speed.
@@ -229,6 +233,7 @@ class TestSyncBeforeMerge:
         mock_pr_status.mergeable = "MERGEABLE"
         mock_pr_status.merge_state_status = "CLEAN"
         mock_pr_status.head_branch = "feature/x"
+        task_state.options.sync_before_merge = True
         with patch(
             "claude_task_master.core.stages.merge_stage.interruptible_sleep", return_value=True
         ):
@@ -271,6 +276,29 @@ class TestSyncBeforeMerge:
 
         assert result is None
         assert task_state.workflow_stage == "resolving_conflicts"
+
+    # Regression: syncing was default-on, so a PR that merged cleanly and was one
+    # commit behind main still burned an agent session plus a full CI round before
+    # it could land. Only a PR that genuinely cannot merge earns that session.
+    @patch("claude_task_master.core.stages.merge_stage.console")
+    def test_behind_but_clean_pr_merges_by_default(
+        self, _console, workflow_handler, task_state, mock_github_client
+    ):
+        """Without --sync-before-merge, being behind is not a reason to detour."""
+        task_state.options.sync_before_merge = False
+        mock_github_client.get_pr_behind_by.return_value = 1
+
+        workflow_handler.handle_ready_to_merge_stage(task_state)
+
+        mock_github_client.merge_pr.assert_called_once()
+        assert task_state.workflow_stage != "resolving_conflicts"
+        assert task_state.branch_sync_attempts == 0
+
+    def test_sync_is_opt_in(self):
+        """The default carries the policy — a fresh run does not sync."""
+        from claude_task_master.core.state_models import TaskOptions
+
+        assert TaskOptions().sync_before_merge is False
 
     @patch("claude_task_master.core.stages.merge_stage.console")
     def test_sync_disabled_merges_stale_pr(
@@ -322,13 +350,26 @@ class TestSyncBeforeMerge:
         prompt = mock_agent.run_work_session.call_args.kwargs["task_description"]
         assert "is behind `main`" in prompt
         assert "has merge conflicts" not in prompt
-        assert "git merge origin/main" in prompt
+        assert "git rebase origin/main" in prompt
 
     def test_sync_prompt_explains_why_ci_is_not_enough(self, workflow_handler):
         prompt = workflow_handler._build_conflict_resolution_task(7, "main", 1, conflicted=False)
 
         assert "CI passed against an older main" in prompt
-        assert "NOT `git rebase`" in prompt
+
+    # Regression: the session merged the base in, leaving a merge commit on every
+    # PR that touched a moving base. It rebases now, which needs a lease-guarded
+    # force-push — a plain `git push` is rejected against a rewritten branch.
+    @pytest.mark.parametrize("conflicted", [True, False])
+    def test_resolution_prompt_rebases_and_force_pushes(self, workflow_handler, conflicted):
+        prompt = workflow_handler._build_conflict_resolution_task(
+            7, "main", 1, conflicted=conflicted
+        )
+
+        assert "git rebase origin/main" in prompt
+        assert "git rebase --continue" in prompt
+        assert "git push --force-with-lease origin HEAD" in prompt
+        assert "git merge origin/main" not in prompt
 
     def test_advance_to_next_task_resets_sync_counter(self, workflow_handler, task_state):
         task_state.branch_sync_attempts = 2
@@ -364,6 +405,9 @@ class TestConflictResolutionStage:
         assert kwargs["create_pr"] is False
         assert kwargs["model_override"] is ModelType.OPUS
         assert kwargs["target_branch"] == "main"
+        # Rebasing is this session's job, so the push-only boilerplate must not
+        # also carry its blanket "NEVER rebase" rule.
+        assert kwargs["allow_rebase"] is True
 
     @patch("claude_task_master.core.stages.conflict_stage.interruptible_sleep", return_value=True)
     @patch("claude_task_master.core.stages.conflict_stage.console")
@@ -414,11 +458,10 @@ class TestConflictResolutionStage:
 
 
 class TestConflictPrompt:
-    def test_prompt_merges_and_names_base_branch(self, workflow_handler):
+    def test_prompt_rebases_and_names_base_branch(self, workflow_handler):
         prompt = workflow_handler._build_conflict_resolution_task(42, "develop", 1)
 
-        assert "git merge origin/develop" in prompt
-        assert "NOT `git rebase`" in prompt
+        assert "git rebase origin/develop" in prompt
         assert "gh pr create" in prompt  # explicitly forbidden
         assert "TASK COMPLETE" in prompt
         assert "attempt" not in prompt.split("## Step 1")[0].lower()
@@ -427,7 +470,7 @@ class TestConflictPrompt:
         prompt = workflow_handler._build_conflict_resolution_task(42, "main", 2)
 
         assert "attempt 2" in prompt
-        assert "mid-merge" in prompt
+        assert "mid-rebase" in prompt
 
 
 # ===========================================================================

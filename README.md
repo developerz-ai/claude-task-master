@@ -409,8 +409,8 @@ claudetm start "Your goal here" [OPTIONS]
 | `--max-sessions` | Limit number of sessions | unlimited |
 | `--prs` | Limit number of PRs to create | unlimited |
 | `--pause-on-pr` | Pause after creating PR | False |
-| `--resolve-conflicts/--no-resolve-conflicts` | Let an agent resolve merge conflicts (3 attempts, then block) | True |
-| `--sync-before-merge/--no-sync-before-merge` | Merge the latest base in and re-run CI before merging (3 attempts, then merge as-is) | True |
+| `--resolve-conflicts/--no-resolve-conflicts` | Let an agent rebase onto the base and resolve merge conflicts (3 attempts, then block) | True |
+| `--sync-before-merge/--no-sync-before-merge` | Also rebase PRs that merely trail the base, so CI verifies the combined tree (3 attempts, then merge as-is) | False |
 | `--admin` | Merge via `gh pr merge --admin`, overriding base-branch protection (requires repo-admin rights) | False |
 | `--budget` | Max spending per session in USD | unlimited |
 
