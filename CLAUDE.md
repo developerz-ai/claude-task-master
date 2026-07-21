@@ -458,6 +458,12 @@ Messages are processed after each task completes. Multiple messages are merged w
 
 - CI runs on Blacksmith (`blacksmith-2vcpu-ubuntu-2404`; `publish-test` on 4vcpu — deliberate). Every workflow declares a `concurrency` group with cancel-in-progress, and every job sets `timeout-minutes`. Publish workflows (PyPI / TestPyPI / Docker tag) are hard `cancel-in-progress: false` — publishes are irreversible.
 
+### Tolerated check failures
+
+Some status checks fail for reasons no commit can fix. `github/check_tolerance.py` holds a whitelist of `ToleratedFailure(check, description, reason)` rules; a failure matching one is counted as *skipped*, and the rollup `ci_state` is recomputed as if it weren't there (SUCCESS, or PENDING if other checks are still running). Built in: **CodeRabbit / "Review rate limited"**. Any other CodeRabbit failure, and the same message from any other check, still fails CI.
+
+Add an exception by appending a rule to `TOLERATED_FAILURES`, or without a release via `CLAUDETM_TOLERATED_CHECK_FAILURES="check=description;other=description"`. Discounted failures are always logged (`~ CodeRabbit: 'Review rate limited' ignored — …`), never silent.
+
 ## Note
 
-Do not use git worktrees — work directly in this checkout. See `.claude/commands/feature.md` and `.claude/commands/planx.md`.
+Do not use git worktrees — work directly in this checkout. If a task is big enough to need subagents, run them as a team in this same checkout: split the work into disjoint pieces so no two agents touch the same files.
