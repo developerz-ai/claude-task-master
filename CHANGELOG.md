@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.64] - 2026-07-21
+
+### Fixed
+- **Waiting for CI is no longer mistaken for a stall.** `ExecutionTracker` advances its progress clock only from *working-stage* signals, but the main loop applied the 300s stall threshold to every cycle — including cycles spent polling GitHub in `waiting_ci`, a stage deliberately bounded by `CI_POLL_TIMEOUT` (7200s / 120 min). A run that had just finished a long review-addressing session and settled in to wait for CI was therefore blocked five minutes in with `Execution issue: Stalled: no progress for 369 seconds` (and a `0 sessions / $0.00` cost report, since no tracker session was open). The loop now heartbeats the tracker on every cycle spent in an external-wait stage (`waiting_ci`, `waiting_reviews`, `ready_to_merge`) and on every workflow-stage transition — the latter covering the sibling case where a CI-fix, review-addressing or conflict-resolution session outlasts the stall threshold on its own and gets the *next* cycle killed. Stall detection for the working stage, loop detection and the max-session-duration check are unchanged.
+- **CodeRabbit's "Review rate limited" no longer fails CI.** CodeRabbit publishes its quota response as a *failing* status context (`CodeRabbit` / `FAILURE` / `Review rate limited`), and GitHub's `statusCheckRollup` goes red when any context fails — so an otherwise green PR read as failed CI, sent the orchestrator into a fix session for a check no commit can turn green, and looped on it. New `github/check_tolerance.py` holds a whitelist of `ToleratedFailure(check, description, reason)` rules matched on trimmed, case-insensitive text; PR-status parsing now fetches the StatusContext `description`, counts a tolerated failure as *skipped*, and recomputes `ci_state` as if it weren't there (SUCCESS, or PENDING while other checks run). CI-log download and the failed-check report skip them, and every discounted failure is logged rather than silently dropped. Deliberately narrow: any other CodeRabbit failure, and the same message from any other check, still fails CI; GitHub Actions check-runs carry no description and never match. Add exceptions by appending a rule, or without a release via `CLAUDETM_TOLERATED_CHECK_FAILURES="check=description;other=description"`.
+
 ## [0.1.63] - 2026-07-21
 
 ### Added
@@ -817,7 +823,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.63...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.64...HEAD
+[0.1.64]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.63...v0.1.64
 [0.1.63]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.62...v0.1.63
 [0.1.62]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.61...v0.1.62
 [0.1.61]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.60...v0.1.61
