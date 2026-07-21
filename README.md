@@ -411,7 +411,28 @@ claudetm start "Your goal here" [OPTIONS]
 | `--pause-on-pr` | Pause after creating PR | False |
 | `--resolve-conflicts/--no-resolve-conflicts` | Let an agent resolve merge conflicts (3 attempts, then block) | True |
 | `--sync-before-merge/--no-sync-before-merge` | Merge the latest base in and re-run CI before merging (3 attempts, then merge as-is) | True |
+| `--admin` | Merge via `gh pr merge --admin`, overriding base-branch protection (requires repo-admin rights) | False |
 | `--budget` | Max spending per session in USD | unlimited |
+
+#### When you need `--admin`
+
+Green CI is not always enough to merge. If the base branch requires **an approving review**, a required check the run can't satisfy, or any other protection rule, `gh pr merge` is refused with:
+
+```
+Pull request #NNN is not mergeable: the base branch policy prohibits the merge.
+```
+
+The run then blocks with a finished, green PR it isn't allowed to land. `--admin` merges past the rule, which is what you want for an unattended run on a repo you own:
+
+```bash
+claudetm start "Your goal here" --admin
+claudetm merge-pr 42 --admin          # same override for a single PR
+claudetm resume --admin               # or turn it on mid-run
+```
+
+It requires repo-admin rights and it is a real override — the review requirement is bypassed, not satisfied. On a repo where those reviews are the point, leave it off and merge by hand.
+
+`--admin` also force-advances a CI **timeout** (`CI_POLL_TIMEOUT`, 120 min) to the review stage instead of blocking. It does not skip CI, ignore failures, or merge a conflicted PR: failing checks still route to the fix loop, and conflicts still go to the resolver.
 
 ### Common Workflows
 

@@ -454,6 +454,17 @@ Messages are processed after each task completes. Multiple messages are merged w
 14. **Per-PR release checks** - planner adds `**Release checks:**` sections to plan.md, specific to each PR's changes
 15. **Release fix limit** - max 5 quick-fix PRs per release failure, then moves on (never blocks pipeline)
 
+## Branch protection & `--admin`
+
+`main` on the `developerz-ai` repos requires **one approving review**, so `gh pr merge` on a solo-authored PR is refused with "the base branch policy prohibits the merge" even with every check green. Two consequences:
+
+- **Running claudetm here:** pass `--admin` (`claudetm start … --admin`, `claudetm merge-pr N --admin`, `claudetm resume --admin`) or the run blocks on a finished, green PR it cannot land.
+- **Merging by hand:** `gh pr merge <n> --squash --admin`.
+
+`--admin` overrides the policy — it does not satisfy it. It never skips CI or merges a conflicted PR; failing checks still route to the fix loop and conflicts to the resolver. It also force-advances a CI *timeout* to the review stage rather than blocking.
+
+Releases go direct-to-main under the same owner bypass — a "pull request required" banner is a nudge, not a rejection.
+
 ## CI standard
 
 - CI runs on Blacksmith (`blacksmith-2vcpu-ubuntu-2404`; `publish-test` on 4vcpu — deliberate). Every workflow declares a `concurrency` group with cancel-in-progress, and every job sets `timeout-minutes`. Publish workflows (PyPI / TestPyPI / Docker tag) are hard `cancel-in-progress: false` — publishes are irreversible.
