@@ -20,6 +20,7 @@ def build_work_prompt(
     pr_group_info: dict | None = None,
     target_branch: str = "main",
     coding_style: str | None = None,
+    allow_rebase: bool = False,
 ) -> str:
     """Build the work session prompt.
 
@@ -38,6 +39,9 @@ def build_work_prompt(
             - remaining_tasks: Number of tasks remaining after current
         target_branch: The target branch for rebasing (default: "main").
         coding_style: Optional coding style guide to follow.
+        allow_rebase: True when rebasing onto target_branch is the session's own
+            job (the conflict/sync session), which lifts the no-rebase rule a
+            plain fix session gets.
 
     Returns:
         Complete work session prompt.
@@ -143,7 +147,9 @@ explain why not → run tests → commit.""",
     #   create_pr: full workflow (commit + push + create PR)
     #   else:     commit-only (more tasks remain in PR group)
     if push_only:
-        execution_content = _build_push_only_execution(target_branch=target_branch)
+        execution_content = _build_push_only_execution(
+            target_branch=target_branch, allow_rebase=allow_rebase
+        )
     elif create_pr:
         execution_content = _build_full_workflow_execution(target_branch=target_branch)
     else:
@@ -251,14 +257,27 @@ Your work is NOT complete until you have a PR URL.
 **STOP AFTER PR CREATION.** Do not wait for CI, check status, or merge — the orchestrator handles that."""
 
 
-def _build_push_only_execution(target_branch: str = "main") -> str:
+def _build_push_only_execution(target_branch: str = "main", allow_rebase: bool = False) -> str:
     """Build execution instructions for fixing an existing PR (commit + push, no PR create).
 
     Args:
-        target_branch: The target branch name (for context only — we do NOT rebase
-            during a fix session because rebasing would rewrite already-reviewed
-            commits and disrupt the PR's review threads).
+        target_branch: The target branch name (for context only — a plain fix
+            session does NOT rebase; it only has to add commits).
+        allow_rebase: True when rebasing onto ``target_branch`` IS the session's
+            job (the conflict/sync session). Drops the blanket no-rebase rule,
+            which would otherwise contradict that session's own instructions.
     """
+    push_step = (
+        "**7. Push to update the existing PR** (REQUIRED) — the rebase rewrote the branch, so push "
+        "with `git push --force-with-lease origin HEAD`. CI re-runs on push. Do NOT run "
+        "`gh pr create` (the PR already exists)."
+        if allow_rebase
+        else f"**7. Push to update the existing PR** (REQUIRED) — `git push origin HEAD`. CI re-runs "
+        f"on push. Do NOT run `gh pr create` (the PR already exists). NEVER rebase onto "
+        f"{target_branch} during a fix — it rewrites already-reviewed commits and breaks the PR's "
+        f"review threads. If push is rejected: `git pull --rebase origin HEAD`, resolve conflicts, "
+        f"re-test, push."
+    )
     return f"""**1. Check git status first** — `git status`. You should be on the PR's feature branch (not {target_branch}/master/develop). If on a default branch, STOP — the workflow is wrong.
 
 **2. Understand the task** — Read the CI logs / PR comments referenced above and the relevant files before modifying. Identify tests/lint to run.
@@ -288,7 +307,7 @@ EOF
 ```
 The `':!.claude-task-master'` pathspec above (and `.git/info/exclude`, written at init) keeps orchestrator state out of the commit. Never add it manually.
 
-**7. Push to update the existing PR** (REQUIRED) — `git push origin HEAD`. CI re-runs on push. Do NOT run `gh pr create` (the PR already exists). NEVER rebase onto {target_branch} during a fix — it rewrites already-reviewed commits and breaks the PR's review threads. If push is rejected: `git pull --rebase origin HEAD`, resolve conflicts, re-test, push.
+{push_step}
 
 **STOP AFTER PUSH.** Do not wait for CI, check status, or merge — the orchestrator handles that."""
 

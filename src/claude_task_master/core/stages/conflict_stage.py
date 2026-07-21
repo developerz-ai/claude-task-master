@@ -3,15 +3,18 @@
 ``ready_to_merge`` routes here in two cases, both meaning "this PR is not ready to
 merge into the base as it stands today":
 
-- **CONFLICTING** — the base moved under the PR and git cannot merge it.
+- **CONFLICTING** — the base moved under the PR and git cannot merge it. Always
+  routed here.
 - **BEHIND** — the base moved but still merges cleanly. Green CI only proves the
   branch passed against the base *as it was when CI ran*; the merge result itself
-  is untested, which is how a green PR breaks production.
+  is untested. Only routed here under ``--sync-before-merge`` (off by default):
+  paying an agent session plus a CI round on every PR main outpaces is not worth
+  the rare semantic clash it catches.
 
-Either way the fix is the agent's job, not a button: merge the base branch into
-the PR branch, resolve whatever that surfaces (textual hunks or semantic
-breakage), re-run the tests, commit, push. The push re-triggers CI, so the PR
-re-enters the normal ``waiting_ci`` → reviews → merge path and the *combined*
+Either way the fix is the agent's job, not a button: rebase the PR branch onto the
+live base, resolve whatever that surfaces (textual hunks or semantic breakage),
+re-run the tests, force-push with lease. The push re-triggers CI, so the PR
+re-enters the normal ``waiting_ci`` → reviews → merge path and the *rebased*
 tree is what gets verified before the merge.
 
 SRP: this module owns *the make-it-mergeable session* — building its prompt and
@@ -21,9 +24,7 @@ CI-fix session.
 
 Bounded on purpose: ``MAX_CONFLICT_FIX_ATTEMPTS`` conflict passes (then the run
 blocks) and ``MAX_BRANCH_SYNC_ATTEMPTS`` sync passes (then a green-but-behind PR
-merges as-is rather than chasing a fast-moving base forever). A merge (not a
-rebase) is used deliberately — rebasing rewrites already-reviewed commits and
-breaks the PR's review threads.
+merges as-is rather than chasing a fast-moving base forever).
 """
 
 from __future__ import annotations
@@ -95,6 +96,9 @@ class _ConflictStage(_MergeStage):
                 create_pr=False,
                 push_only=True,
                 target_branch=base_branch,
+                # Rebasing onto the base IS this session's job, so the push-only
+                # boilerplate must not also tell the agent never to rebase.
+                allow_rebase=True,
             )
         except Exception as e:
             console.error(f"Base-sync session failed: {e}")
@@ -151,7 +155,7 @@ class _ConflictStage(_MergeStage):
         """
         retry_note = (
             f"\n**This is attempt {attempt}** — a previous pass did not finish the job. "
-            "Check `git status` first: the branch may still be mid-merge.\n"
+            "Check `git status` first: the branch may still be mid-rebase.\n"
             if attempt > 1
             else ""
         )
@@ -168,23 +172,24 @@ class _ConflictStage(_MergeStage):
 
         return f"""{headline}
 {retry_note}
-Bring the branch up to date so the PR can merge safely.
+Rebase the branch onto the live base so the PR can merge safely.
 
-## Step 1: Bring in the base branch
+## Step 1: Start the rebase
 
 ```bash
 git status                                  # confirm you are on the PR branch
 git fetch origin {base_branch}
-git merge origin/{base_branch}
+git rebase origin/{base_branch}
 ```
 
-Use `git merge`, NOT `git rebase` — rebasing rewrites already-reviewed commits and
-breaks the PR's review threads.
+Rebase, not merge — the PR's history stays a clean series of commits on top of
+`{base_branch}` instead of accumulating merge commits.
 
 ## Step 2: Resolve every conflicted file
 
-If the merge completed cleanly with no conflicts, skip to Step 3.
+If the rebase finished with no conflicts, skip to Step 3.
 
+A rebase stops once per conflicting commit, so expect to repeat this step.
 `git diff --name-only --diff-filter=U` lists the unmerged files. For each one:
 
 - Read it and find every hunk: `<<<<<<<` … `=======` … `>>>>>>>`.
@@ -196,26 +201,30 @@ If the merge completed cleanly with no conflicts, skip to Step 3.
   broken file.
 - `git add` the file once it is clean.
 
+Then `git rebase --continue` and repeat until the rebase reports it is done.
+If a hunk is genuinely unresolvable, `git rebase --abort` and say so — never leave
+the branch mid-rebase.
+
 Semantic conflicts count too: if the base renamed a function the PR calls, the
-merged result must compile and pass tests, not merely be marker-free.
+rebased result must compile and pass tests, not merely be marker-free.
 
 ## Step 3: Verify
 
-Run the repo's tests and lint. The merge can break code that neither side broke
+Run the repo's tests and lint. The rebase can break code that neither side broke
 alone — a semantic clash between what landed on `{base_branch}` and what this PR
-changed — and that is exactly what this step exists to catch. If it breaks, fix
-it here.
+changed — and that is exactly what this step exists to catch. If it breaks, fix it
+here and commit the fix on top.
 
-## Step 4: Commit and push
+## Step 4: Push
 
 ```bash
-git commit --no-edit                        # completes the merge commit
-git push origin HEAD
+git push --force-with-lease origin HEAD
 ```
 
-If `git status` shows the merge already committed (or `git merge` reported
-"Already up to date"), skip straight to the push — but if there is genuinely
-nothing to push, say so and stop.
+`--force-with-lease` is required: the rebase rewrote the branch, so a plain push is
+rejected, and the lease still refuses to clobber commits someone else pushed.
+If `git rebase` reported "up to date" and the tests needed no fix, there is nothing
+to push — say so and stop.
 Do NOT run `gh pr create` (the PR exists) and do NOT merge the PR yourself — the
 orchestrator handles that once CI is green.
 

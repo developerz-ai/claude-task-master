@@ -643,6 +643,19 @@ class TestExecutionSection:
         for result in self._all_execution_modes():
             assert "auto-gitignored" not in result
 
+    # Regression: the push-only boilerplate said "NEVER rebase onto main" in every
+    # mode, contradicting the conflict/sync session whose entire job is that rebase
+    # — and telling it to plain-push a branch git had just rewritten.
+    def test_push_only_forbids_rebase_by_default(self) -> None:
+        result = build_work_prompt("Any task", push_only=True)
+        assert "NEVER rebase" in result
+        assert "git push origin HEAD" in result
+
+    def test_allow_rebase_drops_the_no_rebase_rule(self) -> None:
+        result = build_work_prompt("Any task", push_only=True, allow_rebase=True)
+        assert "NEVER rebase" not in result
+        assert "git push --force-with-lease origin HEAD" in result
+
     def test_no_progress_md_echo_instruction(self) -> None:
         """The stray 'echo >> progress.md' log instruction is removed.
 

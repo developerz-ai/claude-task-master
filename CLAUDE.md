@@ -208,16 +208,16 @@ All commands check `state_manager.exists()` first:
 - Uses `PlanUpdater` to integrate change request into existing plan
 - Preserves completed tasks, modifies pending tasks as needed
 
-### Up-to-date-before-merge (--sync-before-merge)
-- Green CI only proves the branch passed against the base **as it was when CI ran**. Before merging, `ready_to_merge` compares the PR head against the live base (`get_pr_behind_by`, GitHub's compare API; `mergeStateStatus == "BEHIND"` is also honored)
-- If the branch is behind, the same agent session that handles conflicts runs in *sync* mode: merge the latest base in, fix whatever it surfaces (textual **or** semantic), re-run tests, commit, push → back to `waiting_ci`, so CI verifies the **combined** tree before the merge
+### Up-to-date-before-merge (--sync-before-merge, opt-in)
+- **Off by default.** A PR that merges cleanly is merged, even if the base moved under it. Syncing every behind-but-clean PR costs an agent session plus a full CI round on the common case, to catch a semantic clash that is rare — not a trade worth making automatically
+- Pass `claudetm start --sync-before-merge` when the base is volatile enough that the untested merge result is a real risk (`TaskOptions.sync_before_merge`, default False). Then `ready_to_merge` compares the PR head against the live base (`get_pr_behind_by`, GitHub's compare API; `mergeStateStatus == "BEHIND"` is also honored) and routes a behind branch to the same agent session conflicts use
 - Bounded by `MAX_BRANCH_SYNC_ATTEMPTS` (3) via `state.branch_sync_attempts`. Unlike conflicts, an exhausted counter **merges as-is** rather than blocking — a base that moves faster than CI must not stall the pipeline forever
 - A failed/unavailable comparison never blocks a merge (degrades to "not stale")
-- Disable with `claudetm start --no-sync-before-merge` (`TaskOptions.sync_before_merge`, default True)
 
 ### Merge Conflict Resolution (--resolve-conflicts)
-- When `ready_to_merge` sees `mergeable == "CONFLICTING"`, the conflict is handed to an agent session instead of blocking the run (`core/stages/conflict_stage.py`, stage `resolving_conflicts`)
-- The session **merges** the base branch (`git merge origin/<base>`) — never rebases, which would rewrite reviewed commits and break review threads — resolves every hunk keeping both sides' intent, re-runs tests, commits, pushes
+- When `ready_to_merge` (or `waiting_ci`) sees `mergeable == "CONFLICTING"`, the conflict is handed to an agent session instead of blocking the run (`core/stages/conflict_stage.py`, stage `resolving_conflicts`). This is the *only* condition that triggers the session by default
+- The session **rebases** onto the base (`git rebase origin/<base>`), resolves every hunk keeping both sides' intent — once per conflicting commit, `git rebase --continue` between — re-runs tests, then `git push --force-with-lease`. Rebase keeps PR history a clean series on top of the base instead of accumulating merge commits; the cost is that review threads anchored to rewritten commits go stale
+- The session passes `allow_rebase=True` into the work prompt, which drops the blanket "NEVER rebase" rule a plain CI-fix session carries (`prompts_working._build_push_only_execution`). Fix sessions still never rebase — they only add commits
 - Push re-triggers CI, so the PR re-enters `waiting_ci` and follows the normal path to merge
 - Bounded by `MAX_CONFLICT_FIX_ATTEMPTS` (3) per PR via `state.conflict_fix_attempts`; exhausted attempts block with "manual resolution required" as before
 - Disable with `claudetm start --no-resolve-conflicts` (`TaskOptions.resolve_conflicts`, default True)

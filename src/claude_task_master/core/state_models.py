@@ -50,10 +50,13 @@ class TaskOptions(BaseModel):
     # commit → push) instead of blocking for manual resolution. Bounded by
     # MAX_CONFLICT_FIX_ATTEMPTS; an unresolved conflict still blocks.
     resolve_conflicts: bool = True
-    # Require the PR branch to carry the latest base ("production") commits before
-    # merging: when it is behind, an agent session merges the base in, re-runs the
-    # tests, and pushes, so CI verifies the *combined* tree before the merge.
-    sync_before_merge: bool = True
+    # Opt-in: also sync a PR that is merely *behind* its base but still merges
+    # cleanly, so CI verifies the combined tree. Off by default — a clean merge is
+    # the common case, and spending an agent session (plus a full CI round) on
+    # every PR that main happened to outpace costs far more than the rare semantic
+    # clash it catches. A PR that genuinely cannot merge (CONFLICTING) is always
+    # handed to the agent, regardless of this flag — see `resolve_conflicts`.
+    sync_before_merge: bool = False
 
 
 # Status type alias for type checking
