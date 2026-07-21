@@ -409,6 +409,8 @@ class OrchestratorLoop(
                 return orc.stage_handler.handle_waiting_reviews_stage(state)
             elif stage == "addressing_reviews":
                 return orc.stage_handler.handle_addressing_reviews_stage(state)
+            elif stage == "resolving_conflicts":
+                return orc.stage_handler.handle_resolving_conflicts_stage(state)
             elif stage == "ready_to_merge":
                 stage_before = state.workflow_stage
                 result = orc.stage_handler.handle_ready_to_merge_stage(state)

@@ -190,6 +190,7 @@ Get comprehensive status information about the current task.
 - `ci_failed` - CI checks failed
 - `waiting_reviews` - Waiting for code reviews
 - `addressing_reviews` - Addressing review feedback
+- `resolving_conflicts` - Agent resolving merge conflicts with the base branch
 - `ready_to_merge` - PR approved and ready
 - `merged` - PR has been merged
 

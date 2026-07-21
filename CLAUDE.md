@@ -208,6 +208,14 @@ All commands check `state_manager.exists()` first:
 - Uses `PlanUpdater` to integrate change request into existing plan
 - Preserves completed tasks, modifies pending tasks as needed
 
+### Merge Conflict Resolution (--resolve-conflicts)
+- When `ready_to_merge` sees `mergeable == "CONFLICTING"`, the conflict is handed to an agent session instead of blocking the run (`core/stages/conflict_stage.py`, stage `resolving_conflicts`)
+- The session **merges** the base branch (`git merge origin/<base>`) — never rebases, which would rewrite reviewed commits and break review threads — resolves every hunk keeping both sides' intent, re-runs tests, commits, pushes
+- Push re-triggers CI, so the PR re-enters `waiting_ci` and follows the normal path to merge
+- Bounded by `MAX_CONFLICT_FIX_ATTEMPTS` (3) per PR via `state.conflict_fix_attempts`; exhausted attempts block with "manual resolution required" as before
+- Disable with `claudetm start --no-resolve-conflicts` (`TaskOptions.resolve_conflicts`, default True)
+- Counter resets on task advance, like `ci_fix_attempts`
+
 ### PR Limit (--prs flag)
 - `--prs N` limits the maximum number of pull requests that can be created
 - Injected into planning prompt to guide task organization
@@ -393,7 +401,8 @@ Available via IDE integration:
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
 │                       PR LIFECYCLE                               │
-│  Wait for CI → Fix failures + comments → Merge                  │
+│  Wait for CI → Fix failures + comments → Resolve conflicts →    │
+│  Merge                                                           │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐

@@ -10,6 +10,7 @@ Inheritance chain (each extends the previous):
   _PRFixStage       ← CI-failure handling
   _ReviewStage      ← review-comment polling + resolution
   _MergeStage       ← merge readiness + post-merge cleanup
+  _ConflictStage    ← agent resolution of merge conflicts
   _ReleaseStage     ← release verification + quick-fix PR
   WorkflowStageHandler  ← public API (no extra logic)
 """
@@ -27,6 +28,7 @@ class WorkflowStageHandler(_ReleaseStage):
     4. ci_failed → Fix CI failures
     5. waiting_reviews → Wait for reviews
     6. addressing_reviews → Address review feedback
+    6b. resolving_conflicts → Agent merges base + resolves conflicts (bounded)
     7. ready_to_merge → Merge PR
     8. merged → Move to releasing (if auto_merge) or next task
     9. releasing → Verify deployment health (optional, auto_merge only)

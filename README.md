@@ -164,6 +164,7 @@ Claude Task Master uses the Claude Agent SDK to autonomously work on complex tas
 - **Autonomous Execution** - Runs until goal is achieved or needs human input
 - **PR-Based Workflow** - All work flows through pull requests for review
 - **CI Integration** - Handles CI failures and review comments together
+- **Conflict Resolution** - Merges the base branch and resolves conflicts with an agent instead of blocking
 - **Mailbox System** - Receive dynamic plan updates while working (via REST API, MCP, or CLI)
 - **Multi-Instance Coordination** - Multiple instances can communicate via mailbox
 - **State Persistence** - Survives interruptions, resumes where it left off
@@ -183,7 +184,8 @@ Claude Task Master uses the Claude Agent SDK to autonomously work on complex tas
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
 │                       PR LIFECYCLE                               │
-│  Wait for CI → Fix failures → Address reviews → Merge           │
+│  Wait for CI → Fix failures → Address reviews → Resolve         │
+│  conflicts → Merge                                              │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
@@ -406,6 +408,7 @@ claudetm start "Your goal here" [OPTIONS]
 | `--max-sessions` | Limit number of sessions | unlimited |
 | `--prs` | Limit number of PRs to create | unlimited |
 | `--pause-on-pr` | Pause after creating PR | False |
+| `--resolve-conflicts/--no-resolve-conflicts` | Let an agent resolve merge conflicts (3 attempts, then block) | True |
 | `--budget` | Max spending per session in USD | unlimited |
 
 ### Common Workflows
@@ -862,6 +865,8 @@ For authentication details, see [Authentication Guide](./docs/authentication.md)
 
 ```
 working → pr_created → waiting_ci → ci_failed → waiting_reviews → addressing_reviews → ready_to_merge → merged → releasing → release_fix
+                                                                          ↑                    ↓
+                                                                          └── resolving_conflicts (on CONFLICTING)
 ```
 
 Each stage has specific handlers that determine when to transition to the next stage.

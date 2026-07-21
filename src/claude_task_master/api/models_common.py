@@ -112,6 +112,7 @@ class WorkflowStage(StrEnum):
     CI_FAILED = "ci_failed"
     WAITING_REVIEWS = "waiting_reviews"
     ADDRESSING_REVIEWS = "addressing_reviews"
+    RESOLVING_CONFLICTS = "resolving_conflicts"
     READY_TO_MERGE = "ready_to_merge"
     MERGED = "merged"
 

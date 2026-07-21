@@ -922,10 +922,11 @@ class TestHandleReadyToMergeStage:
         mock_github_client,
         mock_pr_status,
     ):
-        """Should block when PR has conflicts."""
+        """Should block when PR has conflicts and agent resolution is disabled."""
         state_manager.state_dir.mkdir(exist_ok=True)
         basic_task_state.current_pr = 42
         basic_task_state.options.auto_merge = True
+        basic_task_state.options.resolve_conflicts = False
         mock_pr_status.mergeable = "CONFLICTING"
         mock_github_client.get_pr_status.return_value = mock_pr_status
 

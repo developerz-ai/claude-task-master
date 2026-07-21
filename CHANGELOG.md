@@ -7,10 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.61] - 2026-07-20
+
+### Added
+- **Merge conflicts are resolved by an agent instead of blocking the run.** When `ready_to_merge` found a PR whose base branch had moved under it (`mergeable == "CONFLICTING"`), the run stopped and waited for a human. It now enters a new `resolving_conflicts` stage that runs a work session on the PR branch: `git merge origin/<base>` (a **merge**, never a rebase — rebasing rewrites already-reviewed commits and breaks the PR's review threads), resolve every hunk keeping *both* sides' intent, re-run tests, commit, push. The push re-triggers CI, so the PR rejoins the normal `waiting_ci` → reviews → merge path. Bounded at 3 passes per PR (`MAX_CONFLICT_FIX_ATTEMPTS`, tracked in `state.conflict_fix_attempts` and reset on task advance); after that it blocks exactly as before. Opt out with `claudetm start --no-resolve-conflicts` (`TaskOptions.resolve_conflicts`, default on). Ported from `aitm`, which has had AI conflict resolution since its CI-fix rebase flow.
+
 ## [0.1.60] - 2026-07-20
 
 ### Added
-- **Project logo** — the orc-warrior mascot now ships in `assets/` (`logo-full.png` 726px source, plus 512/256/128px variants; background trimmed to transparency and palette-quantized, ~80 KB for the 512px) and heads the README (rendered from a raw-GitHub URL so it also shows on the PyPI project page).
+- **Project logo** — the orc-warrior mascot now ships in `assets/` (`logo-full.png` 726px source, plus 512/256/128px variants; backdrop flood-filled to transparency and palette-quantized, ~100 KB for the 512px) and heads the README (rendered from a raw-GitHub URL so it also shows on the PyPI project page).
 - `org.opencontainers.image.documentation` label on the Docker image.
 - `pytest-xdist` in the dev extra — the suite is parallel-safe end to end (`pytest -n auto` runs 5514 tests in ~25s vs ~98s serial).
 
@@ -796,7 +801,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.60...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.61...HEAD
+[0.1.61]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.60...v0.1.61
 [0.1.60]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.59...v0.1.60
 [0.1.59]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.58...v0.1.59
 [0.1.58]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.57...v0.1.58

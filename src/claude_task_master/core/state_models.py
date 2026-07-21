@@ -46,6 +46,10 @@ class TaskOptions(BaseModel):
     webhook_url: str | None = None  # URL to receive webhook notifications
     webhook_secret: str | None = None  # HMAC secret for signing webhook payloads
     max_budget_usd: float | None = None  # Per-session spending cap in USD
+    # Hand a merge conflict to an agent session (merge base → resolve hunks → test →
+    # commit → push) instead of blocking for manual resolution. Bounded by
+    # MAX_CONFLICT_FIX_ATTEMPTS; an unresolved conflict still blocks.
+    resolve_conflicts: bool = True
 
 
 # Status type alias for type checking
@@ -60,6 +64,7 @@ WorkflowStageType = Literal[
     "ci_failed",
     "waiting_reviews",
     "addressing_reviews",
+    "resolving_conflicts",
     "ready_to_merge",
     "merged",
     "releasing",
@@ -118,6 +123,8 @@ class TaskState(BaseModel):
     # CI polling fields
     ci_poll_start_time: datetime | None = None  # When CI polling started for current PR
     ci_fix_attempts: int = 0  # Number of CI-fix agent sessions for current PR
+    # Conflict-resolution fields
+    conflict_fix_attempts: int = 0  # Number of conflict-resolution agent sessions for current PR
     # Release phase fields
     release_fix_attempts: int = 0  # Number of release fix attempts for current PR
     in_release_fix: bool = False  # True while current PR is a release-fix PR

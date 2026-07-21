@@ -72,6 +72,7 @@ class TestWorkflowStages:
             "ci_failed",
             "waiting_reviews",
             "addressing_reviews",
+            "resolving_conflicts",
             "ready_to_merge",
             "merged",
         }
@@ -79,7 +80,7 @@ class TestWorkflowStages:
 
     def test_workflow_stages_count(self):
         """Test that WORKFLOW_STAGES has correct count."""
-        assert len(WORKFLOW_STAGES) == 8
+        assert len(WORKFLOW_STAGES) == 9
 
 
 class TestTerminalStatuses:

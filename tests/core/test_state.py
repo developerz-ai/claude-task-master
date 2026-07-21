@@ -94,6 +94,7 @@ class TestTaskOptions:
             "webhook_url": None,
             "webhook_secret": None,
             "max_budget_usd": None,
+            "resolve_conflicts": True,
         }
 
 

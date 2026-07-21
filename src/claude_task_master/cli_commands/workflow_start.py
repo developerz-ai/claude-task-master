@@ -48,6 +48,11 @@ def start(
         "--admin",
         help="Use 'gh pr merge --admin' to override base-branch policy when merging",
     ),
+    resolve_conflicts: bool = typer.Option(
+        True,
+        "--resolve-conflicts/--no-resolve-conflicts",
+        help="Let an agent resolve merge conflicts on a PR instead of blocking (bounded retries)",
+    ),
     enable_release: bool = typer.Option(
         False,
         "--release/--no-release",
@@ -224,6 +229,7 @@ def start(
         options = TaskOptions(
             auto_merge=auto_merge,
             admin_merge=admin,
+            resolve_conflicts=resolve_conflicts,
             enable_release=enable_release,
             enable_verification=enable_verification,
             max_sessions=max_sessions,

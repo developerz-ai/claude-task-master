@@ -32,6 +32,7 @@ WORKFLOW_STAGES = frozenset(
         "ci_failed",  # CI failed, needs fixes
         "waiting_reviews",  # Waiting for code reviews
         "addressing_reviews",  # Working on review feedback
+        "resolving_conflicts",  # Agent resolving merge conflicts
         "ready_to_merge",  # All checks passed, ready to merge
         "merged",  # PR merged, ready for next task
     ]

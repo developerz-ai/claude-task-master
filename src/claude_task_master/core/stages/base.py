@@ -38,6 +38,9 @@ class StageHandlerBase:
     MERGE_CONFIRM_POLLS = 6
     # Max consecutive CI-fix cycles before blocking for manual intervention.
     MAX_CI_FIX_ATTEMPTS = 3
+    # Max conflict-resolution agent sessions per PR before blocking. A conflict the
+    # agent cannot resolve in this many passes is not going to resolve itself.
+    MAX_CONFLICT_FIX_ATTEMPTS = 3
     # Grace period after CI passes before checking reviews. Review bots (CodeRabbit) post their
     # review comments a little *after* CI completes, not as a blocking status check — so a short
     # delay would race the merge ahead of the comments. 120s gives them time to land.

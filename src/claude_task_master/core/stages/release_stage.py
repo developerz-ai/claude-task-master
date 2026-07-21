@@ -7,13 +7,13 @@ from typing import TYPE_CHECKING
 from .. import console
 from ..agent import ModelType
 from ..shutdown import interruptible_sleep
-from .merge_stage import _MergeStage
+from .conflict_stage import _ConflictStage
 
 if TYPE_CHECKING:
     from ..state import TaskState
 
 
-class _ReleaseStage(_MergeStage):
+class _ReleaseStage(_ConflictStage):
     """Mixin: post-merge release verification and quick-fix PR creation."""
 
     def handle_releasing_stage(self, state: TaskState) -> int | None:
