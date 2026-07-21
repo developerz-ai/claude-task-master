@@ -54,14 +54,29 @@ class TestToleranceRules:
     @pytest.mark.parametrize(
         "description",
         [
+            "Review rate limited",  # the status-context wording
+            "Review limit reached",  # the wording in CodeRabbit's PR comment
+            "You have reached your review rate limit",
+        ],
+    )
+    def test_every_coderabbit_quota_wording_is_tolerated(self, description):
+        """Regression: only the exact "Review rate limited" string was matched,
+        so the sibling "Review limit reached" wording still failed CI."""
+        check = _status_context("CodeRabbit", "FAILURE", description)
+        assert is_tolerated_failure(check)
+        assert not is_failed_check(check)
+
+    @pytest.mark.parametrize(
+        "description",
+        [
             "Review failed",
             "1 issue found",
-            "Review rate limited soon",  # not the exact message
+            "3 issues found",
             "",
             None,
         ],
     )
-    def test_other_coderabbit_failures_still_fail(self, description):
+    def test_real_coderabbit_verdicts_still_fail(self, description):
         check = _status_context("CodeRabbit", "FAILURE", description)
         assert not is_tolerated_failure(check)
         assert is_failed_check(check)
@@ -69,6 +84,18 @@ class TestToleranceRules:
     def test_other_checks_with_the_same_message_still_fail(self):
         check = _status_context("SomeOtherBot", "FAILURE", "Review rate limited")
         assert is_failed_check(check)
+
+    def test_env_rules_stay_exact(self):
+        """Loose matching is opt-in per rule; env-declared rules are exact, so a
+        typo there cannot silently swallow a whole family of failures."""
+        import os
+
+        os.environ["CLAUDETM_TOLERATED_CHECK_FAILURES"] = "bot=limit"
+        try:
+            assert is_tolerated_failure(_status_context("bot", "FAILURE", "limit"))
+            assert is_failed_check(_status_context("bot", "FAILURE", "limit reached"))
+        finally:
+            del os.environ["CLAUDETM_TOLERATED_CHECK_FAILURES"]
 
     def test_check_runs_are_never_tolerated(self):
         assert is_failed_check(_check_run("Tests", "FAILURE"))

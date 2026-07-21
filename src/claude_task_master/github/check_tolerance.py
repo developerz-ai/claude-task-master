@@ -5,10 +5,10 @@ the code under review and that no commit can fix. Treating those as CI failures
 sends the orchestrator into a pointless fix session and then loops on the same
 red check forever.
 
-The tolerated set is a whitelist: each rule names one check *and* the exact
-message that marks its failure as a quota/availability response rather than a
-verdict on the code. Anything else — including any other failure from the same
-check — still fails CI normally.
+The tolerated set is a whitelist: each rule names one check *and* the message
+that marks its failure as a quota/availability response rather than a verdict on
+the code. Anything else — including any other failure from the same check — still
+fails CI normally.
 
 Adding a new exception
 ----------------------
@@ -20,18 +20,23 @@ Append a :class:`ToleratedFailure` to :data:`TOLERATED_FAILURES`::
         reason="the bot's plan limit, not a code defect",
     )
 
-or, without waiting for a release, set the environment variable::
+Use ``match="contains"`` when the service words the same condition several ways
+(CodeRabbit says both "Review rate limited" and "Review limit reached"); the
+default ``"exact"`` tolerates only that one message.
+
+Without waiting for a release, set the environment variable::
 
     CLAUDETM_TOLERATED_CHECK_FAILURES="some-bot=quota exceeded;other-bot=busy"
 
-Both sides of a rule are matched on stripped, lower-cased text.
+Env rules always match exactly. Both sides of every rule are compared on
+stripped, lower-cased text.
 """
 
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 #: Environment variable holding extra rules as ``check=description`` pairs
 #: separated by ``;`` (or newlines). Merged with :data:`TOLERATED_FAILURES`.
@@ -44,14 +49,18 @@ class ToleratedFailure:
 
     Attributes:
         check: Status-check context or check-run name (case-insensitive).
-        description: The exact failure description to tolerate (case-insensitive).
+        description: The failure description to tolerate (case-insensitive).
             A check failing with any *other* description is a real failure.
         reason: Why it is safe to ignore. Shown when the failure is discounted.
+        match: ``"exact"`` (default) requires the whole description; ``"contains"``
+            accepts any description containing it, for services that word the
+            same condition more than one way.
     """
 
     check: str
     description: str
     reason: str = ""
+    match: Literal["exact", "contains"] = "exact"
 
     def matches(self, name: str, description: str) -> bool:
         """Report whether this rule covers a (name, description) pair.
@@ -63,15 +72,33 @@ class ToleratedFailure:
         Returns:
             True if both sides match this rule.
         """
-        return self.check.lower() == name and self.description.lower() == description
+        if self.check.lower() != name:
+            return False
+        wanted = self.description.lower()
+        return wanted in description if self.match == "contains" else wanted == description
 
+
+#: Why CodeRabbit's quota failures are safe to ignore — it is out of review
+#: budget, which says nothing about the code.
+_CODERABBIT_QUOTA = "CodeRabbit review quota, not a verdict on the code"
 
 #: The built-in exceptions. Extend this tuple to tolerate another check.
+#: CodeRabbit words the same quota condition at least two ways ("Review rate
+#: limited" on the status context, "Review limit reached" in its PR comment), so
+#: both fragments are matched loosely. A real verdict ("1 issue found",
+#: "Review failed") contains neither and still fails CI.
 TOLERATED_FAILURES: tuple[ToleratedFailure, ...] = (
     ToleratedFailure(
         check="CodeRabbit",
-        description="Review rate limited",
-        reason="CodeRabbit review quota, not a verdict on the code",
+        description="rate limit",
+        reason=_CODERABBIT_QUOTA,
+        match="contains",
+    ),
+    ToleratedFailure(
+        check="CodeRabbit",
+        description="limit reached",
+        reason=_CODERABBIT_QUOTA,
+        match="contains",
     ),
 )
 
