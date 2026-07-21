@@ -8,14 +8,14 @@ from typing import TYPE_CHECKING
 from ...github.check_tolerance import is_failed_check, tolerated_reason
 from .. import console
 from ..shutdown import interruptible_sleep
-from .git_ops import _GitOps
+from .pr_recovery import _PRRecovery
 
 if TYPE_CHECKING:
     from ...github.client_pr_models import PRStatus
     from ..state import TaskState
 
 
-class _CIStage(_GitOps):
+class _CIStage(_PRRecovery):
     """Mixin: CI polling, PR-creation detection, CI-event emission."""
 
     def _emit_ci_event(
@@ -63,8 +63,10 @@ class _CIStage(_GitOps):
         The agent worker should have already created the PR. This stage detects
         the PR and moves to CI waiting.
 
-        If no PR is found, it means the agent failed to create one despite being
-        instructed to. In this case, we block and require manual intervention.
+        If no PR is found, recovery is attempted first (push the branch and
+        open the PR, or close the group out when nothing is shippable — see
+        :meth:`_PRRecovery._recover_missing_pr`); only unrecoverable states
+        block for manual intervention.
         """
         console.info("Checking PR status...")
 
@@ -83,16 +85,12 @@ class _CIStage(_GitOps):
                     self.state_manager.save_state(state)
                     self._sanitize_pr_body(pr_number)
                 else:
-                    # No PR found - agent failed to create one
-                    console.error("No PR found for current branch!")
-                    console.error("The agent was instructed to create a PR but didn't.")
-                    console.detail("Manual intervention required:")
-                    console.detail("  1. Push the branch: git push -u origin HEAD")
-                    console.detail("  2. Create a PR: gh pr create --title 'feat: description'")
-                    console.detail("  3. Resume: claudetm resume")
-                    state.status = "blocked"
-                    self.state_manager.save_state(state)
-                    return 1
+                    # No PR on the branch. The agent may have skipped PR creation
+                    # legitimately (a verification-only last task in a PR group
+                    # whose earlier tasks committed without pushing) — recover
+                    # deterministically instead of blocking outright.
+                    console.warning("No PR found for current branch - attempting recovery")
+                    return self._recover_missing_pr(state)
             except Exception as e:
                 console.warning(f"Could not detect PR: {e}")
                 state.status = "blocked"
