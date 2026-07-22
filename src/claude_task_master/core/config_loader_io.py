@@ -11,6 +11,7 @@ from claude_task_master.core.config import (
     ClaudeTaskMasterConfig,
     generate_default_config_json,
 )
+from claude_task_master.core.profiles import active_profile_env_safe
 
 # =============================================================================
 # Constants
@@ -32,6 +33,11 @@ ENV_VAR_MAPPINGS: list[tuple[str, tuple[str, ...]]] = [
     ("CLAUDETM_MODEL_FABLE", ("models", "fable")),
     ("CLAUDETM_MODEL_HAIKU", ("models", "haiku")),
     ("CLAUDETM_MODEL_SONNET_1M", ("models", "sonnet_1m")),
+    ("CLAUDETM_CONTEXT_OPUS", ("context_windows", "opus")),
+    ("CLAUDETM_CONTEXT_FABLE", ("context_windows", "fable")),
+    ("CLAUDETM_CONTEXT_SONNET", ("context_windows", "sonnet")),
+    ("CLAUDETM_CONTEXT_HAIKU", ("context_windows", "haiku")),
+    ("CLAUDETM_CONTEXT_SONNET_1M", ("context_windows", "sonnet_1m")),
     ("CLAUDETM_TARGET_BRANCH", ("git", "target_branch")),
 ]
 
@@ -215,8 +221,17 @@ def ensure_config_exists(working_dir: Path | None = None) -> tuple[Path, bool]:
 def apply_env_overrides(config: ClaudeTaskMasterConfig) -> ClaudeTaskMasterConfig:
     """Apply environment variable overrides to configuration.
 
-    Environment variables take precedence over file-based configuration.
-    Only non-empty environment variables are applied.
+    Precedence (highest first): real environment variables, then the active
+    profile's env, then the file-based config. Only non-empty values are
+    applied.
+
+    The active profile supplies the same keys for ``api-key``/``oauth`` profiles
+    — auth (``ANTHROPIC_API_KEY``/``ANTHROPIC_BASE_URL``/``CLAUDE_CONFIG_DIR``),
+    per-tier model ids (``CLAUDETM_MODEL_*``), and context windows
+    (``CLAUDETM_CONTEXT_*``). Wiring it here is what makes a profile's model
+    overrides actually take effect: without it the profile's ``CLAUDETM_MODEL_*``
+    only reached the SDK subprocess env (which the bundled CLI ignores), never
+    the config that drives ``get_model_name``.
 
     Args:
         config: Base configuration object.
@@ -227,8 +242,12 @@ def apply_env_overrides(config: ClaudeTaskMasterConfig) -> ClaudeTaskMasterConfi
     # Convert to dict for modification
     config_dict = config.model_dump()
 
+    # Active profile env ({} when no profile is active, or on profile error).
+    # Real env vars win over the profile so an explicit export still overrides.
+    profile_env = active_profile_env_safe()
+
     for env_var, path_parts in ENV_VAR_MAPPINGS:
-        env_value = os.environ.get(env_var)
+        env_value = os.environ.get(env_var) or profile_env.get(env_var)
         if env_value:  # Only apply non-empty values
             _set_nested_value(config_dict, path_parts, env_value)
 

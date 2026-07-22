@@ -22,6 +22,7 @@ from claude_task_master.core.config import (
     ClaudeTaskMasterConfig,
     ModelConfig,
     generate_default_config,
+    get_model_name,
 )
 from claude_task_master.core.config_loader import (
     CONFIG,
@@ -502,3 +503,108 @@ class TestSaveLoadRoundTrip:
         save_config_to_file(cfg, config_path)
         loaded = load_config_from_file(config_path)
         assert loaded.models.sonnet_1m == "round-trip-1m"
+
+
+# ---------------------------------------------------------------------------
+# Active-profile model/context overrides (regression)
+# ---------------------------------------------------------------------------
+
+
+_PROFILE_MODEL_ENV = [
+    "CLAUDETM_MODEL_OPUS",
+    "CLAUDETM_MODEL_SONNET",
+    "CLAUDETM_MODEL_FABLE",
+    "CLAUDETM_MODEL_HAIKU",
+    "CLAUDETM_MODEL_SONNET_1M",
+    "CLAUDETM_CONTEXT_OPUS",
+    "CLAUDETM_CONTEXT_SONNET",
+]
+
+
+def _clear_model_env(monkeypatch) -> None:
+    """Strip ambient CLAUDETM_MODEL_*/CONTEXT_* so real-env can't shadow the profile."""
+    for var in _PROFILE_MODEL_ENV:
+        monkeypatch.delenv(var, raising=False)
+
+
+class TestProfileModelOverrides:
+    """Regression: an active profile's model/context overrides must reach config.
+
+    Previously env_for_profile injected CLAUDETM_MODEL_* only into the SDK
+    subprocess env (which the bundled CLI ignores), never into the os.environ
+    that apply_env_overrides reads — so ModelConfig stayed at its claude-*
+    default and the run printed/used e.g. claude-sonnet-5 instead of the
+    profile's model. apply_env_overrides now consults the active profile too.
+    """
+
+    def test_active_profile_model_override_reaches_config(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """The exact bug: an api-key profile must change what get_model_name returns."""
+        _clear_model_env(monkeypatch)
+        from claude_task_master.core.profiles import ProfileManager
+
+        base = tmp_path / ".claudetm"
+        ProfileManager(base_dir=base).add(
+            "kimi",
+            "api-key",
+            api_key="sk-1",
+            base_url="https://api.kimi.com/coding",
+            models={"opus": "k3", "sonnet": "k3", "haiku": "kimi-for-coding-highspeed"},
+        )
+        monkeypatch.setenv("CLAUDETM_HOME", str(base))
+        monkeypatch.delenv("CLAUDETM_PROFILE", raising=False)
+
+        cfg = apply_env_overrides(generate_default_config())
+        # Named tiers override...
+        assert cfg.models.opus == "k3"
+        assert cfg.models.sonnet == "k3"
+        # ...and the omitted 1M/debugging tier inherits sonnet — the line that
+        # used to print "Using model: sonnet_1m (claude-sonnet-5)".
+        assert cfg.models.sonnet_1m == "k3"
+        assert get_model_name(cfg, "sonnet_1m") == "k3"
+
+    def test_active_profile_context_override_reaches_config(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Sibling bug: profile context_windows also never reached config before."""
+        _clear_model_env(monkeypatch)
+        from claude_task_master.core.profiles import ProfileManager
+
+        base = tmp_path / ".claudetm"
+        ProfileManager(base_dir=base).add(
+            "zai",
+            "api-key",
+            api_key="sk-1",
+            models={"opus": "glm-5.2"},
+            context_windows={"opus": 128000},
+        )
+        monkeypatch.setenv("CLAUDETM_HOME", str(base))
+        monkeypatch.delenv("CLAUDETM_PROFILE", raising=False)
+
+        cfg = apply_env_overrides(generate_default_config())
+        assert cfg.context_windows.opus == 128000
+
+    def test_real_env_wins_over_profile(self, tmp_path: Path, monkeypatch) -> None:
+        _clear_model_env(monkeypatch)
+        from claude_task_master.core.profiles import ProfileManager
+
+        base = tmp_path / ".claudetm"
+        ProfileManager(base_dir=base).add(
+            "kimi", "api-key", api_key="sk-1", models={"sonnet": "k3"}
+        )
+        monkeypatch.setenv("CLAUDETM_HOME", str(base))
+        monkeypatch.delenv("CLAUDETM_PROFILE", raising=False)
+        monkeypatch.setenv("CLAUDETM_MODEL_SONNET", "env-wins")
+
+        cfg = apply_env_overrides(generate_default_config())
+        assert cfg.models.sonnet == "env-wins"
+
+    def test_no_profile_keeps_defaults(self, tmp_path: Path, monkeypatch) -> None:
+        _clear_model_env(monkeypatch)
+        monkeypatch.setenv("CLAUDETM_HOME", str(tmp_path / "empty"))
+        monkeypatch.delenv("CLAUDETM_PROFILE", raising=False)
+
+        cfg = apply_env_overrides(generate_default_config())
+        assert cfg.models.sonnet_1m == "claude-sonnet-5"
+        assert cfg.models.opus == "claude-opus-4-8"

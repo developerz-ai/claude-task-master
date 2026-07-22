@@ -71,7 +71,7 @@ By default claudetm uses the global `~/.claude/.credentials.json` session. **Pro
 There are two profile types:
 
 - **`oauth`** — an isolated Claude Code config home. Each profile gets its own credentials directory under `~/.claudetm/profiles/<name>/`, so two subscriptions never clobber each other.
-- **`api-key`** — a direct API key + base URL (e.g. z.ai / GLM via an Anthropic-compatible endpoint), injected as `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`.
+- **`api-key`** — a direct API key + base URL (e.g. z.ai / GLM via an Anthropic-compatible endpoint), injected as `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`. It can also carry **per-tier model and context-window overrides** so claudetm routes every complexity level to a model the endpoint actually serves.
 
 ```bash
 # Create an oauth profile and log into it (opens claude in its isolated dir)
@@ -83,12 +83,28 @@ claudetm profile login work          # run /login inside, then exit
 CLAUDETM_API_KEY=sk-... claudetm profile add zai --type api-key \
     --base-url https://api.z.ai/api/anthropic
 
+# An api-key profile against a custom endpoint: name a model for each tier
+# (and optionally its context size in tokens). Tiers you omit inherit from a
+# family neighbour, so naming just opus/sonnet/haiku covers every task.
+#
+#   --model-opus        coding tasks (complex implementation) — the smart tier
+#   --model-sonnet      general tasks (balanced)
+#   --model-haiku       quick tasks (fast/cheap)
+#   --model-sonnet-1m   debugging/QA (big context)  — defaults to sonnet
+#   --model-fable       premium smart tier          — defaults to opus
+CLAUDETM_API_KEY=sk-... claudetm profile add kimi --type api-key \
+    --base-url https://api.kimi.com/coding \
+    --model-opus k3 --model-sonnet k3 --model-haiku kimi-for-coding-highspeed \
+    --context-opus 131072 --context-sonnet 131072
+
 # Manage profiles
 claudetm profile list                # active profile is marked with →
 claudetm profile use work            # set the active profile
 claudetm profile show                # show active profile (secrets masked)
 claudetm profile remove zai
 ```
+
+The active profile's model overrides take precedence over the config file but yield to an explicit `CLAUDETM_MODEL_*` env var. claudetm passes the resolved model id to the SDK, and also emits Claude Code's native `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL` so subagents resolve to provider-valid ids too.
 
 The active profile applies to subsequent runs. Override it for a single run with the `CLAUDETM_PROFILE` environment variable:
 
@@ -335,7 +351,11 @@ The config file sets these environment variables before Python starts:
 | `models.opus` | `CLAUDETM_MODEL_OPUS` | Model for opus tier |
 | `models.fable` | `CLAUDETM_MODEL_FABLE` | Model for fable tier (opt-in, premium) |
 | `models.haiku` | `CLAUDETM_MODEL_HAIKU` | Model for haiku tier |
+| `models.sonnet_1m` | `CLAUDETM_MODEL_SONNET_1M` | Model for debugging/QA tier (big context) |
+| `context_windows.*` | `CLAUDETM_CONTEXT_{OPUS,FABLE,SONNET,HAIKU,SONNET_1M}` | Context window per tier (tokens) |
 | `git.target_branch` | `CLAUDETM_TARGET_BRANCH` | Target branch for PRs |
+
+Precedence (highest first): real environment variables, then the **active profile** (api-key/oauth profiles supply these same keys), then the config file.
 
 ### Using OpenRouter
 

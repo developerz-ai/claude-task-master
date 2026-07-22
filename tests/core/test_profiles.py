@@ -142,6 +142,100 @@ class TestEnvForProfile:
         assert env_for_profile(p) == {}
 
 
+class TestEnvForProfileModels:
+    """Model/context overrides emitted from an api-key profile's `models`."""
+
+    def test_named_tiers_emit_model_env(self) -> None:
+        p = Profile(
+            name="zai",
+            type="api-key",
+            api_key="sk-1",
+            models={"opus": "glm-5.2", "sonnet": "glm-4.7", "haiku": "glm-4.7"},
+        )
+        env = env_for_profile(p)
+        assert env["CLAUDETM_MODEL_OPUS"] == "glm-5.2"
+        assert env["CLAUDETM_MODEL_SONNET"] == "glm-4.7"
+        assert env["CLAUDETM_MODEL_HAIKU"] == "glm-4.7"
+
+    def test_sonnet_1m_inherits_sonnet(self) -> None:
+        """Regression: a profile naming sonnet must cover the 1M/debugging tier.
+
+        kimi names opus/sonnet/haiku only; sonnet_1m used to fall through to the
+        claude-sonnet-5 default, so the debugging-qa tier ran on the wrong model.
+        """
+        p = Profile(
+            name="kimi",
+            type="api-key",
+            api_key="sk-1",
+            models={"opus": "k3", "sonnet": "k3", "haiku": "fast"},
+        )
+        env = env_for_profile(p)
+        assert env["CLAUDETM_MODEL_SONNET_1M"] == "k3"  # <- sonnet
+
+    def test_fable_inherits_opus(self) -> None:
+        """fable (premium tier) inherits opus (smartest) when not explicit."""
+        p = Profile(
+            name="kimi",
+            type="api-key",
+            api_key="sk-1",
+            models={"opus": "k3", "sonnet": "k3", "haiku": "fast"},
+        )
+        env = env_for_profile(p)
+        assert env["CLAUDETM_MODEL_FABLE"] == "k3"  # <- opus
+
+    def test_sonnet_1m_falls_back_to_opus_when_no_sonnet(self) -> None:
+        p = Profile(name="x", type="api-key", api_key="sk-1", models={"opus": "glm-5.2"})
+        env = env_for_profile(p)
+        assert env["CLAUDETM_MODEL_SONNET_1M"] == "glm-5.2"  # sonnet absent -> opus
+
+    def test_native_anthropic_default_models_emitted(self) -> None:
+        """Claude Code native tier vars emitted so subagents resolve provider ids."""
+        p = Profile(
+            name="zai",
+            type="api-key",
+            api_key="sk-1",
+            models={"opus": "glm-5.2", "sonnet": "glm-4.7", "haiku": "glm-4.7"},
+        )
+        env = env_for_profile(p)
+        assert env["ANTHROPIC_DEFAULT_OPUS_MODEL"] == "glm-5.2"
+        assert env["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "glm-4.7"
+        assert env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "glm-4.7"
+
+    def test_uncovered_tier_not_emitted(self) -> None:
+        """A tier with no override and no family neighbour emits nothing (not '')."""
+        p = Profile(name="x", type="api-key", api_key="sk-1", models={"sonnet": "glm-4.7"})
+        env = env_for_profile(p)
+        assert "CLAUDETM_MODEL_HAIKU" not in env
+        assert "ANTHROPIC_DEFAULT_HAIKU_MODEL" not in env
+
+    def test_context_windows_emitted(self) -> None:
+        p = Profile(
+            name="zai",
+            type="api-key",
+            api_key="sk-1",
+            context_windows={"opus": 128000, "sonnet": 128000},
+        )
+        env = env_for_profile(p)
+        assert env["CLAUDETM_CONTEXT_OPUS"] == "128000"
+        assert env["CLAUDETM_CONTEXT_SONNET"] == "128000"
+
+    def test_context_family_fallback_covers_all_tiers(self) -> None:
+        """sonnet_1m/fable context inherit their family neighbour so claudetm
+        compacts in time on custom endpoints whose real context is below the
+        Claude defaults (otherwise it assumes 1M and never compacts before the
+        provider's smaller limit -> 'context window limit' crash)."""
+        p = Profile(
+            name="zai",
+            type="api-key",
+            api_key="sk-1",
+            models={"opus": "glm-5.2"},
+            context_windows={"opus": 128000, "sonnet": 128000, "haiku": 128000},
+        )
+        env = env_for_profile(p)
+        assert env["CLAUDETM_CONTEXT_SONNET_1M"] == "128000"  # <- sonnet
+        assert env["CLAUDETM_CONTEXT_FABLE"] == "128000"  # <- opus
+
+
 class TestResolveRuntimeEnv:
     def test_no_registry_returns_empty(self, tmp_path: Path, monkeypatch) -> None:
         monkeypatch.setenv("CLAUDETM_HOME", str(tmp_path / "missing"))

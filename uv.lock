@@ -255,7 +255,7 @@ wheels = [
 
 [[package]]
 name = "claude-task-master"
-version = "0.1.68"
+version = "0.1.69"
 source = { editable = "." }
 dependencies = [
     { name = "claude-agent-sdk" },
