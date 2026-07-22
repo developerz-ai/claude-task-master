@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.70] - 2026-07-22
+
 ### Fixed
 - **A profile's per-tier model overrides now actually take effect.** `env_for_profile` injected `CLAUDETM_MODEL_*` only into the SDK subprocess env (which the bundled `claude` CLI ignores), never into the `os.environ` that `apply_env_overrides` reads — so `ModelConfig` stayed at its `claude-*` defaults and a run printed/used e.g. `claude-sonnet-5` instead of the active profile's model. `apply_env_overrides` now consults the active profile too (precedence: real env > profile > config file), and `env_for_profile` fills tiers the profile omits from a family neighbour (`sonnet_1m` ← sonnet ← opus, `fable` ← opus ← sonnet) so a profile naming only opus/sonnet/haiku routes every complexity level to a provider-valid id. It also emits Claude Code's native `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL` so subagents resolve to provider ids instead of `claude-*` the endpoint rejects. Profile `context_windows` overrides (`CLAUDETM_CONTEXT_*`) are likewise wired into the config loader (they previously went nowhere) and inherit the same family fallback (`sonnet_1m` ← sonnet, `fable` ← opus) — without correct per-tier context sizes claudetm assumes the Claude defaults (200K/1M) and never auto-compacts before a custom endpoint's smaller real limit, surfacing as "The model has reached its context window limit".
 
@@ -855,6 +857,7 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 - N/A
 
 [Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.69...HEAD
+[0.1.70]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.69...v0.1.70
 [0.1.69]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.68...v0.1.69
 [0.1.68]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.67...v0.1.68
 [0.1.67]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.66...v0.1.67
