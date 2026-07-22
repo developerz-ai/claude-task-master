@@ -196,9 +196,19 @@ def env_for_profile(profile: Profile) -> dict[str, str]:
                 env[env_var] = value
 
     # Context window overrides (tokens). Read by the config loader to size the
-    # auto-compact threshold per tier.
+    # auto-compact threshold per tier. As with models, a partial mapping still
+    # covers every tier via family fallback (sonnet_1m <- sonnet <- opus,
+    # fable <- opus <- sonnet). This matters for custom endpoints whose real
+    # context is far below the Claude defaults: without it claudetm assumes
+    # e.g. 1M for sonnet_1m and never compacts before the provider's smaller
+    # limit is hit ("The model has reached its context window limit").
     if profile.context_windows:
-        for model_key, size in profile.context_windows.items():
+        ctx = dict(profile.context_windows)
+        if not ctx.get("sonnet_1m"):
+            ctx["sonnet_1m"] = ctx.get("sonnet") or ctx.get("opus") or 0
+        if not ctx.get("fable"):
+            ctx["fable"] = ctx.get("opus") or ctx.get("sonnet") or 0
+        for model_key, size in ctx.items():
             if size:
                 env[f"CLAUDETM_CONTEXT_{model_key.upper()}"] = str(size)
 

@@ -219,6 +219,22 @@ class TestEnvForProfileModels:
         assert env["CLAUDETM_CONTEXT_OPUS"] == "128000"
         assert env["CLAUDETM_CONTEXT_SONNET"] == "128000"
 
+    def test_context_family_fallback_covers_all_tiers(self) -> None:
+        """sonnet_1m/fable context inherit their family neighbour so claudetm
+        compacts in time on custom endpoints whose real context is below the
+        Claude defaults (otherwise it assumes 1M and never compacts before the
+        provider's smaller limit -> 'context window limit' crash)."""
+        p = Profile(
+            name="zai",
+            type="api-key",
+            api_key="sk-1",
+            models={"opus": "glm-5.2"},
+            context_windows={"opus": 128000, "sonnet": 128000, "haiku": 128000},
+        )
+        env = env_for_profile(p)
+        assert env["CLAUDETM_CONTEXT_SONNET_1M"] == "128000"  # <- sonnet
+        assert env["CLAUDETM_CONTEXT_FABLE"] == "128000"  # <- opus
+
 
 class TestResolveRuntimeEnv:
     def test_no_registry_returns_empty(self, tmp_path: Path, monkeypatch) -> None:
