@@ -13,6 +13,10 @@ Two profile types are supported:
   is what makes parallel runs under different subscriptions possible.
 - ``api-key`` - a direct API key + base URL injected as ``ANTHROPIC_API_KEY`` /
   ``ANTHROPIC_BASE_URL`` (e.g. z.ai / GLM via an Anthropic-compatible endpoint).
+  May also carry per-tier ``models`` (opus/sonnet/haiku/sonnet_1m/fable -> a
+  provider-valid model id) and ``context_windows`` overrides; tiers the profile
+  omits inherit from a family neighbour so a partial profile still routes every
+  complexity level to a model the endpoint actually serves.
 
 The registry lives in ``~/.claudetm/profiles.json`` (override the base directory
 with the ``CLAUDETM_HOME`` env var). The active profile is a single pointer,
@@ -88,6 +92,16 @@ class Profile(BaseModel):
     # api-key: direct credentials for an Anthropic-compatible endpoint.
     api_key: str | None = None
     base_url: str | None = None
+    # Optional model overrides for api-key profiles (e.g., z.ai GLM, Kimi)
+    models: dict[str, str] | None = Field(
+        default=None,
+        description="Model name overrides (opus, sonnet, fable, haiku, sonnet_1m → custom IDs).",
+    )
+    # Optional context window overrides (in tokens)
+    context_windows: dict[str, int] | None = Field(
+        default=None,
+        description="Context window sizes per model (opus, sonnet, fable, haiku, sonnet_1m → tokens).",
+    )
 
     def validate_for_type(self) -> None:
         """Ensure the fields required by this profile's type are present.
@@ -140,6 +154,54 @@ def env_for_profile(profile: Profile) -> dict[str, str]:
         env["ANTHROPIC_API_KEY"] = profile.api_key
     if profile.base_url:
         env["ANTHROPIC_BASE_URL"] = profile.base_url
+
+    # Model overrides. A profile usually names only the tiers it cares about
+    # (opus/sonnet/haiku); tiers it omits inherit from a family neighbour so a
+    # partial profile still routes every complexity level to a provider-valid
+    # model instead of the claude-* default a custom endpoint would reject:
+    #   sonnet_1m (debugging, big context) <- sonnet <- opus
+    #   fable (premium smartest)           <- opus   <- sonnet
+    if profile.models:
+        resolved = dict(profile.models)
+        if not resolved.get("sonnet_1m"):
+            resolved["sonnet_1m"] = resolved.get("sonnet") or resolved.get("opus") or ""
+        if not resolved.get("fable"):
+            resolved["fable"] = resolved.get("opus") or resolved.get("sonnet") or ""
+
+        # claudetm's own tier -> model env vars (read by the config loader to
+        # build ModelConfig, which drives get_model_name / what we send the SDK).
+        for tier, env_var in (
+            ("opus", "CLAUDETM_MODEL_OPUS"),
+            ("sonnet", "CLAUDETM_MODEL_SONNET"),
+            ("fable", "CLAUDETM_MODEL_FABLE"),
+            ("haiku", "CLAUDETM_MODEL_HAIKU"),
+            ("sonnet_1m", "CLAUDETM_MODEL_SONNET_1M"),
+        ):
+            value = resolved.get(tier)
+            if value:
+                env[env_var] = value
+
+        # Claude Code's *native* tier -> model env vars. claudetm sends an
+        # explicit model id for the main conversation, but a Task-subagent (or
+        # any internal SDK model resolution) may default to a claude-* id the
+        # endpoint rejects as "Unknown Model"; these keep subagents on
+        # provider-valid ids too. Claude Code defines opus/sonnet/haiku only.
+        for tier, env_var in (
+            ("opus", "ANTHROPIC_DEFAULT_OPUS_MODEL"),
+            ("sonnet", "ANTHROPIC_DEFAULT_SONNET_MODEL"),
+            ("haiku", "ANTHROPIC_DEFAULT_HAIKU_MODEL"),
+        ):
+            value = resolved.get(tier)
+            if value:
+                env[env_var] = value
+
+    # Context window overrides (tokens). Read by the config loader to size the
+    # auto-compact threshold per tier.
+    if profile.context_windows:
+        for model_key, size in profile.context_windows.items():
+            if size:
+                env[f"CLAUDETM_CONTEXT_{model_key.upper()}"] = str(size)
+
     return env
 
 
@@ -163,6 +225,22 @@ def resolve_runtime_env() -> dict[str, str]:
     if profile is None:
         return {}
     return env_for_profile(profile)
+
+
+def active_profile_env_safe() -> dict[str, str]:
+    """Resolve the active profile's env, returning ``{}`` on any profile error.
+
+    The config loader calls this on every config read (see
+    ``config_loader_io.apply_env_overrides``) so a missing or misconfigured
+    active profile cannot crash incidental commands like ``status`` or
+    ``config show``. The actual run still fails loud and early at query time via
+    :func:`resolve_runtime_env` (in ``agent_query_execute``), preserving the
+    fail-fast contract for the path that matters.
+    """
+    try:
+        return resolve_runtime_env()
+    except ProfileError:
+        return {}
 
 
 # =============================================================================
@@ -303,6 +381,8 @@ class ProfileManager:
         profile_type: ProfileType,
         api_key: str | None = None,
         base_url: str | None = None,
+        models: dict[str, str] | None = None,
+        context_windows: dict[str, int] | None = None,
     ) -> Profile:
         """Create a new profile.
 
@@ -315,6 +395,8 @@ class ProfileManager:
             profile_type: ``oauth`` or ``api-key``.
             api_key: API key (required for ``api-key`` profiles).
             base_url: Anthropic-compatible base URL (``api-key`` profiles).
+            models: Optional model name overrides (e.g., {"opus": "glm-5.2[1m]", "sonnet": "glm-4.7"}).
+            context_windows: Optional context window sizes per model (in tokens).
 
         Returns:
             The created profile.
@@ -346,6 +428,8 @@ class ProfileManager:
             config_dir=config_dir,
             api_key=api_key,
             base_url=base_url,
+            models=models,
+            context_windows=context_windows,
         )
         profile.validate_for_type()
 

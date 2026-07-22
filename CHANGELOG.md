@@ -7,7 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.69] - 2026-07-21
+### Fixed
+- **A profile's per-tier model overrides now actually take effect.** `env_for_profile` injected `CLAUDETM_MODEL_*` only into the SDK subprocess env (which the bundled `claude` CLI ignores), never into the `os.environ` that `apply_env_overrides` reads — so `ModelConfig` stayed at its `claude-*` defaults and a run printed/used e.g. `claude-sonnet-5` instead of the active profile's model. `apply_env_overrides` now consults the active profile too (precedence: real env > profile > config file), and `env_for_profile` fills tiers the profile omits from a family neighbour (`sonnet_1m` ← sonnet ← opus, `fable` ← opus ← sonnet) so a profile naming only opus/sonnet/haiku routes every complexity level to a provider-valid id. It also emits Claude Code's native `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL` so subagents resolve to provider ids instead of `claude-*` the endpoint rejects. Profile `context_windows` overrides (`CLAUDETM_CONTEXT_*`) are likewise wired into the config loader (they previously went nowhere).
+
+
 
 ### Fixed
 - **A PR group that ends without a PR recovers instead of blocking the run.** Non-last tasks in a PR group commit in commit-only mode ("do NOT push or create a PR"), so the whole group's work sits unpushed on the local branch until the last task's session opens the PR. When that last task was verification-only, the agent truthfully reported "nothing to ship, no PR" — and `handle_pr_created_stage` treated the missing PR as unconditionally fatal: `status=blocked`, run dead, the group's commits stranded. A new `_PRRecovery` mixin (`core/stages/pr_recovery.py`) now recovers deterministically: a branch with commits over the base is pushed and its PR opened by the orchestrator itself (title/body derived from the plan's PR group; the next cycle detects it through the normal path), and a branch with zero commits over the base closes the group out as done via the `merged` stage. Blocking is reserved for what genuinely needs a human — dirty tree, sitting on the base branch, or a failed comparison/push/PR-creation (an unmeasurable branch is "unknown", never "empty"). The last-in-group work prompt also now states the PR must be opened even when that task itself changed nothing.

@@ -120,6 +120,10 @@ class TestProfileAdd:
             mock_mgr = MagicMock()
             MockMgr.return_value = mock_mgr
             profile = MagicMock(spec=Profile)
+            # Pydantic v2 hides fields from dir(), so a spec'd mock lacks the
+            # override fields the CLI now reads; default to "no overrides".
+            profile.models = None
+            profile.context_windows = None
             profile.type = "oauth"
             profile.name = "work"
             profile.config_dir = str(tmp_path / "work")
@@ -140,6 +144,10 @@ class TestProfileAdd:
             mock_mgr = MagicMock()
             MockMgr.return_value = mock_mgr
             profile = MagicMock(spec=Profile)
+            # Pydantic v2 hides fields from dir(), so a spec'd mock lacks the
+            # override fields the CLI now reads; default to "no overrides".
+            profile.models = None
+            profile.context_windows = None
             profile.type = "api-key"
             profile.name = "zai"
             profile.config_dir = None
@@ -199,6 +207,10 @@ class TestProfileAdd:
             mock_mgr = MagicMock()
             MockMgr.return_value = mock_mgr
             profile = MagicMock(spec=Profile)
+            # Pydantic v2 hides fields from dir(), so a spec'd mock lacks the
+            # override fields the CLI now reads; default to "no overrides".
+            profile.models = None
+            profile.context_windows = None
             profile.type = "oauth"
             profile.name = "myprofile"
             profile.config_dir = "/some/dir"
@@ -217,6 +229,10 @@ class TestProfileAdd:
             mock_mgr = MagicMock()
             MockMgr.return_value = mock_mgr
             profile = MagicMock(spec=Profile)
+            # Pydantic v2 hides fields from dir(), so a spec'd mock lacks the
+            # override fields the CLI now reads; default to "no overrides".
+            profile.models = None
+            profile.context_windows = None
             profile.type = "oauth"
             profile.name = "first"
             profile.config_dir = "/dir"
@@ -343,6 +359,10 @@ class TestProfileShow:
             MockMgr.return_value = mock_mgr
             mock_mgr.active_name.return_value = "work"
             profile = MagicMock(spec=Profile)
+            # Pydantic v2 hides fields from dir(), so a spec'd mock lacks the
+            # override fields the CLI now reads; default to "no overrides".
+            profile.models = None
+            profile.context_windows = None
             profile.name = "work"
             profile.type = "oauth"
             profile.config_dir = "/dir/work"
@@ -361,6 +381,10 @@ class TestProfileShow:
             MockMgr.return_value = mock_mgr
             mock_mgr.active_name.return_value = "work"
             profile = MagicMock(spec=Profile)
+            # Pydantic v2 hides fields from dir(), so a spec'd mock lacks the
+            # override fields the CLI now reads; default to "no overrides".
+            profile.models = None
+            profile.context_windows = None
             profile.name = "zai"
             profile.type = "api-key"
             profile.base_url = "https://api.z.ai"
@@ -379,6 +403,10 @@ class TestProfileShow:
             MockMgr.return_value = mock_mgr
             mock_mgr.active_name.return_value = "zai"
             profile = MagicMock(spec=Profile)
+            # Pydantic v2 hides fields from dir(), so a spec'd mock lacks the
+            # override fields the CLI now reads; default to "no overrides".
+            profile.models = None
+            profile.context_windows = None
             profile.name = "zai"
             profile.type = "api-key"
             profile.base_url = "https://api.z.ai"
@@ -423,6 +451,10 @@ class TestProfileShow:
             MockMgr.return_value = mock_mgr
             mock_mgr.active_name.return_value = "work"
             profile = MagicMock(spec=Profile)
+            # Pydantic v2 hides fields from dir(), so a spec'd mock lacks the
+            # override fields the CLI now reads; default to "no overrides".
+            profile.models = None
+            profile.context_windows = None
             profile.name = "work"
             profile.type = "oauth"
             profile.config_dir = "/dir"
@@ -440,6 +472,10 @@ class TestProfileShow:
             MockMgr.return_value = mock_mgr
             mock_mgr.active_name.return_value = "other"
             profile = MagicMock(spec=Profile)
+            # Pydantic v2 hides fields from dir(), so a spec'd mock lacks the
+            # override fields the CLI now reads; default to "no overrides".
+            profile.models = None
+            profile.context_windows = None
             profile.name = "zai"
             profile.type = "api-key"
             profile.base_url = None
@@ -547,6 +583,10 @@ class TestProfileLogin:
             mock_mgr = MagicMock()
             MockMgr.return_value = mock_mgr
             profile = MagicMock(spec=Profile)
+            # Pydantic v2 hides fields from dir(), so a spec'd mock lacks the
+            # override fields the CLI now reads; default to "no overrides".
+            profile.models = None
+            profile.context_windows = None
             profile.name = "work"
             profile.type = "oauth"
             profile.config_dir = "/profiles/work"
@@ -572,6 +612,10 @@ class TestProfileLogin:
             mock_mgr = MagicMock()
             MockMgr.return_value = mock_mgr
             profile = MagicMock(spec=Profile)
+            # Pydantic v2 hides fields from dir(), so a spec'd mock lacks the
+            # override fields the CLI now reads; default to "no overrides".
+            profile.models = None
+            profile.context_windows = None
             profile.name = "zai"
             profile.type = "api-key"
             profile.config_dir = None
@@ -600,6 +644,10 @@ class TestProfileLogin:
             mock_mgr = MagicMock()
             MockMgr.return_value = mock_mgr
             profile = MagicMock(spec=Profile)
+            # Pydantic v2 hides fields from dir(), so a spec'd mock lacks the
+            # override fields the CLI now reads; default to "no overrides".
+            profile.models = None
+            profile.context_windows = None
             profile.name = "work"
             profile.type = "oauth"
             profile.config_dir = "/profiles/work"
@@ -617,6 +665,10 @@ class TestProfileLogin:
             mock_mgr = MagicMock()
             MockMgr.return_value = mock_mgr
             profile = MagicMock(spec=Profile)
+            # Pydantic v2 hides fields from dir(), so a spec'd mock lacks the
+            # override fields the CLI now reads; default to "no overrides".
+            profile.models = None
+            profile.context_windows = None
             profile.name = "work"
             profile.type = "oauth"
             profile.config_dir = "/profiles/work"
@@ -634,6 +686,10 @@ class TestProfileLogin:
             mock_mgr = MagicMock()
             MockMgr.return_value = mock_mgr
             profile = MagicMock(spec=Profile)
+            # Pydantic v2 hides fields from dir(), so a spec'd mock lacks the
+            # override fields the CLI now reads; default to "no overrides".
+            profile.models = None
+            profile.context_windows = None
             profile.name = "work"
             profile.type = "oauth"
             profile.config_dir = "/isolated/work"

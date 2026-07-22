@@ -21,7 +21,12 @@ Environment Variable Mapping:
 | models.fable             | CLAUDETM_MODEL_FABLE      |
 | models.haiku             | CLAUDETM_MODEL_HAIKU      |
 | models.sonnet_1m         | CLAUDETM_MODEL_SONNET_1M  |
+| context_windows.*        | CLAUDETM_CONTEXT_*        |
 | git.target_branch        | CLAUDETM_TARGET_BRANCH    |
+
+Precedence (highest first): real environment variables, then the active
+profile's env (api-key/oauth profiles supply these same keys), then the
+file-based config. See ``config_loader_io.apply_env_overrides``.
 """
 
 from __future__ import annotations

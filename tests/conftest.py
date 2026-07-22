@@ -23,6 +23,21 @@ def temp_dir() -> Generator[Path, None, None]:
         yield Path(tmpdir)
 
 
+@pytest.fixture(autouse=True)
+def isolate_profile_home(tmp_path: Path, monkeypatch) -> None:
+    """Point profile storage at an empty temp dir for every test.
+
+    config_loader's apply_env_overrides() resolves the *real* active profile
+    from ~/.claudetm (via active_profile_env_safe) and applies its auth + model
+    overrides to config. Without isolation a developer's active profile would
+    leak into tests (e.g. an api-key profile satisfying "missing credentials"
+    assertions). Tests that need a specific profile set CLAUDETM_HOME themselves
+    — they share this test's monkeypatch instance, so a later setenv() wins.
+    """
+    monkeypatch.setenv("CLAUDETM_HOME", str(tmp_path / "isolate-claudetm"))
+    monkeypatch.delenv("CLAUDETM_PROFILE", raising=False)
+
+
 @pytest.fixture
 def state_dir(temp_dir: Path) -> Path:
     """Provide a state directory path for tests."""

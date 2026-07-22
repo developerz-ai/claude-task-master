@@ -56,6 +56,34 @@ def profile_add(
     base_url: str | None = typer.Option(
         None, "--base-url", help="Anthropic-compatible base URL (api-key profiles)"
     ),
+    model_opus: str | None = typer.Option(
+        None, "--model-opus", help="Model ID for opus tier (e.g., glm-5.2[1m])"
+    ),
+    model_sonnet: str | None = typer.Option(
+        None, "--model-sonnet", help="Model ID for sonnet tier (e.g., glm-4.7)"
+    ),
+    model_haiku: str | None = typer.Option(
+        None, "--model-haiku", help="Model ID for haiku tier (e.g., glm-4.7)"
+    ),
+    model_fable: str | None = typer.Option(None, "--model-fable", help="Model ID for fable tier"),
+    model_sonnet_1m: str | None = typer.Option(
+        None, "--model-sonnet-1m", help="Model ID for sonnet_1m tier"
+    ),
+    context_opus: int | None = typer.Option(
+        None, "--context-opus", help="Context window size for opus (tokens)"
+    ),
+    context_sonnet: int | None = typer.Option(
+        None, "--context-sonnet", help="Context window size for sonnet (tokens)"
+    ),
+    context_haiku: int | None = typer.Option(
+        None, "--context-haiku", help="Context window size for haiku (tokens)"
+    ),
+    context_fable: int | None = typer.Option(
+        None, "--context-fable", help="Context window size for fable (tokens)"
+    ),
+    context_sonnet_1m: int | None = typer.Option(
+        None, "--context-sonnet-1m", help="Context window size for sonnet_1m (tokens)"
+    ),
 ) -> None:
     """➕ Add a new profile.
 
@@ -63,10 +91,25 @@ def profile_add(
     variable, or prompted for securely (never passed as a CLI flag, which would
     leak it into shell history and process listings).
 
+    Each tier takes a model name (a provider-valid id) and, optionally, a
+    context size in tokens. Tiers you omit inherit from a family neighbour, so
+    naming just opus/sonnet/haiku still routes every task to a model the
+    endpoint serves:
+        --model-opus        coding tasks (complex implementation) — smart tier
+        --model-sonnet      general tasks (balanced)
+        --model-haiku       quick tasks (fast/cheap)
+        --model-sonnet-1m   debugging/QA (big context) — defaults to sonnet
+        --model-fable       premium smart tier         — defaults to opus
+
     Examples:
         claudetm profile add work                       # oauth (Claude sub)
         claudetm profile add zai --type api-key \\
             --base-url https://api.z.ai/api/anthropic   # prompts for the key
+
+        claudetm profile add zai --type api-key \\
+            --base-url https://api.z.ai/api/anthropic \\
+            --model-opus glm-5.2 --model-sonnet glm-4.7 --model-haiku glm-4.7 \\
+            --context-opus 128000 --context-sonnet 128000 --context-haiku 128000
     """
     if profile_type not in ("oauth", "api-key"):
         console.print(f"[red]Invalid --type '{profile_type}'. Use 'oauth' or 'api-key'.[/red]")
@@ -76,6 +119,36 @@ def profile_add(
     if profile_type == "api-key":
         api_key = os.environ.get("CLAUDETM_API_KEY") or typer.prompt("API key", hide_input=True)
 
+    # Build model mappings
+    models: dict[str, str] | None = None
+    if any([model_opus, model_sonnet, model_haiku, model_fable, model_sonnet_1m]):
+        models = {}
+        if model_opus:
+            models["opus"] = model_opus
+        if model_sonnet:
+            models["sonnet"] = model_sonnet
+        if model_haiku:
+            models["haiku"] = model_haiku
+        if model_fable:
+            models["fable"] = model_fable
+        if model_sonnet_1m:
+            models["sonnet_1m"] = model_sonnet_1m
+
+    # Build context window mappings
+    context_windows: dict[str, int] | None = None
+    if any([context_opus, context_sonnet, context_haiku, context_fable, context_sonnet_1m]):
+        context_windows = {}
+        if context_opus:
+            context_windows["opus"] = context_opus
+        if context_sonnet:
+            context_windows["sonnet"] = context_sonnet
+        if context_haiku:
+            context_windows["haiku"] = context_haiku
+        if context_fable:
+            context_windows["fable"] = context_fable
+        if context_sonnet_1m:
+            context_windows["sonnet_1m"] = context_sonnet_1m
+
     manager = ProfileManager()
     try:
         profile = manager.add(
@@ -83,6 +156,8 @@ def profile_add(
             profile_type=profile_type,  # type: ignore[arg-type]
             api_key=api_key,
             base_url=base_url,
+            models=models,
+            context_windows=context_windows,
         )
     except ProfileError as e:
         console.print(f"[red]{e}[/red]")
@@ -95,6 +170,14 @@ def profile_add(
             f"[yellow]Next:[/yellow] authenticate this profile with "
             f"[cyan]claudetm profile login {name}[/cyan]"
         )
+    if profile.models:
+        console.print("[dim]Model overrides:[/dim]")
+        for model_key, model_id in profile.models.items():
+            console.print(f"  {model_key}: {model_id}")
+    if profile.context_windows:
+        console.print("[dim]Context windows:[/dim]")
+        for model_key, size in profile.context_windows.items():
+            console.print(f"  {model_key}: {size:,} tokens")
     if manager.active_name() == name:
         console.print(f"[dim]'{name}' is now the active profile.[/dim]")
 
@@ -172,6 +255,14 @@ def _print_profile(profile: Profile, active: bool) -> None:
     else:
         console.print(f"  [dim]base_url:[/dim]   {profile.base_url or 'https://api.anthropic.com'}")
         console.print(f"  [dim]api_key:[/dim]    {_mask(profile.api_key)}")
+        if profile.models:
+            console.print("  [dim]models:[/dim]")
+            for model_key, model_id in profile.models.items():
+                console.print(f"    {model_key}: {model_id}")
+        if profile.context_windows:
+            console.print("  [dim]context_windows:[/dim]")
+            for model_key, size in profile.context_windows.items():
+                console.print(f"    {model_key}: {size:,} tokens")
 
 
 @profile_app.command(name="remove")

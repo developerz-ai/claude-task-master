@@ -28,7 +28,11 @@ Environment Variable Overrides:
 - CLAUDETM_MODEL_FABLE -> config.models.fable
 - CLAUDETM_MODEL_HAIKU -> config.models.haiku
 - CLAUDETM_MODEL_SONNET_1M -> config.models.sonnet_1m
+- CLAUDETM_CONTEXT_{OPUS,FABLE,SONNET,HAIKU,SONNET_1M} -> config.context_windows.*
 - CLAUDETM_TARGET_BRANCH -> config.git.target_branch
+
+The active profile (api-key/oauth) supplies these same keys; precedence is
+real env > active profile > config file (see config_loader_io.apply_env_overrides).
 
 Path utilities, file I/O, and env-override helpers live in
 :mod:`.config_loader_io`.
