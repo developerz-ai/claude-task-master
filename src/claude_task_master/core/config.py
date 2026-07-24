@@ -79,7 +79,7 @@ class ModelConfig(BaseModel):
         description="Model name for 'sonnet' (balanced). Overridden by CLAUDETM_MODEL_SONNET.",
     )
     opus: str = Field(
-        default="claude-opus-4-8",
+        default="claude-opus-5",
         description="Model name for 'opus' (smartest). Overridden by CLAUDETM_MODEL_OPUS.",
     )
     fable: str = Field(
@@ -88,7 +88,7 @@ class ModelConfig(BaseModel):
         "Overridden by CLAUDETM_MODEL_FABLE.",
     )
     haiku: str = Field(
-        default="claude-haiku-4-5-20251001",
+        default="claude-haiku-4-5",
         description="Model name for 'haiku' (fastest). Overridden by CLAUDETM_MODEL_HAIKU.",
     )
     sonnet_1m: str = Field(
@@ -119,7 +119,7 @@ class ContextWindowsConfig(BaseModel):
     """Context window sizes per model (in tokens).
 
     Controls the max context window size used for auto-compact threshold calculation.
-    Opus 4.8 and Sonnet 5 support 1M context in beta (tier 4+ users).
+    Opus 5 and Sonnet 5 support 1M context in beta (tier 4+ users).
     Users on lower tiers should set these to 200000.
 
     To enable 1M context via the API, use the beta header: context-1m-2025-08-07
@@ -196,9 +196,9 @@ class ClaudeTaskMasterConfig(BaseModel):
       },
       "models": {
         "sonnet": "claude-sonnet-5",
-        "opus": "claude-opus-4-8",
+        "opus": "claude-opus-5",
         "fable": "claude-fable-5",
-        "haiku": "claude-haiku-4-5-20251001",
+        "haiku": "claude-haiku-4-5",
         "sonnet_1m": "claude-sonnet-5"
       },
       "git": {

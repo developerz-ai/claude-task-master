@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.71] - 2026-07-24
+
+### Added
+- `claudetm update` command — manual self-update from PyPI via `uv tool install --force --reinstall` (falls back to pipx). `--check` only reports whether a newer version exists; nothing ever updates automatically.
+
+### Changed
+- Bumped `claude-agent-sdk` to >=0.2.126 (latest).
+- Default `opus` model is now **Claude Opus 5** (`claude-opus-5`); default `haiku` now uses the `claude-haiku-4-5` alias. `sonnet` (`claude-sonnet-5`) and `fable` (`claude-fable-5`) unchanged.
+
 ## [0.1.70] - 2026-07-22
 
 ### Fixed
@@ -856,7 +865,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.69...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.71...HEAD
+[0.1.71]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.69...v0.1.71
 [0.1.70]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.69...v0.1.70
 [0.1.69]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.68...v0.1.69
 [0.1.68]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.67...v0.1.68

@@ -607,4 +607,4 @@ class TestProfileModelOverrides:
 
         cfg = apply_env_overrides(generate_default_config())
         assert cfg.models.sonnet_1m == "claude-sonnet-5"
-        assert cfg.models.opus == "claude-opus-4-8"
+        assert cfg.models.opus == "claude-opus-5"

@@ -298,7 +298,7 @@ claudetm --init-config
 claudetm --show-config
 ```
 
-This creates `.claude-task-master/config.json`. The smartest tier (`opus`) defaults to **Claude Opus 4.8** (`claude-opus-4-8`). Override it by editing the `"opus"` key or setting `CLAUDETM_MODEL_OPUS`. A separate opt-in `fable` tier defaults to **Claude Fable 5** (`claude-fable-5`, premium-priced at 2x Opus) — mirroring Claude Code's `ANTHROPIC_DEFAULT_FABLE_MODEL`; override via the `"fable"` key or `CLAUDETM_MODEL_FABLE`. No task routes to it by default; set `CLAUDETM_MODEL_OPUS=claude-fable-5` to run the smartest tier on Fable.
+This creates `.claude-task-master/config.json`. The smartest tier (`opus`) defaults to **Claude Opus 5** (`claude-opus-5`). Override it by editing the `"opus"` key or setting `CLAUDETM_MODEL_OPUS`. A separate opt-in `fable` tier defaults to **Claude Fable 5** (`claude-fable-5`, premium-priced at 2x Opus) — mirroring Claude Code's `ANTHROPIC_DEFAULT_FABLE_MODEL`; override via the `"fable"` key or `CLAUDETM_MODEL_FABLE`. No task routes to it by default; set `CLAUDETM_MODEL_OPUS=claude-fable-5` to run the smartest tier on Fable.
 
 ```json
 {
@@ -311,9 +311,9 @@ This creates `.claude-task-master/config.json`. The smartest tier (`opus`) defau
   },
   "models": {
     "sonnet": "claude-sonnet-5",
-    "opus": "claude-opus-4-8",
+    "opus": "claude-opus-5",
     "fable": "claude-fable-5",
-    "haiku": "claude-haiku-4-5-20251001"
+    "haiku": "claude-haiku-4-5"
   },
   "context_windows": {
     "opus": 200000,
@@ -328,7 +328,7 @@ This creates `.claude-task-master/config.json`. The smartest tier (`opus`) defau
 }
 ```
 
-> **Note:** Opus 4.8 and Sonnet 5 support a 1M token context window in beta (**tier 4+** API access required). If you have tier 4+ access, you can increase the context windows:
+> **Note:** Opus 5 and Sonnet 5 support a 1M token context window in beta (**tier 4+** API access required). If you have tier 4+ access, you can increase the context windows:
 > ```json
 > "context_windows": {
 >   "opus": 1000000,
@@ -415,6 +415,7 @@ Complete documentation for all features and deployment options:
 | `claudetm mailbox` | Show mailbox status |
 | `claudetm mailbox send "msg"` | Send message to mailbox |
 | `claudetm mailbox clear` | Clear pending messages |
+| `claudetm update` | Self-update to the latest PyPI release (`--check` to only check) |
 
 ### Start Options
 

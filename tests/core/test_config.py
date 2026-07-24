@@ -79,9 +79,9 @@ class TestModelConfig:
         """Test that ModelConfig has correct default values."""
         config = ModelConfig()
         assert config.sonnet == "claude-sonnet-5"
-        assert config.opus == "claude-opus-4-8"
+        assert config.opus == "claude-opus-5"
         assert config.fable == "claude-fable-5"
-        assert config.haiku == "claude-haiku-4-5-20251001"
+        assert config.haiku == "claude-haiku-4-5"
         assert config.sonnet_1m == "claude-sonnet-5"
 
     def test_custom_models(self) -> None:
@@ -89,11 +89,11 @@ class TestModelConfig:
         config = ModelConfig(
             sonnet="anthropic/claude-sonnet-4-6",
             opus="anthropic/claude-opus-4-7",
-            haiku="anthropic/claude-haiku-4-5-20251001",
+            haiku="anthropic/claude-haiku-4-5",
         )
         assert config.sonnet == "anthropic/claude-sonnet-4-6"
         assert config.opus == "anthropic/claude-opus-4-7"
-        assert config.haiku == "anthropic/claude-haiku-4-5-20251001"
+        assert config.haiku == "anthropic/claude-haiku-4-5"
 
     def test_custom_sonnet_1m(self) -> None:
         """Test that ModelConfig accepts custom sonnet_1m model name."""
@@ -313,8 +313,8 @@ class TestUtilityFunctions:
     def test_get_model_name_opus(self) -> None:
         """Test get_model_name returns correct model for opus."""
         config = ClaudeTaskMasterConfig()
-        assert get_model_name(config, "opus") == "claude-opus-4-8"
-        assert get_model_name(config, "OPUS") == "claude-opus-4-8"
+        assert get_model_name(config, "opus") == "claude-opus-5"
+        assert get_model_name(config, "OPUS") == "claude-opus-5"
 
     def test_get_model_name_fable(self) -> None:
         """Test get_model_name returns correct model for fable."""
@@ -325,8 +325,8 @@ class TestUtilityFunctions:
     def test_get_model_name_haiku(self) -> None:
         """Test get_model_name returns correct model for haiku."""
         config = ClaudeTaskMasterConfig()
-        assert get_model_name(config, "haiku") == "claude-haiku-4-5-20251001"
-        assert get_model_name(config, "HAIKU") == "claude-haiku-4-5-20251001"
+        assert get_model_name(config, "haiku") == "claude-haiku-4-5"
+        assert get_model_name(config, "HAIKU") == "claude-haiku-4-5"
 
     def test_get_model_name_sonnet_1m(self) -> None:
         """Test get_model_name returns correct model for sonnet_1m."""
