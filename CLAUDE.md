@@ -229,7 +229,11 @@ A CI-fix, review-fix or conflict session promises the same two things: **commit*
 
 Undelivered → the stage repeats instead of advancing, bounded by `MAX_FIX_FINISH_ATTEMPTS` (2, `state.fix_finish_attempts`), then blocks. Ordering matters in `addressing_reviews`: the check runs **before** `post_comment_replies`, because resolving the threads is what tells the rest of the workflow the review is handled. A CI-fix that delivered nothing refunds `ci_fix_attempts` — that counter bounds "the fix didn't work", not "no fix was produced".
 
-`ready_to_merge` additionally refuses to call `gh pr merge` on a definite dirty tree, reporting the pending files instead of the raw git checkout error.
+`ready_to_merge` additionally refuses to call `gh pr merge` on a definite dirty tree, reporting the pending files instead of the raw git checkout error. Same guard on the other two merge sites: the verification fix-PR path (`loop_verification`) and the `merge-pr`/`fix-pr` CLI.
+
+The CLI carries its own copy of the contract check (`fix_session.fix_session_undelivered_reason`) because `fix-pr` runs without a stage handler — `run_fix_session` had the review stage's bug verbatim, resolving threads for a fix that never reached the PR.
+
+**Planning is covered by the same rule.** `run_planning_phase` reports `success`/`subtype` like `run_work_session`, and the planner refuses to persist a plan from a cut-off session: every later stage treats `plan.md` as the whole job, so a task list that stops halfway is worse than none. `PlanUpdater` was already safe here — it validates the result parses to real tasks, preserves every completed task, and backs up before overwriting.
 
 Fail-open vs fail-closed is deliberate. `_porcelain_status()` returns three states (`""` / dirty / `None` = unreadable). `_has_uncommitted_changes()` folds unreadable into dirty (fail **closed**) for pushing and PR-opening; the fix probe and merge guard act only on a *definite* dirty tree (fail **open**), since looping a session over a repo you cannot measure is worse than deferring to `gh`.
 
