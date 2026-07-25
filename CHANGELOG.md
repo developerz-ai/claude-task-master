@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.73] - 2026-07-25
+
+### Fixed
+- **A fix session that never committed no longer resolves the review and merges the PR without the fix.** v0.1.72 stopped a dying *work* session from marking its task done, but the push-only stages (CI fix, review fix, conflict) had the identical hole: they ran the session and advanced on it unverified. Observed end to end — a review-fix session ended waiting on a backgrounded typecheck, so the orchestrator posted the comment replies, resolved the threads on GitHub, and moved to `waiting_ci`, which read the *previous* push's green CI as this fix's and walked the PR to merge. The merge then died on a raw git error, because `gh pr merge` checks branches out and the fix was still in the working tree. All three stages now check the session's two-part contract against the repository (`_fix_session_unfinished_reason`: uncommitted changes, or commits never pushed) and repeat the stage instead of advancing, bounded by `MAX_FIX_FINISH_ATTEMPTS` (2) then blocking. In `addressing_reviews` the check runs *before* `post_comment_replies`, since resolving the threads is what tells the rest of the workflow the review is handled. A CI-fix that delivered nothing refunds `ci_fix_attempts` — that counter bounds "the fix didn't work", not "no fix was produced".
+- **`ready_to_merge` refuses to merge on a dirty tree** rather than letting `gh pr merge` fail with `Your local changes to the following files would be overwritten by checkout`. It names the pending files and blocks; it does not commit unreviewed leftovers into a PR one call from landing.
+- **Git probes read the project tree, not the process cwd**, and distinguish "clean" from "unreadable". `_porcelain_status()` returns three states, so pushing/PR-opening can fail **closed** on an unknown tree (unchanged) while the fix probe and merge guard fail **open** — looping a session over a repo you cannot measure is worse than deferring to `gh`.
+
 ## [0.1.72] - 2026-07-25
 
 ### Fixed
@@ -879,7 +886,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.72...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.73...HEAD
+[0.1.73]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.72...v0.1.73
 [0.1.72]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.71...v0.1.72
 [0.1.71]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.69...v0.1.71
 [0.1.70]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.69...v0.1.70

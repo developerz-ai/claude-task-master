@@ -66,6 +66,17 @@ class _PRFixStage(_CIStage):
             push_only=True,
         )
 
+        # Did the session actually deliver? Advancing on an undelivered fix would
+        # read the previous push's green CI as this fix's.
+        unfinished = self._fix_session_unfinished_reason(required_branch)
+        if unfinished:
+            # This attempt fixed nothing, so it must not consume the CI-fix
+            # budget — that counter bounds "the fix didn't work", not "no fix
+            # was produced"; _handle_unfinished_fix has its own bound.
+            state.ci_fix_attempts = max(0, state.ci_fix_attempts - 1)
+            return self._handle_unfinished_fix(state, unfinished, "ci_failed")
+        state.fix_finish_attempts = 0
+
         # Wait for CI to start after push
         console.info("Waiting 60s for CI to start...")
         if not interruptible_sleep(60):

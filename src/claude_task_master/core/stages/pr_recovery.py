@@ -233,44 +233,6 @@ Don't merge, don't wait for CI. Done = clean `git status` + PR URL."""
         return title, "\n".join(lines).strip()
 
     @staticmethod
-    def _has_uncommitted_changes() -> bool:
-        """True when ``git status --porcelain`` reports anything (or fails)."""
-        try:
-            result = subprocess.run(
-                ["git", "status", "--porcelain"],
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-            return bool(result.stdout.strip())
-        except Exception:
-            return True
-
-    @staticmethod
-    def _uncommitted_summary(max_lines: int = 40) -> str:
-        """Short ``git status --short`` listing for the finish-session prompt.
-
-        Best-effort context only: an empty string when git cannot be read, so a
-        failure here degrades the prompt rather than the recovery.
-        """
-        try:
-            result = subprocess.run(
-                ["git", "status", "--short"],
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-        except Exception:
-            return ""
-        lines = result.stdout.strip().splitlines()
-        if len(lines) > max_lines:
-            extra = len(lines) - max_lines
-            lines = lines[:max_lines] + [f"... and {extra} more"]
-        return "\n".join(lines)
-
-    @staticmethod
     def _commits_ahead_of_base(base: str) -> int | None:
         """Count commits on HEAD that are not on ``origin/<base>``.
 

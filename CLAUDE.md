@@ -220,6 +220,19 @@ Two independent signals decide whether a session satisfied its contract (`_LoopW
 
 Unfinished → the task is **not** checked off and the same task re-runs, with a `**Retry N**` note in its prompt telling it the leftover diff is its own work to finish, not redo. Bounded by `MAX_TASK_FINISH_ATTEMPTS` (2, `state.task_finish_attempts`); after that the task is checked off anyway and the PR stage takes over — the finish session below can still ship a dirty tree, so a stubborn task must not deadlock the run. Retries burn sessions, so `--max-sessions` still bounds everything.
 
+### Undelivered fix sessions (push-only stages)
+
+A CI-fix, review-fix or conflict session promises the same two things: **commit** the work, then **push** it so CI re-runs against the fix. Neither was verified — the agent's own report is not evidence, and a session killed mid-turn reports success. Both are now checked against the repository (`_GitOps._fix_session_unfinished_reason`):
+
+- **uncommitted changes** — the session stopped mid-fix. This also breaks the merge outright: `gh pr merge` checks branches out and refuses on a dirty tree
+- **unpushed commits** — the fix exists locally only, so the next `waiting_ci` poll reads the *previous* push's green CI as this fix's and merges the PR without the fix
+
+Undelivered → the stage repeats instead of advancing, bounded by `MAX_FIX_FINISH_ATTEMPTS` (2, `state.fix_finish_attempts`), then blocks. Ordering matters in `addressing_reviews`: the check runs **before** `post_comment_replies`, because resolving the threads is what tells the rest of the workflow the review is handled. A CI-fix that delivered nothing refunds `ci_fix_attempts` — that counter bounds "the fix didn't work", not "no fix was produced".
+
+`ready_to_merge` additionally refuses to call `gh pr merge` on a definite dirty tree, reporting the pending files instead of the raw git checkout error.
+
+Fail-open vs fail-closed is deliberate. `_porcelain_status()` returns three states (`""` / dirty / `None` = unreadable). `_has_uncommitted_changes()` folds unreadable into dirty (fail **closed**) for pushing and PR-opening; the fix probe and merge guard act only on a *definite* dirty tree (fail **open**), since looping a session over a repo you cannot measure is worse than deferring to `gh`.
+
 ### Missing-PR recovery (dirty tree included)
 
 `pr_created` with no PR on the branch self-heals rather than blocking (`core/stages/pr_recovery.py`):

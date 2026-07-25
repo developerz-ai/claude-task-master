@@ -204,6 +204,16 @@ End with: TASK COMPLETE"""
             push_only=True,
         )
 
+        # Verify BEFORE posting replies. post_comment_replies marks the threads
+        # addressed and resolves them on GitHub, which is what tells the rest of
+        # the workflow the review is handled — claiming that for a fix still
+        # sitting uncommitted in the working tree walks the PR straight to merge
+        # on the previous push's green CI.
+        unfinished = self._fix_session_unfinished_reason(required_branch)
+        if unfinished:
+            return self._handle_unfinished_fix(state, unfinished, "addressing_reviews")
+        state.fix_finish_attempts = 0
+
         # Post replies to comments using resolution file
         self.pr_context.post_comment_replies(state.current_pr)
 

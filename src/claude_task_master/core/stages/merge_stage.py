@@ -186,6 +186,27 @@ class _MergeStage(_ReviewStage):
             return cast("int | None", stale)
 
         if state.options.auto_merge:
+            # `gh pr merge` checks branches out, so a dirty tree aborts it with a
+            # raw git error ("Your local changes would be overwritten by
+            # checkout") after the PR has already been reported ready. Say what
+            # is actually wrong instead, and don't commit unreviewed leftovers
+            # into a PR that is one call away from landing.
+            # Only a *definite* dirty tree blocks: an unreadable repo is left to
+            # `gh` rather than stalling every merge behind a failed probe.
+            pending = self._uncommitted_summary(max_lines=20)
+            if pending:
+                console.error(
+                    f"Refusing to merge PR #{pr_number}: the working tree has uncommitted "
+                    "changes, and merging checks branches out"
+                )
+                console.detail("Pending changes:")
+                for line in pending.splitlines():
+                    console.detail(f"  {line}")
+                console.detail("Commit, stash or discard them, then: claudetm resume")
+                state.status = "blocked"
+                self.state_manager.save_state(state)
+                return 1
+
             console.info(f"Merging PR #{pr_number}...")
             try:
                 self.github_client.merge_pr(pr_number, admin=state.options.admin_merge)
@@ -339,6 +360,7 @@ class _MergeStage(_ReviewStage):
         state.branch_sync_attempts = 0
         state.pr_finish_attempts = 0
         state.task_finish_attempts = 0
+        state.fix_finish_attempts = 0
         state.in_release_fix = False
         state.ci_poll_start_time = None
         self.state_manager.save_state(state)
