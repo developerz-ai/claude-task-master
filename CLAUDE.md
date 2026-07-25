@@ -248,6 +248,18 @@ Fail-open vs fail-closed is deliberate. `_porcelain_status()` returns three stat
 
 Both counters reset on task advance, like `ci_fix_attempts`.
 
+### Blocking is a last resort (unattended runs)
+
+claudetm exists to do a lot of work without supervision, so **every block is a defect unless a human is genuinely required**. A run that dies at 3am on a GitHub 5xx has failed at its one job. Three operations used to end a run on their *first* failure — detecting a PR, merging it, and checking out the base after a merge — all with causes that resolve themselves in seconds.
+
+`_GitOps._retry_transient(state, key, reason, hint)` is the shared primitive: leave `workflow_stage` alone and return None, and the stage simply re-enters next cycle. `MAX_TRANSIENT_RETRIES` (5) with linear backoff to `TRANSIENT_RETRY_MAX_DELAY` (60s); budgets are per `key` and instance-level (a resume starts clean). Clear it with `_clear_transient(key)` on success so flakiness doesn't accumulate across a long run.
+
+Used at: PR detection (`ci_stage`), `merge_pr` (`merge_stage`), post-merge checkout of the base. A permanent failure — branch protection refusing a solo-authored PR without `--admin` — still blocks, just after the retries and with the attempt count attached.
+
+The other half of the rule is recovery over refusal: `_PRRecovery` opens a missing PR itself, a dirty tree gets a finish session, and `loop_verification._open_missing_fix_pr` does the same for the verification path (which had no recovery at all). Recovery only ever fires on the unambiguous case — real feature branch, clean tree, commits over the base; anything else reports rather than pushing something it cannot vouch for.
+
+Blocks that are correct and stay: a PR closed without merging, a tree still dirty after the finish budget, sitting on the base branch, attempt budgets exhausted.
+
 ### Limits — what bounds an agent, and what doesn't
 
 Sessions are bounded in **steps**, not wall-clock. A wall-clock cap punishes a session that is legitimately slow (big test suite, slow CI) exactly as hard as one that is looping.

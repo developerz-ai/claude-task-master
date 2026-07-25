@@ -78,6 +78,7 @@ class _CIStage(_PRRecovery):
                     from datetime import datetime
 
                     console.success(f"Detected PR #{pr_number} for current branch")
+                    self._clear_transient("detect_pr")
                     state.current_pr = pr_number
                     # Start PR timing when PR is first detected (avoid overwriting on resume)
                     if state.pr_start_time is None:
@@ -92,10 +93,15 @@ class _CIStage(_PRRecovery):
                     console.warning("No PR found for current branch - attempting recovery")
                     return self._recover_missing_pr(state)
             except Exception as e:
-                console.warning(f"Could not detect PR: {e}")
-                state.status = "blocked"
-                self.state_manager.save_state(state)
-                return 1
+                # A failed *lookup* says nothing about the PR — the branch may
+                # well have one. Ending the run here on a GitHub hiccup strands
+                # finished work, so retry before giving up.
+                return self._retry_transient(
+                    state,
+                    "detect_pr",
+                    f"Could not detect PR for the current branch: {e}",
+                    hint="Check `gh auth status` and the branch's PR, then: claudetm resume",
+                )
 
         console.detail(f"PR #{state.current_pr} - moving to CI check")
         state.workflow_stage = "waiting_ci"

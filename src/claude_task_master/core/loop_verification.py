@@ -108,6 +108,49 @@ After completing your fixes, end with: TASK COMPLETE"""
             _oloop.console.error(f"Fix session failed: {e}")
             return False
 
+    def _open_missing_fix_pr(self, state: TaskState) -> int | None:
+        """Push the verification-fix branch and open its PR when the session didn't.
+
+        Mirrors ``_PRRecovery`` for the verification path, which had no recovery
+        of its own: a fix session that committed but stopped before
+        ``gh pr create`` left the run dead with the fix sitting on a local
+        branch. Only the unambiguous case is recovered — a real feature branch,
+        a clean tree, commits over the base. Anything else returns None and the
+        caller reports the failure as before.
+
+        Returns:
+            The new PR number, or None when recovery is not possible.
+        """
+        handler = self._orc.stage_handler
+        base = self._get_target_branch()  # type: ignore[attr-defined]
+        branch = handler._get_current_branch()
+
+        if not branch or branch == base:
+            console.warning(f"No PR found for fix branch (on {branch or 'unknown branch'})")
+            return None
+        if handler._has_uncommitted_changes():
+            console.warning("No PR found for fix branch and the tree has uncommitted changes")
+            return None
+        ahead = handler._commits_ahead_of_base(base)
+        if not ahead:
+            console.warning(f"No PR found for fix branch and {branch} has nothing over {base}")
+            return None
+
+        console.info(f"No PR on {branch} ({ahead} commit(s) over {base}) — opening it myself")
+        try:
+            handler._push_current_branch()
+            return int(
+                self._orc.github_client.create_pr(
+                    "fix: address verification failures",
+                    "Opened by the claudetm orchestrator: the verification fix session "
+                    "committed its work but did not open the PR.",
+                    base=base,
+                )
+            )
+        except Exception as e:
+            console.warning(f"Could not open the fix PR: {e}")
+            return None
+
     def _wait_for_fix_pr_merge(self, state: TaskState) -> bool:
         """Wait for fix PR to pass CI and merge it.
 
@@ -123,8 +166,13 @@ After completing your fixes, end with: TASK COMPLETE"""
         try:
             pr_number = orc.github_client.get_pr_for_current_branch()
             if not pr_number:
-                console.warning("No PR found for fix branch")
-                return False
+                # The fix session committed but never opened the PR (or died
+                # before pushing). Ending the run here is the same "give up
+                # where the orchestrator can recover" the PR stages already
+                # stopped doing — open it ourselves.
+                pr_number = self._open_missing_fix_pr(state)
+                if not pr_number:
+                    return False
             console.success(f"Fix PR #{pr_number} detected")
             state.current_pr = pr_number
             if state.pr_start_time is None:
