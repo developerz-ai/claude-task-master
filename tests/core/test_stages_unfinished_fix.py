@@ -249,6 +249,25 @@ class TestFixSessionUnfinishedReason:
         with patch.object(WorkflowStageHandler, "_porcelain_status", return_value=None):
             assert handler._fix_session_unfinished_reason("feat/x") is None
 
+    def test_probes_read_the_project_tree_not_the_process_cwd(self, handler, state_manager):
+        """Regression: measured against whatever repo the process happened to sit in.
+
+        `_unpushed_commit_count` ran without a cwd, so in a checkout of the
+        project's own repo (CI) it counted the PR's commits as unpushed and
+        every fix stage refused to advance — while passing locally, where the
+        process cwd happened to have nothing committed yet.
+        """
+        project = str(state_manager.state_dir.parent)
+
+        with patch(f"{_GIT_OPS}.subprocess.run") as run:
+            run.return_value = MagicMock(stdout="0\n", returncode=0)
+            handler._unpushed_commit_count("feat/x")
+            handler._porcelain_status()
+
+        assert run.call_args_list, "expected git to be invoked"
+        for call in run.call_args_list:
+            assert call.kwargs.get("cwd") == project
+
     def test_unknown_push_state_is_not_a_violation(self, handler):
         with (
             patch.object(WorkflowStageHandler, "_porcelain_status", return_value=""),

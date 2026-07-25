@@ -742,3 +742,71 @@ class TestMaxPrsPassThrough:
 
         call_kwargs = mock_agent_wrapper.run_planning_phase.call_args.kwargs
         assert call_kwargs.get("max_prs") is None
+
+
+class TestPlanningSessionCutOff:
+    """A planning session the SDK cut off must not persist a partial plan.
+
+    Every later stage treats plan.md as the whole job, so a task list that
+    simply stops halfway through is worse than no plan at all — the missing
+    tasks are never noticed. Reachable in practice since sessions carry a turn
+    cap (CLAUDETM_MAX_TURNS) and an optional budget cap.
+    """
+
+    def test_truncated_plan_is_not_saved(self, planner, mock_agent_wrapper, state_manager):
+        state_manager.state_dir.mkdir(exist_ok=True)
+        mock_agent_wrapper.run_planning_phase.return_value = {
+            "plan": "## Task List\n- [ ] Task 1\n- [ ] Task 2 (cut off mid-",
+            "criteria": "partial",
+            "raw_output": "...",
+            "success": False,
+            "subtype": "error_max_turns",
+        }
+
+        planner.create_plan("Some goal")
+
+        assert state_manager.load_plan() is None
+
+    def test_existing_plan_survives_a_cut_off_replan(
+        self, planner, mock_agent_wrapper, state_manager
+    ):
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan("## Task List\n- [x] Done\n- [ ] Pending\n")
+        mock_agent_wrapper.run_planning_phase.return_value = {
+            "plan": "## Task List\n- [ ] Only",
+            "criteria": "x",
+            "raw_output": "...",
+            "success": False,
+            "subtype": "error_during_execution",
+        }
+
+        planner.create_plan("Some goal")
+
+        assert "- [x] Done" in (state_manager.load_plan() or "")
+
+    def test_successful_plan_is_saved(self, planner, mock_agent_wrapper, state_manager):
+        state_manager.state_dir.mkdir(exist_ok=True)
+        mock_agent_wrapper.run_planning_phase.return_value = {
+            "plan": "## Task List\n- [ ] Task 1\n",
+            "criteria": "done",
+            "raw_output": "...",
+            "success": True,
+            "subtype": None,
+        }
+
+        planner.create_plan("Some goal")
+
+        assert "- [ ] Task 1" in (state_manager.load_plan() or "")
+
+    def test_absent_success_key_still_saves(self, planner, mock_agent_wrapper, state_manager):
+        """Older shapes without the flag must keep working (only False blocks)."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        mock_agent_wrapper.run_planning_phase.return_value = {
+            "plan": "## Task List\n- [ ] Task 1\n",
+            "criteria": "done",
+            "raw_output": "...",
+        }
+
+        planner.create_plan("Some goal")
+
+        assert "- [ ] Task 1" in (state_manager.load_plan() or "")

@@ -93,7 +93,10 @@ class _GitOps(StageHandlerBase):
             )
         except Exception:
             return None
-        return result.stdout.strip()
+        # rstrip only: a leading space is the status column (" M path"), and
+        # stripping it misaligns the first line against every other one. A clean
+        # tree still yields "" so emptiness checks are unaffected.
+        return result.stdout.rstrip()
 
     def _has_uncommitted_changes(self) -> bool:
         """True when the tree is dirty **or** cannot be read (fail closed).
@@ -119,17 +122,22 @@ class _GitOps(StageHandlerBase):
             lines = lines[:max_lines] + [f"... and {extra} more"]
         return "\n".join(lines)
 
-    @staticmethod
-    def _unpushed_commit_count(branch: str) -> int | None:
+    def _unpushed_commit_count(self, branch: str) -> int | None:
         """Commits on HEAD that ``origin/<branch>`` does not have.
+
+        Measured in the project tree (:meth:`_project_dir`), not the process
+        cwd — the answer is meaningless if it comes from a different repository
+        than the one the run is working on.
 
         Returns None when the comparison cannot be made — no upstream yet, a
         failed fetch, a detached HEAD. Callers must treat that as "unknown" and
         never as proof that the branch was pushed.
         """
+        cwd = self._project_dir()
         try:
             subprocess.run(
                 ["git", "fetch", "origin", branch],
+                cwd=cwd,
                 check=True,
                 capture_output=True,
                 text=True,
@@ -137,6 +145,7 @@ class _GitOps(StageHandlerBase):
             )
             result = subprocess.run(
                 ["git", "rev-list", "--count", f"origin/{branch}..HEAD"],
+                cwd=cwd,
                 check=True,
                 capture_output=True,
                 text=True,

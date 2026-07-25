@@ -124,6 +124,17 @@ class Planner:
         plan = result.get("plan", "")
         criteria = result.get("criteria", "")
 
+        # A planning session the SDK cut off (max turns, budget cap, mid-run
+        # error) leaves a plan that simply stops partway through the task list.
+        # Persisting it is worse than having none: the run proceeds as if that
+        # truncated list were the whole job, and the missing tasks are never
+        # noticed. Keep any existing plan and surface the failure instead.
+        if result.get("success") is False:
+            subtype = result.get("subtype") or "error"
+            console.error(f"Planning session ended early ({subtype}) — plan may be incomplete")
+            console.detail("Not saving a truncated plan. Re-run to plan again.")
+            return result
+
         # Save to state
         if plan:
             self.state_manager.save_plan(plan)

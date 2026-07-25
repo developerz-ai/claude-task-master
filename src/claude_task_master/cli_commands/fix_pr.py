@@ -22,7 +22,7 @@ from .ci_helpers import (
     GitHubCITimeoutError,
     wait_for_ci_complete,
 )
-from .fix_session import get_current_branch, run_fix_session
+from .fix_session import get_current_branch, pending_changes_summary, run_fix_session
 
 if TYPE_CHECKING:
     from ..github import GitHubClient, PRStatus
@@ -354,6 +354,20 @@ def merge_pr(
 
         # Merge the PR
         if status.mergeable == "MERGEABLE":
+            # `gh pr merge` checks branches out, so a dirty tree aborts it with a
+            # raw git error after everything has been reported ready.
+            pending = pending_changes_summary()
+            if pending:
+                console.error(
+                    f"Refusing to merge PR #{pr_number}: the working tree has uncommitted "
+                    "changes, and merging checks branches out"
+                )
+                for line in pending.splitlines():
+                    console.detail(f"  {line}")
+                console.detail("Commit, stash or discard them, then re-run.")
+                state_manager.release_session_lock()
+                raise typer.Exit(1)
+
             console.info(f"Merging PR #{pr_number}...")
             merged_branch = get_current_branch()
             try:
