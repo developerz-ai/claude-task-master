@@ -97,11 +97,13 @@ class AgentPhaseExecutor(_AgentPhaseGenerationMixin):
             release_guide: Optional release guide for per-PR release checks.
 
         Returns:
-            Dict with 'plan', 'criteria', 'raw_output' and 'success' keys.
-            ``success`` is False when the SDK's terminal result was an error
-            (max turns, budget cap, mid-execution error) — the whole run is
-            built on this plan, so a caller must not persist a plan that was
-            cut off halfway through being written.
+            Dict with 'plan', 'criteria', 'raw_output', 'success' and 'subtype'
+            keys. ``success`` is False when the SDK's terminal result was an
+            error (max turns, budget cap, mid-execution error) — the whole run
+            is built on this plan, so a caller must not persist a plan that was
+            cut off halfway through being written. ``subtype`` carries the
+            SDK's terminal subtype for reporting (e.g. ``"error_max_turns"``),
+            and is None when no ResultMessage was seen.
         """
         # Reset terminal-result capture so a prior session's outcome cannot
         # leak into this session's derived success.
