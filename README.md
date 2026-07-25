@@ -357,6 +357,16 @@ The config file sets these environment variables before Python starts:
 
 Precedence (highest first): real environment variables, then the **active profile** (api-key/oauth profiles supply these same keys), then the config file.
 
+**Session limits** (environment only — sensible defaults, rarely need changing):
+
+| Environment Variable | Default | Description |
+|---------------------|---------|-------------|
+| `CLAUDETM_MAX_TURNS` | `400` | Max agent steps per session — a runaway backstop, not a working budget. Set `0` to disable. Overrunning retries the task rather than marking it done |
+| `CLAUDETM_STREAM_IDLE_TIMEOUT_SEC` | `1800` | Max silence between SDK stream messages before treating the stream as hung |
+| `CLAUDETM_POST_COMPLETION_IDLE_TIMEOUT_SEC` | `120` | Max wait for the final result message after the agent signals it's done |
+
+Sessions are bounded in steps, not wall-clock: a wall-clock cap would punish a slow-but-healthy session (big test suite, slow CI) exactly as hard as a looping one. Use `--budget` for a per-session cost cap.
+
 ### Using OpenRouter
 
 To use OpenRouter instead of direct Anthropic API:

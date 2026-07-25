@@ -22,6 +22,26 @@ from claude_task_master.core.orchestrator import WebhookEmitter, WorkLoopOrchest
 from claude_task_master.core.state import TaskOptions, TaskState
 from claude_task_master.webhooks.events import EventType
 
+
+def _git_stub(branch: str):
+    """subprocess.run stub that answers git by subcommand.
+
+    ``patch("...orchestrator_loop.subprocess.run")`` patches ``run`` on the
+    shared ``subprocess`` module, so it intercepts every git call the working
+    stage makes — including the post-session ``git status --porcelain`` probe
+    that decides whether the session left work uncommitted. A blanket stub
+    returning the branch name for everything reads as a dirty tree and the task
+    is retried instead of completing.
+    """
+
+    def _run(cmd, *args, **kwargs):
+        if "status" in cmd:
+            return MagicMock(stdout="", returncode=0)
+        return MagicMock(stdout=f"{branch}\n", returncode=0)
+
+    return _run
+
+
 # =============================================================================
 # Test Fixtures
 # =============================================================================
@@ -340,7 +360,7 @@ class TestTaskLifecycleWebhooks:
         """Should emit task.started event when task begins."""
         mock_branch.return_value = "feature/test"
         # Mock subprocess for getting branch
-        mock_subprocess.return_value = MagicMock(stdout="feature/test\n", returncode=0)
+        mock_subprocess.side_effect = _git_stub("feature/test")
 
         state_manager.state_dir.mkdir(exist_ok=True)
         state_manager.save_plan(basic_plan)
@@ -379,7 +399,7 @@ class TestTaskLifecycleWebhooks:
     ):
         """Should emit task.completed event when task completes."""
         mock_branch.return_value = "feature/test"
-        mock_subprocess.return_value = MagicMock(stdout="feature/test\n", returncode=0)
+        mock_subprocess.side_effect = _git_stub("feature/test")
 
         state_manager.state_dir.mkdir(exist_ok=True)
         state_manager.save_plan(basic_plan)
@@ -421,7 +441,7 @@ class TestTaskLifecycleWebhooks:
         from claude_task_master.core.task_runner import WorkSessionError
 
         mock_branch.return_value = "feature/test"
-        mock_subprocess.return_value = MagicMock(stdout="feature/test\n", returncode=0)
+        mock_subprocess.side_effect = _git_stub("feature/test")
 
         state_manager.state_dir.mkdir(exist_ok=True)
         state_manager.save_plan(basic_plan)
@@ -688,7 +708,7 @@ class TestEventOrderingAndCorrelation:
     ):
         """Should emit events in correct order during task execution."""
         mock_branch.return_value = "main"
-        mock_subprocess.return_value = MagicMock(stdout="main\n", returncode=0)
+        mock_subprocess.side_effect = _git_stub("main")
 
         state_manager.state_dir.mkdir(exist_ok=True)
         state_manager.save_plan(basic_plan)

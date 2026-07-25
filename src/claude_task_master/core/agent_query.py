@@ -62,6 +62,22 @@ POST_COMPLETION_IDLE_TIMEOUT_SEC = float(
     os.environ.get("CLAUDETM_POST_COMPLETION_IDLE_TIMEOUT_SEC", "120")
 )
 
+# Hard ceiling on agent steps (assistant turns) in one session. Bounds work in
+# the only unit that actually correlates with an agent going in circles — a
+# wall-clock cap punishes a session that is legitimately slow (big test suite,
+# slow CI) exactly as hard as one that is looping.
+#
+# Set well above real work: observed healthy sessions run tens of turns, so 400
+# is a runaway backstop, not a working budget. Hitting it yields an
+# `error_max_turns` terminal result, which the orchestrator now treats as "task
+# not done" — it retries the task (leftover changes intact) rather than checking
+# it off. Set to 0 to disable the cap entirely.
+_max_turns_env = os.environ.get("CLAUDETM_MAX_TURNS", "400")
+try:
+    MAX_TURNS: int | None = int(_max_turns_env) or None
+except ValueError:
+    MAX_TURNS = 400
+
 
 class AgentQueryExecutor(_AgentQueryExecuteMixin, _AgentQueryHelpersMixin):
     """Handles query execution with retry logic and circuit breaker.

@@ -209,6 +209,43 @@ All commands check `state_manager.exists()` first:
 - Uses `PlanUpdater` to integrate change request into existing plan
 - Preserves completed tasks, modifies pending tasks as needed
 
+### Unfinished sessions (a session that stops mid-task never counts as done)
+
+A work session can end without finishing: the SDK cuts it off (`error_max_turns`, budget cap, `error_during_execution`), or the agent ends its turn waiting on a backgrounded check and the harness kills it. Neither looks like a failure — the second one is a perfectly clean `end_turn` — so the loop used to check the task `[x]`, advance to `pr_created`, find no PR and a dirty tree, and block for a human.
+
+Two independent signals decide whether a session satisfied its contract (`_LoopWorkingStageMixin._session_unfinished_reason`):
+
+- **the SDK's terminal result** — an error result surfaces as `run_work_session` returning `"ran_incomplete"` (`task_runner_session`), derived from `ResultMessage.is_error`
+- **a clean working tree** — the session's own contract is "commit your work", so leftover changes mean it stopped mid-task. Probed in the project dir, not the process cwd. A failed probe (no git, not a repo, timeout) is never read as unfinished
+
+Unfinished → the task is **not** checked off and the same task re-runs, with a `**Retry N**` note in its prompt telling it the leftover diff is its own work to finish, not redo. Bounded by `MAX_TASK_FINISH_ATTEMPTS` (2, `state.task_finish_attempts`); after that the task is checked off anyway and the PR stage takes over — the finish session below can still ship a dirty tree, so a stubborn task must not deadlock the run. Retries burn sessions, so `--max-sessions` still bounds everything.
+
+### Missing-PR recovery (dirty tree included)
+
+`pr_created` with no PR on the branch self-heals rather than blocking (`core/stages/pr_recovery.py`):
+
+- **clean tree, commits ahead of base** → the orchestrator pushes and opens the PR itself
+- **clean tree, nothing ahead** → nothing to ship; stage advances to `merged`
+- **dirty tree** → a bounded *finish session*: an agent verifies, commits, pushes and opens the PR for the whole group. Bounded by `MAX_PR_FINISH_ATTEMPTS` (2, `state.pr_finish_attempts`). The stage stays `pr_created`, so the next cycle either detects the PR the session opened or — tree now clean — takes the deterministic push+create path
+- **still blocks** for what genuinely needs a human: sitting on the base branch, a failed base comparison, a failed push/`gh pr create`, a crashed finish session, or a tree still dirty after the attempt budget
+
+Both counters reset on task advance, like `ci_fix_attempts`.
+
+### Limits — what bounds an agent, and what doesn't
+
+Sessions are bounded in **steps**, not wall-clock. A wall-clock cap punishes a session that is legitimately slow (big test suite, slow CI) exactly as hard as one that is looping.
+
+| Limit | Default | Override | What it does |
+|---|---|---|---|
+| `MAX_TURNS` (`core/agent_query.py`) | 400 turns | `CLAUDETM_MAX_TURNS` (`0` disables) | Runaway backstop per session, passed to the SDK as `max_turns`. Healthy sessions run tens of turns. Overrunning yields `error_max_turns` → the task retries (see above), it is never checked off |
+| `max_budget_usd` | unset | `--budget` | Per-session cost cap. Same graceful path on overrun |
+| `STREAM_IDLE_TIMEOUT_SEC` | 1800s | `CLAUDETM_STREAM_IDLE_TIMEOUT_SEC` | Max gap *between* stream messages — catches a hung SDK, not a slow agent |
+| `POST_COMPLETION_IDLE_TIMEOUT_SEC` | 120s | `CLAUDETM_POST_COMPLETION_IDLE_TIMEOUT_SEC` | Only armed after `end_turn`, where the sole remaining message is the `ResultMessage` the SDK sometimes loses (#30333). Times out as *success* |
+| `TrackerConfig.stall_threshold_seconds` | 300s | — | Orchestrator liveness, evaluated only *between* cycles. Every stage that runs an agent session or waits on GitHub heartbeats around it, so this never measures how long an agent may work |
+| `TrackerConfig.max_session_duration` | 4h | — | Backstop, checked only while a session is active — which `should_abort` effectively never is. Must never be tightened to "typical" durations; real sessions run over an hour |
+| `TrackerConfig.max_same_task_attempts` | 3 | — | Loop detection per task index. Sits one above `MAX_TASK_FINISH_ATTEMPTS` so a legitimate retry can't trip it |
+| `CI_POLL_TIMEOUT` | 7200s | — | CI wait, not agent work |
+
 ### Up-to-date-before-merge (--sync-before-merge, opt-in)
 - **Off by default.** A PR that merges cleanly is merged, even if the base moved under it. Syncing every behind-but-clean PR costs an agent session plus a full CI round on the common case, to catch a semantic clash that is rare — not a trade worth making automatically
 - Pass `claudetm start --sync-before-merge` when the base is volatile enough that the untested merge result is a real risk (`TaskOptions.sync_before_merge`, default False). Then `ready_to_merge` compares the PR head against the live base (`get_pr_behind_by`, GitHub's compare API; `mergeStateStatus == "BEHIND"` is also honored) and routes a behind branch to the same agent session conflicts use

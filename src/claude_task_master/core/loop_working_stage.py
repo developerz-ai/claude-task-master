@@ -6,6 +6,7 @@ the current task via an agent work session and transitioning state.
 
 from __future__ import annotations
 
+import subprocess
 import time
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -15,6 +16,13 @@ from .state import TaskState
 
 if TYPE_CHECKING:
     from .orchestrator import WorkLoopOrchestrator
+
+#: Max consecutive re-runs of the same task when its session ended without
+#: satisfying the work contract (cut off by the SDK, or uncommitted changes left
+#: behind). After this the task is checked off anyway and the PR stages take over
+#: — ``_PRRecovery`` can still finish and ship a dirty tree, so a stubborn task
+#: must not deadlock the run here.
+MAX_TASK_FINISH_ATTEMPTS = 2
 
 
 class _LoopWorkingStageMixin:
@@ -28,6 +36,43 @@ class _LoopWorkingStageMixin:
     _orc: WorkLoopOrchestrator  # set by OrchestratorLoop.__init__
 
     # ------------------------------------------------------------------
+
+    def _session_unfinished_reason(self, session_result: str | None) -> str | None:
+        """Return why the just-finished work session didn't satisfy its contract.
+
+        Two independent signals, because neither alone catches both failures:
+
+        - ``"ran_incomplete"`` — the SDK's terminal result was an error (max
+          turns, budget cap, error_during_execution). The agent was cut off.
+        - a dirty working tree — the session's own contract is "commit your
+          work", so leftover changes mean it stopped mid-task even when the SDK
+          reported a clean end_turn (an agent that ends its turn waiting on a
+          background check looks perfectly healthy to the SDK). The state dir is
+          git-excluded at init, so it never shows up here.
+
+        Returns:
+            A short reason string, or None when the session finished properly.
+        """
+        if session_result == "ran_incomplete":
+            return "session was cut off"
+        try:
+            result = subprocess.run(
+                ["git", "status", "--porcelain"],
+                # The project tree the run operates on — not the process cwd,
+                # which a caller may have moved.
+                cwd=str(self._orc.state_manager.state_dir.parent),
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+        except Exception:
+            # Can't tell (no git, timeout, not a repo) — never invent an
+            # unfinished session out of a failed probe.
+            return None
+        if result.stdout.strip():
+            return "uncommitted changes left behind"
+        return None
 
     def _handle_working_stage(self, state: TaskState) -> int | None:
         """Handle the working stage — implement the current task.
@@ -132,6 +177,33 @@ class _LoopWorkingStageMixin:
             orc.state_manager.save_state_merged(state)
             return None
 
+        if session_result == "no_tasks_remaining":
+            # The index is past the end of the plan — no session ran, so there is
+            # nothing to check off and nothing to ship.
+            console.detail("No tasks remaining in plan")
+            orc.state_manager.save_state_merged(state)
+            return None
+
+        unfinished = self._session_unfinished_reason(session_result)
+        if unfinished and state.task_finish_attempts < MAX_TASK_FINISH_ATTEMPTS:
+            state.task_finish_attempts += 1
+            state.session_count += 1
+            state.pr_active_work_seconds += session_duration
+            console.warning(
+                f"Task #{completed_task_index + 1} not finished ({unfinished}) — "
+                f"retrying it (attempt {state.task_finish_attempts}/{MAX_TASK_FINISH_ATTEMPTS})"
+            )
+            state.workflow_stage = "working"
+            orc.state_manager.save_state_merged(state)
+            return None
+        if unfinished:
+            console.warning(
+                f"Task #{completed_task_index + 1} still unfinished ({unfinished}) after "
+                f"{state.task_finish_attempts} retries — moving on; the PR stage will "
+                "finish and ship what is on the branch"
+            )
+
+        state.task_finish_attempts = 0
         orc.tracker.record_task_progress(state.current_task_index)
         # Import deferred to avoid circular imports; allows tests to patch
         # claude_task_master.core.orchestrator_loop.reset_escape correctly.

@@ -133,6 +133,14 @@ class TaskState(BaseModel):
     # Conflict-resolution fields
     conflict_fix_attempts: int = 0  # Number of conflict-resolution agent sessions for current PR
     branch_sync_attempts: int = 0  # Number of base-sync agent sessions for current PR
+    # Number of "finish the group" agent sessions run for the current PR group
+    # because the branch had no PR and the tree was dirty (a work session ended
+    # mid-task). Bounded by MAX_PR_FINISH_ATTEMPTS; reset on task advance.
+    pr_finish_attempts: int = 0
+    # Consecutive re-runs of the CURRENT task because its work session ended
+    # without satisfying its contract (SDK error result, or uncommitted changes
+    # left behind). Bounded by MAX_TASK_FINISH_ATTEMPTS; reset on task advance.
+    task_finish_attempts: int = 0
     # Release phase fields
     release_fix_attempts: int = 0  # Number of release fix attempts for current PR
     in_release_fix: bool = False  # True while current PR is a release-fix PR

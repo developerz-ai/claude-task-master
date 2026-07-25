@@ -45,6 +45,11 @@ class StageHandlerBase:
     # full CI round-trip, so a busy base branch could otherwise outrun the PR
     # forever; after this many chases, a green-but-slightly-behind PR merges.
     MAX_BRANCH_SYNC_ATTEMPTS = 3
+    # Max "finish the group" agent sessions when the PR group ended with no PR and
+    # a dirty tree (a work session died mid-task). Two passes is enough for the
+    # common case — the leftover work just needs verifying, committing, pushing;
+    # after that, a human is genuinely needed.
+    MAX_PR_FINISH_ATTEMPTS = 2
     # Grace period after CI passes before checking reviews. Review bots (CodeRabbit) post their
     # review comments a little *after* CI completes, not as a blocking status check — so a short
     # delay would race the merge ahead of the comments. 120s gives them time to land.
