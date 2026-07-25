@@ -50,6 +50,11 @@ class StageHandlerBase:
     # common case — the leftover work just needs verifying, committing, pushing;
     # after that, a human is genuinely needed.
     MAX_PR_FINISH_ATTEMPTS = 2
+    # Max re-runs of a push-only fix session (CI fix, review fix, conflict) that
+    # ended without committing and pushing. Separate from the per-cause counters
+    # (MAX_CI_FIX_ATTEMPTS etc.): those bound "the fix didn't work", this bounds
+    # "the session never delivered a fix at all".
+    MAX_FIX_FINISH_ATTEMPTS = 2
     # Grace period after CI passes before checking reviews. Review bots (CodeRabbit) post their
     # review comments a little *after* CI completes, not as a blocking status check — so a short
     # delay would race the merge ahead of the comments. 120s gives them time to land.

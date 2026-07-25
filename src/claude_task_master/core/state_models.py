@@ -137,6 +137,11 @@ class TaskState(BaseModel):
     # because the branch had no PR and the tree was dirty (a work session ended
     # mid-task). Bounded by MAX_PR_FINISH_ATTEMPTS; reset on task advance.
     pr_finish_attempts: int = 0
+    # Consecutive re-runs of a push-only fix session (CI fix, review fix,
+    # conflict) that ended without committing and pushing. Bounded by
+    # MAX_FIX_FINISH_ATTEMPTS; reset when a fix session delivers, and on task
+    # advance.
+    fix_finish_attempts: int = 0
     # Consecutive re-runs of the CURRENT task because its work session ended
     # without satisfying its contract (SDK error result, or uncommitted changes
     # left behind). Bounded by MAX_TASK_FINISH_ATTEMPTS; reset on task advance.

@@ -97,8 +97,19 @@ class AgentPhaseExecutor(_AgentPhaseGenerationMixin):
             release_guide: Optional release guide for per-PR release checks.
 
         Returns:
-            Dict with 'plan', 'criteria', and 'raw_output' keys.
+            Dict with 'plan', 'criteria', 'raw_output', 'success' and 'subtype'
+            keys. ``success`` is False when the SDK's terminal result was an
+            error (max turns, budget cap, mid-execution error) — the whole run
+            is built on this plan, so a caller must not persist a plan that was
+            cut off halfway through being written. ``subtype`` carries the
+            SDK's terminal subtype for reporting (e.g. ``"error_max_turns"``),
+            and is None when no ResultMessage was seen.
         """
+        # Reset terminal-result capture so a prior session's outcome cannot
+        # leak into this session's derived success.
+        if self.message_processor is not None:
+            self.message_processor.reset_result_state()
+
         # Build prompt for planning
         prompt = build_planning_prompt(
             goal=goal,
@@ -123,11 +134,19 @@ class AgentPhaseExecutor(_AgentPhaseGenerationMixin):
             )
         )
 
+        success = True
+        subtype: str | None = None
+        if self.message_processor is not None:
+            success = not self.message_processor.last_result_is_error
+            subtype = self.message_processor.last_result_subtype
+
         # Parse result to extract plan and criteria
         return {
             "plan": self._extract_plan(result),
             "criteria": self._extract_criteria(result),
             "raw_output": result,
+            "success": success,
+            "subtype": subtype,
         }
 
     def run_work_session(

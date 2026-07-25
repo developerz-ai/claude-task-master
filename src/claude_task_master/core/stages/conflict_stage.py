@@ -109,6 +109,14 @@ class _ConflictStage(_MergeStage):
             self.state_manager.save_state(state)
             return 1
 
+        # A rebase that ends mid-flight leaves conflict markers and a dirty tree;
+        # advancing on that would merge-check a branch git cannot even check out.
+        # ("Up to date, nothing to push" is clean and unpushed-free — it passes.)
+        unfinished = self._fix_session_unfinished_reason(required_branch)
+        if unfinished:
+            return self._handle_unfinished_fix(state, unfinished, "resolving_conflicts")
+        state.fix_finish_attempts = 0
+
         # The push re-triggers CI; GitHub also needs a moment to recompute
         # mergeability against the new head.
         console.info("Waiting 60s for CI to start...")

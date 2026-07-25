@@ -164,6 +164,17 @@ After completing your fixes, end with: TASK COMPLETE"""
                 return False
 
         if state.options.auto_merge:
+            # `gh pr merge` checks branches out — a dirty tree aborts it with a
+            # raw git error. Same guard as the ready_to_merge stage.
+            pending = orc.stage_handler._uncommitted_summary(max_lines=20)
+            if pending:
+                console.error(
+                    f"Refusing to merge fix PR #{pr_number}: uncommitted changes in the "
+                    "working tree, and merging checks branches out"
+                )
+                for line in pending.splitlines():
+                    console.detail(f"  {line}")
+                return False
             try:
                 console.info(f"Merging fix PR #{pr_number}...")
                 orc.github_client.merge_pr(pr_number, admin=state.options.admin_merge)

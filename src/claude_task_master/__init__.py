@@ -3,5 +3,5 @@
 Uses Claude Agent SDK to keep Claude working until a goal is achieved.
 """
 
-__version__ = "0.1.72"
+__version__ = "0.1.73"
 __all__ = ["__version__"]

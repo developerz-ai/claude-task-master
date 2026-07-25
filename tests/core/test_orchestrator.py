@@ -896,12 +896,26 @@ class TestRunWorkflowCycle:
     def test_workflow_cycle_pr_created_stage_no_pr_blocks(
         self, mock_console, basic_orchestrator, state_manager, basic_task_state
     ):
-        """Should block when no PR found - agent failed to create one."""
+        """Should block when no PR found and recovery is impossible.
+
+        The git probes are pinned rather than left to the ambient repository:
+        read from the real working tree, this asserted "blocked" only while the
+        developer happened to be sitting on the base branch, and took the
+        recovery path otherwise.
+        """
+        from claude_task_master.core.workflow_stages import WorkflowStageHandler
+
         state_manager.state_dir.mkdir(exist_ok=True)
         basic_task_state.workflow_stage = "pr_created"
 
-        result = basic_orchestrator._run_workflow_cycle(basic_task_state)
-        # Should block because no PR was found (agent failed to create one)
+        with (
+            patch.object(WorkflowStageHandler, "_get_current_branch", return_value="feat/x"),
+            patch.object(WorkflowStageHandler, "_has_uncommitted_changes", return_value=False),
+            # Unmeasurable against the base → unknown, never assumed empty.
+            patch.object(WorkflowStageHandler, "_commits_ahead_of_base", return_value=None),
+        ):
+            result = basic_orchestrator._run_workflow_cycle(basic_task_state)
+
         assert result == 1
         assert basic_task_state.status == "blocked"
 
