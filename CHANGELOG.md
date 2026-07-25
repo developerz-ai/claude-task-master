@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.74] - 2026-07-25
+
+### Fixed
+- **A transient GitHub failure no longer ends an unattended run.** claudetm is built to work for hours without supervision, so a run that dies at 3am on a 5xx has failed at its one job — yet three operations blocked on their *first* failure, each with a cause that resolves itself in seconds: detecting a PR (`Could not detect PR: …` — a failed *lookup*, which says nothing about whether the branch has one), merging it (a rate limit, mergeability still recomputing, a check that flipped between the poll and the call), and checking out the base after a merge (a momentary index lock — and there the PR had *already landed*, so giving up stranded finished work). All three now retry through a shared `_retry_transient` primitive: `MAX_TRANSIENT_RETRIES` (5) with linear backoff to 60s, per-operation budgets, cleared on success so flakiness doesn't accumulate. A genuinely permanent failure — branch protection refusing a solo-authored PR without `--admin` — still blocks, just after the retries and with the attempt count attached.
+- **The verification fix-PR path recovers instead of giving up.** A fix session that committed but stopped before `gh pr create` left the run dead with the fix on a local branch — the same "give up where the orchestrator can recover" the PR stages stopped doing in 0.1.72. `_open_missing_fix_pr` now pushes and opens it, and only in the unambiguous case (real feature branch, clean tree, commits over the base); anything else reports the failure as before rather than pushing something it cannot vouch for.
+
 ## [0.1.73] - 2026-07-25
 
 ### Fixed
@@ -892,7 +898,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.73...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.74...HEAD
+[0.1.74]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.73...v0.1.74
 [0.1.73]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.72...v0.1.73
 [0.1.72]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.71...v0.1.72
 [0.1.71]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.69...v0.1.71

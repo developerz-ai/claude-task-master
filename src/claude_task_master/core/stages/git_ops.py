@@ -6,6 +6,7 @@ import subprocess
 from typing import TYPE_CHECKING
 
 from .. import console
+from ..shutdown import interruptible_sleep
 from .base import StageHandlerBase
 
 if TYPE_CHECKING:
@@ -187,6 +188,57 @@ class _GitOps(StageHandlerBase):
             if unpushed:
                 return f"{unpushed} commit(s) never pushed"
         return None
+
+    def _retry_transient(
+        self,
+        state: TaskState,
+        key: str,
+        reason: str,
+        hint: str | None = None,
+    ) -> int | None:
+        """Retry an operation that failed for a reason time may fix, then block.
+
+        claudetm is built to run unattended for hours, so ending a run on the
+        first flaky API call — a GitHub 5xx, a rate limit, a branch momentarily
+        locked, mergeability still recomputing — is a bug: the operation would
+        very likely succeed a minute later, and instead a human has to come back
+        and type ``claudetm resume``. Equally, a permanent failure (branch
+        protection refusing the merge) must not spin forever, so the budget is
+        small and the block still happens, just later and with the failure count
+        attached.
+
+        The caller leaves ``workflow_stage`` untouched, so returning None simply
+        re-enters the same stage on the next cycle.
+
+        Args:
+            state: Current task state.
+            key: Identifies the operation being retried (its own budget).
+            reason: What failed, shown on every attempt.
+            hint: Optional guidance printed only when the budget is spent.
+
+        Returns:
+            None to retry on the next cycle, 1 once the budget is spent.
+        """
+        attempt = self._transient_attempts.get(key, 0) + 1
+        self._transient_attempts[key] = attempt
+
+        if attempt > self.MAX_TRANSIENT_RETRIES:
+            console.error(f"{reason} — still failing after {attempt - 1} retries, blocking")
+            if hint:
+                console.detail(hint)
+            state.status = "blocked"
+            self.state_manager.save_state(state)
+            return 1
+
+        delay = min(self.CI_POLL_INTERVAL * attempt, self.TRANSIENT_RETRY_MAX_DELAY)
+        console.warning(f"{reason} — retry {attempt}/{self.MAX_TRANSIENT_RETRIES} in {delay}s")
+        self.state_manager.save_state(state)
+        interruptible_sleep(delay)
+        return None
+
+    def _clear_transient(self, key: str) -> None:
+        """Forget a transient-retry budget after the operation succeeded."""
+        self._transient_attempts.pop(key, None)
 
     def _handle_unfinished_fix(self, state: TaskState, reason: str, stage: str) -> int | None:
         """Keep an undelivered fix in its own stage instead of advancing on it.

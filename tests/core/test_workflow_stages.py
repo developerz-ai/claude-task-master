@@ -321,15 +321,23 @@ class TestHandlePRCreatedStage:
     def test_pr_detection_error_blocks(
         self, mock_console, workflow_handler, state_manager, basic_task_state, mock_github_client
     ):
-        """Should block when PR detection fails with exception."""
+        """Should retry a failed PR lookup, then block once the budget is spent.
+
+        A failed lookup says nothing about the PR — the branch may well have
+        one — so a single GitHub hiccup must not end an unattended run.
+        """
         state_manager.state_dir.mkdir(exist_ok=True)
         mock_github_client.get_pr_for_current_branch.side_effect = Exception("API error")
 
-        result = workflow_handler.handle_pr_created_stage(basic_task_state)
+        with patch("claude_task_master.core.stages.git_ops.interruptible_sleep", return_value=True):
+            for _ in range(workflow_handler.MAX_TRANSIENT_RETRIES):
+                assert workflow_handler.handle_pr_created_stage(basic_task_state) is None
+                assert basic_task_state.status != "blocked"
 
-        assert result == 1  # Blocked
+            result = workflow_handler.handle_pr_created_stage(basic_task_state)
+
+        assert result == 1
         assert basic_task_state.status == "blocked"
-        mock_console.warning.assert_called()
 
     @patch("claude_task_master.core.stages.ci_stage.console")
     def test_sanitizes_pr_body_on_detection(
@@ -1012,7 +1020,12 @@ class TestHandleReadyToMergeStage:
         mock_github_client,
         mock_pr_status,
     ):
-        """Should block when merge fails."""
+        """Should retry a failed merge, then block once the budget is spent.
+
+        Transient (5xx, rate limit, mergeability recomputing) and permanent
+        (branch protection) merge failures look identical here, so retrying
+        rescues the first kind at the cost of a few polls for the second.
+        """
         state_manager.state_dir.mkdir(exist_ok=True)
         basic_task_state.current_pr = 42
         basic_task_state.options.auto_merge = True
@@ -1020,11 +1033,50 @@ class TestHandleReadyToMergeStage:
         mock_github_client.merge_pr.side_effect = Exception("Merge failed")
         mock_sleep.return_value = True
 
-        result = workflow_handler.handle_ready_to_merge_stage(basic_task_state)
+        with (
+            patch("claude_task_master.core.stages.git_ops.interruptible_sleep", return_value=True),
+            patch.object(WorkflowStageHandler, "_uncommitted_summary", return_value=""),
+        ):
+            for _ in range(workflow_handler.MAX_TRANSIENT_RETRIES):
+                assert workflow_handler.handle_ready_to_merge_stage(basic_task_state) is None
+                assert basic_task_state.status != "blocked"
+
+            result = workflow_handler.handle_ready_to_merge_stage(basic_task_state)
 
         assert result == 1
         assert basic_task_state.status == "blocked"
-        mock_console.warning.assert_called()
+
+    @patch("claude_task_master.core.stages.merge_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.merge_stage.console")
+    def test_merge_recovers_when_a_retry_succeeds(
+        self,
+        mock_console,
+        mock_sleep,
+        workflow_handler,
+        state_manager,
+        basic_task_state,
+        mock_github_client,
+        mock_pr_status,
+    ):
+        """The point of the retry: a flaky merge lands instead of killing the run."""
+        state_manager.state_dir.mkdir(exist_ok=True)
+        basic_task_state.current_pr = 42
+        basic_task_state.options.auto_merge = True
+        mock_github_client.get_pr_status.return_value = mock_pr_status
+        mock_github_client.merge_pr.side_effect = [Exception("502 Bad Gateway"), None]
+        mock_sleep.return_value = True
+
+        with (
+            patch("claude_task_master.core.stages.git_ops.interruptible_sleep", return_value=True),
+            patch.object(WorkflowStageHandler, "_uncommitted_summary", return_value=""),
+            patch.object(WorkflowStageHandler, "_confirm_pr_merged", return_value=True),
+        ):
+            assert workflow_handler.handle_ready_to_merge_stage(basic_task_state) is None
+            result = workflow_handler.handle_ready_to_merge_stage(basic_task_state)
+
+        assert result is None
+        assert basic_task_state.status != "blocked"
+        assert basic_task_state.workflow_stage == "merged"
 
     @patch("claude_task_master.core.stages.merge_stage.interruptible_sleep")
     @patch("claude_task_master.core.stages.merge_stage.console")
@@ -1253,7 +1305,12 @@ class TestHandleMergedStage:
         mock_github_client,
         mock_pr_status,
     ):
-        """Should block workflow if checkout fails after PR merge."""
+        """Should retry a failed post-merge checkout, then block.
+
+        The PR has already landed, so giving up on the first failure strands a
+        finished merge behind a manual resume — but continuing on the merged
+        branch is not an option either, since the next task would commit onto it.
+        """
         state_manager.state_dir.mkdir(exist_ok=True)
         state_manager.save_plan("- [ ] Task 1")
         basic_task_state.current_pr = 42
@@ -1261,13 +1318,21 @@ class TestHandleMergedStage:
 
         mark_fn = MagicMock()
 
-        with patch.object(WorkflowStageHandler, "_checkout_branch", return_value=False):
+        with (
+            patch.object(WorkflowStageHandler, "_checkout_branch", return_value=False),
+            patch("claude_task_master.core.stages.git_ops.interruptible_sleep", return_value=True),
+            # The retry/block reporting lives in _GitOps, not merge_stage.
+            patch("claude_task_master.core.stages.git_ops.console") as git_console,
+        ):
+            for _ in range(workflow_handler.MAX_TRANSIENT_RETRIES):
+                assert workflow_handler.handle_merged_stage(basic_task_state, mark_fn) is None
+                assert basic_task_state.status != "blocked"
+
             result = workflow_handler.handle_merged_stage(basic_task_state, mark_fn)
 
-        # Should block instead of continuing
         assert result == 1
         assert basic_task_state.status == "blocked"
-        mock_console.error.assert_called()
+        git_console.error.assert_called()
 
     @patch("claude_task_master.core.stages.merge_stage.console")
     def test_release_fix_pr_merge_preserves_attempt_counter(

@@ -211,16 +211,28 @@ class _MergeStage(_ReviewStage):
             try:
                 self.github_client.merge_pr(pr_number, admin=state.options.admin_merge)
             except Exception as e:
-                console.warning(f"Auto-merge failed: {e}")
-                console.detail("PR may need manual merge or have merge conflicts")
-                state.status = "blocked"
-                self.state_manager.save_state(state)
-                return 1
+                # Merge failures split into two kinds that look identical here:
+                # transient (GitHub 5xx, rate limit, mergeability recomputing,
+                # a check that flipped between the poll and the call) and
+                # permanent (branch protection refusing a solo-authored PR
+                # without --admin). Retrying costs a few polls and rescues the
+                # first kind; the second still blocks, just with the attempt
+                # count attached instead of on the first try.
+                return self._retry_transient(
+                    state,
+                    f"merge_pr:{pr_number}",
+                    f"Auto-merge failed for PR #{pr_number}: {e}",
+                    hint=(
+                        "If the base branch policy requires a review, re-run with --admin; "
+                        f"otherwise merge PR #{pr_number} manually, then: claudetm resume"
+                    ),
+                )
             # Confirm the merge actually landed - merge_pr may have enabled
             # auto-merge instead, which only merges once checks pass.
             merged = self._confirm_pr_merged(pr_number)
             if merged:
                 console.success(f"PR #{pr_number} merged!")
+                self._clear_transient(f"merge_pr:{pr_number}")
                 self._merge_unknown_attempts.pop(pr_number, None)
                 state.workflow_stage = "merged"
                 self.state_manager.save_state(state)
@@ -311,15 +323,22 @@ class _MergeStage(_ReviewStage):
             # Checkout to base branch to avoid conflicts on next task
             console.info(f"Checking out to {base_branch}...")
             if not self._checkout_branch(base_branch):
-                # Checkout failed even after recovery - block and require manual intervention
-                console.error(f"Could not checkout to {base_branch} after PR merge")
-                console.detail("Manual intervention required:")
-                console.detail(f"  1. Run: git stash && git checkout {base_branch} && git pull")
-                console.detail("  2. Then run: claudetm resume")
-                state.status = "blocked"
-                self.state_manager.save_state(state)
-                return 1
+                # The PR is already merged — the work landed. A checkout that
+                # fails here is usually momentary (an index lock, a concurrent
+                # git process), so retry rather than stranding a finished merge
+                # behind a manual resume. Continuing on the old branch is NOT an
+                # option: the next task would commit onto a merged branch.
+                return self._retry_transient(
+                    state,
+                    f"checkout_base:{base_branch}",
+                    f"Could not checkout {base_branch} after merging PR #{state.current_pr}",
+                    hint=(
+                        f"Run: git stash && git checkout {base_branch} && git pull, "
+                        "then: claudetm resume"
+                    ),
+                )
 
+            self._clear_transient(f"checkout_base:{base_branch}")
             console.success(f"Switched to {base_branch}")
 
             # Delete the merged local branch (best effort, skip if same as base)

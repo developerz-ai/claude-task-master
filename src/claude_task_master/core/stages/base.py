@@ -55,6 +55,14 @@ class StageHandlerBase:
     # (MAX_CI_FIX_ATTEMPTS etc.): those bound "the fix didn't work", this bounds
     # "the session never delivered a fix at all".
     MAX_FIX_FINISH_ATTEMPTS = 2
+    # Retries for an operation that failed for reasons a human cannot fix and
+    # time usually can: a GitHub 5xx, a rate limit, mergeability still being
+    # recomputed, a branch briefly locked. claudetm is meant to run unattended
+    # for hours, so ending a whole run on the first flaky API call is a bug —
+    # but so is retrying a genuinely permanent failure forever.
+    MAX_TRANSIENT_RETRIES = 5
+    # Seconds between transient retries (linear backoff up to this ceiling).
+    TRANSIENT_RETRY_MAX_DELAY = 60
     # Grace period after CI passes before checking reviews. Review bots (CodeRabbit) post their
     # review comments a little *after* CI completes, not as a blocking status check — so a short
     # delay would race the merge ahead of the comments. 120s gives them time to land.
@@ -94,3 +102,8 @@ class StageHandlerBase:
         # Fetched once per branch per handler lifetime; branch-protection rules don't
         # change between CI polls, so a per-wait fetch is pure N+1 waste.
         self._required_checks_cache: dict[str, set[str]] = {}
+        # Consecutive failures per transient-retry key (see _retry_transient).
+        # Instance-level: a retry budget is about *this* run's flakiness, and
+        # resuming should start from a clean slate rather than inherit a count
+        # from an operation that may since have started working.
+        self._transient_attempts: dict[str, int] = {}
