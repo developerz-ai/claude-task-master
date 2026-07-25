@@ -69,6 +69,7 @@ def recovery_env(state_manager):
     with (
         patch(f"{_MODULE}.console"),
         patch("claude_task_master.core.stages.ci_stage.console"),
+        patch(f"{_MODULE}._PRRecovery._uncommitted_summary", return_value=" M src/thing.py"),
         patch.object(
             WorkflowStageHandler, "_get_current_branch", return_value="feat/group-branch"
         ) as branch,
@@ -131,9 +132,54 @@ class TestRecoverMissingPR:
         assert result == 1
         assert task_state.status == "blocked"
 
-    def test_dirty_tree_blocks(self, workflow_handler, task_state, recovery_env):
-        """Uncommitted changes mean the session left unfinished work — block."""
+    def test_dirty_tree_runs_finish_session(self, workflow_handler, task_state, recovery_env):
+        """Uncommitted changes are handed to a finish session, not blocked on."""
         recovery_env["dirty"].return_value = True
+
+        result = workflow_handler.handle_pr_created_stage(task_state)
+
+        assert result is None
+        assert task_state.status == "working"  # not blocked
+        assert task_state.pr_finish_attempts == 1
+        # Stage stays pr_created so the next cycle re-checks for the PR.
+        assert task_state.workflow_stage == "pr_created"
+        workflow_handler.agent.run_work_session.assert_called_once()
+        kwargs = workflow_handler.agent.run_work_session.call_args.kwargs
+        assert kwargs["create_pr"] is True
+        assert kwargs["required_branch"] == "feat/group-branch"
+        recovery_env["push"].assert_not_called()
+
+    def test_finish_session_then_clean_tree_opens_pr(
+        self, workflow_handler, task_state, mock_github_client, recovery_env
+    ):
+        """A finish session that commits but doesn't push still gets its PR opened."""
+        recovery_env["dirty"].return_value = True
+        workflow_handler.handle_pr_created_stage(task_state)
+
+        recovery_env["dirty"].return_value = False
+        result = workflow_handler.handle_pr_created_stage(task_state)
+
+        assert result is None
+        recovery_env["push"].assert_called_once()
+        mock_github_client.create_pr.assert_called_once()
+
+    def test_dirty_tree_blocks_after_max_finish_attempts(
+        self, workflow_handler, task_state, recovery_env
+    ):
+        """A tree still dirty after the attempt budget needs a human."""
+        recovery_env["dirty"].return_value = True
+        task_state.pr_finish_attempts = workflow_handler.MAX_PR_FINISH_ATTEMPTS
+
+        result = workflow_handler.handle_pr_created_stage(task_state)
+
+        assert result == 1
+        assert task_state.status == "blocked"
+        workflow_handler.agent.run_work_session.assert_not_called()
+
+    def test_finish_session_failure_blocks(self, workflow_handler, task_state, recovery_env):
+        """A crashed finish session falls back to the manual-intervention block."""
+        recovery_env["dirty"].return_value = True
+        workflow_handler.agent.run_work_session.side_effect = RuntimeError("sdk exploded")
 
         result = workflow_handler.handle_pr_created_stage(task_state)
 

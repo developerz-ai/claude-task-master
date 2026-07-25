@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.72] - 2026-07-25
+
+### Fixed
+- **A work session that stops mid-task no longer marks that task done.** Two ways a session ends without finishing: the SDK cuts it off (`error_max_turns`, budget cap, `error_during_execution`), or the agent ends its turn waiting on a backgrounded check and the harness kills it — the second arriving as a perfectly clean `end_turn`. Either way the loop checked the task `[x]`, advanced to `pr_created`, found no PR and a dirty tree, and blocked; the user had to finish the work, open the PR by hand and `claudetm resume`. `run_work_session` now surfaces the SDK's error result as `"ran_incomplete"` (`ResultMessage.is_error` was captured but never acted on in the work path), and the working stage additionally probes the project tree — the session's own contract is "commit your work", so leftover changes mean it stopped mid-task. Unfinished → the task is not checked off and re-runs, with a `**Retry N**` note telling it the leftover diff is its own work to finish rather than redo. Bounded by `MAX_TASK_FINISH_ATTEMPTS` (2); after that it hands over to the PR stage rather than deadlocking. A failed git probe (no git, not a repo, timeout) is never read as unfinished.
+- **A dirty tree at `pr_created` is recovered, not blocked on.** `_PRRecovery` (v0.1.69) pushes and opens the PR itself for a clean tree, but treated uncommitted changes as unconditionally fatal — exactly the state a killed session leaves behind. It now runs a bounded *finish session*: a tightly-scoped agent verifies the leftover work, commits, pushes and opens the PR for the whole group (`MAX_PR_FINISH_ATTEMPTS`, 2). The stage stays `pr_created`, so the next cycle either detects that PR or — tree now clean — takes the deterministic push+create path. Blocking is still reserved for what needs a human: the base branch, a failed comparison/push/`gh pr create`, a crashed finish session, or a tree still dirty after the budget.
+- **A long agent session no longer reads as a stall.** `ExecutionTracker.start_session` stamps the progress clock at session *start*, so any session running past `stall_threshold_seconds` (5 min) would abort the run the moment it returned — masked until now only because the working stage always recorded task progress straight after. The loop now heartbeats whenever a cycle ran an agent session, not only when it changed stage, which is what makes the new retry and finish sessions safe.
+
+### Added
+- **Agent sessions are bounded in steps.** `max_turns` was never passed to the SDK — a session could run forever, with only an optional `--budget` as a ceiling. Now capped at 400 turns (`CLAUDETM_MAX_TURNS`, `0` disables): a runaway backstop, not a working budget, since healthy sessions run tens of turns. Steps rather than wall-clock on purpose — a time cap punishes a session that is legitimately slow (big test suite, slow CI) exactly as hard as one that is looping. Overrunning now retries the task instead of marking it done.
+
+### Changed
+- Work prompts state that verification must run in the foreground: backgrounding a check and ending the turn on it kills the session with the work uncommitted — the trigger behind both fixes above.
+- `TrackerConfig.max_session_duration` raised 30 min → 4 h (strict: 15 min → 1 h). It is a backstop checked only while a session is active, and real work sessions legitimately run over an hour; the old value would have killed healthy work had it ever been reached. Every tracker limit is now documented with what it actually measures.
+
 ## [0.1.71] - 2026-07-24
 
 ### Added
@@ -865,7 +879,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.71...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.72...HEAD
+[0.1.72]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.71...v0.1.72
 [0.1.71]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.69...v0.1.71
 [0.1.70]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.69...v0.1.70
 [0.1.69]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.68...v0.1.69

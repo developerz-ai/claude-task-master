@@ -225,12 +225,20 @@ class OrchestratorLoop(
 
                 # Route through orc.* so patch.object on orchestrator intercepts it.
                 stage_before_cycle = state.workflow_stage
+                sessions_before_cycle = state.session_count
                 result = orc._run_workflow_cycle(state)
                 # A stage transition is progress: fixing CI, addressing review
                 # comments or resolving conflicts each run an agent session that
                 # reports nothing to the tracker and can outlast the stall
-                # threshold on its own.
-                if state.workflow_stage != stage_before_cycle:
+                # threshold on its own. So is an agent session that ran without
+                # changing stage (a task retry, a finish-the-group session):
+                # start_session stamps the progress clock at session *start*, so
+                # any long session would otherwise read as a stall the moment it
+                # returns.
+                if (
+                    state.workflow_stage != stage_before_cycle
+                    or state.session_count != sessions_before_cycle
+                ):
                     orc.tracker.record_heartbeat()
                 if result is not None:
                     stop_listening()

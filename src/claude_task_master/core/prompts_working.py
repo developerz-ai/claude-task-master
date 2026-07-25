@@ -231,6 +231,7 @@ npm test                 # JS
 ruff check . && mypy .   # Python lint/types
 eslint . && tsc          # JS lint/types
 ```
+Foreground only. Never background a check and end your turn waiting on it — the session dies there and your work is lost uncommitted.
 
 **6. Commit** —
 ```bash
@@ -295,6 +296,7 @@ npm test                 # JS
 ruff check . && mypy .   # Python lint/types
 eslint . && tsc          # JS lint/types
 ```
+Foreground only. Never background a check and end your turn waiting on it — the session dies there and your work is lost uncommitted.
 
 **6. Commit** —
 ```bash
@@ -331,6 +333,7 @@ npm test                 # JS
 ruff check . && mypy .   # Python lint/types
 eslint . && tsc          # JS lint/types
 ```
+Foreground only. Never background a check and end your turn waiting on it — the session dies there and your work is lost uncommitted.
 
 **6. Commit** —
 ```bash

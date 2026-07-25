@@ -62,6 +62,10 @@ class _TaskRunnerSessionMixin:
             - ``"skipped_already_complete"``: the current task was already
               checked off in the plan; only the task index was advanced.
             - ``"ran"``: an agent work session executed to completion.
+            - ``"ran_incomplete"``: a session ran but the SDK reported an error
+              terminal result (max turns, budget cap, mid-execution error), so
+              the task cannot be assumed done. Distinct from ``"ran"`` so
+              callers do not check it off.
             - ``"no_tasks_remaining"``: the task index is past the end of the
               plan; no work was started. Distinct from ``"ran"`` so callers
               only mark tasks complete when work actually ran.
@@ -146,10 +150,21 @@ class _TaskRunnerSessionMixin:
                 for ref in parsed_task.context_lines:
                     context_refs += f"  - {ref}\n"
 
+        # A retry means the previous session on this exact task stopped before
+        # committing. Say so — otherwise the agent re-reads a working tree full
+        # of its own half-finished changes with no idea where they came from.
+        retry_note = ""
+        if state.task_finish_attempts:
+            retry_note = (
+                f"\n**Retry {state.task_finish_attempts}** — the previous session on this task "
+                "stopped before committing. `git status`/`git diff` first: the leftover changes "
+                "are its work. Finish them, don't redo them.\n"
+            )
+
         task_description = f"""Goal: {goal}
 
 Current Task (#{state.current_task_index + 1}): {cleaned_task}
-{context_refs}
+{context_refs}{retry_note}
 Please complete this task."""
 
         console.newline()
@@ -237,6 +252,15 @@ Please complete this task."""
         # Expose the session output so the orchestrator can distil it into
         # accumulated context.md learnings after the task is marked complete.
         self.last_session_output = result.get("output", "") or ""
+
+        # The SDK's terminal ResultMessage is authoritative about whether the
+        # session reached its own end. An error result (max turns, budget cap,
+        # error_during_execution) means the agent was cut off mid-task — the
+        # caller must not check the task off on the strength of it.
+        if result.get("success") is False:
+            subtype = result.get("subtype") or "error"
+            console.warning(f"Work session ended early ({subtype}) - task is not done")
+            return "ran_incomplete"
 
         return "ran"
 

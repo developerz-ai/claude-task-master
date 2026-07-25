@@ -77,10 +77,19 @@ class SessionMetrics:
 class TrackerConfig:
     """Configuration for progress tracking."""
 
-    stall_threshold_seconds: float = 300.0  # 5 minutes without progress
-    slow_threshold_seconds: float = 120.0  # 2 minutes per task is slow
-    max_same_task_attempts: int = 3  # Max times to retry same task
-    max_session_duration: float = 1800.0  # 30 minutes max per session
+    # Seconds without a completion/heartbeat before the run is aborted as
+    # stalled. Only ever evaluated *between* cycles: a session in flight reports
+    # nothing, and every stage that runs one (or waits on GitHub) heartbeats
+    # around it, so this measures orchestrator liveness — not how long an agent
+    # is allowed to work.
+    stall_threshold_seconds: float = 300.0
+    slow_threshold_seconds: float = 120.0  # advisory only — SLOW never aborts
+    max_same_task_attempts: int = 3  # Max times the same task index may start a session
+    # Hard ceiling on a single session, checked only while a session is active.
+    # In practice `should_abort` runs between cycles (no active session), so this
+    # is a backstop, not the working budget — real work sessions legitimately run
+    # over an hour, so the value must never be tightened to "typical" durations.
+    max_session_duration: float = 14400.0  # 4 hours
     enable_cost_tracking: bool = True
 
     @classmethod
@@ -95,7 +104,7 @@ class TrackerConfig:
             stall_threshold_seconds=120.0,
             slow_threshold_seconds=60.0,
             max_same_task_attempts=2,
-            max_session_duration=900.0,
+            max_session_duration=3600.0,
         )
 
 

@@ -78,6 +78,7 @@ class _AgentQueryExecuteMixin:
 
         STREAM_IDLE_TIMEOUT_SEC = _aq.STREAM_IDLE_TIMEOUT_SEC
         POST_COMPLETION_IDLE_TIMEOUT_SEC = _aq.POST_COMPLETION_IDLE_TIMEOUT_SEC
+        MAX_TURNS = _aq.MAX_TURNS
 
         result_text = ""
 
@@ -167,6 +168,11 @@ class _AgentQueryExecuteMixin:
             # Add effort level for extended thinking depth control
             if effort_level:
                 options_kwargs["effort"] = effort_level
+
+            # Bound the session in steps, not wall-clock. Overrunning yields an
+            # error_max_turns result, which the work loop reads as "not done".
+            if MAX_TURNS:
+                options_kwargs["max_turns"] = MAX_TURNS
 
             # Add fallback model for auto-recovery on model unavailability
             if fallback_model_name:

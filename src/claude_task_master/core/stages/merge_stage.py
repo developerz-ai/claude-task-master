@@ -337,6 +337,8 @@ class _MergeStage(_ReviewStage):
         state.ci_fix_attempts = 0
         state.conflict_fix_attempts = 0
         state.branch_sync_attempts = 0
+        state.pr_finish_attempts = 0
+        state.task_finish_attempts = 0
         state.in_release_fix = False
         state.ci_poll_start_time = None
         self.state_manager.save_state(state)
