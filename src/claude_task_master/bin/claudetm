@@ -15,6 +15,7 @@
 #   OPENROUTER_BASE_URL     - OpenRouter API base URL
 #   CLAUDETM_MODEL_SONNET   - Model name for 'sonnet' tier
 #   CLAUDETM_MODEL_OPUS     - Model name for 'opus' tier
+#   CLAUDETM_MODEL_FABLE    - Model name for 'fable' tier (opt-in, premium)
 #   CLAUDETM_MODEL_HAIKU    - Model name for 'haiku' tier
 #   CLAUDETM_TARGET_BRANCH  - Git target branch for PRs (default: main)
 #
@@ -33,7 +34,7 @@ set -euo pipefail
 
 # Script version - synchronized with Python package version
 # This should be kept in sync using scripts/sync_version.py
-SCRIPT_VERSION="0.1.6"
+SCRIPT_VERSION="0.1.75"
 
 # Configuration file location
 CONFIG_DIR=".claude-task-master"
@@ -184,6 +185,14 @@ load_config() {
         fi
     fi
 
+    if [[ -z "${CLAUDETM_MODEL_FABLE:-}" ]]; then
+        value=$(echo "$config_content" | json_get "models.fable")
+        if [[ -n "$value" ]]; then
+            export CLAUDETM_MODEL_FABLE="$value"
+            debug "Set CLAUDETM_MODEL_FABLE from config"
+        fi
+    fi
+
     if [[ -z "${CLAUDETM_MODEL_HAIKU:-}" ]]; then
         value=$(echo "$config_content" | json_get "models.haiku")
         if [[ -n "$value" ]]; then
@@ -287,17 +296,19 @@ default_config = {
         "openrouter_api_key": None,
         "openrouter_base_url": "https://openrouter.ai/api/v1"
     },
-    # NOTE: "opus" (smartest tier) is intentionally omitted — it is resolved
-    # dynamically at load time (Fable 5 before 2026-06-23, Opus 4.8 after).
-    # TODO(remove after 2026-06-23): pin the preferred model here again.
     "models": {
         "sonnet": "claude-sonnet-5",
-        "haiku": "claude-haiku-4-5-20251001"
+        "opus": "claude-opus-5",
+        "fable": "claude-fable-5",
+        "haiku": "claude-haiku-4-5-20251001",
+        "sonnet_1m": "claude-sonnet-5"
     },
     "context_windows": {
-        "opus": 200000,
+        "opus": 1000000,
+        "fable": 1000000,
         "sonnet": 200000,
-        "haiku": 200000
+        "haiku": 200000,
+        "sonnet_1m": 1000000
     },
     "git": {
         "target_branch": "main",
@@ -441,6 +452,7 @@ main() {
         echo "  Model Settings:"
         echo "    CLAUDETM_MODEL_SONNET = ${CLAUDETM_MODEL_SONNET:-(not set)}"
         echo "    CLAUDETM_MODEL_OPUS   = ${CLAUDETM_MODEL_OPUS:-(not set)}"
+        echo "    CLAUDETM_MODEL_FABLE  = ${CLAUDETM_MODEL_FABLE:-(not set)}"
         echo "    CLAUDETM_MODEL_HAIKU  = ${CLAUDETM_MODEL_HAIKU:-(not set)}"
         echo ""
         echo "  Git Settings:"

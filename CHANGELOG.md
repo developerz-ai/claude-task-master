@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.75] - 2026-07-27
+
+### Changed
+- **The `opus` tier now runs with its real 1M context window.** `context_windows.opus` defaulted to `200000`, a leftover from when 1M was a tier-4 beta opt-in — but the Models API reports `max_input_tokens: 1000000` for `claude-opus-5`, so every `[coding]` task was compacting at 85% of 200K while 800K of window sat unused. Default is now `1_000_000`, matching `MODEL_CONTEXT_WINDOWS[OPUS]`, which already said 1M. Set it back to `200000` if your account is capped at standard context. `sonnet` and `haiku` are unchanged.
+- **`bin/claudetm --init-config` no longer pins a retired model.** Its embedded template still wrote `"opus": "claude-opus-4-8"` — so a freshly initialised config silently downgraded the smartest tier off the `core/config.py` default (`claude-opus-5`) and back a generation. Template now matches the schema, including `context_windows.opus: 1000000`.
+- Stale "Opus 4.8" references in the planning prompt's complexity table and the `MODEL_CONTEXT_WINDOWS` comments now read Opus 5.
+
+### Fixed
+- **The bundled bash wrapper had drifted from the repo one and shipped that way.** `src/claude_task_master/bin/claudetm` — the copy packaged as `package-data` and therefore the one an installed `claudetm` actually executes — was missing the entire `fable` tier (`CLAUDETM_MODEL_FABLE` was never loaded from `config.json`) and the `sonnet_1m` entries in its `--init-config` template, both added to `bin/claudetm` back in 0.1.65 but never copied across. Installed users got a wrapper two features behind the repo, with no signal. The two files are now byte-identical and `scripts/sync_version.py` keeps `SCRIPT_VERSION` on the package version (it had drifted to `0.1.2`/`0.1.6`).
+
+### Note
+- There is **no `claude-opus-5[1m]` model ID** — the `[1m]` suffix is a Claude Code CLI convention, and `GET /v1/models/claude-opus-5[1m]` returns `404 not_found_error`. Opus 5's 1M window is native to the plain `claude-opus-5` ID, so the window is configured via `context_windows.opus`, not via a suffixed model string. Documented in README and CLAUDE.md so it isn't re-litigated.
+
 ## [0.1.74] - 2026-07-25
 
 ### Fixed
@@ -898,7 +911,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.74...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.75...HEAD
+[0.1.75]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.74...v0.1.75
 [0.1.74]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.73...v0.1.74
 [0.1.73]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.72...v0.1.73
 [0.1.72]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.71...v0.1.72

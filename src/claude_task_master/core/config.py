@@ -80,7 +80,8 @@ class ModelConfig(BaseModel):
     )
     opus: str = Field(
         default="claude-opus-5",
-        description="Model name for 'opus' (smartest). Overridden by CLAUDETM_MODEL_OPUS.",
+        description="Model name for 'opus' (smartest, 1M context). "
+        "Overridden by CLAUDETM_MODEL_OPUS.",
     )
     fable: str = Field(
         default="claude-fable-5",
@@ -119,15 +120,17 @@ class ContextWindowsConfig(BaseModel):
     """Context window sizes per model (in tokens).
 
     Controls the max context window size used for auto-compact threshold calculation.
-    Opus 5 and Sonnet 5 support 1M context in beta (tier 4+ users).
-    Users on lower tiers should set these to 200000.
+    Claude Opus 5 reports ``max_input_tokens: 1000000`` from the Models API, so ``opus``
+    defaults to 1000000 to match. Sonnet 5 also supports 1M context in beta (tier 4+
+    users). Users on lower tiers should set these to 200000.
 
     To enable 1M context via the API, use the beta header: context-1m-2025-08-07
     """
 
     opus: int = Field(
-        default=200_000,
-        description="Opus context window size in tokens. 200000 (standard) or 1000000 (beta, tier 4+).",
+        default=1_000_000,
+        description="Opus context window size in tokens. 1000000 matches Claude Opus 5's "
+        "native window; set to 200000 if your account is capped at standard context.",
     )
     fable: int = Field(
         default=1_000_000,
@@ -206,7 +209,7 @@ class ClaudeTaskMasterConfig(BaseModel):
         "auto_push": true
       },
       "context_windows": {
-        "opus": 200000,
+        "opus": 1000000,
         "fable": 1000000,
         "sonnet": 200000,
         "haiku": 200000,

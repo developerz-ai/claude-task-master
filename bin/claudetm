@@ -34,7 +34,7 @@ set -euo pipefail
 
 # Script version - synchronized with Python package version
 # This should be kept in sync using scripts/sync_version.py
-SCRIPT_VERSION="0.1.2"
+SCRIPT_VERSION="0.1.75"
 
 # Configuration file location
 CONFIG_DIR=".claude-task-master"
@@ -298,13 +298,13 @@ default_config = {
     },
     "models": {
         "sonnet": "claude-sonnet-5",
-        "opus": "claude-opus-4-8",
+        "opus": "claude-opus-5",
         "fable": "claude-fable-5",
         "haiku": "claude-haiku-4-5-20251001",
         "sonnet_1m": "claude-sonnet-5"
     },
     "context_windows": {
-        "opus": 200000,
+        "opus": 1000000,
         "fable": 1000000,
         "sonnet": 200000,
         "haiku": 200000,

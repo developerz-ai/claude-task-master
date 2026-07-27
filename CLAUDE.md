@@ -106,12 +106,12 @@ uv tool install claude-task-master --force --reinstall
 **Task Complexity Levels** (for dynamic model routing + effort-based thinking):
 | Complexity | Tag | Model | Effort | Use Case |
 |------------|-----|-------|--------|----------|
-| CODING | `[coding]` | Opus 5 | max | Complex implementation tasks, new features, intricate logic |
+| CODING | `[coding]` | Opus 5 (1M) | max | Complex implementation tasks, new features, intricate logic |
 | QUICK | `[quick]` | Haiku | low | Simple fixes, configuration changes, small tweaks |
 | GENERAL | `[general]` | Sonnet | medium | Tests, documentation, moderate refactoring, balanced tasks |
 | DEBUGGING_QA | `[debugging-qa]` | Sonnet 1M | high | CI failures, bug tracing, visual QA, log analysis (1M context) |
 
-When uncertain, default to `[coding]` (uses the smartest model). The smartest tier is **Claude Opus 5** (`claude-opus-5`) — see the `opus` default in `ModelConfig` in `core/config.py`. An opt-in `fable` tier (**Claude Fable 5**, `claude-fable-5`, premium-priced) exists alongside it — configured via the `"fable"` config key or `CLAUDETM_MODEL_FABLE`, mirroring Claude Code's `ANTHROPIC_DEFAULT_FABLE_MODEL`. No complexity level routes to it by default (2x Opus pricing); users opt in via `CLAUDETM_MODEL_FABLE=claude-fable-5` or by passing the `fable` model key explicitly. The `sonnet_1m` tier uses Sonnet with 1M context (e.g., `claude-sonnet-5` configured as `CLAUDETM_MODEL_SONNET_1M` for log analysis). Fallback: Fable → Opus → Sonnet → Haiku.
+When uncertain, default to `[coding]` (uses the smartest model). The smartest tier is **Claude Opus 5** (`claude-opus-5`) — see the `opus` default in `ModelConfig` in `core/config.py`. Its context window is **1M natively** (the Models API reports `max_input_tokens: 1000000`), so `context_windows.opus` defaults to `1_000_000`; there is no `claude-opus-5[1m]` model ID — that suffix is a Claude Code CLI convention and 404s against the API. An opt-in `fable` tier (**Claude Fable 5**, `claude-fable-5`, premium-priced) exists alongside it — configured via the `"fable"` config key or `CLAUDETM_MODEL_FABLE`, mirroring Claude Code's `ANTHROPIC_DEFAULT_FABLE_MODEL`. No complexity level routes to it by default (2x Opus pricing); users opt in via `CLAUDETM_MODEL_FABLE=claude-fable-5` or by passing the `fable` model key explicitly. The `sonnet_1m` tier uses Sonnet with 1M context (e.g., `claude-sonnet-5` configured as `CLAUDETM_MODEL_SONNET_1M` for log analysis). Fallback: Fable → Opus → Sonnet → Haiku.
 
 **Fallback Models**: If primary model is unavailable, auto-fallback: Fable → Opus → Sonnet → Haiku.
 

@@ -105,13 +105,20 @@ class TestContextWindowsConfig:
     """Tests for ContextWindowsConfig model."""
 
     def test_default_values(self) -> None:
-        """Test that ContextWindowsConfig has correct default values (200K standard)."""
+        """Opus/fable/sonnet_1m default to 1M; sonnet and haiku stay at the 200K standard."""
         config = ContextWindowsConfig()
-        assert config.opus == 200_000
+        assert config.opus == 1_000_000
         assert config.fable == 1_000_000
         assert config.sonnet == 200_000
         assert config.haiku == 200_000
         assert config.sonnet_1m == 1_000_000
+
+    def test_standard_context_override(self) -> None:
+        """Users capped at standard context can pin opus back down to 200K."""
+        config = ContextWindowsConfig(opus=200_000, sonnet=200_000, haiku=200_000)
+        assert config.opus == 200_000
+        assert config.sonnet == 200_000
+        assert config.haiku == 200_000
 
     def test_tier4_context(self) -> None:
         """Test setting 1M context windows for tier 4+ users."""

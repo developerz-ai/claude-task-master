@@ -298,7 +298,7 @@ claudetm --init-config
 claudetm --show-config
 ```
 
-This creates `.claude-task-master/config.json`. The smartest tier (`opus`) defaults to **Claude Opus 5** (`claude-opus-5`). Override it by editing the `"opus"` key or setting `CLAUDETM_MODEL_OPUS`. A separate opt-in `fable` tier defaults to **Claude Fable 5** (`claude-fable-5`, premium-priced at 2x Opus) — mirroring Claude Code's `ANTHROPIC_DEFAULT_FABLE_MODEL`; override via the `"fable"` key or `CLAUDETM_MODEL_FABLE`. No task routes to it by default; set `CLAUDETM_MODEL_OPUS=claude-fable-5` to run the smartest tier on Fable.
+This creates `.claude-task-master/config.json`. The smartest tier (`opus`) defaults to **Claude Opus 5** (`claude-opus-5`), whose context window is **1M tokens natively** — so `context_windows.opus` defaults to `1000000`. (There is no `claude-opus-5[1m]` model ID; that suffix is a Claude Code CLI convention and 404s against the API.) Override the model by editing the `"opus"` key or setting `CLAUDETM_MODEL_OPUS`; drop `context_windows.opus` to `200000` if your account is capped at standard context. A separate opt-in `fable` tier defaults to **Claude Fable 5** (`claude-fable-5`, premium-priced at 2x Opus) — mirroring Claude Code's `ANTHROPIC_DEFAULT_FABLE_MODEL`; override via the `"fable"` key or `CLAUDETM_MODEL_FABLE`. No task routes to it by default; set `CLAUDETM_MODEL_OPUS=claude-fable-5` to run the smartest tier on Fable.
 
 ```json
 {
@@ -316,7 +316,7 @@ This creates `.claude-task-master/config.json`. The smartest tier (`opus`) defau
     "haiku": "claude-haiku-4-5"
   },
   "context_windows": {
-    "opus": 200000,
+    "opus": 1000000,
     "fable": 1000000,
     "sonnet": 200000,
     "haiku": 200000
