@@ -34,7 +34,7 @@ set -euo pipefail
 
 # Script version - synchronized with Python package version
 # This should be kept in sync using scripts/sync_version.py
-SCRIPT_VERSION="0.1.75"
+SCRIPT_VERSION="0.1.76"
 
 # Configuration file location
 CONFIG_DIR=".claude-task-master"

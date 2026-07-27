@@ -328,11 +328,19 @@ This creates `.claude-task-master/config.json`. The smartest tier (`opus`) defau
 }
 ```
 
-> **Note:** Opus 5 and Sonnet 5 support a 1M token context window in beta (**tier 4+** API access required). If you have tier 4+ access, you can increase the context windows:
+> **Note:** `context_windows` only drives claudetm's **auto-compact threshold** — it does not grant a bigger window. Over-stating a window means compaction fires too late and the session overflows; under-stating it just compacts early, which is harmless. So the defaults are deliberately conservative, and only `opus` claims 1M:
+>
+> | Tier | Default | Why |
+> |---|---|---|
+> | `opus` | 1000000 | Opus is upgraded to 1M automatically on Max/Team/Enterprise. **On Pro that upgrade is billed to usage credits** — set `200000` if you don't buy them. |
+> | `sonnet` | 200000 | Conservative. On a subscription the 1M window is the paid extra, so this only goes to `1000000` once you've confirmed your account actually serves it. |
+> | `haiku` | 200000 | Haiku 4.5's real window. |
+>
+> Two setups cap 1M-capable models at 200K regardless of plan, and want `200000` for every tier: an LLM gateway (`ANTHROPIC_BASE_URL` pointing somewhere Claude Code can't verify 1M support) and `CLAUDE_CODE_DISABLE_1M_CONTEXT=1`.
 > ```json
 > "context_windows": {
->   "opus": 1000000,
->   "sonnet": 1000000,
+>   "opus": 200000,
+>   "sonnet": 200000,
 >   "haiku": 200000
 > }
 > ```

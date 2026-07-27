@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.76] - 2026-07-27
+
+### Changed
+- **Documented what `context_windows` actually is, and picked defaults accordingly.** It sets claudetm's auto-compact *threshold* — it does not grant a larger window — so the two directions of error are not symmetric: over-stating a window compacts too late and overflows the session, under-stating it compacts early and costs nothing. Defaults now lean conservative and only `opus` claims 1M, since Claude Code upgrades Opus to 1M automatically on Max/Team/Enterprise. **On Pro that upgrade is billed to usage credits — set `context_windows.opus` to `200000` there.** `sonnet` stays at `200000`: on a subscription the 1M Sonnet window is the paid extra, so it is opt-in rather than assumed. `haiku` stays at `200000`, Haiku 4.5's real window. README carries the per-tier table, including the two setups that cap 1M-capable models at 200K regardless of plan (an LLM gateway `ANTHROPIC_BASE_URL`, and `CLAUDE_CODE_DISABLE_1M_CONTEXT=1`).
+- **Recorded that `claude-opus-5[1m]` is not a portable model id.** The `[1m]` suffix is a Claude Code alias convention — the CLI accepts it, but `GET /v1/models/claude-opus-5[1m]` returns `404 not_found_error`, so it must not be written into `models.opus`. The window is selected through `context_windows.opus`, not a suffixed model string. Noted in CLAUDE.md and README so it isn't reintroduced.
+
 ## [0.1.75] - 2026-07-27
 
 ### Changed
@@ -911,7 +917,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.75...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.76...HEAD
+[0.1.76]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.75...v0.1.76
 [0.1.75]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.74...v0.1.75
 [0.1.74]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.73...v0.1.74
 [0.1.73]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.72...v0.1.73

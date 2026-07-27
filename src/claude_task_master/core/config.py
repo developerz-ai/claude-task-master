@@ -120,17 +120,28 @@ class ContextWindowsConfig(BaseModel):
     """Context window sizes per model (in tokens).
 
     Controls the max context window size used for auto-compact threshold calculation.
-    Claude Opus 5 reports ``max_input_tokens: 1000000`` from the Models API, so ``opus``
-    defaults to 1000000 to match. Sonnet 5 also supports 1M context in beta (tier 4+
-    users). Users on lower tiers should set these to 200000.
 
-    To enable 1M context via the API, use the beta header: context-1m-2025-08-07
+    These only drive *when claudetm compacts* -- they do not grant a larger window. So
+    the bias is deliberate: under-stating a window compacts early (harmless), over-stating
+    it compacts too late and overflows the session. Defaults track a Claude Code
+    subscription, the auth path claudetm runs on:
+
+    - ``opus`` -- 1M. Automatically upgraded on Max/Team/Enterprise with no extra
+      configuration. **On Pro this requires usage credits**; set 200000 there.
+    - ``sonnet`` -- 200K, the conservative default. Raise to 1000000 only once you have
+      confirmed your account actually serves Sonnet at 1M.
+    - ``haiku`` -- 200K, which is Haiku 4.5's real window.
+
+    Two setups budget 1M-capable models at 200K regardless of plan, and want 200000 for
+    every tier here: an LLM gateway (``ANTHROPIC_BASE_URL`` pointing somewhere Claude Code
+    cannot verify 1M support) and ``CLAUDE_CODE_DISABLE_1M_CONTEXT=1``.
     """
 
     opus: int = Field(
         default=1_000_000,
-        description="Opus context window size in tokens. 1000000 matches Claude Opus 5's "
-        "native window; set to 200000 if your account is capped at standard context.",
+        description="Opus context window size in tokens. 1000000 matches the automatic "
+        "1M upgrade on Max/Team/Enterprise; set to 200000 on Pro (1M needs usage credits "
+        "there) or behind an LLM gateway.",
     )
     fable: int = Field(
         default=1_000_000,
@@ -138,7 +149,9 @@ class ContextWindowsConfig(BaseModel):
     )
     sonnet: int = Field(
         default=200_000,
-        description="Sonnet context window size in tokens. 200000 (standard) or 1000000 (beta, tier 4+).",
+        description="Sonnet context window size in tokens. 200000 is the conservative "
+        "default (1M on a subscription is billed to usage credits); raise to 1000000 "
+        "only once you have confirmed your account serves Sonnet at 1M.",
     )
     haiku: int = Field(
         default=200_000,
