@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from . import console
+from .config_loader import get_config
 from .state import TaskState
 
 if TYPE_CHECKING:
@@ -73,6 +74,45 @@ class _LoopWorkingStageMixin:
         if result.stdout.strip():
             return "uncommitted changes left behind"
         return None
+
+    def _ship_group_if_skipped_task_closed_it(self, state: TaskState, skipped_index: int) -> None:
+        """Route to the PR stage when the task just skipped closed its PR group.
+
+        A task already checked off in ``plan.md`` runs no session — but its
+        group still has to ship. Its commits can already be on the branch (a
+        resume after the session that did the work, a task checked off by the
+        finish-attempt budget), and the PR stage is the only thing that opens a
+        PR. Skipping straight into the next group strands them: the run keeps
+        committing locally and never opens anything.
+
+        ``run_work_session`` has already advanced the index past the skipped
+        task, so rewind it — the PR stages act on the *last* task of the group,
+        and ``handle_merged_stage`` advances past it once the PR lands. When
+        nothing is shippable, ``_PRRecovery`` closes the group out without an
+        agent session, so an all-complete plan still walks through cheaply.
+
+        Args:
+            state: Current mutable task state (index already advanced).
+            skipped_index: Index of the task that was skipped.
+        """
+        orc = self._orc
+        closes_group = state.options.pr_per_task or orc.task_runner.is_last_task_in_group(
+            state, task_index=skipped_index
+        )
+        if not closes_group:
+            return
+        # Sitting on the base branch means no group work was committed here —
+        # and the PR stage blocks on a base branch it cannot open a PR from.
+        base = get_config().git.target_branch
+        branch = self._get_current_branch()  # type: ignore[attr-defined]
+        if not branch or branch == base:
+            return
+        console.info(
+            f"Task #{skipped_index + 1} closed its PR group - checking the group has shipped"
+        )
+        state.current_task_index = skipped_index
+        state.workflow_stage = "pr_created"
+        state.task_start_time = None
 
     def _handle_working_stage(self, state: TaskState) -> int | None:
         """Handle the working stage — implement the current task.
@@ -174,6 +214,7 @@ class _LoopWorkingStageMixin:
 
         if session_result == "skipped_already_complete":
             console.info(f"Task #{completed_task_index + 1} already complete - skipping")
+            self._ship_group_if_skipped_task_closed_it(state, completed_task_index)
             orc.state_manager.save_state_merged(state)
             return None
 

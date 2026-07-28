@@ -250,6 +250,19 @@ Fail-open vs fail-closed is deliberate. `_porcelain_status()` returns three stat
 
 Both counters reset on task advance, like `ci_fix_attempts`.
 
+### What ends a PR group (the only thing that opens a PR)
+
+Outside `--pr-per-task`, a PR is opened for exactly one reason: the task just finished was the **last of its group** (`is_last_task_in_group` → `pr_created`). Everything else runs commit-only. Two ways that test used to answer "no" forever, both of which produce the same silent failure — tasks completing, commits stacking on an unpushed local branch, zero PRs:
+
+- **Groups must be contiguous.** Group membership comes from `### PR <n>: …` headings, and a planner that restates its task list (draft → verification → "reissuing the corrected plan") writes the same heading two or three times. Keying groups by heading number alone folded the restatements into one group with a non-contiguous index set, so the group did not "end" until its *final* restatement. A repeated heading now opens a new instance — `pr_10` → `pr_10#2` (`_new_group_id`, `core/task_group.py`) — which keeps each group's indices a contiguous run. Re-entering the heading already current is not a new instance. `TaskGroup.pr_number` strips the suffix.
+- **A skipped task still closes its group.** A task already `[x]` runs no session, and the skip path returned without checking the boundary — stranding commits that were already on the branch (a resume, or a task checked off by `MAX_TASK_FINISH_ATTEMPTS`). It now rewinds the index `run_work_session` advanced and enters `pr_created`; `_PRRecovery` opens the PR or closes the group out with no agent session. Skipped on the base branch — nothing is committed there and the PR stage would block.
+
+A triplicated `plan.md` still runs its work N times; the parser only guarantees each block ships. If the task count looks 2–3× too large, check for repeated `### PR n:` headings before blaming the loop.
+
+### CI must actually have run
+
+`ci_state == "SUCCESS"` is not sufficient. GitHub reports SUCCESS the moment the only registered checks are skipped ones — which is exactly what a PR looks like in the seconds after it is opened, before its jobs appear. Accepting it there leaves `waiting_ci` permanently on CI that never started, and with `--auto-merge --admin` that merges a red PR. `handle_waiting_ci_stage` treats **SUCCESS with `checks_passed == 0`** as unconfirmed and keeps polling through the same grace window as the no-CI fast path (`NO_CI_MIN_POLLS` 2 / `NO_CI_MIN_ELAPSED` 30s). A genuinely all-skipped run — every job path-filtered out — still passes, one poll later. `checks_passed` counts `SUCCESS`/`NEUTRAL` only, so a pending check makes the rollup PENDING and never reaches this test.
+
 ### Blocking is a last resort (unattended runs)
 
 claudetm exists to do a lot of work without supervision, so **every block is a defect unless a human is genuinely required**. A run that dies at 3am on a GitHub 5xx has failed at its one job. Three operations used to end a run on their *first* failure — detecting a PR, merging it, and checking out the base after a merge — all with causes that resolve themselves in seconds.

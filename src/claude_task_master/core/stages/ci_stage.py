@@ -190,6 +190,14 @@ class _CIStage(_PRRecovery):
         """Clear CI poll timer (called when leaving CI polling stages)."""
         state.ci_poll_start_time = None
 
+    def _start_ci_poll_timer(self, state: TaskState) -> None:
+        """Start the CI poll timer if it isn't already running."""
+        if state.ci_poll_start_time is None:
+            from datetime import datetime  # noqa: PLC0415
+
+            state.ci_poll_start_time = datetime.now()
+            self.state_manager.save_state(state)
+
     def _no_ci_confirmed(self, state: TaskState) -> bool:
         """Check whether the no-CI fast path may be trusted yet.
 
@@ -293,11 +301,7 @@ class _CIStage(_PRRecovery):
                 and pr_status.ci_state not in ("SUCCESS", "FAILURE", "ERROR")
             ):
                 if not self._no_ci_confirmed(state):
-                    if state.ci_poll_start_time is None:
-                        from datetime import datetime
-
-                        state.ci_poll_start_time = datetime.now()
-                        self.state_manager.save_state(state)
+                    self._start_ci_poll_timer(state)
                     console.info(
                         "No CI checks reported yet - waiting to confirm no CI is configured"
                     )
@@ -332,6 +336,24 @@ class _CIStage(_PRRecovery):
                 console.warning(f"PR #{state.current_pr} has merge conflicts!")
                 self._clear_ci_poll_timer(state)
                 return self._handle_conflicting_pr(state, state.current_pr)
+
+            # A green rollup that nothing actually passed is not evidence CI ran.
+            # GitHub reports SUCCESS the moment the only registered checks are
+            # skipped ones — which is exactly what a PR looks like in the seconds
+            # after it is opened, before its jobs appear. Accepting it there merges
+            # a PR whose CI never started. Wait out the same grace period the no-CI
+            # path uses: real jobs show up within it, and a genuinely all-skipped
+            # run (every job path-filtered out) still passes, just one poll later.
+            if (
+                pr_status.ci_state == "SUCCESS"
+                and pr_status.checks_passed == 0
+                and not self._no_ci_confirmed(state)
+            ):
+                self._start_ci_poll_timer(state)
+                console.info("CI reports success but no check has passed yet - confirming...")
+                console.detail(f"Next check in {self.CI_POLL_INTERVAL}s...")
+                interruptible_sleep(self.CI_POLL_INTERVAL)
+                return None
 
             if pr_status.ci_state == "SUCCESS":
                 console.success(

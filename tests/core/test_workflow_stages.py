@@ -433,6 +433,73 @@ class TestHandleWaitingCIStage:
 
     @patch("claude_task_master.core.stages.ci_stage.interruptible_sleep")
     @patch("claude_task_master.core.stages.ci_stage.console")
+    def test_success_with_nothing_passed_is_not_trusted_yet(
+        self,
+        mock_console,
+        mock_sleep,
+        workflow_handler,
+        state_manager,
+        basic_task_state,
+        mock_github_client,
+        mock_pr_status,
+    ):
+        """A green rollup that no check actually passed is CI that hasn't started.
+
+        Seconds after a PR is opened the rollup holds only the jobs that resolved
+        instantly (skipped path-filtered ones) and GitHub calls that SUCCESS —
+        indistinguishable from a finished all-skipped run, and fatal under
+        auto-merge.
+        """
+        state_manager.state_dir.mkdir(exist_ok=True)
+        basic_task_state.current_pr = 42
+        basic_task_state.workflow_stage = "waiting_ci"
+        mock_pr_status.ci_state = "SUCCESS"
+        mock_pr_status.checks_passed = 0
+        mock_pr_status.checks_skipped = 1
+        mock_pr_status.check_details = [{"name": "detect targets", "conclusion": "SKIPPED"}]
+        mock_github_client.get_pr_status.return_value = mock_pr_status
+
+        result = workflow_handler.handle_waiting_ci_stage(basic_task_state)
+
+        assert result is None
+        assert basic_task_state.workflow_stage == "waiting_ci"
+        assert basic_task_state.ci_poll_start_time is not None
+        mock_sleep.assert_called_with(workflow_handler.CI_POLL_INTERVAL)
+
+    @patch("claude_task_master.core.stages.ci_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.ci_stage.console")
+    def test_success_with_nothing_passed_is_accepted_after_the_grace_period(
+        self,
+        mock_console,
+        mock_sleep,
+        workflow_handler,
+        state_manager,
+        basic_task_state,
+        mock_github_client,
+        mock_pr_status,
+    ):
+        """An all-skipped run is legitimate — it just has to outlast the window."""
+        from datetime import datetime, timedelta
+
+        state_manager.state_dir.mkdir(exist_ok=True)
+        basic_task_state.current_pr = 42
+        basic_task_state.ci_poll_start_time = datetime.now() - timedelta(
+            seconds=workflow_handler.NO_CI_MIN_ELAPSED + 1
+        )
+        mock_pr_status.ci_state = "SUCCESS"
+        mock_pr_status.checks_passed = 0
+        mock_pr_status.checks_skipped = 1
+        mock_pr_status.check_details = [{"name": "detect targets", "conclusion": "SKIPPED"}]
+        mock_github_client.get_pr_status.return_value = mock_pr_status
+        mock_sleep.return_value = True
+
+        result = workflow_handler.handle_waiting_ci_stage(basic_task_state)
+
+        assert result is None
+        assert basic_task_state.workflow_stage == "waiting_reviews"
+
+    @patch("claude_task_master.core.stages.ci_stage.interruptible_sleep")
+    @patch("claude_task_master.core.stages.ci_stage.console")
     def test_ci_failure_all_complete_moves_to_ci_failed(
         self,
         mock_console,

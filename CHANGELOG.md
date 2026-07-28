@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.77] - 2026-07-28
+
+### Fixed
+- **A restated task list no longer costs you every PR.** Observed end to end: 48 tasks, 55 sessions, ~14 hours, 10 commits stacked on one local branch — and zero PRs, none of it even pushed. The planner had written its task list three times into `plan.md` (a draft, its own verification pass, then "Reissuing the corrected plan"), so `### PR 10: …` appeared at three line numbers. `parse_tasks_with_groups` keyed groups by heading number alone, folding all three restatements into one `pr_10` whose task indices ran `[43,44,45,46,47, …, 222…226]` — non-contiguous. The orchestrator opens a PR only when the current task is the last of its group, and a merged group does not "end" until its *final* restatement, so every task in between took the `More tasks in PR group - continuing without creating PR` branch. Forever. A repeated heading now opens a new group instance (`pr_10` → `pr_10#2`), which keeps every group's indices contiguous by construction; re-entering the heading already current (a duplicate line, a heading after a release-checks block) is still not a new instance. The restated block ships its own PRs instead of silently swallowing the first one's.
+- **An already-complete task that closes a PR group hands it to the PR stage.** Second, independent hole on the same run, and the one that kept a resume from recovering: a task already checked off runs no session, and the skip path returned without ever asking whether that task ended its group. The group's commits — already on the branch from the session that did the work, or from a task checked off by the finish-attempt budget — were stranded, and the run walked on into the next group still committing locally. It now rewinds the index `run_work_session` advanced (the PR stages act on the group's *last* task; `handle_merged_stage` advances past it) and enters `pr_created`, where `_PRRecovery` either opens the PR or closes the group out with no agent session. Guarded on the base branch: no group work is committed there, and the PR stage has nothing to open a PR from.
+- **A green CI rollup that nothing actually passed is no longer read as passing CI.** One second after a PR was opened, `gh` reported `SUCCESS` — the rollup held exactly one instantly-resolved skipped job and none of the real ones had registered yet — and the orchestrator logged `CI passed! (0 passed, 1 skipped)` and left `waiting_ci` for good, never checking again. Under `--auto-merge --admin` that is a merge on CI that never ran; it survived only because the review stage then happened to sit for eleven minutes waiting on CodeRabbit while the real checks went green. `SUCCESS` with `checks_passed == 0` now polls through the same grace window the no-CI path uses (`NO_CI_MIN_POLLS` / `NO_CI_MIN_ELAPSED`), so a genuinely all-skipped run still passes, one poll later.
+
 ## [0.1.76] - 2026-07-27
 
 ### Changed
@@ -917,7 +924,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.76...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.77...HEAD
+[0.1.77]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.76...v0.1.77
 [0.1.76]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.75...v0.1.76
 [0.1.75]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.74...v0.1.75
 [0.1.74]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.73...v0.1.74

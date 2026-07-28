@@ -64,10 +64,14 @@ class TaskGroup:
 
     @property
     def pr_number(self) -> int | None:
-        """Extract PR number from id if available."""
+        """Extract PR number from id if available.
+
+        Repeated headings get an instance suffix (``pr_3#2``); the number is
+        the heading's, so the suffix is stripped before parsing.
+        """
         if self.id.startswith("pr_"):
             try:
-                return int(self.id[3:])
+                return int(self.id[3:].split("#", 1)[0])
             except ValueError:
                 return None
         return None
@@ -115,6 +119,37 @@ class ParsedTask:
         return f"{status} {self.description}"
 
 
+def _new_group_id(base_id: str, current_group_id: str, groups: list[TaskGroup]) -> str:
+    """Return the id a PR/Group heading opens, keeping group membership contiguous.
+
+    A heading that repeats later in the plan opens a *new* group instance
+    (``pr_3`` → ``pr_3#2``) instead of re-opening the earlier one. Planners do
+    restate their task list — a draft, then a corrected reissue — and merging
+    the restatements into one group makes that group's task indices
+    non-contiguous. The orchestrator only ships a PR when the current task is
+    the last of its group, so a merged group does not "end" until its *final*
+    restatement: every task in between runs commit-only and the whole run
+    accumulates local commits without ever opening a PR.
+
+    Re-entering the heading that is already current (a duplicate line, a
+    heading repeated after a release-checks block) is not a new instance.
+
+    Args:
+        base_id: The id derived from the heading (``pr_<n>``).
+        current_group_id: The group the parser is currently inside.
+        groups: Groups discovered so far.
+
+    Returns:
+        ``base_id``, or ``base_id`` with an instance suffix when it repeats.
+    """
+    if base_id == current_group_id or not any(g.id == base_id for g in groups):
+        return base_id
+    instance = 2
+    while any(g.id == f"{base_id}#{instance}" for g in groups):
+        instance += 1
+    return f"{base_id}#{instance}"
+
+
 def parse_tasks_with_groups(plan: str) -> tuple[list[ParsedTask], list[TaskGroup]]:
     """Parse tasks and PRs/groups from plan markdown.
 
@@ -139,6 +174,10 @@ def parse_tasks_with_groups(plan: str) -> tuple[list[ParsedTask], list[TaskGroup
     - [ ] Task 1
     - [ ] Task 2
     ```
+
+    A heading that repeats later in the plan opens a new group instance
+    (``pr_1``, then ``pr_1#2``) so that every group's task indices stay
+    contiguous — see :func:`_new_group_id`.
 
     Args:
         plan: The plan markdown content.
@@ -173,11 +212,10 @@ def parse_tasks_with_groups(plan: str) -> tuple[list[ParsedTask], list[TaskGroup
         if pr_match:
             pr_num = pr_match.group(1)
             pr_name = pr_match.group(2).strip()
-            current_group_id = f"pr_{pr_num}"
+            current_group_id = _new_group_id(f"pr_{pr_num}", current_group_id, groups)
             current_group_name = pr_name
             in_release_checks = False
 
-            # Create new group if not exists
             if not any(g.id == current_group_id for g in groups):
                 groups.append(TaskGroup(id=current_group_id, name=pr_name))
             continue

@@ -125,10 +125,15 @@ class TaskRunner(_TaskRunnerSessionMixin):
         self._parsed_groups_cache = None
         self._plan_hash = None
 
-    def _get_group_context(self, state: TaskState, plan: str | None = None) -> dict | None:
-        """Get PR group context for the current task.
+    def _get_group_context(
+        self,
+        state: TaskState,
+        plan: str | None = None,
+        task_index: int | None = None,
+    ) -> dict | None:
+        """Get PR group context for a task.
 
-        Computes information about the current task's PR group including:
+        Computes information about the task's PR group including:
         - Group name and ID
         - Whether this is the last task in the group
         - Remaining tasks in the group
@@ -137,6 +142,9 @@ class TaskRunner(_TaskRunnerSessionMixin):
         Args:
             state: Current task state.
             plan: Optional plan content. If not provided, loads from state manager.
+            task_index: Task to describe. Defaults to ``state.current_task_index``;
+                callers pass an explicit index to ask about a task the state has
+                already advanced past.
 
         Returns:
             Dict with group context, or None if no plan or task out of range.
@@ -148,11 +156,12 @@ class TaskRunner(_TaskRunnerSessionMixin):
         if not plan:
             return None
 
+        index = state.current_task_index if task_index is None else task_index
         parsed_tasks, _ = self._get_parsed_tasks(plan)
-        if state.current_task_index >= len(parsed_tasks):
+        if index >= len(parsed_tasks) or index < 0:
             return None
 
-        current_task = parsed_tasks[state.current_task_index]
+        current_task = parsed_tasks[index]
         group_id = current_task.group_id
         group_name = current_task.group_name
 
@@ -161,7 +170,7 @@ class TaskRunner(_TaskRunnerSessionMixin):
 
         # Find the current task's position within the group
         current_task_in_group_idx = next(
-            (i for i, t in enumerate(tasks_in_group) if t.index == state.current_task_index),
+            (i for i, t in enumerate(tasks_in_group) if t.index == index),
             0,
         )
 
@@ -256,19 +265,20 @@ class TaskRunner(_TaskRunnerSessionMixin):
         tasks = parse_task_descriptions(plan)
         return state.current_task_index >= len(tasks)
 
-    def is_last_task_in_group(self, state: TaskState) -> bool:
-        """Check if the current task is the last in its PR group.
+    def is_last_task_in_group(self, state: TaskState, task_index: int | None = None) -> bool:
+        """Check if a task is the last in its PR group.
 
         Used by orchestrator to determine whether to trigger PR workflow
         or continue to next task in the same group.
 
         Args:
             state: Current task state.
+            task_index: Task to check. Defaults to ``state.current_task_index``.
 
         Returns:
             True if this is the last task in the PR group.
         """
-        group_context = self._get_group_context(state)
+        group_context = self._get_group_context(state, task_index=task_index)
         if group_context is None:
             # No plan or task out of range - treat as last task
             return True
