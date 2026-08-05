@@ -18,6 +18,11 @@ permissions:
   packages: write  # Required to push to GitHub Container Registry
   id-token: write  # Required for artifact attestation
   attestations: write  # Required for attestation
+  # attest-build-provenance v3+ also persists an artifact-metadata storage
+  # record. Without this the job still succeeds, but warns twice and the
+  # record never lands ("Failed to persist storage record: no artifacts
+  # found") — an attestation that is quietly half-published.
+  artifact-metadata: write
 
 jobs:
   build-and-push:
