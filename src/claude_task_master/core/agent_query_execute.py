@@ -266,15 +266,16 @@ class _AgentQueryExecuteMixin:
                         break
                     raise self._classify_api_error(e) from e  # type: ignore[attr-defined]
 
+                # The terminal result: everything after it is teardown.
+                if type(message).__name__ == "ResultMessage":
+                    terminal_result_seen = True
+
                 # Detect "agent has nothing more to do" — used to switch to
                 # the post-completion short timeout. We can't import the
                 # SDK types directly without circular issues, so check by
                 # class name. An AssistantMessage with stop_reason=end_turn
                 # and no ToolUseBlock means: no more turns, ResultMessage
                 # is the only thing left.
-                if type(message).__name__ == "ResultMessage":
-                    terminal_result_seen = True
-
                 if type(message).__name__ == "AssistantMessage":
                     # Only the top-level conversation drives end-of-turn
                     # detection. A Task-subagent's messages carry
