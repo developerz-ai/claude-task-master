@@ -58,8 +58,8 @@ dev = [
     "pytest-timeout>=2.4.0",
     "pytest-xdist>=3.8.0",
     "hypothesis>=6.151.6",
-    "ruff>=0.15.0",
-    "mypy>=1.19.0",
+    "ruff>=0.16.1,<0.17",
+    "mypy>=1.19.0,<2",
 ]
 all = [
     "claude-task-master[mcp,api,dev]",
@@ -92,6 +92,12 @@ claude_task_master = ["bin/claudetm"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# The gate runs `ruff check .` / `ruff format --check .` so scripts/ and the
+# root helpers are linted, not just src/ + tests/ (they were already being
+# type-checked). Markdown is deliberately out: ruff 0.16 formats Python code
+# blocks inside .md, and reflowing a doc's sample — collapsing a deliberately
+# multi-line request into one line — makes it worse to read, not better.
+extend-exclude = ["*.md"]
 
 [tool.ruff.lint]
 select = [
