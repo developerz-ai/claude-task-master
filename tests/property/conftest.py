@@ -8,6 +8,19 @@ import os
 import pytest
 from hypothesis import Phase, Verbosity, settings
 
+# The profile a bare `pytest` gets. Every *named* profile below already sets
+# deadline=None, but the unnamed default kept Hypothesis's 200ms per-example
+# deadline — and CI sets HYPOTHESIS_PROFILE=ci, so CI was immune while a plain
+# local `pytest -n auto` flaked on the filesystem-backed mailbox properties
+# ("DeadlineExceeded: Test took 304.69ms"), failing a different two tests each
+# run. Same reasoning as the timeout note in pytest_collection_modifyitems: a
+# wall-clock budget on a disk-bound property measures how loaded the worker is,
+# not the property. Registering it explicitly makes a local run match CI.
+settings.register_profile(
+    "default",
+    deadline=None,
+)
+
 # Configure default Hypothesis settings for the test suite
 settings.register_profile(
     "ci",
@@ -40,7 +53,7 @@ settings.register_profile(
 
 # Load profile from environment variable if set
 _profile = os.environ.get("HYPOTHESIS_PROFILE", "default")
-if _profile in ("ci", "dev", "quick", "thorough"):
+if _profile in ("default", "ci", "dev", "quick", "thorough"):
     settings.load_profile(_profile)
 
 

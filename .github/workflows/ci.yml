@@ -40,11 +40,14 @@ jobs:
       - name: Install dependencies
         run: uv pip install -e ".[all]"
 
+      # Scope matches mypy below (and the documented local gate): the whole
+      # tree, not just src/ + tests/. scripts/ and the root helpers ship with
+      # the repo and were type-checked but never linted.
       - name: Run Ruff linter
-        run: ruff check src/ tests/
+        run: ruff check .
 
       - name: Run Ruff formatter check
-        run: ruff format --check src/ tests/
+        run: ruff format --check .
 
       - name: Run mypy
         run: mypy .
@@ -93,7 +96,7 @@ jobs:
           retention-days: 7
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           files: ./coverage.xml
           fail_ci_if_error: false

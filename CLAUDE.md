@@ -556,6 +556,13 @@ Releases go direct-to-main under the same owner bypass — a "pull request requi
 
 - CI runs on Blacksmith (`blacksmith-2vcpu-ubuntu-2404`; `publish-test` on 4vcpu — deliberate). Every workflow declares a `concurrency` group with cancel-in-progress, and every job sets `timeout-minutes`. Publish workflows (PyPI / TestPyPI / Docker tag) are hard `cancel-in-progress: false` — publishes are irreversible.
 
+### The local gate is the CI gate
+
+`ruff check .`, `ruff format --check .`, `mypy .`, `pytest` — the **whole tree**, all three tools on the same scope. Run exactly that before pushing; anything narrower is not the gate. Two drifts made a narrower gate look green and shipped a red release commit (v0.1.79):
+
+- **`mypy .` used to be unrunnable locally.** A leftover `build/` tree (gitignored, absent in CI's clean checkout) made it die on `Duplicate module named "claude_task_master"` before checking anything, so the habit became `mypy src` — which skips `tests/` and `scripts/`. `[tool.mypy] exclude` now covers `build|dist|coverage_html|htmlcov|.venv|tmp`, a no-op in CI, so the same command works in both places.
+- **ruff was scoped to `src/ tests/` in CI while mypy checked everything.** `scripts/` and the root helpers were type-checked but never linted. Both now run on `.`.
+
 ### Tolerated check failures
 
 Some status checks fail for reasons no commit can fix. `github/check_tolerance.py` holds a whitelist of `ToleratedFailure(check, description, reason)` rules; a failure matching one is counted as *skipped*, and the rollup `ci_state` is recomputed as if it weren't there (SUCCESS, or PENDING if other checks are still running). Built in: **CodeRabbit / "Review rate limited"**. Any other CodeRabbit failure, and the same message from any other check, still fails CI.

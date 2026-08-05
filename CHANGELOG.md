@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.80] - 2026-08-05
+
+### Fixed
+- **The local gate is the CI gate again.** v0.1.79's release commit went out with a red CI over a `union-attr` error in a *test* file — the kind of thing the gate exists to catch, missed because the local gate had quietly become narrower than CI's. Two independent drifts, both fixed at the source rather than by remembering to type a longer command:
+  - **`mypy .` was unrunnable locally.** A leftover `build/` tree — gitignored, and absent from CI's clean checkout — made it die on `Duplicate module named "claude_task_master" (also at ./build/lib/…)` before checking a single file. So the habit became `mypy src`, which skips `tests/` and `scripts/` entirely. `[tool.mypy] exclude` now covers `build|dist|coverage_html|htmlcov|.venv|tmp`: all build/tooling output, never sources, so it is a no-op on CI and makes the one command work identically in both places.
+  - **ruff was scoped narrower than mypy in CI.** `ruff check src/ tests/` against `mypy .` meant `scripts/`, `examples/util.py` and the root helpers were type-checked but never linted. Both now run on `.` — 399 files through mypy, the whole tree through ruff, matching the gate CLAUDE.md documents.
+- **A bare local `pytest -n auto` no longer flakes on the mailbox property tests.** It failed a *different* two of `TestMailboxStorageProperties` on each run — the signature of a wall-clock budget, not a bug — with `DeadlineExceeded: Test took 304.69ms, which exceeds the deadline of 200.00ms`. Those properties do real `mkdtemp` + locked atomic JSON writes per example, so under twelve competing xdist workers an example crosses Hypothesis's 200ms per-example deadline at random. Every *named* profile in `tests/property/conftest.py` already set `deadline=None`; the unnamed `default` one — the profile a plain `pytest` gets — did not, and CI passes `HYPOTHESIS_PROFILE=ci`, so CI was immune while local runs were unreliable. A `default` profile is now registered with `deadline=None` too, the same reasoning already written down for the per-test pytest timeout in that file: a wall-clock budget on a disk-bound property measures worker contention, not the property. Verified with the full suite green under both the default and `ci` profiles.
+
+### Changed
+- **Every GitHub Action still on the Node 20 runtime is bumped to its Node 24 major.** They were running only because the runner force-migrates them ("targets Node.js 20 but is being forced to run on Node.js 24"), which is a removal notice, not a stable state — the failure would have landed on a tag push, i.e. mid-release. `docker/setup-qemu-action` v3→v4, `docker/setup-buildx-action` v3→v4, `docker/login-action` v3→v4, `docker/metadata-action` v5→v6, `docker/build-push-action` v6→v7, `actions/attest-build-provenance` v2→v4, `codecov/codecov-action` v5→v7 (the last one is what pulled the deprecated `actions/github-script` into the Tests job). Checked against each major's release notes for input changes that touch us: the removed `DOCKER_BUILD_NO_SUMMARY`/`DOCKER_BUILD_EXPORT_RETENTION_DAYS` envs are unused, `setup-buildx-action` is called with no inputs at all, and metadata-action v6's `#`-in-list-values change preserves the full-line comments our `tags:` block uses.
+
 ## [0.1.79] - 2026-08-05
 
 ### Added
@@ -936,7 +947,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.79...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.80...HEAD
+[0.1.80]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.79...v0.1.80
 [0.1.79]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.78...v0.1.79
 [0.1.78]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.77...v0.1.78
 [0.1.77]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.76...v0.1.77
