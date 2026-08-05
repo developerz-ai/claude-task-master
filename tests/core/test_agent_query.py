@@ -68,7 +68,13 @@ class TestAgentWrapperRunQuery:
 
     @pytest.mark.asyncio
     async def test_run_query_restores_directory_on_error(self, agent, temp_dir):
-        """Test _run_query restores directory even on error."""
+        """Test _run_query restores directory even on error.
+
+        An unclassified stream error is retried under the failure budget (an
+        unattended run must not die on one hiccup), so a *persistent* one
+        surfaces as ConsecutiveFailuresError rather than the first
+        QueryExecutionError.
+        """
         original_dir = os.getcwd()
 
         # Create async generator that raises an error
@@ -79,8 +85,9 @@ class TestAgentWrapperRunQuery:
         agent.query = mock_query_gen
         agent._query_executor.query = mock_query_gen
 
-        with pytest.raises(QueryExecutionError):
-            await agent._run_query("test prompt", ["Read"])
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            with pytest.raises(ConsecutiveFailuresError):
+                await agent._run_query("test prompt", ["Read"])
 
         # Should be back in original directory
         assert os.getcwd() == original_dir

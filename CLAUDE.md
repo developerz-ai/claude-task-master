@@ -222,6 +222,10 @@ Two independent signals decide whether a session satisfied its contract (`_LoopW
 
 Unfinished → the task is **not** checked off and the same task re-runs, with a `**Retry N**` note in its prompt telling it the leftover diff is its own work to finish, not redo. Bounded by `MAX_TASK_FINISH_ATTEMPTS` (2, `state.task_finish_attempts`); after that the task is checked off anyway and the PR stage takes over — the finish session below can still ship a dirty tree, so a stubborn task must not deadlock the run. Retries burn sessions, so `--max-sessions` still bounds everything.
 
+**The terminal result must survive the CLI's exit code.** After an error result the CLI exits non-zero *on purpose* (for shell consumers), and the SDK turns that trailing `ProcessError` into a bare `Exception("Claude Code returned an error result: <subtype>")` raised from the *next* `__anext__()`. Raising it buried the outcome the `ResultMessage` had already reported and killed the whole run — one `Connection closed mid-response` blip ended a 22-task unattended run at task 1. `_execute_query` now tracks `terminal_result_seen`: once a `ResultMessage` arrives the session is over, so any later stream error or stall closes the stream and returns the accumulated text, and the caller derives `ran_incomplete` from `is_error` as designed. The guard is scoped to *post-terminal* teardown — an error with no terminal result behind it still reaches the retry path.
+
+Relatedly, an unclassified `QueryExecutionError` (a CLI crash whose text carries no keyword `_classify_api_error` recognises) is no longer fatal on sight: it retries under the same failure budget as a connection error (`rate_limit_config.max_retries`), and only a persistent one raises `ConsecutiveFailuresError`.
+
 ### Undelivered fix sessions (push-only stages)
 
 A CI-fix, review-fix or conflict session promises the same two things: **commit** the work, then **push** it so CI re-runs against the fix. Neither was verified — the agent's own report is not evidence, and a session killed mid-turn reports success. Both are now checked against the repository (`_GitOps._fix_session_unfinished_reason`):

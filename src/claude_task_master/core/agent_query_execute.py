@@ -196,10 +196,20 @@ class _AgentQueryExecuteMixin:
         #     it (#30333). Treat as success with accumulated text.
         stream = self.query(prompt=prompt, options=options)
         agent_completed = False
+        # A terminal ResultMessage means the session is over — whatever the SDK
+        # emits (or fails to emit) afterwards is teardown noise, not a query
+        # failure. Notably, the CLI exits non-zero *on purpose* after an error
+        # result, and the SDK turns that trailing ProcessError into a bare
+        # Exception("Claude Code returned an error result: <subtype>"). Raising
+        # it would bury the outcome the ResultMessage already reported and kill
+        # the whole run, instead of letting the caller derive success from it.
+        terminal_result_seen = False
         try:
             while True:
                 current_timeout = (
-                    POST_COMPLETION_IDLE_TIMEOUT_SEC if agent_completed else STREAM_IDLE_TIMEOUT_SEC
+                    POST_COMPLETION_IDLE_TIMEOUT_SEC
+                    if (agent_completed or terminal_result_seen)
+                    else STREAM_IDLE_TIMEOUT_SEC
                 )
                 try:
                     message = await asyncio.wait_for(
@@ -209,6 +219,16 @@ class _AgentQueryExecuteMixin:
                 except StopAsyncIteration:
                     break
                 except TimeoutError as e:
+                    if terminal_result_seen:
+                        # Terminal result already in hand; the SDK just never
+                        # closed the stream. Nothing left to wait for.
+                        console.newline()
+                        console.warning(
+                            f"Stream idle {current_timeout:.0f}s after the terminal result "
+                            "- closing the session",
+                            flush=True,
+                        )
+                        break
                     if agent_completed:
                         # Agent finished; SDK swallowed ResultMessage. Don't
                         # retry — the work succeeded, retrying would re-run
@@ -232,7 +252,23 @@ class _AgentQueryExecuteMixin:
                 except APITimeoutError:
                     raise
                 except Exception as e:
+                    if terminal_result_seen:
+                        # Post-terminal teardown error (typically the CLI's
+                        # deliberate non-zero exit after an error result).
+                        # Return what we have: the ResultMessage the caller
+                        # needs was already processed, and it decides whether
+                        # the session counts as finished.
+                        console.newline()
+                        console.warning(
+                            f"Stream error after the terminal result ({e}) - session already ended",
+                            flush=True,
+                        )
+                        break
                     raise self._classify_api_error(e) from e  # type: ignore[attr-defined]
+
+                # The terminal result: everything after it is teardown.
+                if type(message).__name__ == "ResultMessage":
+                    terminal_result_seen = True
 
                 # Detect "agent has nothing more to do" — used to switch to
                 # the post-completion short timeout. We can't import the
