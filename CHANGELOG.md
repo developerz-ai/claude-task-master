@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.78] - 2026-08-05
+
+### Fixed
+- **A network blip no longer ends an unattended run at task 1.** Observed: 22 tasks planned, the first work session dies eight minutes in on `API Error: Connection closed mid-response`, and the run blocks. The session's outcome was already known and already captured — the log line right above the failure is us reading a `ResultMessage` with `is_error=True` — and claudetm knows what to do with that: `run_work_session` returns `"ran_incomplete"`, the task stays unchecked, and it re-runs with a `**Retry N**` note over its own leftover diff. That path never ran. After an error result the CLI exits non-zero *on purpose* (for shell-script consumers), and the SDK replaces the trailing `ProcessError` with `Exception("Claude Code returned an error result: <subtype>")` raised from the **next** `__anext__()`. `_classify_api_error` found no `connect`/`timeout`/`5xx` keyword in that replacement text, so it landed in the generic `QueryExecutionError` bucket — which is re-raised without a single retry, becomes `WorkSessionError`, and blocks the run. `_execute_query` now tracks `terminal_result_seen`: once a `ResultMessage` arrives the session is over, so any later stream error or stall closes the stream and returns the accumulated text, and the caller derives the outcome from `is_error` as designed. Post-terminal stalls also use the short post-completion timeout instead of parking on the 30-minute idle ceiling. Scoped to *post-terminal* teardown — an error with no terminal result behind it still reaches the retry path, so a genuine failure is never silently reported as an empty run.
+- **An unclassified API error is retried instead of ending the run on sight.** Same doctrine as 0.1.74: every block is a defect unless a human is genuinely required. A `QueryExecutionError` the classifier can't place (a CLI crash whose text carries no recognisable keyword) was fatal on its first occurrence with zero retries. It now retries under the same failure budget as a connection error (`rate_limit_config.max_retries`); only a persistent one raises `ConsecutiveFailuresError`.
+- **The packaged bash wrapper had drifted again — and `sync_version.py` was the reason.** `src/claude_task_master/bin/claudetm`, the copy shipped as package-data and therefore the one an installed `claudetm` actually executes, still read `SCRIPT_VERSION="0.1.76"` two releases later: the sync script only ever updated `bin/claudetm`, so the drift 0.1.75 fixed by hand quietly came back. The script now syncs both wrappers and reports them separately, so `--check` fails on exactly this.
+
 ## [0.1.77] - 2026-07-28
 
 ### Fixed
@@ -924,7 +931,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.77...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.78...HEAD
+[0.1.78]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.77...v0.1.78
 [0.1.77]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.76...v0.1.77
 [0.1.76]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.75...v0.1.76
 [0.1.75]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.74...v0.1.75

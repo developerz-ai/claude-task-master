@@ -4,7 +4,7 @@
 Ensures version consistency across:
     - pyproject.toml (source of truth)
     - src/claude_task_master/__init__.py
-    - bin/claudetm (SCRIPT_VERSION)
+    - bin/claudetm and src/claude_task_master/bin/claudetm (SCRIPT_VERSION)
 
 Usage:
     python scripts/sync_version.py         # Check and sync all versions
@@ -17,6 +17,11 @@ import re
 import sys
 from pathlib import Path
 from typing import NamedTuple
+
+# The wrapper shipped as package-data — the one an installed `claudetm`
+# actually executes. It has drifted from bin/claudetm before (see CHANGELOG
+# 0.1.75), so it is synced here rather than by hand.
+PACKAGED_BASH_REL = "src/claude_task_master/bin/claudetm"
 
 
 class VersionInfo(NamedTuple):
@@ -61,18 +66,18 @@ def get_init_version(init_path: Path) -> VersionInfo:
     return VersionInfo("__init__.py", None)
 
 
-def get_bash_version(bash_path: Path) -> VersionInfo:
+def get_bash_version(bash_path: Path, label: str = "bin/claudetm") -> VersionInfo:
     """Extract SCRIPT_VERSION from bash wrapper."""
     if not bash_path.exists():
-        return VersionInfo("bin/claudetm", None)
+        return VersionInfo(label, None)
 
     content = bash_path.read_text()
     for i, line in enumerate(content.splitlines(), 1):
         match = re.match(r'^SCRIPT_VERSION\s*=\s*"([^"]+)"', line)
         if match:
-            return VersionInfo("bin/claudetm", match.group(1), i)
+            return VersionInfo(label, match.group(1), i)
 
-    return VersionInfo("bin/claudetm", None)
+    return VersionInfo(label, None)
 
 
 def update_init_version(init_path: Path, old_version: str, new_version: str) -> bool:
@@ -132,12 +137,14 @@ def check_versions(verbose: bool = True) -> tuple[str | None, list[VersionInfo],
     pyproject_path = project_root / "pyproject.toml"
     init_path = project_root / "src" / "claude_task_master" / "__init__.py"
     bash_path = project_root / "bin" / "claudetm"
+    packaged_bash_path = project_root / PACKAGED_BASH_REL
 
     pyproject_info = get_pyproject_version(pyproject_path)
     init_info = get_init_version(init_path)
     bash_info = get_bash_version(bash_path)
+    packaged_bash_info = get_bash_version(packaged_bash_path, PACKAGED_BASH_REL)
 
-    all_versions = [pyproject_info, init_info, bash_info]
+    all_versions = [pyproject_info, init_info, bash_info, packaged_bash_info]
 
     if verbose:
         print("Version check:")
@@ -217,15 +224,18 @@ def sync_versions(dry_run: bool = False) -> bool:
             print(f"  ERROR: Cannot update {init_path.name} - version line not found")
             success = False
 
-    # Update bin/claudetm if needed
-    bash_info = next(info for info in all_versions if info.file == "bin/claudetm")
-    if bash_info.version != source_version:
-        bash_path = project_root / "bin" / "claudetm"
+    # Update both wrappers if needed: the repo one and the packaged copy that
+    # an installed claudetm actually runs.
+    for label, rel in (("bin/claudetm", "bin/claudetm"), (PACKAGED_BASH_REL, PACKAGED_BASH_REL)):
+        bash_info = next(info for info in all_versions if info.file == label)
+        if bash_info.version == source_version:
+            continue
+        bash_path = project_root / rel
         if bash_info.version:
             if not update_bash_version(bash_path, bash_info.version, source_version):
                 success = False
         else:
-            print(f"  ERROR: Cannot update {bash_path.name} - SCRIPT_VERSION not found")
+            print(f"  ERROR: Cannot update {rel} - SCRIPT_VERSION not found")
             success = False
 
     if success:
