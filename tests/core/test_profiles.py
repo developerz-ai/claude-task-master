@@ -115,7 +115,9 @@ class TestProfileLifecycle:
         activated = manager.use(DEFAULT_PROFILE_NAME)
         assert activated is not None
         assert manager.active_name() == DEFAULT_PROFILE_NAME
-        assert manager.resolve_active().config_dir == "/dir/default"
+        resolved = manager.resolve_active()
+        assert resolved is not None
+        assert resolved.config_dir == "/dir/default"
 
     def test_remove_clears_active(self, manager: ProfileManager) -> None:
         manager.add("work", "oauth")
