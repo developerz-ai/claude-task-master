@@ -25,6 +25,7 @@ from .agent_exceptions import (
     ConsecutiveFailuresError,
     ContentFilterError,
     ModelUnavailableError,
+    QueryExecutionError,
     SDKImportError,
     SDKInitializationError,
     StreamStallError,
@@ -384,6 +385,25 @@ class AgentQueryExecutor(_AgentQueryExecuteMixin, _AgentQueryHelpersMixin):
             ):
                 # These errors should not be retried
                 raise
+            except QueryExecutionError as e:
+                # An unclassified API/CLI failure with no terminal result to
+                # derive an outcome from — e.g. the SDK surfacing a CLI crash
+                # as a bare Exception whose text carries no recognisable
+                # keyword. Ending an unattended run on the first one fails
+                # claudetm's one job, so retry under the same failure budget
+                # as a connection error; a genuinely permanent failure
+                # exhausts it and raises ConsecutiveFailuresError.
+                self._record_failure(e)
+
+                retry_delay = self._get_retry_delay(e)
+
+                console.newline()
+                console.warning(
+                    f"API error ({self._consecutive_failures}/{max_failures} in window): {e.message}",
+                    flush=True,
+                )
+                console.detail(f"Retrying in {retry_delay:.0f} seconds...", flush=True)
+                await asyncio.sleep(retry_delay)
             except Exception as e:  # noqa: BLE001
                 # AgentError subclasses not handled above are re-raised immediately.
                 from .agent_exceptions import AgentError  # noqa: PLC0415
