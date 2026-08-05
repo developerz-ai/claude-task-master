@@ -7,10 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.80] - 2026-08-05
+## [0.1.81] - 2026-08-05
 
 ### Fixed
 - **The linters are pinned, because a floating one is how a green local gate goes red in CI.** `ruff>=0.15.0` let CI resolve 0.16.1 while the lockfile held 0.15.22 locally — and 0.16 gained a whole new file type: it formats Python code blocks inside Markdown. Widening the gate's scope to `.` therefore passed locally and failed CI on seven `docs/` and `examples/` `.md` files that had never been in scope. Now `ruff>=0.16.1,<0.17` and `mypy>=1.19.0,<2`, so both places resolve the same tool. Markdown is explicitly excluded from ruff (`extend-exclude = ["*.md"]`): reflowing a doc's sample — collapsing a deliberately multi-line request into a single line — makes it worse to read, and the point of the wider scope was `scripts/` and the root helpers, which mypy already checked.
+- **The Docker workflow grants `artifact-metadata: write`.** v0.1.80's Docker job passed but warned twice — `Please check that the "artifact-metadata:write" permission has been included`, then `Failed to persist storage record: no artifacts found`. `actions/attest-build-provenance` v3+ persists an artifact-metadata storage record that v2 did not, so the bump left the attestation half-published: green job, missing record. This release is the first tag push that exercises it.
+
+## [0.1.80] - 2026-08-05
+
+### Fixed
 - **The local gate is the CI gate again.** v0.1.79's release commit went out with a red CI over a `union-attr` error in a *test* file — the kind of thing the gate exists to catch, missed because the local gate had quietly become narrower than CI's. Two independent drifts, both fixed at the source rather than by remembering to type a longer command:
   - **`mypy .` was unrunnable locally.** A leftover `build/` tree — gitignored, and absent from CI's clean checkout — made it die on `Duplicate module named "claude_task_master" (also at ./build/lib/…)` before checking a single file. So the habit became `mypy src`, which skips `tests/` and `scripts/` entirely. `[tool.mypy] exclude` now covers `build|dist|coverage_html|htmlcov|.venv|tmp`: all build/tooling output, never sources, so it is a no-op on CI and makes the one command work identically in both places.
   - **ruff was scoped narrower than mypy in CI.** `ruff check src/ tests/` against `mypy .` meant `scripts/`, `examples/util.py` and the root helpers were type-checked but never linted. Both now run on `.` — 399 files through mypy, the whole tree through ruff, matching the gate CLAUDE.md documents.
@@ -948,7 +953,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.80...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.81...HEAD
+[0.1.81]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.80...v0.1.81
 [0.1.80]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.79...v0.1.80
 [0.1.79]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.78...v0.1.79
 [0.1.78]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.77...v0.1.78
