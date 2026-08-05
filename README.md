@@ -100,9 +100,12 @@ CLAUDETM_API_KEY=sk-... claudetm profile add kimi --type api-key \
 # Manage profiles
 claudetm profile list                # active profile is marked with →
 claudetm profile use work            # set the active profile
+claudetm profile use default         # back to the ambient ~/.claude OAuth login
 claudetm profile show                # show active profile (secrets masked)
 claudetm profile remove zai
 ```
+
+`default` is a built-in profile name, not a registry entry: it means the ordinary Claude Code login at `~/.claude` (or `CLAUDE_CONFIG_DIR`) — the credentials a run uses when no profile is selected. Selecting it clears the active pointer, so `claudetm profile use default` is how you get back to your normal subscription after switching to an isolated or api-key profile. It works as a `CLAUDETM_PROFILE=default` per-run override too.
 
 The active profile's model overrides take precedence over the config file but yield to an explicit `CLAUDETM_MODEL_*` env var. claudetm passes the resolved model id to the SDK, and also emits Claude Code's native `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL` so subagents resolve to provider-valid ids too.
 

@@ -22,6 +22,12 @@ The registry lives in ``~/.claudetm/profiles.json`` (override the base directory
 with the ``CLAUDETM_HOME`` env var). The active profile is a single pointer,
 overridable per-run via the ``CLAUDETM_PROFILE`` environment variable.
 
+The name ``default`` is reserved for the ambient Claude Code login at
+``~/.claude`` (or ``CLAUDE_CONFIG_DIR``) -- the credentials a run uses when no
+profile is selected. It is not stored in the registry: selecting it clears the
+active pointer, so ``claudetm profile use default`` switches back to the
+ordinary OAuth credentials the same way every other profile is selected.
+
 This module only manages profile *metadata* and resolves the environment a run
 should launch with. The actual env injection happens at the SDK subprocess
 boundary (see ``agent_query`` / ``conversation``).
@@ -43,6 +49,14 @@ ProfileType = Literal["oauth", "api-key"]
 PROFILE_ENV_VAR = "CLAUDETM_PROFILE"
 # Environment variable that relocates the base directory (mainly for tests).
 HOME_ENV_VAR = "CLAUDETM_HOME"
+
+# Reserved name for the built-in profile: the ambient Claude Code login at
+# ``~/.claude`` (or ``CLAUDE_CONFIG_DIR``), i.e. "no profile at all". It is not
+# a registry entry -- selecting it *clears* the active pointer, which is what
+# every code path already reads as "use the ordinary oauth credentials". Naming
+# it makes that state reachable by the same verb as every other profile
+# (``claudetm profile use default``) instead of only by never having set one.
+DEFAULT_PROFILE_NAME = "default"
 
 # Profile names become filesystem paths (the oauth config dir), so restrict them
 # to a safe charset and reject path-traversal / separators / dot segments.
@@ -131,6 +145,32 @@ class ProfileRegistry(BaseModel):
 # =============================================================================
 # Environment resolution
 # =============================================================================
+
+
+def ambient_config_dir() -> Path:
+    """Return the Claude Code config dir used when no profile is active.
+
+    This is what the built-in ``default`` profile authenticates from: the
+    ``CLAUDE_CONFIG_DIR`` override if the environment sets one, else
+    ``~/.claude``.
+    """
+    override = os.environ.get("CLAUDE_CONFIG_DIR")
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".claude"
+
+
+def ambient_credentials_path() -> Path:
+    """Return the OAuth credentials file backing the built-in default profile."""
+    return ambient_config_dir() / ".credentials.json"
+
+
+def ambient_credentials_exist() -> bool:
+    """Whether the ambient ``~/.claude`` OAuth login is present on disk."""
+    try:
+        return ambient_credentials_path().is_file()
+    except OSError:
+        return False
 
 
 def env_for_profile(profile: Profile) -> dict[str, str]:
@@ -367,7 +407,9 @@ class ProfileManager:
 
         Returns:
             The resolved Profile, or None when no profile is selected at all
-            (no override and no persisted active pointer).
+            (no override and no persisted active pointer), or when the
+            reserved name ``default`` is selected without a registry entry
+            shadowing it -- both mean "use the ambient ~/.claude login".
 
         Raises:
             ProfileNotFoundError: If a profile IS selected (via override or the
@@ -380,6 +422,10 @@ class ProfileManager:
             return None
         profile = registry.profiles.get(name)
         if profile is None:
+            # ``default`` names the ambient login rather than a missing
+            # profile, so resolving it to None is the answer, not a fallback.
+            if name == DEFAULT_PROFILE_NAME:
+                return None
             raise ProfileNotFoundError(name)
         return profile
 
@@ -413,10 +459,15 @@ class ProfileManager:
 
         Raises:
             ProfileExistsError: If the name is already taken.
-            ProfileValidationError: If the name is unsafe or required fields for
-                the type are missing.
+            ProfileValidationError: If the name is unsafe, is the reserved
+                ``default``, or required fields for the type are missing.
         """
         _validate_name(name)
+        if name == DEFAULT_PROFILE_NAME:
+            raise ProfileValidationError(
+                f"'{DEFAULT_PROFILE_NAME}' is reserved for the built-in ambient "
+                "~/.claude login. Pick another name."
+            )
         registry = self.load()
         if name in registry.profiles:
             raise ProfileExistsError(name)
@@ -481,8 +532,16 @@ class ProfileManager:
             registry.active = None
         self.save(registry)
 
-    def use(self, name: str) -> Profile:
+    def use(self, name: str) -> Profile | None:
         """Set the active profile.
+
+        Args:
+            name: A registry profile name, or the reserved ``default`` to go
+                back to the ambient ``~/.claude`` login (clears the pointer).
+
+        Returns:
+            The activated Profile, or None when the built-in default was
+            selected -- there is no registry entry behind it.
 
         Raises:
             ProfileNotFoundError: If no such profile exists.
@@ -490,13 +549,22 @@ class ProfileManager:
         registry = self.load()
         profile = registry.profiles.get(name)
         if profile is None:
-            raise ProfileNotFoundError(name)
+            if name != DEFAULT_PROFILE_NAME:
+                raise ProfileNotFoundError(name)
+            # Built-in default: an unset pointer already means "ambient
+            # ~/.claude", so selecting it is exactly clearing the pointer.
+            registry.active = None
+            self.save(registry)
+            return None
         registry.active = name
         self.save(registry)
         return profile
 
     def clear_active(self) -> None:
-        """Unset the active profile (revert to default ~/.claude credentials)."""
+        """Unset the active profile (revert to default ~/.claude credentials).
+
+        Equivalent to ``use(DEFAULT_PROFILE_NAME)``.
+        """
         registry = self.load()
         registry.active = None
         self.save(registry)

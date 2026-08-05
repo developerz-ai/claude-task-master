@@ -195,6 +195,7 @@ All commands check `state_manager.exists()` first:
 - Profiles isolate credentials so multiple Claude subscriptions (or a custom Anthropic-compatible endpoint) can be used without colliding on the global `~/.claude/.credentials.json`
 - Two types: `oauth` (isolated `CLAUDE_CONFIG_DIR` per profile under `~/.claudetm/profiles/<name>/`) and `api-key` (injects `ANTHROPIC_API_KEY`/`ANTHROPIC_BASE_URL`, e.g. z.ai/GLM)
 - Registry at `~/.claudetm/profiles.json` (override base dir with `CLAUDETM_HOME`); active profile is a single pointer, overridable per-run via `CLAUDETM_PROFILE`
+- **`default` is reserved** (`DEFAULT_PROFILE_NAME`) for the ambient Claude Code login at `~/.claude` / `CLAUDE_CONFIG_DIR` — the credentials used when no profile is selected. It has no registry entry, so `use("default")` *clears* the pointer and returns None, and `resolve_active` maps the name to None instead of raising. `add` rejects it; a pre-existing registry profile of that name still shadows the built-in everywhere (lookups check the registry first)
 - The active profile's env is injected at the SDK subprocess boundary (`core/agent_query_execute.py`); `CredentialManager` reads the active oauth profile's config dir, and short-circuits the OAuth file check for `api-key` profiles
 - Different accounts run in parallel safely (per-profile creds dir + per-project state); running the *same* subscription twice can trigger OAuth refresh-token rotation — use a distinct profile per concurrent run
 

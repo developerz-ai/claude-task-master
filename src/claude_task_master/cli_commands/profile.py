@@ -4,10 +4,14 @@ Profiles let claudetm run under isolated credentials so multiple Claude
 subscriptions (or a custom Anthropic-compatible endpoint such as z.ai) can be
 used without colliding on the global ``~/.claude/.credentials.json``.
 
+The reserved name ``default`` denotes the ambient Claude Code login at
+``~/.claude`` -- what a run uses when no profile is active. It has no registry
+entry, so ``claudetm profile use default`` simply clears the active pointer.
+
 Commands:
 - add:    Create a profile (oauth or api-key)
-- list:   List all profiles and show the active one
-- use:    Set the active profile
+- list:   List all profiles (including built-in 'default') and the active one
+- use:    Set the active profile ('default' = ambient ~/.claude login)
 - show:   Show a profile's details
 - remove: Delete a profile
 - login:  Authenticate an oauth profile (runs `claude` in its isolated dir)
@@ -23,10 +27,13 @@ from rich.console import Console
 from rich.table import Table
 
 from ..core.profiles import (
+    DEFAULT_PROFILE_NAME,
     PROFILE_ENV_VAR,
     Profile,
     ProfileError,
     ProfileManager,
+    ambient_config_dir,
+    ambient_credentials_path,
 )
 
 console = Console()
@@ -189,15 +196,22 @@ def profile_list() -> None:
     profiles = manager.list()
     active = manager.active_name()
 
-    if not profiles:
-        console.print("[dim]No profiles yet. Create one with 'claudetm profile add <name>'.[/dim]")
-        return
-
     table = Table(title="Profiles")
     table.add_column("", style="green", width=2)
     table.add_column("Name", style="cyan")
     table.add_column("Type")
     table.add_column("Detail", style="dim")
+
+    # The built-in default (ambient ~/.claude login) is always selectable, so
+    # list it — it is what an unset active pointer resolves to. A registry
+    # profile of the same name (pre-dating the reservation) shadows it.
+    if not any(p.name == DEFAULT_PROFILE_NAME for p in profiles):
+        table.add_row(
+            "→" if active is None else "",
+            DEFAULT_PROFILE_NAME,
+            "oauth",
+            str(ambient_config_dir()),
+        )
 
     for p in profiles:
         marker = "→" if p.name == active else ""
@@ -205,6 +219,8 @@ def profile_list() -> None:
         table.add_row(marker, p.name, p.type, detail or "")
 
     console.print(table)
+    if not profiles:
+        console.print("[dim]Add one with 'claudetm profile add <name>'.[/dim]")
 
 
 @profile_app.command(name="use")
@@ -215,14 +231,33 @@ def profile_use(
 
     The active profile applies to subsequent runs. Override per-run with the
     CLAUDETM_PROFILE environment variable.
+
+    Use the reserved name 'default' to go back to the ambient Claude Code
+    OAuth login (~/.claude), i.e. running with no profile at all.
     """
     manager = ProfileManager()
     try:
-        manager.use(name)
+        profile = manager.use(name)
     except ProfileError as e:
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(1) from None
-    console.print(f"[green]✅ Active profile:[/green] {name}")
+
+    if profile is not None:
+        console.print(f"[green]✅ Active profile:[/green] {name}")
+        return
+
+    # Built-in default: no registry entry, just the ambient oauth credentials.
+    creds = ambient_credentials_path()
+    console.print(
+        f"[green]✅ Active profile:[/green] {DEFAULT_PROFILE_NAME} "
+        f"[dim](ambient Claude Code login)[/dim]"
+    )
+    console.print(f"[dim]Credentials:[/dim] {creds}")
+    if not creds.is_file():
+        console.print(
+            "[yellow]⚠️  No OAuth credentials there yet.[/yellow] Run "
+            "[cyan]claude[/cyan] and [bold]/login[/bold] to authenticate."
+        )
 
 
 @profile_app.command(name="show")
@@ -231,17 +266,33 @@ def profile_show(
 ) -> None:
     """🔎 Show a profile's details (secrets masked)."""
     manager = ProfileManager()
-    target = name or manager.active_name()
-    if not target:
-        console.print("[yellow]No profile specified and none active.[/yellow]")
-        raise typer.Exit(1)
+    active = manager.active_name()
+    # No active pointer means the ambient login is in effect — that IS the
+    # built-in default profile, so show it instead of erroring out.
+    target = name or active or DEFAULT_PROFILE_NAME
     try:
         profile = manager.get(target)
     except ProfileError as e:
+        if target == DEFAULT_PROFILE_NAME:
+            _print_default_profile(active=(active is None))
+            return
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(1) from None
 
-    _print_profile(profile, active=(profile.name == manager.active_name()))
+    _print_profile(profile, active=(profile.name == active))
+
+
+def _print_default_profile(active: bool) -> None:
+    """Render the built-in default profile (the ambient ~/.claude login)."""
+    console.print(
+        f"[bold cyan]{DEFAULT_PROFILE_NAME}[/bold cyan]"
+        + (" [green](active)[/green]" if active else "")
+    )
+    console.print("  [dim]type:[/dim]       oauth [dim](built-in)[/dim]")
+    console.print(f"  [dim]config_dir:[/dim] {ambient_config_dir()}")
+    creds = ambient_credentials_path()
+    state = "found" if creds.is_file() else "[yellow]not logged in[/yellow]"
+    console.print(f"  [dim]credentials:[/dim] {creds} ({state})")
 
 
 def _print_profile(profile: Profile, active: bool) -> None:
@@ -272,6 +323,12 @@ def profile_remove(
 ) -> None:
     """🗑️  Remove a profile (its config dir is left on disk)."""
     manager = ProfileManager()
+    if name == DEFAULT_PROFILE_NAME and name not in {p.name for p in manager.list()}:
+        console.print(
+            f"[red]'{DEFAULT_PROFILE_NAME}' is the built-in ambient login and cannot be "
+            "removed.[/red]"
+        )
+        raise typer.Exit(1)
     if not force and not typer.confirm(f"Remove profile '{name}'?"):
         console.print("[yellow]Cancelled[/yellow]")
         raise typer.Exit(0)
@@ -297,6 +354,13 @@ def profile_login(
     try:
         profile = manager.get(name)
     except ProfileError as e:
+        if name == DEFAULT_PROFILE_NAME:
+            console.print(
+                f"[yellow]'{DEFAULT_PROFILE_NAME}' is the ambient Claude Code login "
+                f"({ambient_config_dir()}).[/yellow] Run [cyan]claude[/cyan] and "
+                "[bold]/login[/bold] directly to authenticate it."
+            )
+            raise typer.Exit(1) from None
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(1) from None
 

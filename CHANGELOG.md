@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.79] - 2026-08-05
+
+### Added
+- **`claudetm profile use default` switches back to your ordinary Claude login.** Getting *into* an isolated or api-key profile took one verb; getting back out had none — the active pointer is what selects a profile, and nothing in the CLI could clear it, so the only route back to the plain `~/.claude` OAuth credentials was hand-editing `~/.claudetm/profiles.json`. `default` is now a reserved name for that ambient login (`DEFAULT_PROFILE_NAME`): it has no registry entry, so selecting it clears the pointer — which is exactly the state every run already reads as "no profile, use `~/.claude`". It also resolves as a `CLAUDETM_PROFILE=default` per-run override, where it previously died with `Profile 'default' not found`. `profile list` shows it as a row (marked active when no profile is set), `profile show` renders it instead of erroring out when nothing is active and reports whether the credentials file is actually there, and `profile use default` warns if you aren't logged in rather than switching you to credentials that don't exist. `profile add default` is refused so the built-in can't be shadowed; a registry profile of that name created before the reservation still wins everywhere, since every lookup checks the registry first.
+
 ## [0.1.78] - 2026-08-05
 
 ### Fixed
@@ -931,7 +936,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.78...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.79...HEAD
+[0.1.79]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.78...v0.1.79
 [0.1.78]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.77...v0.1.78
 [0.1.77]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.76...v0.1.77
 [0.1.76]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.75...v0.1.76

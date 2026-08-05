@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from claude_task_master.core.profiles import (
+    DEFAULT_PROFILE_NAME,
     PROFILE_ENV_VAR,
     Profile,
     ProfileError,
@@ -85,6 +86,36 @@ class TestProfileLifecycle:
     def test_use_missing_raises(self, manager: ProfileManager) -> None:
         with pytest.raises(ProfileNotFoundError):
             manager.use("nope")
+
+    def test_use_default_clears_active(self, manager: ProfileManager) -> None:
+        # 'default' is the ambient ~/.claude login: selecting it must clear the
+        # pointer, which is the state every run already reads as "no profile".
+        manager.add("work", "oauth")
+        assert manager.active_name() == "work"
+        assert manager.use(DEFAULT_PROFILE_NAME) is None
+        assert manager.active_name() is None
+
+    def test_use_default_with_no_profiles_at_all(self, manager: ProfileManager) -> None:
+        assert manager.use(DEFAULT_PROFILE_NAME) is None
+        assert manager.active_name() is None
+
+    def test_add_rejects_reserved_default_name(self, manager: ProfileManager) -> None:
+        with pytest.raises(ProfileValidationError, match="reserved"):
+            manager.add(DEFAULT_PROFILE_NAME, "oauth")
+
+    def test_registry_profile_named_default_still_wins(self, manager: ProfileManager) -> None:
+        # Profiles created before the name was reserved keep working: a real
+        # registry entry shadows the built-in meaning everywhere.
+        registry = manager.load()
+        registry.profiles[DEFAULT_PROFILE_NAME] = Profile(
+            name=DEFAULT_PROFILE_NAME, type="oauth", config_dir="/dir/default"
+        )
+        manager.save(registry)
+
+        activated = manager.use(DEFAULT_PROFILE_NAME)
+        assert activated is not None
+        assert manager.active_name() == DEFAULT_PROFILE_NAME
+        assert manager.resolve_active().config_dir == "/dir/default"
 
     def test_remove_clears_active(self, manager: ProfileManager) -> None:
         manager.add("work", "oauth")
@@ -262,6 +293,15 @@ class TestResolveRuntimeEnv:
         monkeypatch.setenv(PROFILE_ENV_VAR, "zai")
         env = resolve_runtime_env()
         assert env == {"ANTHROPIC_API_KEY": "sk-override"}
+
+    def test_default_override_resolves_to_ambient(self, tmp_path: Path, monkeypatch) -> None:
+        # CLAUDETM_PROFILE=default names the ambient login, so an empty env is
+        # the correct answer — not a ProfileNotFoundError.
+        base = tmp_path / ".claudetm"
+        ProfileManager(base_dir=base).add("zai", "api-key", api_key="sk-active")
+        monkeypatch.setenv("CLAUDETM_HOME", str(base))
+        monkeypatch.setenv(PROFILE_ENV_VAR, DEFAULT_PROFILE_NAME)
+        assert resolve_runtime_env() == {}
 
     def test_unknown_override_raises(self, tmp_path: Path, monkeypatch) -> None:
         # An explicitly-selected but missing profile must fail fast, not

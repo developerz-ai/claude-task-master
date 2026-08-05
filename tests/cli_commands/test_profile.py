@@ -255,16 +255,19 @@ class TestProfileList:
     """Tests for 'claudetm profile list'."""
 
     def test_list_empty_registry(self, runner):
-        """An empty profile registry shows the 'no profiles' hint."""
+        """An empty registry still lists the built-in default, plus an add hint."""
         with patch(f"{_MOD}.ProfileManager") as MockMgr:
             mock_mgr = MagicMock()
             MockMgr.return_value = mock_mgr
             mock_mgr.list.return_value = []
+            mock_mgr.active_name.return_value = None
 
             result = runner.invoke(profile_app, ["list"])
 
         assert result.exit_code == 0
-        assert "No profiles" in result.output
+        assert "default" in result.output
+        assert "→" in result.output  # no active pointer -> default is in effect
+        assert "profile add" in result.output
 
     def test_list_shows_profiles_table(self, runner):
         """Non-empty registry renders a table with profile names and types."""
@@ -330,6 +333,45 @@ class TestProfileUse:
         assert result.exit_code == 0
         mock_mgr.use.assert_called_once_with("work")
         assert "work" in result.output
+
+    def test_use_default_reports_ambient_credentials(self, runner, tmp_path):
+        """'profile use default' (manager returns None) reports the ambient login."""
+        creds_dir = tmp_path / ".claude"
+        creds_dir.mkdir()
+        (creds_dir / ".credentials.json").write_text("{}")
+
+        with (
+            patch(f"{_MOD}.ProfileManager") as MockMgr,
+            patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(creds_dir)}),
+        ):
+            mock_mgr = MagicMock()
+            MockMgr.return_value = mock_mgr
+            mock_mgr.use.return_value = None
+
+            result = runner.invoke(profile_app, ["use", "default"])
+
+        assert result.exit_code == 0
+        mock_mgr.use.assert_called_once_with("default")
+        assert "default" in result.output
+        # Rich hard-wraps the path, so compare against the unwrapped text.
+        assert ".credentials.json" in result.output.replace("\n", "")
+        assert "No OAuth credentials" not in result.output
+
+    def test_use_default_warns_when_not_logged_in(self, runner, tmp_path):
+        """No ambient credentials on disk → still switches, but warns to /login."""
+        with (
+            patch(f"{_MOD}.ProfileManager") as MockMgr,
+            patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(tmp_path / "empty")}),
+        ):
+            mock_mgr = MagicMock()
+            MockMgr.return_value = mock_mgr
+            mock_mgr.use.return_value = None
+
+            result = runner.invoke(profile_app, ["use", "default"])
+
+        assert result.exit_code == 0
+        assert "No OAuth credentials" in result.output
+        assert "login" in result.output
 
     def test_use_unknown_profile_exits_1(self, runner):
         """Using a non-existent profile forwards ProfileNotFoundError as exit 1."""
@@ -419,17 +461,20 @@ class TestProfileShow:
         assert "supersecret" not in result.output
         assert "…" in result.output or "***" in result.output
 
-    def test_show_no_active_no_name_exits_1(self, runner):
-        """No name and no active profile → exit 1 with a helpful message."""
+    def test_show_no_active_no_name_shows_builtin_default(self, runner):
+        """No name and no active profile → render the built-in default as active."""
         with patch(f"{_MOD}.ProfileManager") as MockMgr:
             mock_mgr = MagicMock()
             MockMgr.return_value = mock_mgr
             mock_mgr.active_name.return_value = None
+            mock_mgr.get.side_effect = ProfileNotFoundError("default")
 
             result = runner.invoke(profile_app, ["show"])
 
-        assert result.exit_code == 1
-        assert "No profile" in result.output or "none active" in result.output.lower()
+        assert result.exit_code == 0
+        assert "default" in result.output
+        assert "(active)" in result.output
+        assert ".credentials.json" in result.output.replace("\n", "")
 
     def test_show_unknown_profile_exits_1(self, runner):
         """Requesting a non-existent profile propagates ProfileError as exit 1."""
@@ -507,6 +552,19 @@ class TestProfileRemove:
         assert result.exit_code == 0
         mock_mgr.remove.assert_called_once_with("work", force=True)
         assert "Removed" in result.output
+
+    def test_remove_builtin_default_refused(self, runner):
+        """The built-in default has no registry entry, so it cannot be removed."""
+        with patch(f"{_MOD}.ProfileManager") as MockMgr:
+            mock_mgr = MagicMock()
+            MockMgr.return_value = mock_mgr
+            mock_mgr.list.return_value = []
+
+            result = runner.invoke(profile_app, ["remove", "default", "--force"])
+
+        assert result.exit_code == 1
+        assert "cannot be removed" in result.output
+        mock_mgr.remove.assert_not_called()
 
     def test_remove_short_force_flag(self, runner):
         """'-f' (short force) removes without confirmation."""
@@ -637,6 +695,19 @@ class TestProfileLogin:
 
         assert result.exit_code == 1
         assert "ghost" in result.output
+
+    def test_login_builtin_default_points_at_claude_cli(self, runner):
+        """login default has no isolated dir to seed — point at plain `claude`."""
+        with patch(f"{_MOD}.ProfileManager") as MockMgr:
+            mock_mgr = MagicMock()
+            MockMgr.return_value = mock_mgr
+            mock_mgr.get.side_effect = ProfileNotFoundError("default")
+
+            result = runner.invoke(profile_app, ["login", "default"])
+
+        assert result.exit_code == 1
+        assert "ambient" in result.output
+        assert "/login" in result.output
 
     def test_login_claude_not_found_exits_1(self, runner):
         """When 'claude' binary is absent, login exits 1 with a helpful message."""
