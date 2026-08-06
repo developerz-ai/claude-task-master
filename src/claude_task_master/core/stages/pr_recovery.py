@@ -232,16 +232,20 @@ Don't merge, don't wait for CI. Done = clean `git status` + PR URL."""
         ]
         return title, "\n".join(lines).strip()
 
-    @staticmethod
-    def _commits_ahead_of_base(base: str) -> int | None:
+    def _commits_ahead_of_base(self, base: str) -> int | None:
         """Count commits on HEAD that are not on ``origin/<base>``.
+
+        Measured in :meth:`_project_dir`, like every other git probe — the run's
+        working tree, not whatever repository the process happens to sit in.
 
         Returns None when the comparison cannot be made (fetch or rev-list
         failure) — the caller must treat that as "unknown", never as 0.
         """
+        cwd = self._project_dir()
         try:
             subprocess.run(
                 ["git", "fetch", "origin", base],
+                cwd=cwd,
                 check=True,
                 capture_output=True,
                 text=True,
@@ -249,6 +253,7 @@ Don't merge, don't wait for CI. Done = clean `git status` + PR URL."""
             )
             result = subprocess.run(
                 ["git", "rev-list", "--count", f"origin/{base}..HEAD"],
+                cwd=cwd,
                 check=True,
                 capture_output=True,
                 text=True,
@@ -258,11 +263,15 @@ Don't merge, don't wait for CI. Done = clean `git status` + PR URL."""
         except Exception:
             return None
 
-    @staticmethod
-    def _push_current_branch() -> None:
-        """Push the current branch, setting upstream. Raises on failure."""
+    def _push_current_branch(self) -> None:
+        """Push the project tree's current branch, setting upstream.
+
+        Raises on failure — every caller treats a failed push as a reason to
+        stop, never as something to log and continue past.
+        """
         subprocess.run(
             ["git", "push", "-u", "origin", "HEAD"],
+            cwd=self._project_dir(),
             check=True,
             capture_output=True,
             text=True,

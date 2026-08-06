@@ -297,12 +297,18 @@ class _GitOps(StageHandlerBase):
         self.state_manager.save_state(state)
         return None
 
-    @staticmethod
-    def _get_current_branch() -> str | None:
-        """Get the current git branch name."""
+    def _get_current_branch(self) -> str | None:
+        """Get the current git branch name of the project tree.
+
+        Measured in :meth:`_project_dir`, like every other probe here: the
+        branch has to come from the same repository the dirty/ahead/unpushed
+        answers do, or a run started from a different cwd pairs one repo's
+        leftovers with another repo's branch name.
+        """
         try:
             result = subprocess.run(
                 ["git", "branch", "--show-current"],
+                cwd=self._project_dir(),
                 check=True,
                 capture_output=True,
                 text=True,

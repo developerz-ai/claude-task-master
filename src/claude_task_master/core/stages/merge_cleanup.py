@@ -142,25 +142,32 @@ class _MergeCleanup(_ReviewStage):
             return None
 
         after_sha = self._head_sha()
-        head_moved = bool(before_sha and after_sha and before_sha != after_sha)
+        # Unknown counts as moved, not as unchanged. Reading "no new commits" off
+        # a probe that failed is how a cleanup commit gets merged on the CI that
+        # ran before it existed — and the cost of being wrong the other way is
+        # one extra CI poll on an already-green PR.
+        head_moved = before_sha is None or after_sha is None or before_sha != after_sha
 
         # A session that committed but never pushed is the dangerous case: the
         # tree reads clean, so nothing downstream would notice, and the merge
         # would land the PR *without* those commits and then delete the branch
         # carrying them. Pushing is deterministic, so the orchestrator does it.
+        # A push with nothing to push is a no-op, so this runs whenever new
+        # commits are possible rather than only when they are proven.
         unpushed = self._unpushed_commit_count(branch)
-        if unpushed:
-            console.info(f"Pushing {unpushed} commit(s) the cleanup session left unpushed...")
+        if head_moved or unpushed:
+            console.info(
+                f"Pushing {unpushed} commit(s) the cleanup session left unpushed..."
+                if unpushed
+                else "Making sure the cleanup session's commits reached the PR..."
+            )
             try:
                 self._push_current_branch()
             except Exception as e:
                 return self._block_dirty_merge(
                     state, pr_number, "", f"could not push the cleanup commits: {e}"
                 )
-            head_moved = True
-
-        if head_moved:
-            console.info(f"Cleanup pushed new commits — PR #{pr_number} goes back through CI")
+            console.info(f"PR #{pr_number} goes back through CI before merging")
             state.workflow_stage = "waiting_ci"
             state.ci_poll_start_time = None
             self.state_manager.save_state(state)

@@ -150,7 +150,7 @@ class TestDirtyTreeRunsCleanupSession:
         mock_github_client.merge_pr.assert_not_called()
 
     def test_new_commits_send_the_pr_back_through_ci(self, handler, state, mock_github_client):
-        """A cleanup that pushed must not merge on CI that predates it."""
+        """A cleanup that committed must not merge on CI that predates it."""
         state.ci_poll_start_time = datetime.now()
 
         with (
@@ -158,12 +158,29 @@ class TestDirtyTreeRunsCleanupSession:
             patch.object(WorkflowStageHandler, "_get_current_branch", return_value="feat/x"),
             patch.object(WorkflowStageHandler, "_head_sha", side_effect=["abc123", "def456"]),
             patch.object(WorkflowStageHandler, "_unpushed_commit_count", return_value=0),
+            patch.object(WorkflowStageHandler, "_push_current_branch"),
         ):
             result = handler.handle_ready_to_merge_stage(state)
 
         assert result is None
         assert state.workflow_stage == "waiting_ci"
         assert state.ci_poll_start_time is None
+        mock_github_client.merge_pr.assert_not_called()
+
+    def test_an_unreadable_head_is_treated_as_moved(self, handler, state, mock_github_client):
+        """Unknown must not read as "no new commits" — that merges on stale CI."""
+        with (
+            patch.object(WorkflowStageHandler, "_uncommitted_summary", side_effect=[_PENDING, ""]),
+            patch.object(WorkflowStageHandler, "_get_current_branch", return_value="feat/x"),
+            patch.object(WorkflowStageHandler, "_head_sha", return_value=None),
+            patch.object(WorkflowStageHandler, "_unpushed_commit_count", return_value=None),
+            patch.object(WorkflowStageHandler, "_push_current_branch") as push,
+        ):
+            result = handler.handle_ready_to_merge_stage(state)
+
+        assert result is None
+        push.assert_called_once()
+        assert state.workflow_stage == "waiting_ci"
         mock_github_client.merge_pr.assert_not_called()
 
     def test_committed_but_unpushed_work_is_pushed_before_merging(self, handler, state):
