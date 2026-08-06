@@ -61,7 +61,7 @@ class _PRContextCIMixin:
     # CI helpers
     # ------------------------------------------------------------------
 
-    def failing_run_ids(self, pr_number: int | None) -> list[int]:
+    def failing_run_ids(self, pr_number: int | None) -> list[int] | None:
         """Return the workflow run IDs behind a PR's failing checks.
 
         One PR commonly fans out to several workflows, so a red PR usually has
@@ -74,7 +74,10 @@ class _PRContextCIMixin:
             pr_number: The PR number.
 
         Returns:
-            Sorted run IDs, empty when the PR is green or none could be parsed.
+            Sorted run IDs; ``[]`` when the PR has no failing run to act on, and
+            ``None`` when GitHub could not be asked. The two must stay distinct:
+            a caller that reads a failed status lookup as "no runs" turns a
+            momentary API blip into "nothing to re-run", which is a block.
         """
         if pr_number is None:
             return []
@@ -82,7 +85,7 @@ class _PRContextCIMixin:
         try:
             pr_status = self.github_client.get_pr_status(pr_number)
         except Exception:
-            return []
+            return None
 
         return _run_ids_from_checks(pr_status.check_details)
 
@@ -163,10 +166,15 @@ class _PRContextCIMixin:
             for run_id in run_ids:
                 _console.detail(f"Downloading CI logs for run {run_id} from {repo}...")
                 try:
-                    # Download and save logs chunked (20KB per file ~5K tokens)
+                    # Download and save logs chunked (20KB per file ~5K tokens).
+                    # One directory per run: job names are only unique *within* a
+                    # workflow, and a repo whose workflows each define a "typecheck"
+                    # job would otherwise have the last download overwrite the rest —
+                    # leaving the agent reading one workflow's logs under a name that
+                    # implies all of them.
                     logs = downloader.download_failed_run_logs(
                         run_id=run_id,
-                        output_dir=ci_dir,
+                        output_dir=ci_dir / f"run-{run_id}",
                         max_chars_per_file=20_000,
                     )
                 except Exception as e:

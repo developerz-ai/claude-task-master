@@ -134,9 +134,13 @@ class _PRFixStage(_CIStage):
         from ...github.ci_infra import CIInfraDetector  # noqa: PLC0415
 
         try:
-            run_ids = [int(run_id) for run_id in self.pr_context.failing_run_ids(state.current_pr)]
-            if not run_ids:
+            reported = self.pr_context.failing_run_ids(state.current_pr)
+            # None means GitHub could not be asked. Unknown is not "the platform
+            # is at fault" — the ordinary fix path handles it, and the no-commit
+            # branch below re-asks with a bounded retry.
+            if not reported:
                 return []
+            run_ids = [int(run_id) for run_id in reported]
             detector = CIInfraDetector(repo=self.github_client._get_repo_info())
             all_infra = all(detector.never_ran(run_id) for run_id in run_ids)
         except Exception:
@@ -146,7 +150,9 @@ class _PRFixStage(_CIStage):
 
         return run_ids if all_infra else []
 
-    def _rerun_failed_ci(self, state: TaskState, run_ids: list[int], reason: str) -> int | None:
+    def _rerun_failed_ci(
+        self, state: TaskState, run_ids: list[int] | None, reason: str
+    ) -> int | None:
         """Re-run the PR's failed jobs and go back to waiting on CI.
 
         The escape hatch for a red PR that no code change addresses. It is
@@ -155,13 +161,25 @@ class _PRFixStage(_CIStage):
 
         Args:
             state: Current task state.
-            run_ids: The failing workflow runs to re-run.
+            run_ids: The failing workflow runs to re-run, or None when GitHub
+                could not be asked which they are.
             reason: Why re-running is the right move, shown to the user.
 
         Returns:
-            None to continue the loop in ``waiting_ci``, 1 once the budget is
-            spent or there is nothing to re-run.
+            None to continue the loop, 1 once a budget is spent or GitHub
+            refused outright.
         """
+        if run_ids is None:
+            # Not "nothing to re-run" — "we could not find out". Blocking on a
+            # momentary API failure is the shape of bug this method exists to
+            # remove, so it takes the bounded transient path instead.
+            return self._retry_transient(
+                state,
+                "ci_rerun_lookup",
+                f"Could not read the PR's failing checks to re-run them ({reason})",
+            )
+        self._clear_transient("ci_rerun_lookup")
+
         if not run_ids:
             console.error(
                 f"CI is red but no workflow run could be identified to re-run ({reason}) — "
@@ -171,8 +189,7 @@ class _PRFixStage(_CIStage):
             self.state_manager.save_state(state)
             return 1
 
-        state.ci_rerun_attempts += 1
-        if state.ci_rerun_attempts > self.MAX_CI_RERUN_ATTEMPTS:
+        if state.ci_rerun_attempts >= self.MAX_CI_RERUN_ATTEMPTS:
             console.error(
                 f"CI still red after {self.MAX_CI_RERUN_ATTEMPTS} job re-runs ({reason}) — "
                 f"blocking, manual intervention required"
@@ -187,10 +204,11 @@ class _PRFixStage(_CIStage):
 
         console.warning(
             f"Re-running failed CI jobs ({reason}) — "
-            f"attempt {state.ci_rerun_attempts}/{self.MAX_CI_RERUN_ATTEMPTS}"
+            f"attempt {state.ci_rerun_attempts + 1}/{self.MAX_CI_RERUN_ATTEMPTS}"
         )
 
         from ...github.ci_rerun import CIRerunner  # noqa: PLC0415
+        from ...github.exceptions import GitHubTimeoutError  # noqa: PLC0415
 
         try:
             rerunner = CIRerunner(repo=self.github_client._get_repo_info())
@@ -198,9 +216,18 @@ class _PRFixStage(_CIStage):
             return self._retry_transient(
                 state, "ci_rerun", f"Could not reach GitHub to re-run: {e}"
             )
+        self._clear_transient("ci_rerun")
 
-        restarted = [run_id for run_id in run_ids if rerunner.rerun_failed_jobs(run_id)]
-        if not restarted:
+        restarted: list[int] = []
+        unanswered: list[int] = []
+        for run_id in run_ids:
+            try:
+                if rerunner.rerun_failed_jobs(run_id):
+                    restarted.append(run_id)
+            except GitHubTimeoutError:
+                unanswered.append(run_id)
+
+        if not restarted and not unanswered:
             console.error(
                 "GitHub refused to re-run any of the failed jobs — "
                 "blocking, manual intervention required"
@@ -210,7 +237,22 @@ class _PRFixStage(_CIStage):
             self.state_manager.save_state(state)
             return 1
 
-        console.detail(f"Re-running {len(restarted)} of {len(run_ids)} failing run(s): {restarted}")
+        if unanswered:
+            # A timed-out request may already have restarted the run. Asking
+            # again would be refused ("already running") and read as a final
+            # no; polling settles it either way — pending means it landed, red
+            # again means it did not, and the budget is spent either way so a
+            # permanently timing-out `gh` cannot loop.
+            console.detail(f"Re-run request timed out for run(s) {unanswered} — CI will confirm")
+
+        # Only now: the budget counts re-runs GitHub was actually asked to
+        # perform, not attempts that never reached it.
+        state.ci_rerun_attempts += 1
+
+        if restarted:
+            console.detail(
+                f"Re-running {len(restarted)} of {len(run_ids)} failing run(s): {restarted}"
+            )
 
         # The re-run starts the checks over, so the poll timer must too —
         # otherwise the previous wait counts against CI_POLL_TIMEOUT and the

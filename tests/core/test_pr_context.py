@@ -236,7 +236,7 @@ class TestSaveCIFailures:
         assert ci_dir.exists()
 
         # Check for job directory and log file
-        job_dir = ci_dir / "test-job"
+        job_dir = ci_dir / "run-12345" / "test-job"
         assert job_dir.exists()
         log_file = job_dir / "1.log"
         assert log_file.exists()
@@ -287,9 +287,66 @@ class TestSaveCIFailures:
 
             pr_context_manager.save_ci_failures(123, _also_save_comments=False)
 
-        log_file = state_manager.get_pr_dir(123) / "ci" / "test-job" / "1.log"
+        log_file = state_manager.get_pr_dir(123) / "ci" / "run-12345" / "test-job" / "1.log"
         assert log_file.exists()
         assert "Test error" in log_file.read_text()
+
+    def test_same_job_name_in_two_runs_keeps_both_logs(
+        self,
+        pr_context_manager: PRContextManager,
+        state_manager: StateManager,
+        mock_github_client: MagicMock,
+    ) -> None:
+        """Job names are unique within a workflow, not across a repo's workflows.
+
+        A repo whose api, web and mobile workflows each define a "typecheck"
+        job would otherwise have the last download overwrite the others,
+        leaving the fix agent reading one workflow's logs under a name that
+        implies all of them.
+        """
+        mock_github_client.get_pr_status.return_value = MagicMock(
+            check_details=[
+                {
+                    "name": "typecheck",
+                    "conclusion": "FAILURE",
+                    "url": "https://github.com/owner/repo/actions/runs/111/job/1",
+                },
+                {
+                    "name": "typecheck",
+                    "conclusion": "FAILURE",
+                    "url": "https://github.com/owner/repo/actions/runs/222/job/2",
+                },
+            ]
+        )
+        mock_github_client._get_repo_info.return_value = "owner/repo"
+
+        def _jobs(job_id: int) -> MagicMock:
+            return MagicMock(
+                returncode=0,
+                stdout=json.dumps(
+                    {
+                        "id": job_id,
+                        "name": "typecheck",
+                        "status": "completed",
+                        "conclusion": "failure",
+                    }
+                ),
+                stderr="",
+            )
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                _jobs(1),
+                MagicMock(returncode=0, stdout=b"api typecheck broke", stderr=b""),
+                _jobs(2),
+                MagicMock(returncode=0, stdout=b"web typecheck broke", stderr=b""),
+            ]
+
+            pr_context_manager.save_ci_failures(123, _also_save_comments=False)
+
+        ci_dir = state_manager.get_pr_dir(123) / "ci"
+        assert "api typecheck broke" in (ci_dir / "run-111" / "typecheck" / "1.log").read_text()
+        assert "web typecheck broke" in (ci_dir / "run-222" / "typecheck" / "1.log").read_text()
 
     def test_saves_failure_for_error_conclusion(
         self,
@@ -332,7 +389,7 @@ class TestSaveCIFailures:
 
         pr_dir = state_manager.get_pr_dir(123)
         ci_dir = pr_dir / "ci"
-        job_dir = ci_dir / "build-job"
+        job_dir = ci_dir / "run-12345" / "build-job"
         assert job_dir.exists()
         log_file = job_dir / "1.log"
         assert log_file.exists()

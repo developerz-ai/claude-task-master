@@ -52,6 +52,20 @@ class TestNeverRan:
         with _jobs(_job("cancelled"), _job("failure", steps=[{"name": "build"}])):
             assert detector.never_ran(1) is False
 
+    def test_matrix_fail_fast_is_a_real_failure(self, detector):
+        """fail-fast cancels the siblings of a job that genuinely broke.
+
+        The cancelled siblings record no steps, but the sibling that *caused*
+        the cancellation did — and that one is a defect the agent must see, so
+        the run as a whole is not infrastructural.
+        """
+        with _jobs(
+            _job("failure", steps=[{"name": "pytest", "conclusion": "failure"}]),
+            _job("cancelled"),
+            _job("cancelled"),
+        ):
+            assert detector.never_ran(1) is False
+
     def test_green_run_is_not_infrastructural(self, detector):
         with _jobs({"id": 1, "name": "test", "conclusion": "success", "steps": []}):
             assert detector.never_ran(1) is False

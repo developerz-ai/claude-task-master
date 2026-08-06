@@ -43,6 +43,8 @@ def _quiet() -> Generator[None, None, None]:
         patch(f"{_PR_FIX}.console"),
         patch("claude_task_master.core.stages.git_ops.console"),
         patch(f"{_PR_FIX}.interruptible_sleep", return_value=True),
+        # _retry_transient lives in git_ops and sleeps through its own binding.
+        patch("claude_task_master.core.stages.git_ops.interruptible_sleep", return_value=True),
     ):
         yield
 
@@ -221,6 +223,51 @@ class TestFixSessionWithoutACommit:
 
         assert result == 1
         assert state.status == "blocked"
+
+    def test_unreadable_status_retries_instead_of_blocking(self, handler, state, mock_pr_context):
+        """`None` is "could not ask GitHub", not "nothing to re-run".
+
+        Blocking a task on a momentary API failure is the shape of bug this
+        whole change removes, so it must not be reintroduced by the fix.
+        """
+        mock_pr_context.failing_run_ids = MagicMock(return_value=None)
+
+        with _infra(False), _delivered(), _committed(False):
+            result = handler.handle_ci_failed_stage(state)
+
+        assert result is None
+        assert state.status != "blocked"
+        # Bounded: the transient budget still blocks a permanent outage later.
+        assert handler._transient_attempts["ci_rerun_lookup"] == 1
+
+
+class TestReRunRequestOutcomes:
+    """A refusal is final; a timeout is not an answer at all."""
+
+    def test_timeout_goes_to_ci_rather_than_blocking(self, handler, state):
+        """The request may have landed — polling settles it."""
+        from claude_task_master.github.exceptions import GitHubTimeoutError
+
+        rerunner = MagicMock()
+        rerunner.rerun_failed_jobs = MagicMock(side_effect=GitHubTimeoutError("timeout"))
+
+        with _infra(True), patch(_RERUN, return_value=rerunner):
+            result = handler.handle_ci_failed_stage(state)
+
+        assert result is None
+        assert state.status != "blocked"
+        assert state.workflow_stage == "waiting_ci"
+        # Still spent, so a permanently timing-out `gh` cannot loop forever.
+        assert state.ci_rerun_attempts == 1
+
+    def test_refusal_does_not_spend_the_budget(self, handler, state):
+        """Blocking is the outcome, so the counter must not also be charged."""
+        rerun_patch, _ = _rerun(accepted=False)
+
+        with _infra(True), rerun_patch:
+            handler.handle_ci_failed_stage(state)
+
+        assert state.ci_rerun_attempts == 0
 
 
 class TestBudgetEndsWithTheStreak:

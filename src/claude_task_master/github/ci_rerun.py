@@ -36,10 +36,20 @@ class CIRerunner:
             run_id: The workflow run ID.
 
         Returns:
-            True when GitHub accepted the request. False on any failure —
-            the run may be too old to re-run, or already re-running — so the
-            caller can report how many of its runs actually restarted.
+            True when GitHub accepted the request, False when it refused —
+            the run may be past its retention window, or already re-running.
+            A refusal is an answer; the caller can report how many runs
+            actually restarted.
+
+        Raises:
+            GitHubTimeoutError: The request neither succeeded nor was refused.
+                Kept distinct from a refusal because the two need opposite
+                handling: a refusal is final, a timeout may already have
+                restarted the run server-side, and treating it as "GitHub said
+                no" would block a task whose CI is in fact re-running.
         """
+        from .exceptions import GitHubTimeoutError  # noqa: PLC0415
+
         try:
             subprocess.run(
                 ["gh", "run", "rerun", str(run_id), "--failed", "--repo", self.repo],
@@ -48,6 +58,8 @@ class CIRerunner:
                 check=True,
                 timeout=self.timeout,
             )
+        except subprocess.TimeoutExpired as e:
+            raise GitHubTimeoutError(f"Timeout re-running failed jobs for run {run_id}") from e
         except (subprocess.SubprocessError, OSError):
             return False
         return True

@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from claude_task_master.github.ci_rerun import CIRerunner
+from claude_task_master.github.exceptions import GitHubTimeoutError
 
 
 @pytest.fixture
@@ -36,6 +37,11 @@ class TestRerunFailedJobs:
         with patch("subprocess.run", side_effect=subprocess.CalledProcessError(1, "gh")):
             assert rerunner.rerun_failed_jobs(123) is False
 
-    def test_timeout_is_reported_not_raised(self, rerunner):
+    def test_timeout_is_distinct_from_refusal(self, rerunner):
+        """A timeout may already have restarted the run; a refusal never did.
+
+        Collapsing the two would block a task whose CI is in fact re-running.
+        """
         with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("gh", 60)):
-            assert rerunner.rerun_failed_jobs(123) is False
+            with pytest.raises(GitHubTimeoutError):
+                rerunner.rerun_failed_jobs(123)
