@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.82] - 2026-08-06
+
+### Fixed
+- **A dirty working tree no longer ends a run at the finish line.** `ready_to_merge` refuses to call `gh pr merge` on uncommitted changes — correctly, since merging checks branches out — but refusing was all it did, and that block cannot be cleared by the command that exists to clear blocks: the condition is purely local and deterministic, so `claudetm resume -f` resets the status, re-enters the stage, re-reads the same unchanged tree and blocks again having run **zero** sessions. Observed on a 19-session run that had already got its PR green: `D mobile/app/expo-env.d.ts`, `M mobile/app/tsconfig.json` — both written by an `expo prebuild` a session had run, nobody's edit, and the run sat there overnight. The tree now goes to a bounded cleanup session (`core/stages/merge_cleanup.py`), the shape `_PRRecovery` already uses for a dirty tree with no PR: the agent decides per path whether it is the PR's own unfinished work (finish, commit, push) or tooling droppings (discard). The orchestrator keeps what must not be guessed — it never commits anything itself, and a session that leaves new commits on the branch is pushed and routed back through `waiting_ci` rather than merged on CI that ran before those commits existed (an unreadable HEAD counts as moved, since reading "unknown" as "unchanged" is exactly how a cleanup commit gets merged untested). Bounded by `MAX_MERGE_CLEANUP_ATTEMPTS` (2). Leftovers on the base branch, a crashed session, a failed push, or a tree still dirty after the budget still block — those genuinely need a human.
+- **`resume --force` refunds the attempt budgets.** The same dead-end one level up: the per-PR counters are persisted, so any stage that blocked *because* its budget was spent blocked again the instant a forced resume re-entered it. `StateRecovery.apply_recovery` now zeroes `ci_fix_attempts`, `conflict_fix_attempts`, `branch_sync_attempts`, `pr_finish_attempts`, `merge_cleanup_attempts`, `fix_finish_attempts` and `task_finish_attempts`. The budgets bound an *unattended* loop; `-f` means a human looked at the run and did something about it.
+- **Every git probe measures the run's project tree.** `_get_current_branch`, `_push_current_branch` and `_commits_ahead_of_base` ran in the process cwd while `_porcelain_status`, `_head_sha` and `_unpushed_commit_count` measure `_project_dir()`. A run started from a different repository could therefore pair one repo's leftover changes with another repo's branch name — and then push it.
+
 ## [0.1.81] - 2026-08-05
 
 ### Fixed
@@ -953,7 +960,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.81...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.82...HEAD
+[0.1.82]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.81...v0.1.82
 [0.1.81]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.80...v0.1.81
 [0.1.80]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.79...v0.1.80
 [0.1.79]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.78...v0.1.79
