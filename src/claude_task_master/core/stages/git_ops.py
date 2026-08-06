@@ -123,6 +123,26 @@ class _GitOps(StageHandlerBase):
             lines = lines[:max_lines] + [f"... and {extra} more"]
         return "\n".join(lines)
 
+    def _head_sha(self) -> str | None:
+        """The project tree's current HEAD sha, or None when it cannot be read.
+
+        Used to tell "the session changed the branch" from "the session only
+        tidied the working tree" — the first means CI must run again before the
+        PR merges, the second does not.
+        """
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=self._project_dir(),
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+        except Exception:
+            return None
+        return result.stdout.strip() or None
+
     def _unpushed_commit_count(self, branch: str) -> int | None:
         """Commits on HEAD that ``origin/<branch>`` does not have.
 
@@ -277,12 +297,18 @@ class _GitOps(StageHandlerBase):
         self.state_manager.save_state(state)
         return None
 
-    @staticmethod
-    def _get_current_branch() -> str | None:
-        """Get the current git branch name."""
+    def _get_current_branch(self) -> str | None:
+        """Get the current git branch name of the project tree.
+
+        Measured in :meth:`_project_dir`, like every other probe here: the
+        branch has to come from the same repository the dirty/ahead/unpushed
+        answers do, or a run started from a different cwd pairs one repo's
+        leftovers with another repo's branch name.
+        """
         try:
             result = subprocess.run(
                 ["git", "branch", "--show-current"],
+                cwd=self._project_dir(),
                 check=True,
                 capture_output=True,
                 text=True,

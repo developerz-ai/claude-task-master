@@ -106,6 +106,13 @@ class StateRecovery:
     def apply_recovery(self, state: TaskState, cwd: str | None = None) -> RecoveredState:
         """Detect and apply recovered state.
 
+        Also refunds the per-PR attempt budgets. ``resume --force`` means a human
+        looked at the run and did something about it, so carrying a spent counter
+        forward turns the retry into an immediate re-block: the stage re-enters,
+        finds its budget already at the cap, and blocks again having run nothing.
+        The budgets exist to stop an *unattended* loop from spinning, not to make
+        a deliberate retry impossible.
+
         Args:
             state: The TaskState to update.
             cwd: Working directory.
@@ -118,5 +125,12 @@ class StateRecovery:
         state.workflow_stage = recovered.workflow_stage
         state.current_pr = recovered.current_pr
         state.status = "working"
+        state.ci_fix_attempts = 0
+        state.conflict_fix_attempts = 0
+        state.branch_sync_attempts = 0
+        state.pr_finish_attempts = 0
+        state.merge_cleanup_attempts = 0
+        state.fix_finish_attempts = 0
+        state.task_finish_attempts = 0
 
         return recovered

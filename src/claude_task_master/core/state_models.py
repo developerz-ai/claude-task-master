@@ -137,6 +137,10 @@ class TaskState(BaseModel):
     # because the branch had no PR and the tree was dirty (a work session ended
     # mid-task). Bounded by MAX_PR_FINISH_ATTEMPTS; reset on task advance.
     pr_finish_attempts: int = 0
+    # Number of "clean the tree" agent sessions run in ready_to_merge because the
+    # working tree was dirty and `gh pr merge` checks branches out. Bounded by
+    # MAX_MERGE_CLEANUP_ATTEMPTS; reset on task advance and by `resume --force`.
+    merge_cleanup_attempts: int = 0
     # Consecutive re-runs of a push-only fix session (CI fix, review fix,
     # conflict) that ended without committing and pushing. Bounded by
     # MAX_FIX_FINISH_ATTEMPTS; reset when a fix session delivers, and on task

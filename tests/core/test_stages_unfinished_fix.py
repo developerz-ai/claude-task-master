@@ -181,17 +181,25 @@ class TestCIFixNotDelivered:
 class TestMergeRefusesDirtyTree:
     """`gh pr merge` checks branches out — never call it on a dirty tree."""
 
-    def test_dirty_tree_blocks_with_a_clear_message(self, handler, state, mock_github_client):
+    def test_dirty_tree_never_reaches_gh_pr_merge(self, handler, state, mock_github_client):
+        """A dirty tree diverts to the cleanup session (see
+        test_merge_dirty_tree_recovery), but `gh pr merge` is never called on it."""
         state.workflow_stage = "ready_to_merge"
         state.options.auto_merge = True
 
-        with patch.object(
-            WorkflowStageHandler, "_uncommitted_summary", return_value=" M src/thing.py"
+        with (
+            patch.object(
+                WorkflowStageHandler, "_uncommitted_summary", return_value=" M src/thing.py"
+            ),
+            patch.object(WorkflowStageHandler, "_get_current_branch", return_value="feat/x"),
+            patch.object(WorkflowStageHandler, "_head_sha", return_value="abc123"),
+            patch.object(WorkflowStageHandler, "_unpushed_commit_count", return_value=0),
         ):
             result = handler.handle_ready_to_merge_stage(state)
 
-        assert result == 1
-        assert state.status == "blocked"
+        assert result is None
+        assert state.workflow_stage == "ready_to_merge"
+        assert state.merge_cleanup_attempts == 1
         mock_github_client.merge_pr.assert_not_called()
 
     def test_clean_tree_merges(self, handler, state, mock_github_client):

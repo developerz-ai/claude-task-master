@@ -9,6 +9,7 @@ Inheritance chain (each extends the previous):
   _CIStage          ← CI polling + PR-creation detection
   _PRFixStage       ← CI-failure handling
   _ReviewStage      ← review-comment polling + resolution
+  _MergeCleanup     ← bounded agent recovery for a dirty tree before merging
   _MergeStage       ← merge readiness + post-merge cleanup
   _ConflictStage    ← agent resolution of merge conflicts
   _ReleaseStage     ← release verification + quick-fix PR

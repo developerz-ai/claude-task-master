@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, cast
 
 from .. import console
 from ..shutdown import interruptible_sleep
-from .review_stage import _ReviewStage
+from .merge_cleanup import _MergeCleanup
 
 if TYPE_CHECKING:
     from ...github.client_pr_models import PRStatus
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 _NOT_STALE = object()
 
 
-class _MergeStage(_ReviewStage):
+class _MergeStage(_MergeCleanup):
     """Mixin: ready-to-merge, merge execution, post-merge cleanup, task advance."""
 
     def _merge_status_retry(self, state: TaskState, reason: str) -> int | None:
@@ -188,24 +188,19 @@ class _MergeStage(_ReviewStage):
         if state.options.auto_merge:
             # `gh pr merge` checks branches out, so a dirty tree aborts it with a
             # raw git error ("Your local changes would be overwritten by
-            # checkout") after the PR has already been reported ready. Say what
-            # is actually wrong instead, and don't commit unreviewed leftovers
-            # into a PR that is one call away from landing.
-            # Only a *definite* dirty tree blocks: an unreadable repo is left to
+            # checkout") after the PR has already been reported ready. The
+            # orchestrator must not commit unreviewed leftovers into a PR that is
+            # one call away from landing — but it must not dead-end on them
+            # either (the condition is local and deterministic, so a blocked run
+            # re-blocks on `resume --force` forever). An agent judges them:
+            # see _MergeCleanup.
+            # Only a *definite* dirty tree diverts: an unreadable repo is left to
             # `gh` rather than stalling every merge behind a failed probe.
             pending = self._uncommitted_summary(max_lines=20)
             if pending:
-                console.error(
-                    f"Refusing to merge PR #{pr_number}: the working tree has uncommitted "
-                    "changes, and merging checks branches out"
+                return self._handle_dirty_before_merge(
+                    state, pr_number, pending, pr_status.base_branch or "main"
                 )
-                console.detail("Pending changes:")
-                for line in pending.splitlines():
-                    console.detail(f"  {line}")
-                console.detail("Commit, stash or discard them, then: claudetm resume")
-                state.status = "blocked"
-                self.state_manager.save_state(state)
-                return 1
 
             console.info(f"Merging PR #{pr_number}...")
             try:
@@ -378,6 +373,7 @@ class _MergeStage(_ReviewStage):
         state.conflict_fix_attempts = 0
         state.branch_sync_attempts = 0
         state.pr_finish_attempts = 0
+        state.merge_cleanup_attempts = 0
         state.task_finish_attempts = 0
         state.fix_finish_attempts = 0
         state.in_release_fix = False

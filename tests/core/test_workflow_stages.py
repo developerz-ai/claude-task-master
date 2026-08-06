@@ -198,27 +198,35 @@ class TestGetCheckName:
 
 
 class TestGetCurrentBranch:
-    """Tests for _get_current_branch static method."""
+    """Tests for _get_current_branch."""
 
-    def test_get_current_branch_success(self):
+    def test_get_current_branch_success(self, workflow_handler):
         """Should return branch name on success."""
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="feature/my-branch\n")
-            branch = WorkflowStageHandler._get_current_branch()
+            branch = workflow_handler._get_current_branch()
             assert branch == "feature/my-branch"
 
-    def test_get_current_branch_empty(self):
+    def test_reads_the_project_tree_not_the_process_cwd(self, workflow_handler):
+        """The branch must come from the same repo as every other git probe."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="feature/my-branch\n")
+            workflow_handler._get_current_branch()
+
+        assert mock_run.call_args.kwargs["cwd"] == workflow_handler._project_dir()
+
+    def test_get_current_branch_empty(self, workflow_handler):
         """Should return None for empty output (detached HEAD)."""
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="")
-            branch = WorkflowStageHandler._get_current_branch()
+            branch = workflow_handler._get_current_branch()
             assert branch is None
 
-    def test_get_current_branch_error(self):
+    def test_get_current_branch_error(self, workflow_handler):
         """Should return None on error."""
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = Exception("Git not available")
-            branch = WorkflowStageHandler._get_current_branch()
+            branch = workflow_handler._get_current_branch()
             assert branch is None
 
 
