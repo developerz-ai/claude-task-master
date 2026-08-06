@@ -133,16 +133,16 @@ class _MergeCleanup(_ReviewStage):
         still_pending = self._uncommitted_summary(max_lines=20)
         if still_pending:
             console.warning(
-                "Cleanup session left the tree dirty — retrying on the next cycle"
-                if state.merge_cleanup_attempts < self.MAX_MERGE_CLEANUP_ATTEMPTS
-                else "Cleanup session left the tree dirty"
+                f"Cleanup session left the tree dirty "
+                f"({state.merge_cleanup_attempts}/{self.MAX_MERGE_CLEANUP_ATTEMPTS} attempts used)"
             )
             # Stage untouched: the next cycle re-enters and either runs the last
             # attempt or blocks with the budget spent.
             self.state_manager.save_state(state)
             return None
 
-        head_moved = bool(before_sha and (after := self._head_sha()) and before_sha != after)
+        after_sha = self._head_sha()
+        head_moved = bool(before_sha and after_sha and before_sha != after_sha)
 
         # A session that committed but never pushed is the dangerous case: the
         # tree reads clean, so nothing downstream would notice, and the merge
