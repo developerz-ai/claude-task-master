@@ -7,12 +7,30 @@ These tests verify the combined CI failures and review comments workflow:
 - Combined feedback task description generation
 """
 
+import itertools
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 from claude_task_master.core.pr_context import PRContextManager
 from claude_task_master.core.state import StateManager, TaskOptions
 from claude_task_master.core.workflow_stages import WorkflowStageHandler
+
+
+@pytest.fixture(autouse=True)
+def _sessions_commit():
+    """Let every fix session here look like it committed and pushed.
+
+    ``handle_ci_failed_stage`` reads HEAD either side of the session, because a
+    session that commits nothing triggers no new CI run and must re-run the
+    failed jobs instead of polling the same red one. A mocked agent never moves
+    HEAD, so without this every test in this module would take that path. The
+    no-commit behaviour has its own suite: tests/core/test_stages_ci_rerun.py.
+    """
+    shas = itertools.count()
+    with patch.object(WorkflowStageHandler, "_head_sha", side_effect=lambda: f"sha{next(shas)}"):
+        yield
 
 
 class TestCIFailureOnlyScenario:

@@ -116,6 +116,19 @@ def _delivered(clean: bool = True):
     )
 
 
+def _committed(yes: bool = True):
+    """Patch HEAD so the CI-fix stage sees a new commit (or doesn't).
+
+    ``handle_ci_failed_stage`` reads HEAD either side of the session: an
+    unchanged HEAD means nothing was pushed, so no new run exists to wait for.
+    """
+    return patch.object(
+        WorkflowStageHandler,
+        "_head_sha",
+        side_effect=["before", "after"] if yes else ["same", "same"],
+    )
+
+
 class TestReviewFixNotDelivered:
     """The regression: threads must not be resolved for an uncommitted fix."""
 
@@ -158,7 +171,7 @@ class TestCIFixNotDelivered:
         state.workflow_stage = "ci_failed"
         state.ci_fix_attempts = 0
 
-        with _delivered(clean=False):
+        with _delivered(clean=False), _committed(False):
             result = handler.handle_ci_failed_stage(state)
 
         assert result is None
@@ -170,7 +183,7 @@ class TestCIFixNotDelivered:
     def test_delivered_fix_advances_to_waiting_ci(self, handler, state):
         state.workflow_stage = "ci_failed"
 
-        with _delivered(clean=True):
+        with _delivered(clean=True), _committed(True):
             result = handler.handle_ci_failed_stage(state)
 
         assert result is None

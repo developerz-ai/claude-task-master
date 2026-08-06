@@ -12,6 +12,7 @@ Tests cover:
 
 from __future__ import annotations
 
+import itertools
 from contextlib import ExitStack
 from datetime import datetime
 from unittest.mock import MagicMock, patch
@@ -35,6 +36,22 @@ _STAGE_SLEEP_MODULES = (
     "release_stage",
 )
 _STAGE_CONSOLE_MODULES = (*_STAGE_SLEEP_MODULES, "git_ops", "pr_recovery")
+
+
+def _sessions_commit():
+    """Make each CI-fix session look like it committed and pushed.
+
+    ``handle_ci_failed_stage`` reads HEAD either side of the session: a session
+    that commits nothing triggers no new CI run, so the stage re-runs the failed
+    jobs rather than polling the same red one. A mocked agent never moves HEAD,
+    so tests about the *delivered*-fix path have to say so. The no-commit path
+    has its own suite: tests/core/test_stages_ci_rerun.py.
+
+    Not autouse: ``merge_cleanup`` reads HEAD the same way, and the merge tests
+    in this module depend on the real probe.
+    """
+    shas = itertools.count()
+    return patch.object(WorkflowStageHandler, "_head_sha", side_effect=lambda: f"sha{next(shas)}")
 
 
 @pytest.fixture
@@ -643,7 +660,10 @@ class TestHandleCIFailedStage:
         basic_task_state.current_pr = 42
         mock_sleep.return_value = True
 
-        with patch.object(WorkflowStageHandler, "_get_current_branch", return_value="feature/fix"):
+        with (
+            patch.object(WorkflowStageHandler, "_get_current_branch", return_value="feature/fix"),
+            _sessions_commit(),
+        ):
             result = workflow_handler.handle_ci_failed_stage(basic_task_state)
 
         assert result is None
@@ -695,6 +715,7 @@ class TestHandleCIFailedStage:
         with (
             patch.object(state_manager, "load_context", side_effect=Exception("Error")),
             patch.object(WorkflowStageHandler, "_get_current_branch", return_value="main"),
+            _sessions_commit(),
         ):
             result = workflow_handler.handle_ci_failed_stage(basic_task_state)
 
@@ -1639,7 +1660,10 @@ class TestWorkflowIntegration:
         assert basic_task_state.workflow_stage == "ci_failed"
 
         # Fix CI
-        with patch.object(WorkflowStageHandler, "_get_current_branch", return_value="main"):
+        with (
+            patch.object(WorkflowStageHandler, "_get_current_branch", return_value="main"),
+            _sessions_commit(),
+        ):
             workflow_handler.handle_ci_failed_stage(basic_task_state)
 
         assert basic_task_state.workflow_stage == "waiting_ci"
@@ -2147,7 +2171,10 @@ class TestHandleCIFailedStageCap:
         basic_task_state.ci_fix_attempts = 1
         mock_sleep.return_value = True
 
-        with patch.object(WorkflowStageHandler, "_get_current_branch", return_value="feat"):
+        with (
+            patch.object(WorkflowStageHandler, "_get_current_branch", return_value="feat"),
+            _sessions_commit(),
+        ):
             result = workflow_handler.handle_ci_failed_stage(basic_task_state)
 
         assert result is None
@@ -2216,6 +2243,7 @@ class TestPRHeadBranchSessions:
                 WorkflowStageHandler, "_get_current_branch", return_value="feat/pr-branch"
             ),
             patch("subprocess.run") as mock_run,
+            _sessions_commit(),
         ):
             mock_run.return_value = MagicMock(returncode=0, stdout="")
             result = workflow_handler.handle_ci_failed_stage(basic_task_state)
@@ -2247,6 +2275,7 @@ class TestPRHeadBranchSessions:
         with (
             patch.object(WorkflowStageHandler, "_get_current_branch", return_value="main"),
             patch("subprocess.run") as mock_run,
+            _sessions_commit(),
         ):
             mock_run.return_value = MagicMock(returncode=0, stdout="")
             result = workflow_handler.handle_ci_failed_stage(basic_task_state)
@@ -2571,6 +2600,9 @@ class TestCIFixCycleCap:
         with (
             patch.object(WorkflowStageHandler, "_get_current_branch", return_value="feat/ci-fix"),
             patch("subprocess.run") as mock_run,
+            # Every cycle delivers a commit, so the cap under test is the
+            # CI-fix one and not the re-run budget.
+            _sessions_commit(),
         ):
             mock_run.return_value = MagicMock(returncode=0, stdout="")
             for cycle in range(1, cap + 2):

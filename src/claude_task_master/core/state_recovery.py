@@ -126,6 +126,7 @@ class StateRecovery:
         state.current_pr = recovered.current_pr
         state.status = "working"
         state.ci_fix_attempts = 0
+        state.ci_rerun_attempts = 0
         state.conflict_fix_attempts = 0
         state.branch_sync_attempts = 0
         state.pr_finish_attempts = 0

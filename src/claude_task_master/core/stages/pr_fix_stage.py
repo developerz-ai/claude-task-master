@@ -23,6 +23,18 @@ class _PRFixStage(_CIStage):
         when saving CI failures, so the agent can fix BOTH CI issues AND address
         review comments in a single step.
         """
+        # A failure whose jobs never executed a step is the platform's, not the
+        # branch's: no edit can fix it, and spending an agent session on it ends
+        # with no commit, hence no new run, hence the next poll re-reading this
+        # very failure. Re-run the jobs instead.
+        infra_runs = self._infrastructural_runs(state)
+        if infra_runs:
+            return self._rerun_failed_ci(
+                state,
+                infra_runs,
+                reason="no job in the failing run(s) executed a single step",
+            )
+
         console.info("CI failed - running agent to fix...")
 
         # Cap consecutive CI-fix cycles to avoid an infinite fix loop
@@ -54,6 +66,7 @@ class _PRFixStage(_CIStage):
             context = ""
 
         required_branch = self._get_pr_head_branch(state)
+        head_before = self._head_sha()
         # Fix an EXISTING PR: push the fix to re-trigger CI, never open a new PR
         # or rebase (push_only routes through _build_push_only_execution, which
         # forbids rebasing already-reviewed commits).
@@ -77,6 +90,23 @@ class _PRFixStage(_CIStage):
             return self._handle_unfinished_fix(state, unfinished, "ci_failed")
         state.fix_finish_attempts = 0
 
+        # A clean tree with nothing unpushed is also what "I read the logs and
+        # concluded the diff is fine" looks like — the session ends reporting
+        # success having committed nothing. Nothing was pushed, so GitHub starts
+        # no new run, so waiting_ci would re-read the *same* red run as a fresh
+        # failure and burn another fix attempt, every cycle, until the budget
+        # blocks the task. Re-run the failed jobs instead: an agent that found
+        # nothing to change is evidence the failure is not in the diff.
+        if self._head_sha() == head_before:
+            # This attempt produced no fix, so it must not consume the CI-fix
+            # budget either — that counter bounds "the fix didn't work".
+            state.ci_fix_attempts = max(0, state.ci_fix_attempts - 1)
+            return self._rerun_failed_ci(
+                state,
+                self.pr_context.failing_run_ids(state.current_pr),
+                reason="the fix session finished without committing anything",
+            )
+
         # Wait for CI to start after push
         console.info("Waiting 60s for CI to start...")
         if not interruptible_sleep(60):
@@ -85,6 +115,113 @@ class _PRFixStage(_CIStage):
         state.workflow_stage = "waiting_ci"
         state.session_count += 1
         self.state_manager.save_state(state)
+        return None
+
+    def _infrastructural_runs(self, state: TaskState) -> list[int]:
+        """Return the PR's failing runs whose jobs never executed a step.
+
+        Empty unless *every* failing run looks that way. A mixed red — one
+        workflow genuinely broken, another killed in the queue — is still a
+        real failure the fix agent has to see, and re-running would only delay
+        it.
+
+        Args:
+            state: Current task state.
+
+        Returns:
+            The failing run IDs when all of them are infrastructural, else [].
+        """
+        from ...github.ci_infra import CIInfraDetector  # noqa: PLC0415
+
+        try:
+            run_ids = [int(run_id) for run_id in self.pr_context.failing_run_ids(state.current_pr)]
+            if not run_ids:
+                return []
+            detector = CIInfraDetector(repo=self.github_client._get_repo_info())
+            all_infra = all(detector.never_ran(run_id) for run_id in run_ids)
+        except Exception:
+            # Cannot tell — fall through to the ordinary fix path rather than
+            # re-running a failure that may well be the branch's own.
+            return []
+
+        return run_ids if all_infra else []
+
+    def _rerun_failed_ci(self, state: TaskState, run_ids: list[int], reason: str) -> int | None:
+        """Re-run the PR's failed jobs and go back to waiting on CI.
+
+        The escape hatch for a red PR that no code change addresses. It is
+        bounded because the two causes it serves diverge after a retry or two:
+        a flake clears, an outage does not, and neither is improved by looping.
+
+        Args:
+            state: Current task state.
+            run_ids: The failing workflow runs to re-run.
+            reason: Why re-running is the right move, shown to the user.
+
+        Returns:
+            None to continue the loop in ``waiting_ci``, 1 once the budget is
+            spent or there is nothing to re-run.
+        """
+        if not run_ids:
+            console.error(
+                f"CI is red but no workflow run could be identified to re-run ({reason}) — "
+                f"blocking, manual intervention required"
+            )
+            state.status = "blocked"
+            self.state_manager.save_state(state)
+            return 1
+
+        state.ci_rerun_attempts += 1
+        if state.ci_rerun_attempts > self.MAX_CI_RERUN_ATTEMPTS:
+            console.error(
+                f"CI still red after {self.MAX_CI_RERUN_ATTEMPTS} job re-runs ({reason}) — "
+                f"blocking, manual intervention required"
+            )
+            console.detail(
+                "Nothing in the diff is implicated, so this is the CI platform's to fix: "
+                f"check the runner pool, then `gh run rerun {run_ids[0]} --failed`."
+            )
+            state.status = "blocked"
+            self.state_manager.save_state(state)
+            return 1
+
+        console.warning(
+            f"Re-running failed CI jobs ({reason}) — "
+            f"attempt {state.ci_rerun_attempts}/{self.MAX_CI_RERUN_ATTEMPTS}"
+        )
+
+        from ...github.ci_rerun import CIRerunner  # noqa: PLC0415
+
+        try:
+            rerunner = CIRerunner(repo=self.github_client._get_repo_info())
+        except Exception as e:
+            return self._retry_transient(
+                state, "ci_rerun", f"Could not reach GitHub to re-run: {e}"
+            )
+
+        restarted = [run_id for run_id in run_ids if rerunner.rerun_failed_jobs(run_id)]
+        if not restarted:
+            console.error(
+                "GitHub refused to re-run any of the failed jobs — "
+                "blocking, manual intervention required"
+            )
+            console.detail(f"Runs: {run_ids}. A run older than its retention window cannot re-run.")
+            state.status = "blocked"
+            self.state_manager.save_state(state)
+            return 1
+
+        console.detail(f"Re-running {len(restarted)} of {len(run_ids)} failing run(s): {restarted}")
+
+        # The re-run starts the checks over, so the poll timer must too —
+        # otherwise the previous wait counts against CI_POLL_TIMEOUT and the
+        # fresh run is declared timed out before it can finish.
+        self._clear_ci_poll_timer(state)
+        state.workflow_stage = "waiting_ci"
+        self.state_manager.save_state(state)
+
+        console.info("Waiting 60s for CI to restart...")
+        if not interruptible_sleep(60):
+            return None
         return None
 
     def _build_combined_ci_comments_task(

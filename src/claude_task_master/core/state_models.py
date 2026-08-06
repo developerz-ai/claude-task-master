@@ -130,6 +130,12 @@ class TaskState(BaseModel):
     # CI polling fields
     ci_poll_start_time: datetime | None = None  # When CI polling started for current PR
     ci_fix_attempts: int = 0  # Number of CI-fix agent sessions for current PR
+    # Number of times the failed CI jobs were re-run instead of handed to a fix
+    # agent, because the failure was the platform's (jobs that never executed a
+    # step) or because a fix session produced no commit to re-trigger CI with.
+    # Bounded by MAX_CI_RERUN_ATTEMPTS; reset on task advance and by
+    # `resume --force`.
+    ci_rerun_attempts: int = 0
     # Conflict-resolution fields
     conflict_fix_attempts: int = 0  # Number of conflict-resolution agent sessions for current PR
     branch_sync_attempts: int = 0  # Number of base-sync agent sessions for current PR
