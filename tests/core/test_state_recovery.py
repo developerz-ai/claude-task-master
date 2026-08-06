@@ -486,6 +486,40 @@ class TestApplyRecovery:
         assert result.workflow_stage == "addressing_reviews"
         assert result.current_pr == 100
 
+    def test_apply_recovery_refunds_attempt_budgets(self, temp_dir: Path):
+        """Regression: `resume --force` re-blocked instantly on a spent budget.
+
+        The attempt counters are persisted, so a stage whose budget was already
+        at the cap blocked again the moment the forced resume re-entered it —
+        zero sessions run, the human's intervention ignored.
+        """
+        mock_client = MagicMock()
+        mock_client.get_pr_for_current_branch.return_value = 145
+        mock_client.get_pr_status.return_value = MagicMock(
+            ci_state="SUCCESS",
+            unresolved_threads=0,
+        )
+
+        state = self._create_task_state()
+        state.status = "blocked"
+        state.ci_fix_attempts = 3
+        state.conflict_fix_attempts = 3
+        state.branch_sync_attempts = 3
+        state.pr_finish_attempts = 2
+        state.merge_cleanup_attempts = 2
+        state.fix_finish_attempts = 2
+        state.task_finish_attempts = 2
+
+        StateRecovery(github_client=mock_client).apply_recovery(state, cwd=str(temp_dir))
+
+        assert state.ci_fix_attempts == 0
+        assert state.conflict_fix_attempts == 0
+        assert state.branch_sync_attempts == 0
+        assert state.pr_finish_attempts == 0
+        assert state.merge_cleanup_attempts == 0
+        assert state.fix_finish_attempts == 0
+        assert state.task_finish_attempts == 0
+
     def test_apply_recovery_no_pr_found(self, temp_dir: Path):
         """Test apply_recovery when no PR is found."""
         mock_client = MagicMock()

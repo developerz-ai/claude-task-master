@@ -280,6 +280,22 @@ The other half of the rule is recovery over refusal: `_PRRecovery` opens a missi
 
 Blocks that are correct and stay: a PR closed without merging, a tree still dirty after the finish budget, sitting on the base branch, attempt budgets exhausted.
 
+#### A dirty tree at `ready_to_merge` is recovered, not refused
+
+`gh pr merge` checks branches out, so it dies on a raw git error when the tree is dirty — hence the guard. But refusing was *all* the stage did, and that block is undefeatable by the command meant to defeat it: the condition is purely local and deterministic, so `claudetm resume -f` clears the status, re-enters `ready_to_merge`, re-reads the same unchanged tree and blocks again having run **zero** sessions. A green PR sat overnight behind two files an `expo prebuild` had rewritten (`D mobile/app/expo-env.d.ts`, `M mobile/app/tsconfig.json`) — nobody's edit, and nothing an agent couldn't have judged in a minute.
+
+The tree now goes to a bounded cleanup session (`core/stages/merge_cleanup.py`), the same shape `_PRRecovery` uses for a dirty tree with no PR. The agent is the only thing here that can tell the PR's own unfinished work (finish, commit, push) from tooling droppings (discard); the orchestrator keeps what must not be guessed:
+
+- it never commits anything itself,
+- a session that left **new commits** on the branch routes the PR back to `waiting_ci` (`ci_poll_start_time` cleared) rather than merging on CI that ran before those commits existed — and commits it left *unpushed* are pushed deterministically, since a clean-but-unpushed tree is invisible to every later probe and the merge would land the PR without them, then delete the branch carrying them,
+- bounded by `MAX_MERGE_CLEANUP_ATTEMPTS` (2, `state.merge_cleanup_attempts`, reset on task advance).
+
+Still blocks on sight when recovery cannot be right: leftovers on the **base branch** (nothing there belongs to the PR, and a session must not commit to base), a crashed cleanup session, a failed push, or a tree still dirty after the budget.
+
+#### `resume --force` refunds the attempt budgets
+
+Same defect, one level up: the per-PR counters are persisted, so a stage that blocked *because* its budget was spent blocked again the instant a forced resume re-entered it. `StateRecovery.apply_recovery` now zeroes `ci_fix_attempts`, `conflict_fix_attempts`, `branch_sync_attempts`, `pr_finish_attempts`, `merge_cleanup_attempts`, `fix_finish_attempts` and `task_finish_attempts`. The budgets exist to stop an *unattended* loop from spinning; `-f` means a human looked at the run and did something about it.
+
 ### Limits — what bounds an agent, and what doesn't
 
 Sessions are bounded in **steps**, not wall-clock. A wall-clock cap punishes a session that is legitimately slow (big test suite, slow CI) exactly as hard as one that is looping.

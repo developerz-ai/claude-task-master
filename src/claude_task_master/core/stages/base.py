@@ -50,6 +50,12 @@ class StageHandlerBase:
     # common case — the leftover work just needs verifying, committing, pushing;
     # after that, a human is genuinely needed.
     MAX_PR_FINISH_ATTEMPTS = 2
+    # Max "clean the tree" agent sessions in ready_to_merge when leftover changes
+    # sit in the working tree and `gh pr merge` (which checks branches out) would
+    # therefore die. Two passes: the leftovers are either the PR's own unfinished
+    # work (commit + push) or tooling droppings (discard), and an agent that can
+    # tell neither twice is not going to on the third try.
+    MAX_MERGE_CLEANUP_ATTEMPTS = 2
     # Max re-runs of a push-only fix session (CI fix, review fix, conflict) that
     # ended without committing and pushing. Separate from the per-cause counters
     # (MAX_CI_FIX_ATTEMPTS etc.): those bound "the fix didn't work", this bounds
