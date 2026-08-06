@@ -223,6 +223,32 @@ class TestFixSessionWithoutACommit:
         assert state.status == "blocked"
 
 
+class TestBudgetEndsWithTheStreak:
+    """The budget bounds consecutive red CI, not the PR's whole lifetime."""
+
+    def test_green_ci_clears_the_rerun_counter(self, handler, state, mock_github_client):
+        state.workflow_stage = "waiting_ci"
+        state.ci_rerun_attempts = handler.MAX_CI_RERUN_ATTEMPTS
+        status = mock_github_client.get_pr_status.return_value
+        status.state = "OPEN"
+        status.ci_state = "SUCCESS"
+        status.checks_passed = 4
+        status.checks_skipped = 0
+        status.checks_failed = 0
+        status.checks_pending = 0
+        status.check_details = []
+        status.mergeable = "MERGEABLE"
+
+        with (
+            patch("claude_task_master.core.stages.ci_stage.console"),
+            patch("claude_task_master.core.stages.ci_stage.interruptible_sleep", return_value=True),
+        ):
+            handler.handle_waiting_ci_stage(state)
+
+        # A flake hours later gets its own retries, not a spent budget.
+        assert state.ci_rerun_attempts == 0
+
+
 class TestBudgetsAreRefundedOnForceResume:
     """`resume --force` means a human intervened — every budget starts over."""
 

@@ -362,6 +362,11 @@ class _CIStage(_PRRecovery):
                 )
                 self._report_tolerated_failures(pr_status)
                 self._clear_ci_poll_timer(state)
+                # The re-run budget bounds a *streak* of red CI that no diff can
+                # fix. Green ends the streak: a flake three hours later is a new
+                # one, and should get its own retries rather than inherit a
+                # spent budget and block the PR on the first hiccup.
+                state.ci_rerun_attempts = 0
                 # Emit ci.passed webhook
                 self._emit_ci_event(
                     event_type="ci.passed",
