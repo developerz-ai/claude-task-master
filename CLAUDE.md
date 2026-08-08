@@ -103,6 +103,8 @@ uv tool install claude-task-master --force --reinstall
 | VERIFICATION | Read, Glob, Grep, Bash | Run tests/lint to verify success criteria |
 | WORKING | All tools | Implement tasks with full access |
 
+These sets are a strong **default, not enforcement**: `allowed_tools` is the SDK's *auto-approve* list, and restricting what exists needs `tools=`, which claudetm never passes while running `permission_mode="bypassPermissions"`. So a planning session is read-only by convention and prompt, not by a sandbox. The same fact is why the WORKING phase can spawn subagents with no code change at all — `tools.working` defaults to `[]`, i.e. unrestricted.
+
 **Task Complexity Levels** (for dynamic model routing + effort-based thinking):
 | Complexity | Tag | Model | Effort | Use Case |
 |------------|-----|-------|--------|----------|
@@ -113,7 +115,7 @@ uv tool install claude-task-master --force --reinstall
 
 When uncertain, default to `[coding]` (uses the smartest model). The smartest tier is **Claude Opus 5** (`claude-opus-5`) — see the `opus` default in `ModelConfig` in `core/config.py`. `context_windows.opus` defaults to `1_000_000` because Claude Code upgrades Opus to 1M automatically on Max/Team/Enterprise (on Pro that upgrade is billed to usage credits — set `200000` there). Do **not** write the model id as `claude-opus-5[1m]`: the `[1m]` suffix is a Claude Code alias convention, accepted by the CLI but a `404 not_found_error` on `GET /v1/models`, so it is not a portable model string. The window is configured via `context_windows.opus`, not a suffixed model id.
 
-`context_windows` sets **only the auto-compact threshold** — it does not grant a larger window. Over-stating it compacts too late and overflows the session; under-stating it compacts early, which is harmless. Hence `sonnet` stays at `200_000`: on a subscription the 1M Sonnet window is the paid extra, so it is opt-in rather than assumed. An opt-in `fable` tier (**Claude Fable 5**, `claude-fable-5`, premium-priced) exists alongside it — configured via the `"fable"` config key or `CLAUDETM_MODEL_FABLE`, mirroring Claude Code's `ANTHROPIC_DEFAULT_FABLE_MODEL`. No complexity level routes to it by default (2x Opus pricing); users opt in via `CLAUDETM_MODEL_FABLE=claude-fable-5` or by passing the `fable` model key explicitly. The `sonnet_1m` tier uses Sonnet with 1M context (e.g., `claude-sonnet-5` configured as `CLAUDETM_MODEL_SONNET_1M` for log analysis). Fallback: Fable → Opus → Sonnet → Haiku.
+`context_windows` is **currently inert** — nothing reads it. `get_context_window`, `MODEL_CONTEXT_WINDOWS` and `DEFAULT_COMPACT_THRESHOLD_PERCENT` (`core/agent_models.py`) are referenced only by the re-exports in `core/__init__.py`; no value derived from `config.context_windows` reaches `ClaudeAgentOptions` or any compaction logic, so setting it changes no behaviour today. The config surface stays (config key, `CLAUDETM_CONTEXT_*`, per-profile overrides) and the defaults are written for its *intended* meaning: an auto-compact threshold, never a grant of a larger window — over-stating it would compact too late and overflow the session; under-stating it compacts early, which is harmless. On that reading `sonnet` stays at `200_000`: on a subscription the 1M Sonnet window is the paid extra, so it is opt-in rather than assumed. An opt-in `fable` tier (**Claude Fable 5**, `claude-fable-5`, premium-priced) exists alongside it — configured via the `"fable"` config key or `CLAUDETM_MODEL_FABLE`, mirroring Claude Code's `ANTHROPIC_DEFAULT_FABLE_MODEL`. No complexity level routes to it by default (2x Opus pricing); users opt in via `CLAUDETM_MODEL_FABLE=claude-fable-5` or by passing the `fable` model key explicitly. The `sonnet_1m` tier uses Sonnet with 1M context (e.g., `claude-sonnet-5` configured as `CLAUDETM_MODEL_SONNET_1M` for log analysis). Fallback: Fable → Opus → Sonnet → Haiku.
 
 **Fallback Models**: If primary model is unavailable, auto-fallback: Fable → Opus → Sonnet → Haiku.
 
@@ -157,26 +159,27 @@ When uncertain, default to `[coding]` (uses the smartest model). The smartest ti
 ### Agent SDK Integration
 - Use `query()` with `ClaudeAgentOptions(allowed_tools=[], permission_mode="bypassPermissions")`
 - Message types: `TextBlock`, `ToolUseBlock`, `ToolResultBlock`, `ResultMessage`
-- Change to working dir before query, restore after
-- Stream output real-time: 🔧 for tools, ✓ for completion
+- The working directory is **passed** to the SDK as `cwd=str(self.working_dir)` in `ClaudeAgentOptions`; the process never `chdir`s (`core/agent_query_execute.py`). A global chdir would race concurrent queries in server mode — and it is exactly what makes concurrent subagents inside one session safe. The directory is checked for existence first so a missing path fails clearly instead of as a cryptic SDK error
+- Stream output real-time: tool use and results print via `core/console.py` as ANSI-coloured `[claude HH:MM:SS N/M] …` lines (`Using tool: <name> <detail>`, then `Tool completed` / `Tool error`). No emoji anywhere in the printer
 
 ### Task Management
 - Parse `- [ ]` and `- [x]` from plan.md
 - Check `_is_task_complete()` before running (skip if [x])
 - Mark complete with `_mark_task_complete()`
-- Increment `current_task_index` and save state
+- Advance `current_task_index` to the last task the session actually completed, and save state. Treat it as the loop's **cursor**, not a counter that only goes up: several sites move it forward (the per-task advance, the group-shipping path, post-merge), one deliberately **rewinds** it so a skipped task still closes its group (`loop_working_stage`), and plan updates reconcile it against the rewritten plan (mailbox processing and `resume "message"`). Under `--parallel-tasks` one session advances it past the whole batch it finished
 
 ### Work Completion Requirements
-**A task is NOT complete until:**
-1. Changes are committed with descriptive message
-2. Branch is pushed to remote (`git push -u origin HEAD`)
-3. PR is created (`gh pr create ...`)
 
-The work prompt enforces this - agents must report both commit hash AND PR URL.
+What a task owes depends on where it sits in its PR group — `should_create_pr = state.options.pr_per_task or is_last_in_group` (`core/task_runner_session.py`):
+
+- **Not the last task of its group** — the default mode, and most tasks — owes a **commit only**. The prompt is `_build_commit_only_execution` ("DO NOT create PR yet"), and its completion block requires a commit hash and nothing else. Pushing early would open a PR for half a group.
+- **The last task of its group, and every task under `--pr-per-task`** owes all three: commit with a descriptive message, `git push -u origin HEAD`, `gh pr create …` — and must report both the commit hash AND the PR URL.
+
+Either way the agent's report is not the evidence. The orchestrator checks the repository: a session that leaves a dirty tree did not finish, whatever it claimed (see *Unfinished sessions*).
 
 ### CLI Commands
 All commands check `state_manager.exists()` first:
-- `start`: Initialize and run planning → work loop
+- `start`: Initialize and run planning → work loop. Opt-in flags worth knowing: `--admin`, `--sync-before-merge`, `--parallel-tasks` (hive mode, below)
 - `resume`: Resume paused task, optionally with message to update plan first
 - `status`: Show goal, status, session count, options
 - `plan`: Display plan.md with markdown rendering
@@ -263,6 +266,19 @@ Outside `--pr-per-task`, a PR is opened for exactly one reason: the task just fi
 - **A skipped task still closes its group.** A task already `[x]` runs no session, and the skip path returned without checking the boundary — stranding commits that were already on the branch (a resume, or a task checked off by `MAX_TASK_FINISH_ATTEMPTS`). It now rewinds the index `run_work_session` advanced and enters `pr_created`; `_PRRecovery` opens the PR or closes the group out with no agent session. Skipped on the base branch — nothing is committed there and the PR stage would block.
 
 A triplicated `plan.md` still runs its work N times; the parser only guarantees each block ships. If the task count looks 2–3× too large, check for repeated `### PR n:` headings before blaming the loop.
+
+### Hive mode — one session per PR group (`--parallel-tasks`, opt-in)
+
+- **Off by default.** One task per session is the cheaper, better-understood path, and fan-out only repays its per-agent cold start at real scale. Turn it on with `claudetm start --parallel-tasks` (`TaskOptions.parallel_tasks`, default False) when a PR group is a long list of genuinely independent edits — twenty view models, one file each.
+- When on, the group's **remaining incomplete tasks** are handed to a single **hive lead** work session instead of running one at a time. The lead reads the whole batch and decides for itself which tasks have **disjoint write sets** — no two agents may write the same file — fans exactly those out to `hive-worker` subagents running concurrently in this same checkout, and does everything that overlaps itself, in order. The write-set judgement is the lead's because only the lead has read the batch; the orchestrator does not try to compute it from the plan.
+- **The lead alone runs git.** Workers read, edit and run tests; they never `git add`, commit, push, or switch branches. That is what makes one shared checkout safe — there is no second writer to the index, so no `.git/index.lock` contention and no half-staged tree — and it keeps the group's history a single authored series. The lead commits, pushes and opens the PR for the whole group exactly as the last-task-in-group path already does.
+- **Hard floor of 2.** Below 2 remaining tasks in the group, hive mode does not engage at all and the normal per-task path runs. This is a floor in code, not prompt guidance, because the failure it prevents was measured on the sibling port: a run there spawned four agents to make four one-line edits.
+- **Incompatible with `--pr-per-task`,** which opens a PR per task and so has no batch to ship. Both set → hive mode simply does not engage; the flag is ignored rather than an error.
+- **Bounded by one knob:** `CLAUDETM_HIVE_MAX_PARALLEL` (default 10 — one lead plus up to 10 workers).
+- **The repository is still the evidence.** A hive session is verified like any other: the tree must be clean, and the lead's `TASKS COMPLETE:` manifest may only **narrow** what gets checked off — never widen it beyond the batch it was handed. A lead that finishes three of five reports three, and the other two stay `[ ]` for the next session; a lead that claims a task outside its batch is ignored on that task. The existing `MAX_TASK_FINISH_ATTEMPTS` retry governs unchanged: an unfinished batch re-runs with the leftover diff described as its own work to finish.
+- **A hive session is bounded like one session but spends like several.** `MAX_TURNS` (400) and `--budget` are per *query*, and the terminal `ResultMessage` aggregates the lead plus every subagent — so turns and cost accrue at N agents' rate against a single session's cap. An overrun is not a new failure mode: it lands as `error_max_turns`, the task is not checked off, and it degrades through the same retry.
+
+Why the default is off, concretely: the sibling TypeScript port (`../ai-task-master`) built cross-group parallelism, then pinned `--concurrency` to 1 — "accepted and persisted, but runs are currently pinned to 1 (groups run sequentially in the single checkout)". With one shared checkout, parallelism across groups buys nothing once git is serialized; the only place it pays is *inside* a group, on disjoint file sets, with all git left to one agent. That is the shape implemented here, and it is still not free enough to be the default.
 
 ### CI must actually have run
 
@@ -546,7 +562,7 @@ Messages are processed after each task completes. Multiple messages are merged w
 3. **Log rotation** - auto-keep last 10 logs only
 4. **Clean exit** - delete state files on success, keep logs
 5. **OAuth credentials** - handle nested JSON structure properly
-6. **Working directory** - change dir for queries, always restore
+6. **Working directory** - passed to the SDK as `cwd=`, never `chdir`'d; a process-global chdir would race concurrent queries and concurrent subagents
 7. **Mailbox check** - orchestrator checks mailbox after each task completion
 8. **CI + Comments** - fetched together to handle in one step
 9. **Message priority** - 0=low, 1=normal, 2=high, 3=urgent

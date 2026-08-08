@@ -152,6 +152,63 @@ class TestStartCommand:
 
         assert "no effect" in result.output
 
+    def test_start_parallel_tasks_persists_option(self, cli_runner: CliRunner, temp_dir):
+        """--parallel-tasks persists parallel_tasks=True in the initialized state."""
+        state_dir = temp_dir / ".claude-task-master"
+        with patch.object(StateManager, "STATE_DIR", state_dir):
+            with patch(
+                "claude_task_master.cli_commands.workflow_start.CredentialManager"
+            ) as mock_cred_manager:
+                mock_cred_manager.return_value.get_valid_token.return_value = "test-token"
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
+                    with patch(
+                        "claude_task_master.cli_commands.workflow_helpers.Planner"
+                    ) as mock_planner:
+                        mock_planner.return_value.create_plan.side_effect = Exception("Test stop")
+
+                        cli_runner.invoke(app, ["start", "Test goal", "--parallel-tasks"])
+
+            state = StateManager().load_state()
+        assert state.options.parallel_tasks is True
+
+    def test_start_parallel_tasks_default_off(self, cli_runner: CliRunner, temp_dir):
+        """Hive mode is opt-in: without the flag, parallel_tasks stays False."""
+        state_dir = temp_dir / ".claude-task-master"
+        with patch.object(StateManager, "STATE_DIR", state_dir):
+            with patch(
+                "claude_task_master.cli_commands.workflow_start.CredentialManager"
+            ) as mock_cred_manager:
+                mock_cred_manager.return_value.get_valid_token.return_value = "test-token"
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
+                    with patch(
+                        "claude_task_master.cli_commands.workflow_helpers.Planner"
+                    ) as mock_planner:
+                        mock_planner.return_value.create_plan.side_effect = Exception("Test stop")
+
+                        cli_runner.invoke(app, ["start", "Test goal"])
+
+            state = StateManager().load_state()
+        assert state.options.parallel_tasks is False
+
+    def test_start_no_parallel_tasks_flag(self, cli_runner: CliRunner, temp_dir):
+        """The explicit negative flag also lands as False."""
+        state_dir = temp_dir / ".claude-task-master"
+        with patch.object(StateManager, "STATE_DIR", state_dir):
+            with patch(
+                "claude_task_master.cli_commands.workflow_start.CredentialManager"
+            ) as mock_cred_manager:
+                mock_cred_manager.return_value.get_valid_token.return_value = "test-token"
+                with patch("claude_task_master.cli_commands.workflow_helpers.AgentWrapper"):
+                    with patch(
+                        "claude_task_master.cli_commands.workflow_helpers.Planner"
+                    ) as mock_planner:
+                        mock_planner.return_value.create_plan.side_effect = Exception("Test stop")
+
+                        cli_runner.invoke(app, ["start", "Test goal", "--no-parallel-tasks"])
+
+            state = StateManager().load_state()
+        assert state.options.parallel_tasks is False
+
     def test_start_default_model(self, cli_runner: CliRunner, temp_dir):
         """Test start uses default model."""
         with patch.object(StateManager, "STATE_DIR", temp_dir / ".claude-task-master"):

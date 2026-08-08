@@ -116,6 +116,7 @@ class ConfigUpdateRequest(BaseModel):
         log_level: Log level (quiet, normal, verbose).
         log_format: Log format (text, json).
         pr_per_task: Whether to create PR per task vs per group.
+        parallel_tasks: Whether to run a PR group's remaining tasks as one hive session.
     """
 
     auto_merge: bool | None = Field(
@@ -162,6 +163,13 @@ class ConfigUpdateRequest(BaseModel):
         default=None,
         description="Whether to create PR per task vs per group",
     )
+    parallel_tasks: bool | None = Field(
+        default=None,
+        description=(
+            "Whether to run a PR group's remaining tasks as one 'hive' session that fans "
+            "disjoint-write-set tasks out to subagents (off by default)"
+        ),
+    )
 
     def has_updates(self) -> bool:
         """Check if any configuration updates were provided."""
@@ -196,6 +204,7 @@ class TaskInitRequest(BaseModel):
         max_sessions: Max work sessions before pausing.
         max_prs: Max pull requests to create.
         pause_on_pr: Pause after creating PR for manual review.
+        parallel_tasks: Run a PR group's remaining tasks as one hive session.
     """
 
     goal: str = Field(
@@ -244,6 +253,14 @@ class TaskInitRequest(BaseModel):
         default=False,
         description="Pause after creating PR for manual review",
     )
+    parallel_tasks: bool = Field(
+        default=False,
+        description=(
+            "Run a PR group's remaining tasks as one 'hive' session: the lead fans the tasks "
+            "with disjoint write sets out to subagents and alone touches git. Off by default — "
+            "fan-out only pays at scale (needs 2+ remaining tasks; ignored with pr_per_task)"
+        ),
+    )
 
 
 # =============================================================================
@@ -263,6 +280,7 @@ class TaskOptionsResponse(BaseModel):
         log_level: Current log level.
         log_format: Current log format.
         pr_per_task: Whether to create PR per task vs per group.
+        parallel_tasks: Whether a PR group's remaining tasks run as one hive session.
     """
 
     auto_merge: bool
@@ -275,6 +293,7 @@ class TaskOptionsResponse(BaseModel):
     log_level: str
     log_format: str
     pr_per_task: bool
+    parallel_tasks: bool = False
     max_budget_usd: float | None = None
 
 

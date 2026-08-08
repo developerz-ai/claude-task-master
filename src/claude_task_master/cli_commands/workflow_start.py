@@ -58,6 +58,14 @@ def start(
         "--sync-before-merge/--no-sync-before-merge",
         help="Also sync PRs that are merely behind the base (conflicts are always resolved)",
     ),
+    parallel_tasks: bool = typer.Option(
+        False,
+        "--parallel-tasks/--no-parallel-tasks",
+        help="Run a PR group's remaining tasks as one 'hive' session: the lead agent fans the "
+        "tasks with disjoint write sets out to subagents in this checkout, does the rest itself, "
+        "and alone touches git. Off by default — fan-out only pays at scale, so it needs 2+ "
+        "remaining tasks in the group and is ignored with --pr-per-task.",
+    ),
     enable_release: bool = typer.Option(
         False,
         "--release/--no-release",
@@ -143,6 +151,7 @@ def start(
         claudetm start "Add user auth" --prs 1
         claudetm start "Implement dashboard" --prs 3 --max-sessions 10
         claudetm start "Debug issue" -l verbose --log-format json
+        claudetm start "Port 20 modules" --parallel-tasks  # hive: one session per PR group
         claudetm start "Deploy feature" --webhook-url https://example.com/hooks
 
     Environment Variables:
@@ -236,6 +245,7 @@ def start(
             admin_merge=admin,
             resolve_conflicts=resolve_conflicts,
             sync_before_merge=sync_before_merge,
+            parallel_tasks=parallel_tasks,
             enable_release=enable_release,
             enable_verification=enable_verification,
             max_sessions=max_sessions,

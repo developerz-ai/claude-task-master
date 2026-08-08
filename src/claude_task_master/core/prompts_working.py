@@ -6,6 +6,9 @@ executes tasks, makes changes, and creates PRs.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
+from . import prompts_working_hive as hive_text
 from .prompts_base import PromptBuilder
 
 
@@ -21,6 +24,10 @@ def build_work_prompt(
     target_branch: str = "main",
     coding_style: str | None = None,
     allow_rebase: bool = False,
+    *,
+    hive_tasks: Sequence[str] | None = None,
+    hive_task_numbers: Sequence[int] | None = None,
+    hive_max_parallel: int = 10,
 ) -> str:
     """Build the work session prompt.
 
@@ -42,10 +49,20 @@ def build_work_prompt(
         allow_rebase: True when rebasing onto target_branch is the session's own
             job (the conflict/sync session), which lifts the no-rebase rule a
             plain fix session gets.
+        hive_tasks: Optional cleaned descriptions of the whole batch handed to
+            this session, in plan order. With 2+ entries the prompt becomes a
+            hive LEAD brief (fan-out rules + completion manifest); None or a
+            single entry leaves the prompt byte-identical to the single-task one.
+        hive_task_numbers: Matching 1-based plan numbers for ``hive_tasks``.
+        hive_max_parallel: Max concurrent hive workers the lead may launch.
 
     Returns:
         Complete work session prompt.
     """
+    # Fix sessions (push_only) never run in hive mode — they only add commits to
+    # an existing PR, so there is no batch to fan out.
+    hive = hive_text.is_hive_batch(hive_tasks) and not push_only
+
     branch_info = ""
     if required_branch:
         branch_info = f"\n\n**Current Branch:** `{required_branch}`"
@@ -55,7 +72,9 @@ def build_work_prompt(
             )
 
     builder = PromptBuilder(
-        intro=f"""You are Claude Task Master executing a SINGLE task.
+        intro=hive_text.build_hive_intro(task_description, branch_info)
+        if hive
+        else f"""You are Claude Task Master executing a SINGLE task.
 
 ## Current Task
 
@@ -98,12 +117,25 @@ Completion report: 3-5 lines. What changed, not how."""
             for task in completed:
                 group_lines.append(f"- ✓ {task}")
 
-        if remaining > 0:
+        if hive:
+            # The batch listing below replaces the bare remaining-task count.
+            group_lines.append(hive_text.build_group_batch_note(create_pr))
+        elif remaining > 0:
             group_lines.append(f"\n**Tasks remaining after this one:** {remaining}")
         else:
             group_lines.append("\n**This is the LAST task in this PR group.**")
 
         builder.add_section("PR Group Context", "\n".join(group_lines))
+
+    # Hive lead sections: the batch it owns, then how to fan it out.
+    if hive:
+        builder.add_section(
+            "Task Batch",
+            hive_text.build_task_batch_section(hive_tasks or [], hive_task_numbers),
+        )
+        builder.add_section(
+            "Fan-Out — You Decide", hive_text.build_fanout_section(hive_max_parallel)
+        )
 
     # Context section
     if context:
@@ -155,11 +187,41 @@ explain why not → run tests → commit.""",
     else:
         execution_content = _build_commit_only_execution()
 
+    if hive:
+        execution_content = f"{hive_text.build_execution_preamble()}\n\n{execution_content}"
+
     builder.add_section("Execution", execution_content)
 
     # Completion summary - different requirements based on workflow mode
     if push_only:
-        completion_content = """**After completing THIS task, STOP.**
+        completion_content = _build_push_only_completion()
+    elif create_pr:
+        completion_content = _build_full_workflow_completion(hive=hive)
+    else:
+        completion_content = _build_commit_only_completion(hive=hive)
+
+    builder.add_section("On Completion - STOP", completion_content)
+
+    return builder.build()
+
+
+def _completion_opening(hive: bool) -> str:
+    """Opening line of the completion section (single task vs whole batch)."""
+    if hive:
+        return hive_text.build_completion_opening()
+    return "**After completing THIS task, STOP.**"
+
+
+def _completion_ending(hive: bool) -> str:
+    """Trailing sentinel instruction — plus the batch manifest on the hive path."""
+    if hive:
+        return f"{hive_text.build_manifest_block()}\n\n{hive_text.build_end_instruction()}"
+    return "End with: `TASK COMPLETE`"
+
+
+def _build_push_only_completion() -> str:
+    """Completion contract for a fix session (commit + push, PR already exists)."""
+    return f"""{_completion_opening(False)}
 
 **You MUST commit AND push to update the existing PR (CI re-runs on push).**
 
@@ -172,13 +234,21 @@ Report (keep it short):
 
 PR already exists — do NOT run `gh pr create`, but you MUST push. Don't say "TASK COMPLETE" until the push has succeeded.
 
-End with: `TASK COMPLETE`"""
-    elif create_pr:
-        completion_content = """**After completing THIS task, STOP.**
+{_completion_ending(False)}"""
+
+
+def _build_full_workflow_completion(hive: bool = False) -> str:
+    """Completion contract for the full workflow (commit + push + create PR)."""
+    scope_note = (
+        "This applies even if the batch needed no code changes (e.g. verification-only): earlier tasks in this PR group committed work on this branch that only ships through your PR."
+        if hive
+        else "This applies even if THIS task needed no code changes (e.g. verification-only): earlier tasks in this PR group committed work on this branch that only ships through your PR."
+    )
+    return f"""{_completion_opening(hive)}
 
 **You MUST push and create a PR before reporting completion.**
 
-This applies even if THIS task needed no code changes (e.g. verification-only): earlier tasks in this PR group committed work on this branch that only ships through your PR.
+{scope_note}
 
 Report (keep it short):
 - **Changes:** What was done (1-2 sentences)
@@ -189,9 +259,12 @@ Report (keep it short):
 
 Don't say "TASK COMPLETE" until you have the PR URL.
 
-End with: `TASK COMPLETE`"""
-    else:
-        completion_content = """**After completing THIS task, STOP.**
+{_completion_ending(hive)}"""
+
+
+def _build_commit_only_completion(hive: bool = False) -> str:
+    """Completion contract for commit-only work (more tasks remain in the group)."""
+    return f"""{_completion_opening(hive)}
 
 **Commit your work but DO NOT create a PR yet.**
 
@@ -203,11 +276,7 @@ Report (keep it short):
 
 Do NOT push or create a PR — more tasks remain in this PR group.
 
-End with: `TASK COMPLETE`"""
-
-    builder.add_section("On Completion - STOP", completion_content)
-
-    return builder.build()
+{_completion_ending(hive)}"""
 
 
 def _build_full_workflow_execution(target_branch: str = "main") -> str:

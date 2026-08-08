@@ -398,6 +398,39 @@ class TestUpdateConfigTool:
         updated_state = state_manager.load_state()
         assert updated_state.options.pause_on_pr == (not original_pause_on_pr)
 
+    def test_update_config_parallel_tasks(self, initialized_state, state_dir):
+        """update_config toggles hive mode on."""
+        from claude_task_master.mcp.tools import update_config
+
+        state_manager, state = initialized_state
+        assert state.options.parallel_tasks is False
+
+        result = update_config(
+            state_dir.parent,
+            parallel_tasks=True,
+            state_dir=str(state_dir),
+        )
+        assert result["success"] is True
+        assert result["updated"] is not None
+        assert result["updated"]["parallel_tasks"] is True
+
+        assert state_manager.load_state().options.parallel_tasks is True
+
+    def test_update_config_parallel_tasks_off(self, initialized_state, state_dir):
+        """update_config turns hive mode back off."""
+        from claude_task_master.mcp.tools import update_config
+
+        state_manager, _ = initialized_state
+        update_config(state_dir.parent, parallel_tasks=True, state_dir=str(state_dir))
+
+        result = update_config(
+            state_dir.parent,
+            parallel_tasks=False,
+            state_dir=str(state_dir),
+        )
+        assert result["success"] is True
+        assert state_manager.load_state().options.parallel_tasks is False
+
     def test_update_config_multiple_options(self, initialized_state, state_dir):
         """Test updating multiple options at once."""
         from claude_task_master.mcp.tools import update_config

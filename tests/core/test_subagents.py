@@ -12,7 +12,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from claude_task_master.core.hive import HIVE_MANIFEST_PREFIX
 from claude_task_master.core.subagents import (
+    BUILTIN_AGENT_NAMES,
+    HIVE_WORKER_AGENT_NAME,
+    HIVE_WORKER_DESCRIPTION,
+    HIVE_WORKER_PROMPT,
+    build_builtin_agents,
     detect_claude_md,
     detect_project_config,
     get_agents_for_working_dir,
@@ -762,8 +768,8 @@ Prompt content.
 
         assert "test-agent" in result
 
-    def test_returns_empty_when_no_agents(self, temp_working_dir: Path) -> None:
-        """Test returns empty dict when no agents exist."""
+    def test_returns_only_builtins_when_no_project_agents(self, temp_working_dir: Path) -> None:
+        """Test only built-in agents are returned when the project defines none."""
         mock_agent_def = MagicMock()
         mock_sdk = MagicMock()
         mock_sdk.AgentDefinition = mock_agent_def
@@ -772,7 +778,7 @@ Prompt content.
             with patch("claude_task_master.core.subagents.console"):
                 result = get_agents_for_working_dir(str(temp_working_dir))
 
-        assert result == {}
+        assert set(result) == set(BUILTIN_AGENT_NAMES)
 
     def test_integration_with_full_setup(self, temp_working_dir: Path, agents_dir: Path) -> None:
         """Test full integration with CLAUDE.md and agents."""
@@ -799,9 +805,144 @@ Prompt {i}.
             with patch("claude_task_master.core.subagents.console"):
                 result = get_agents_for_working_dir(str(temp_working_dir))
 
-        assert len(result) == 2
+        assert len(result) == 2 + len(BUILTIN_AGENT_NAMES)
         assert "agent-0" in result
         assert "agent-1" in result
+        assert HIVE_WORKER_AGENT_NAME in result
+
+
+# =============================================================================
+# Built-in agents (hive-worker)
+# =============================================================================
+
+
+class TestBuiltinAgents:
+    """Tests for the programmatic built-in agent definitions."""
+
+    def test_returns_empty_when_sdk_missing(self) -> None:
+        """Built-ins degrade to {} rather than crashing without the SDK."""
+        with patch.dict("sys.modules", {"claude_agent_sdk": None}):
+            assert build_builtin_agents() == {}
+
+    def test_get_agents_survives_missing_sdk(self, temp_working_dir: Path) -> None:
+        """The whole entry point still returns {} without the SDK."""
+        with patch.dict("sys.modules", {"claude_agent_sdk": None}):
+            with patch("claude_task_master.core.subagents.console"):
+                result = get_agents_for_working_dir(str(temp_working_dir))
+
+        assert result == {}
+
+    def test_hive_worker_is_built_in(self) -> None:
+        """hive-worker needs no file in the target project."""
+        agents = build_builtin_agents()
+
+        assert HIVE_WORKER_AGENT_NAME in agents
+        assert HIVE_WORKER_AGENT_NAME in BUILTIN_AGENT_NAMES
+
+    def test_hive_worker_inherits_model(self) -> None:
+        """A worker runs on the lead's model, not a fixed tier."""
+        agent = build_builtin_agents()[HIVE_WORKER_AGENT_NAME]
+
+        assert agent.model == "inherit"
+
+    def test_hive_worker_has_all_tools(self) -> None:
+        """tools=None means unrestricted: it needs Read/Edit/Write/Bash/Grep/Glob."""
+        agent = build_builtin_agents()[HIVE_WORKER_AGENT_NAME]
+
+        assert agent.tools is None
+
+    def test_hive_worker_description_says_when_to_use_it(self) -> None:
+        """Claude picks agents by description; it must name the trigger."""
+        description = HIVE_WORKER_DESCRIPTION.lower()
+
+        assert "one task" in description
+        assert "exclusive" in description
+        assert "disjoint" in description
+        assert "parallel" in description
+
+    def test_hive_worker_prompt_forbids_files_outside_its_set(self) -> None:
+        """Contract point 1 + 2: exclusive file set, collisions are reported."""
+        prompt = HIVE_WORKER_PROMPT.lower()
+
+        assert "exclusive" in prompt
+        assert "collision" in prompt
+        assert "stop" in prompt
+
+    def test_hive_worker_prompt_forbids_git(self) -> None:
+        """Contract point 3: the lead is the only thing that touches git."""
+        prompt = HIVE_WORKER_PROMPT.lower()
+
+        assert "no git commands" in prompt
+        for command in ("git add", "commit", "branch", "checkout", "stash", "push"):
+            assert command in prompt
+        assert "uncommitted" in prompt
+
+    def test_hive_worker_prompt_limits_verification(self) -> None:
+        """Contract point 4: narrow checks only, never the full suite."""
+        prompt = HIVE_WORKER_PROMPT.lower()
+
+        assert "full test suite" in prompt
+        assert "-n auto" in prompt
+
+    def test_hive_worker_prompt_requires_a_report(self) -> None:
+        """Contract point 5 + 6: the final message is the only channel."""
+        prompt = HIVE_WORKER_PROMPT.lower()
+
+        assert "final message" in prompt
+        assert "verified" in prompt
+        assert "no channel to a human" in prompt
+
+    def test_hive_worker_prompt_forbids_the_completion_manifest(self) -> None:
+        """The TASKS COMPLETE manifest belongs to the lead alone.
+
+        Defence in depth for the isolation fix in agent_message.py: even if a
+        worker's narration reached the lead's result_text, the worker is told
+        never to write the label that core/hive.py parses.
+        """
+        prompt = HIVE_WORKER_PROMPT
+
+        assert HIVE_MANIFEST_PREFIX in prompt
+        lowered = prompt.lower()
+        assert "never write" in lowered
+        assert "lead" in lowered
+
+    def test_builtins_merged_with_project_agents(
+        self, temp_working_dir: Path, agents_dir: Path
+    ) -> None:
+        """Project agents and built-ins coexist."""
+        (agents_dir / "custom.md").write_text(
+            "---\nname: custom-agent\ndescription: A project agent\n---\n\nProject prompt.\n"
+        )
+
+        with patch("claude_task_master.core.subagents.console"):
+            result = get_agents_for_working_dir(str(temp_working_dir))
+
+        assert "custom-agent" in result
+        assert HIVE_WORKER_AGENT_NAME in result
+
+    def test_project_agent_overrides_builtin(
+        self, temp_working_dir: Path, agents_dir: Path
+    ) -> None:
+        """A user override of the same name must beat our built-in."""
+        (agents_dir / "hive-worker.md").write_text(
+            f"---\nname: {HIVE_WORKER_AGENT_NAME}\n"
+            "description: My own worker contract\nmodel: haiku\n---\n\nMy prompt.\n"
+        )
+
+        with patch("claude_task_master.core.subagents.console"):
+            result = get_agents_for_working_dir(str(temp_working_dir))
+
+        agent = result[HIVE_WORKER_AGENT_NAME]
+        assert agent.description == "My own worker contract"
+        assert agent.prompt == "My prompt."
+        assert agent.model == "haiku"
+
+    def test_builtins_are_rebuilt_per_call(self) -> None:
+        """Mutating one call's result must not poison the next."""
+        first = build_builtin_agents()
+        first.pop(HIVE_WORKER_AGENT_NAME)
+
+        assert HIVE_WORKER_AGENT_NAME in build_builtin_agents()
 
 
 # =============================================================================

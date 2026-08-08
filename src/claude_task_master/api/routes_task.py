@@ -116,6 +116,7 @@ def create_task_router() -> APIRouter:
                 log_level="normal",  # Default to normal
                 log_format="text",  # Default to text
                 pr_per_task=False,  # Default to False
+                parallel_tasks=task_init.parallel_tasks,
             )
             init_result = TaskService(state_manager).init_task(
                 task_init.goal, task_init.model, options

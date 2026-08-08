@@ -24,6 +24,7 @@ from .agent_async_utils import (
 )
 from .agent_models import ModelType, get_tools_for_phase
 from .agent_phase_generation import _AgentPhaseGenerationMixin
+from .hive import DEFAULT_HIVE_MAX_PARALLEL
 from .prompts import (
     build_context_extraction_prompt,
     build_planning_prompt,
@@ -32,6 +33,8 @@ from .prompts import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from .agent_message import MessageProcessor
     from .agent_query import AgentQueryExecutor
     from .logger import TaskLogger
@@ -162,6 +165,9 @@ class AgentPhaseExecutor(_AgentPhaseGenerationMixin):
         target_branch: str = "main",
         coding_style: str | None = None,
         allow_rebase: bool = False,
+        hive_tasks: Sequence[str] | None = None,
+        hive_task_numbers: Sequence[int] | None = None,
+        hive_max_parallel: int = DEFAULT_HIVE_MAX_PARALLEL,
     ) -> dict[str, Any]:
         """Run a work session with full tools.
 
@@ -180,6 +186,12 @@ class AgentPhaseExecutor(_AgentPhaseGenerationMixin):
             coding_style: Optional coding style guide to inject into prompt.
             allow_rebase: True when rebasing onto target_branch is the session's
                 own job (conflict/sync session) rather than something to avoid.
+            hive_tasks: Task descriptions of a whole PR-group batch when this is
+                a hive lead session; None (the default) for the ordinary
+                one-task session, which leaves the prompt unchanged.
+            hive_task_numbers: 1-based plan numbers parallel to ``hive_tasks``,
+                which the lead quotes back in its completion manifest.
+            hive_max_parallel: Max concurrent hive workers the lead may fan out to.
 
         Returns:
             Dict with 'output', 'success', and 'model_used' keys.
@@ -196,6 +208,9 @@ class AgentPhaseExecutor(_AgentPhaseGenerationMixin):
             target_branch=target_branch,
             coding_style=coding_style,
             allow_rebase=allow_rebase,
+            hive_tasks=hive_tasks,
+            hive_task_numbers=hive_task_numbers,
+            hive_max_parallel=hive_max_parallel,
         )
 
         # Reset terminal-result capture so a prior session's outcome cannot

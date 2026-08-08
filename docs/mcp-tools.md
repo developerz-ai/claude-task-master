@@ -293,6 +293,7 @@ Initialize a new task with the given goal.
 | `max_sessions` | integer | No | - | Max work sessions before pausing |
 | `max_prs` | integer | No | - | Max pull requests to create |
 | `pause_on_pr` | boolean | No | `false` | Pause after creating PR |
+| `parallel_tasks` | boolean | No | `false` | Run a PR group's remaining tasks as one "hive" session that fans disjoint-write-set tasks out to subagents |
 | `state_dir` | string | No | - | Custom state directory path |
 
 **Returns:**
@@ -443,6 +444,7 @@ Update task configuration options at runtime.
 | `log_level` | string | No | Log level: quiet, normal, verbose |
 | `log_format` | string | No | Log format: text, json |
 | `pr_per_task` | boolean | No | Create PR per task vs per group |
+| `parallel_tasks` | boolean | No | Run a PR group's remaining tasks as one "hive" session (see `initialize_task`) |
 | `state_dir` | string | No | Custom state directory path |
 
 **Returns:**

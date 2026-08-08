@@ -135,6 +135,12 @@ def config_update(
     pause_on_pr: bool | None = typer.Option(
         None, "--pause-on-pr/--no-pause-on-pr", help="Set pause on PR"
     ),
+    parallel_tasks: bool | None = typer.Option(
+        None,
+        "--parallel-tasks/--no-parallel-tasks",
+        help="Toggle hive mode: run a PR group's remaining tasks as one session that fans "
+        "disjoint-write-set tasks out to subagents (off by default)",
+    ),
 ) -> None:
     """Update task configuration at runtime.
 
@@ -145,6 +151,7 @@ def config_update(
         claudetm config-update --auto-merge
         claudetm config-update --no-auto-merge --max-sessions 10
         claudetm config-update --pause-on-pr
+        claudetm config-update --parallel-tasks
     """
     state_manager = StateManager()
 
@@ -155,7 +162,14 @@ def config_update(
     # Check if any options were provided
     if all(
         v is None
-        for v in [auto_merge, enable_release, enable_verification, max_sessions, pause_on_pr]
+        for v in [
+            auto_merge,
+            enable_release,
+            enable_verification,
+            max_sessions,
+            pause_on_pr,
+            parallel_tasks,
+        ]
     ):
         console.print("[yellow]No configuration options specified.[/yellow]")
         console.print("Use --help to see available options.")
@@ -176,6 +190,8 @@ def config_update(
             kwargs["max_sessions"] = max_sessions
         if pause_on_pr is not None:
             kwargs["pause_on_pr"] = pause_on_pr
+        if parallel_tasks is not None:
+            kwargs["parallel_tasks"] = parallel_tasks
 
         # Update configuration
         result = control.update_config(**kwargs)
@@ -191,6 +207,7 @@ def config_update(
             console.print(f"  Final verification: {current.get('enable_verification')}")
             console.print(f"  Max sessions: {current.get('max_sessions') or 'unlimited'}")
             console.print(f"  Pause on PR: {current.get('pause_on_pr')}")
+            console.print(f"  Parallel tasks (hive): {current.get('parallel_tasks')}")
 
         raise typer.Exit(0)
 
