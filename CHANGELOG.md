@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.84] - 2026-08-08
+
 ### Changed
 
 - **BREAKING: `--parallel-tasks` is replaced by `--parallel`, and parallelism is now on by default.** 0.1.83 shipped hive mode as *batching several tasks* of a PR group into one lead session, opt-in. That was the wrong unit. The task — not a list of tasks — is what gets parallelised: each task still gets its own work session, checks off exactly one task, and advances `current_task_index` by one, exactly as before. What is new is that the agent running that session is a **lead** which may split *its own single task* into pieces with disjoint write sets and dispatch `hive-worker` subagents for them, doing everything that overlaps itself. The batching, the `TASKS COMPLETE:` manifest, the multi-task check-off, the two-task floor and the `--pr-per-task` incompatibility are all **deleted** — none of them have anything to describe any more.
@@ -990,7 +992,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.83...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.84...HEAD
+[0.1.84]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.83...v0.1.84
 [0.1.83]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.82...v0.1.83
 [0.1.82]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.81...v0.1.82
 [0.1.81]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.80...v0.1.81
