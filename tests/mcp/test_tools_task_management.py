@@ -126,6 +126,35 @@ class TestInitializeTaskTool:
         assert state.options.auto_merge is False
         assert state.options.max_sessions == 5
         assert state.options.pause_on_pr is True
+        # Hive mode is opt-in and was not requested here.
+        assert state.options.parallel_tasks is False
+
+    def test_initialize_task_parallel_tasks(self, temp_dir):
+        """parallel_tasks reaches TaskOptions through the MCP tool."""
+        from claude_task_master.mcp.tools import initialize_task
+
+        state_dir = temp_dir / ".claude-task-master"
+        result = initialize_task(
+            temp_dir,
+            goal="Port twenty modules",
+            parallel_tasks=True,
+            state_dir=str(state_dir),
+        )
+
+        assert result["success"] is True
+        state = StateManager(state_dir=state_dir).load_state()
+        assert state.options.parallel_tasks is True
+
+    def test_initialize_task_parallel_tasks_default_off(self, temp_dir):
+        """Omitting parallel_tasks leaves hive mode off."""
+        from claude_task_master.mcp.tools import initialize_task
+
+        state_dir = temp_dir / ".claude-task-master"
+        result = initialize_task(temp_dir, goal="Small fix", state_dir=str(state_dir))
+
+        assert result["success"] is True
+        state = StateManager(state_dir=state_dir).load_state()
+        assert state.options.parallel_tasks is False
 
     def test_initialize_task_rejects_unknown_model(self, temp_dir):
         """initialize_task rejects an unrecognised model before persisting state."""

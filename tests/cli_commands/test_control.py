@@ -336,6 +336,45 @@ class TestConfigUpdateCommand:
         state = control_state_manager.load_state()
         assert state.options.pause_on_pr is True
 
+    def test_config_update_parallel_tasks(
+        self,
+        cli_runner: CliRunner,
+        control_state_dir: Path,
+        control_state_manager: StateManager,
+        task_options: TaskOptions,
+        isolated_filesystem: Path,
+    ) -> None:
+        """config-update --parallel-tasks turns hive mode on mid-run."""
+        control_state_manager.initialize(goal="Test task", model="opus", options=task_options)
+        assert control_state_manager.load_state().options.parallel_tasks is False
+
+        with _use_state_dir(control_state_dir):
+            result = cli_runner.invoke(app, ["config-update", "--parallel-tasks"])
+            assert result.exit_code == 0
+            assert "Configuration updated" in result.stdout
+
+        state = control_state_manager.load_state()
+        assert state.options.parallel_tasks is True
+
+    def test_config_update_no_parallel_tasks(
+        self,
+        cli_runner: CliRunner,
+        control_state_dir: Path,
+        control_state_manager: StateManager,
+        task_options: TaskOptions,
+        isolated_filesystem: Path,
+    ) -> None:
+        """config-update --no-parallel-tasks turns hive mode back off."""
+        task_options.parallel_tasks = True
+        control_state_manager.initialize(goal="Test task", model="opus", options=task_options)
+
+        with _use_state_dir(control_state_dir):
+            result = cli_runner.invoke(app, ["config-update", "--no-parallel-tasks"])
+            assert result.exit_code == 0
+
+        state = control_state_manager.load_state()
+        assert state.options.parallel_tasks is False
+
     def test_config_update_multiple_options(
         self,
         cli_runner: CliRunner,

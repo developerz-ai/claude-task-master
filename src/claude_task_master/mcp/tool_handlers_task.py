@@ -289,6 +289,7 @@ def initialize_task(
     *,
     enable_release: bool = False,
     enable_verification: bool = False,
+    parallel_tasks: bool = False,
 ) -> dict[str, Any]:
     """Initialize a new task with the given goal.
 
@@ -301,6 +302,10 @@ def initialize_task(
         max_prs: Max pull requests to create.
         pause_on_pr: Pause after creating PR for manual review.
         state_dir: Optional custom state directory path.
+        enable_release: Whether to run post-merge release verification.
+        enable_verification: Whether to run final success-criteria verification.
+        parallel_tasks: Run a PR group's remaining tasks as one "hive" session that
+            fans the tasks with disjoint write sets out to subagents. Off by default.
 
     Returns:
         Dictionary indicating success with run_id or failure.
@@ -317,6 +322,7 @@ def initialize_task(
         max_sessions=max_sessions,
         max_prs=max_prs,
         pause_on_pr=pause_on_pr,
+        parallel_tasks=parallel_tasks,
     )
     result = _task_service(work_dir, state_dir).init_task(goal, model, options)
 

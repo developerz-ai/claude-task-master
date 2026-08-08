@@ -129,6 +129,9 @@ _FORWARDING_SPECS: tuple[ForwardingSpec, ...] = (
         "    max_sessions: Max work sessions before pausing.\n"
         "    max_prs: Max pull requests to create.\n"
         "    pause_on_pr: Pause after creating PR for manual review.\n"
+        "    parallel_tasks: Run a PR group's remaining tasks as one 'hive' session\n"
+        "        that fans the tasks with disjoint write sets out to subagents.\n"
+        "        Off by default; needs 2+ remaining tasks in the group.\n"
         "    state_dir: Optional custom state directory path.\n\n"
         "Returns:\n"
         "    Dictionary indicating success with run_id or failure.",
@@ -193,6 +196,8 @@ _FORWARDING_SPECS: tuple[ForwardingSpec, ...] = (
         "    pr_per_task: Whether to create PR per task vs per group.\n"
         "    enable_release: Whether to run post-merge release verification.\n"
         "    enable_verification: Whether to run final success-criteria verification.\n"
+        "    parallel_tasks: Whether to run a PR group's remaining tasks as one 'hive'\n"
+        "        session that fans disjoint-write-set tasks out to subagents.\n"
         "    state_dir: Optional custom state directory path.\n\n"
         "Returns:\n"
         "    Dictionary indicating success or failure with updated config.",

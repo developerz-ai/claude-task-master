@@ -193,6 +193,7 @@ def update_config(
     *,
     enable_release: bool | None = None,
     enable_verification: bool | None = None,
+    parallel_tasks: bool | None = None,
 ) -> dict[str, Any]:
     """Update task configuration options at runtime.
 
@@ -210,6 +211,10 @@ def update_config(
         log_format: Log format (text, json).
         pr_per_task: Whether to create PR per task vs per group.
         state_dir: Optional custom state directory path.
+        enable_release: Whether to run post-merge release verification.
+        enable_verification: Whether to run final success-criteria verification.
+        parallel_tasks: Whether to run a PR group's remaining tasks as one "hive"
+            session that fans the tasks with disjoint write sets out to subagents.
 
     Returns:
         Dictionary indicating success or failure with updated config details.
@@ -236,6 +241,8 @@ def update_config(
         kwargs["log_format"] = log_format
     if pr_per_task is not None:
         kwargs["pr_per_task"] = pr_per_task
+    if parallel_tasks is not None:
+        kwargs["parallel_tasks"] = parallel_tasks
 
     # If no options provided, return error
     if not kwargs:

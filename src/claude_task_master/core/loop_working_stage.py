@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from . import console
 from .config_loader import get_config
+from .loop_working_hive import _LoopWorkingHiveMixin
 from .state import TaskState
 
 if TYPE_CHECKING:
@@ -26,12 +27,15 @@ if TYPE_CHECKING:
 MAX_TASK_FINISH_ATTEMPTS = 2
 
 
-class _LoopWorkingStageMixin:
+class _LoopWorkingStageMixin(_LoopWorkingHiveMixin):
     """Mixin that provides the working-stage handler to OrchestratorLoop.
 
     Cross-mixin calls to ``_accumulate_context``, ``_get_current_branch``,
     ``_get_total_tasks``, ``_get_completed_tasks``, and ``_emit_status_changed``
     are resolved at runtime via MRO on the concrete ``OrchestratorLoop`` class.
+
+    The batch-aware check-off (``_check_off_finished_tasks``) lives in
+    :mod:`.loop_working_hive`.
     """
 
     _orc: WorkLoopOrchestrator  # set by OrchestratorLoop.__init__
@@ -245,6 +249,12 @@ class _LoopWorkingStageMixin:
             )
 
         state.task_finish_attempts = 0
+        # Recorded with the index the session STARTED on, before any hive batch
+        # moves it. The tracker flags a task index lower than the last one it
+        # saw as REGRESSING (→ abort), and the index the run resumes at can be
+        # lower than the highest task a batch checked off (a task the lead
+        # skipped over). The starting index is monotonically non-decreasing
+        # across cycles, so recording it can never manufacture a regression.
         orc.tracker.record_task_progress(state.current_task_index)
         # Import deferred to avoid circular imports; allows tests to patch
         # claude_task_master.core.orchestrator_loop.reset_escape correctly.
@@ -255,10 +265,16 @@ class _LoopWorkingStageMixin:
         state.session_count += 1
         state.pr_active_work_seconds += session_duration
 
+        completed_indices: list[int] = []
+        hive_next_index: int | None = None
         plan = orc.state_manager.load_plan()
         if plan:
-            orc.task_runner.mark_task_complete(plan, completed_task_index)
-            console.success(f"Task #{completed_task_index + 1} marked complete in plan.md")
+            completed_indices, hive_next_index = self._check_off_finished_tasks(
+                state,
+                plan,
+                completed_task_index,
+                session_unfinished=bool(unfinished),
+            )
 
         if state.task_start_time:
             task_duration_seconds = (datetime.now() - state.task_start_time).total_seconds()
@@ -274,15 +290,24 @@ class _LoopWorkingStageMixin:
         self._accumulate_context(state)  # type: ignore[attr-defined]
 
         completed_tasks = self._get_completed_tasks(state)  # type: ignore[attr-defined]
-        orc.webhook_emitter.emit(
-            "task.completed",
-            task_index=state.current_task_index,
-            task_description=task_desc,
-            total_tasks=total_tasks,
-            completed_tasks=completed_tasks,
-            duration_seconds=task_duration_seconds if state.task_start_time else session_duration,
-            branch=current_branch,
-        )
+        if completed_indices:
+            # One event per session, as before: `task_index` is the last task
+            # the session closed and the description names all of them, so a
+            # batch reports as a batch instead of inventing an event type or
+            # emitting N events with one session's duration attached to each.
+            # A session that closed nothing (a hive lead reporting an empty
+            # manifest) emits no completion at all.
+            orc.webhook_emitter.emit(
+                "task.completed",
+                task_index=state.current_task_index,
+                task_description=self._describe_completed(task_desc, completed_indices),
+                total_tasks=total_tasks,
+                completed_tasks=completed_tasks,
+                duration_seconds=task_duration_seconds
+                if state.task_start_time
+                else session_duration,
+                branch=current_branch,
+            )
 
         import logging
 
@@ -301,14 +326,22 @@ class _LoopWorkingStageMixin:
 
         if state.options.pr_per_task:
             state.workflow_stage = "pr_created"
-        else:
-            if orc.task_runner.is_last_task_in_group(state):
-                state.workflow_stage = "pr_created"
-            else:
-                console.info("More tasks in PR group - continuing without creating PR")
-                state.current_task_index += 1
-                state.workflow_stage = "working"
+        elif hive_next_index is not None:
+            # The hive batch left tasks of this group open, so the group cannot
+            # ship yet whatever `is_last_task_in_group` says about the highest
+            # task that DID complete. Resume at the lowest one still open.
+            console.info("Tasks still open in this PR group - continuing without creating PR")
+            if state.current_task_index != hive_next_index:
                 state.task_start_time = None
+            state.current_task_index = hive_next_index
+            state.workflow_stage = "working"
+        elif orc.task_runner.is_last_task_in_group(state):
+            state.workflow_stage = "pr_created"
+        else:
+            console.info("More tasks in PR group - continuing without creating PR")
+            state.current_task_index += 1
+            state.workflow_stage = "working"
+            state.task_start_time = None
 
         orc.task_runner.update_progress(state)
         orc.state_manager.save_state_merged(state)

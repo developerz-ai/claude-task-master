@@ -5,6 +5,15 @@ following the Single Responsibility Principle (SRP). It handles:
 - Processing messages from the query stream
 - Formatting tool details for display
 - Console output for tool usage and results
+
+**A session's accumulated output is its OWN output.** The SDK streams a
+subagent's messages through the same stream as the parent's, distinguished only
+by ``parent_tool_use_id`` (set inside a subagent, ``None`` at the top level).
+Accumulating those into ``result_text`` mixes every worker's narration into the
+one string callers treat as "what this session said" — which is read back as a
+hive completion manifest (``core/hive.py``) and distilled into ``context.md``
+(``core/loop_context.py``). Subagent text is therefore streamed for visibility
+but never accumulated; see :func:`_subagent_tool_use_id`.
 """
 
 import os
@@ -14,6 +23,35 @@ from . import console
 
 if TYPE_CHECKING:
     from .logger import TaskLogger
+
+
+# The SDK renamed the subagent-spawning tool from ``Task`` to ``Agent`` in
+# Claude Code v2.1.63 and still emits the old name in places, so both count.
+SUBAGENT_TOOL_NAMES: frozenset[str] = frozenset({"Task", "Agent"})
+
+
+def _subagent_tool_use_id(message: Any) -> str | None:
+    """Return the tool-use id this message was produced *inside*, if any.
+
+    A message carrying ``parent_tool_use_id`` came from a subagent spawned by
+    that tool use; a top-level message has it as ``None``.
+
+    The ``isinstance`` check is load-bearing, not decoration. Tests pass
+    ``MagicMock`` messages, and a MagicMock auto-creates every attribute — so a
+    plain truthiness test on ``getattr(message, "parent_tool_use_id", None)``
+    reads *every* mocked message as a subagent and blanks out ``result_text``
+    for the whole suite. Only a genuine non-empty string counts.
+
+    Args:
+        message: A message from the SDK stream.
+
+    Returns:
+        The parent tool-use id, or ``None`` for top-level (own) messages.
+    """
+    parent_id = getattr(message, "parent_tool_use_id", None)
+    if isinstance(parent_id, str) and parent_id:
+        return parent_id
+    return None
 
 
 class MessageProcessor:
@@ -44,6 +82,9 @@ class MessageProcessor:
         self.last_total_cost_usd: float | None = None
         self.last_input_tokens: int = 0
         self.last_output_tokens: int = 0
+        # tool_use_id -> subagent name, learned from the parent's own
+        # Task/Agent tool call. Used only to label streamed subagent lines.
+        self._subagent_names: dict[str, str] = {}
 
     def reset_result_state(self) -> None:
         """Clear captured terminal-result state before a new query.
@@ -57,6 +98,42 @@ class MessageProcessor:
         self.last_total_cost_usd = None
         self.last_input_tokens = 0
         self.last_output_tokens = 0
+        self._subagent_names = {}
+
+    def _note_subagent_spawn(self, block: Any, tool_input: Any) -> None:
+        """Record the subagent name behind a Task/Agent tool call.
+
+        Lets the messages that later arrive with ``parent_tool_use_id`` equal to
+        this block's id be labelled with the agent that produced them. Purely
+        cosmetic: anything unrecognisable is skipped and the line falls back to
+        a generic marker.
+
+        Args:
+            block: The ToolUseBlock being displayed.
+            tool_input: Its input payload.
+        """
+        if getattr(block, "name", None) not in SUBAGENT_TOOL_NAMES:
+            return
+        tool_use_id = getattr(block, "id", None)
+        if not isinstance(tool_use_id, str) or not tool_use_id:
+            return
+        name = tool_input.get("subagent_type") if isinstance(tool_input, dict) else None
+        if isinstance(name, str) and name:
+            self._subagent_names[tool_use_id] = name
+
+    def _stream_prefix(self, subagent_id: str | None) -> str:
+        """Console-only marker distinguishing subagent output from our own.
+
+        Args:
+            subagent_id: The message's ``parent_tool_use_id``, or None.
+
+        Returns:
+            ``""`` for the session's own messages, so their output is
+            byte-identical to before; a short ``↳ [name]`` marker otherwise.
+        """
+        if subagent_id is None:
+            return ""
+        return f"↳ [{self._subagent_names.get(subagent_id, 'subagent')}] "
 
     def process_message(self, message: Any, result_text: str) -> str:
         """Process a message from the query stream.
@@ -67,6 +144,13 @@ class MessageProcessor:
         - ToolResultBlock: Tool result - displayed with success/error status
         - ResultMessage: Final result - captured as result text
 
+        Messages produced inside a subagent (``parent_tool_use_id`` set) are
+        streamed and logged exactly like our own, but their text is NOT
+        accumulated: ``result_text`` is this session's own output. The
+        ``ResultMessage`` is deliberately exempt — it is the terminal result of
+        the whole tree and its cost/token totals are what budget accounting
+        wants.
+
         Args:
             message: The message to process from the SDK stream.
             result_text: The accumulated result text so far.
@@ -75,6 +159,8 @@ class MessageProcessor:
             Updated result text after processing this message.
         """
         message_type = type(message).__name__
+        subagent_id = _subagent_tool_use_id(message)
+        prefix = self._stream_prefix(subagent_id)
 
         if hasattr(message, "content") and message.content:
             # Assistant or User messages with content
@@ -83,25 +169,30 @@ class MessageProcessor:
 
                 if block_type == "TextBlock":
                     # Claude's text response - show with [claude] prefix
-                    console.claude_text(block.text.strip(), flush=True)
-                    result_text += block.text
+                    console.claude_text(f"{prefix}{block.text.strip()}", flush=True)
+                    # A subagent's narration is visible but is not this
+                    # session's output: accumulating it lets a worker's prose
+                    # (a stray completion manifest, say) speak for the lead.
+                    if subagent_id is None:
+                        result_text += block.text
                 elif block_type == "ToolUseBlock":
                     # Tool being invoked - show details
                     console.newline()
                     tool_input = getattr(block, "input", {})
                     tool_detail = self.format_tool_detail(block.name, tool_input)
-                    console.tool(f"Using tool: {block.name} {tool_detail}", flush=True)
+                    console.tool(f"{prefix}Using tool: {block.name} {tool_detail}", flush=True)
+                    self._note_subagent_spawn(block, tool_input)
                     # Log to file if logger is available
                     if self.logger:
                         self.logger.log_tool_use(block.name, tool_input)
                 elif block_type == "ToolResultBlock":
                     # Tool result - show completion with [claude] prefix
                     if block.is_error:
-                        console.tool_result("Tool error", is_error=True)
+                        console.tool_result(f"{prefix}Tool error", is_error=True)
                         if self.logger:
                             self.logger.log_tool_result(block.tool_use_id, "ERROR")
                     else:
-                        console.tool_result("Tool completed")
+                        console.tool_result(f"{prefix}Tool completed")
                         if self.logger:
                             self.logger.log_tool_result(block.tool_use_id, "completed")
 

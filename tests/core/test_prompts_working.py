@@ -6,6 +6,7 @@ This module tests the prompts from prompts_working.py:
 - _build_commit_only_execution: Commit-only workflow (more tasks in group)
 """
 
+import hashlib
 from typing import Any
 
 from claude_task_master.core.prompts_working import (
@@ -1272,3 +1273,372 @@ class TestClaudeMdGuidance:
         assert "CLAUDE.md" in commit_snippet
         assert ".claude/instructions.md" in full_snippet
         assert ".claude/instructions.md" in commit_snippet
+
+
+# =============================================================================
+# Hive Mode Tests (hive_tasks)
+# =============================================================================
+
+
+HIVE_BATCH = ["Add the parser", "Add the CLI flag", "Write the docs"]
+HIVE_NUMBERS = [3, 4, 6]
+
+
+def _hive_prompt(**overrides: Any) -> str:
+    """Render a hive-lead prompt with sane defaults."""
+    params: dict[str, Any] = {
+        "task_description": "Finish PR group 2",
+        "hive_tasks": HIVE_BATCH,
+        "hive_task_numbers": HIVE_NUMBERS,
+    }
+    params.update(overrides)
+    return build_work_prompt(**params)
+
+
+class TestHiveOffIsByteIdentical:
+    """The ordinary (non-hive) path must not regress by a single byte.
+
+    The digests below were taken from the prompt as it stood *before* hive mode
+    existed. They are the whole point of the hive parameters being opt-in: every
+    non-hive caller — including every fix session — must get exactly the same
+    prompt it got before. A failure here means the single-task path changed;
+    re-read the diff rather than re-recording the hash.
+    """
+
+    BASELINES: dict[str, tuple[dict[str, Any], str]] = {
+        "plain": (
+            {"task_description": "Any task"},
+            "3489392e32bb94a469c432f509aa45fce187984da13ce9e38994a9745e76ab09",
+        ),
+        "commit_only": (
+            {"task_description": "Task", "create_pr": False},
+            "e5defd36799725ebaffaca581275cf4a3f5a255180387d0bdf9410a2e79f4944",
+        ),
+        "push_only": (
+            {"task_description": "Task", "push_only": True},
+            "827e4f31b4577bd849d08c760ab477907afc7e555fe8555865a1030795b445d7",
+        ),
+        "push_only_rebase": (
+            {"task_description": "Task", "push_only": True, "allow_rebase": True},
+            "79727e06da77e3a2522972b04c1299d42117bbdea753d5bac60e36afde57576d",
+        ),
+        "everything": (
+            {
+                "task_description": "Implement user authentication",
+                "context": "Uses Flask framework",
+                "pr_comments": "Fix the tests",
+                "file_hints": ["src/auth.py", "tests/test_auth.py"],
+                "required_branch": "feat/auth",
+                "create_pr": True,
+                "pr_group_info": {
+                    "name": "Auth",
+                    "branch": "feat/auth",
+                    "branch_mandated": True,
+                    "completed_tasks": ["Create user model"],
+                    "remaining_tasks": 2,
+                },
+                "target_branch": "develop",
+                "coding_style": "## Naming\n- snake_case",
+            },
+            "2921e6de49c9ed439a2ed544520547be74ade2de3af67bf42355330bac53692d",
+        ),
+    }
+
+    def test_output_unchanged_without_hive_tasks(self) -> None:
+        for name, (params, digest) in self.BASELINES.items():
+            rendered = build_work_prompt(**params)
+            actual = hashlib.sha256(rendered.encode()).hexdigest()
+            assert actual == digest, f"non-hive prompt changed for case {name!r}"
+
+    def test_explicit_none_matches_baseline(self) -> None:
+        """Passing hive_tasks=None explicitly is the same as omitting it."""
+        params, digest = self.BASELINES["plain"]
+        rendered = build_work_prompt(**params, hive_tasks=None, hive_task_numbers=None)
+        assert hashlib.sha256(rendered.encode()).hexdigest() == digest
+
+    def test_single_task_batch_is_not_a_hive(self) -> None:
+        """A batch of one is an ordinary task — no lead framing, no manifest."""
+        params, digest = self.BASELINES["plain"]
+        rendered = build_work_prompt(**params, hive_tasks=["only one"], hive_task_numbers=[1])
+        assert hashlib.sha256(rendered.encode()).hexdigest() == digest
+
+    def test_empty_task_batch_is_not_a_hive(self) -> None:
+        params, digest = self.BASELINES["plain"]
+        rendered = build_work_prompt(**params, hive_tasks=[])
+        assert hashlib.sha256(rendered.encode()).hexdigest() == digest
+
+    def test_push_only_ignores_hive_tasks(self) -> None:
+        """Fix sessions never fan out — they only add commits to an existing PR."""
+        params, digest = self.BASELINES["push_only"]
+        rendered = build_work_prompt(**params, hive_tasks=HIVE_BATCH)
+        assert hashlib.sha256(rendered.encode()).hexdigest() == digest
+        assert "hive-worker" not in rendered
+
+
+class TestHiveIntro:
+    """The lead framing replaces the single-task framing."""
+
+    def test_single_task_framing_dropped(self) -> None:
+        result = _hive_prompt()
+        assert "SINGLE task" not in result
+        assert "don't work ahead" not in result
+
+    def test_lead_framing_present(self) -> None:
+        result = _hive_prompt()
+        assert "LEAD" in result
+        assert "BATCH" in result
+
+    def test_lead_owns_git(self) -> None:
+        result = _hive_prompt()
+        assert "ONLY thing here that touches git" in result
+
+    def test_quality_and_refs_preserved(self) -> None:
+        result = _hive_prompt()
+        assert "HIGH QUALITY" in result
+        assert "plan.md" in result
+        assert "progress.md" in result
+
+    def test_branch_info_still_rendered(self) -> None:
+        result = _hive_prompt(required_branch="feat/hive")
+        assert "**Current Branch:** `feat/hive`" in result
+
+
+class TestHiveTaskBatchSection:
+    """The ## Task Batch listing replaces the bare remaining-count."""
+
+    def test_batch_section_present(self) -> None:
+        result = _hive_prompt()
+        assert "## Task Batch" in result
+
+    def test_every_task_listed_with_plan_number(self) -> None:
+        result = _hive_prompt()
+        for number, task in zip(HIVE_NUMBERS, HIVE_BATCH, strict=True):
+            assert f"{number}. {task}" in result
+
+    def test_tasks_in_plan_order(self) -> None:
+        result = _hive_prompt()
+        positions = [result.find(task) for task in HIVE_BATCH]
+        assert positions == sorted(positions)
+
+    def test_numbers_default_to_one_based_when_absent(self) -> None:
+        result = _hive_prompt(hive_task_numbers=None)
+        for i, task in enumerate(HIVE_BATCH, start=1):
+            assert f"{i}. {task}" in result
+
+    def test_mismatched_numbers_fall_back_to_local_numbering(self) -> None:
+        """A short/long number list must not mislabel the batch."""
+        result = _hive_prompt(hive_task_numbers=[7])
+        for i, task in enumerate(HIVE_BATCH, start=1):
+            assert f"{i}. {task}" in result
+
+    def test_bare_remaining_count_replaced(self) -> None:
+        result = _hive_prompt(
+            pr_group_info={
+                "name": "Group",
+                "completed_tasks": [],
+                "remaining_tasks": 3,
+            },
+        )
+        assert "Tasks remaining after this one:" not in result
+        assert "## Task Batch" in result
+
+    def test_pr_group_context_still_rendered(self) -> None:
+        result = _hive_prompt(
+            pr_group_info={
+                "name": "Group",
+                "completed_tasks": ["Earlier task"],
+                "remaining_tasks": 3,
+            },
+        )
+        assert "**PR Group:** Group" in result
+        assert "Earlier task" in result
+
+
+class TestHiveFanOutRules:
+    """The fan-out rules — the heart of the lead brief."""
+
+    def test_disjoint_write_set_rule(self) -> None:
+        result = _hive_prompt()
+        assert "write sets are disjoint" in result
+        assert "neither depends on the other's output" in result
+
+    def test_sequential_is_an_acceptable_answer(self) -> None:
+        result = _hive_prompt()
+        assert "that is a good answer, not a failure" in result
+        assert "Zero workers is a legitimate answer" in result
+
+    def test_cold_start_cost_stated(self) -> None:
+        result = _hive_prompt()
+        assert "cold start" in result
+
+    def test_hive_worker_subagent_type(self) -> None:
+        result = _hive_prompt()
+        assert 'subagent_type: "hive-worker"' in result
+
+    def test_single_message_for_concurrency(self) -> None:
+        result = _hive_prompt()
+        assert "in a single message so they run concurrently" in result
+
+    def test_workers_must_not_be_backgrounded(self) -> None:
+        """Backgrounded workers outlive the session and strand a dirty tree."""
+        result = _hive_prompt()
+        assert "`run_in_background: false`" in result
+        assert "Never end your turn while a worker is still running." in result
+
+    def test_wait_for_workers_before_gate_or_git(self) -> None:
+        result = _hive_prompt()
+        assert "before you run the gate or touch git" in result
+
+    def test_worker_tool_calls_are_invisible(self) -> None:
+        result = _hive_prompt()
+        assert "tool calls are invisible to you" in result
+
+    def test_max_parallel_default_appears(self) -> None:
+        result = _hive_prompt()
+        assert "at most 10" in result
+
+    def test_max_parallel_override_appears(self) -> None:
+        result = _hive_prompt(hive_max_parallel=4)
+        assert "at most 4" in result
+        assert "at most 10" not in result
+
+    def test_brief_names_task_files_and_neighbours(self) -> None:
+        result = _hive_prompt()
+        assert "EXCLUSIVE file set" in result
+        assert "which other workers are live" in result
+
+    def test_collision_is_reported_not_resolved(self) -> None:
+        result = _hive_prompt()
+        assert "STOPS and reports the collision" in result
+
+    def test_workers_never_run_git(self) -> None:
+        result = _hive_prompt()
+        assert "**Workers never run git**" in result
+        for verb in ("add", "commit", "branch", "checkout", "stash", "push"):
+            assert f"`{verb}`" in result
+
+    def test_worker_report_is_not_evidence(self) -> None:
+        result = _hive_prompt()
+        assert "not evidence" in result
+        assert "verify on disk yourself" in result
+
+    def test_full_gate_is_the_lead_s_job(self) -> None:
+        result = _hive_prompt()
+        assert "narrow checks on their own files" in result
+        assert "FULL project gate once" in result
+
+    def test_unfanned_tasks_done_by_lead(self) -> None:
+        result = _hive_prompt()
+        assert "Everything you did not fan out" in result
+
+
+class TestHiveCompletionManifest:
+    """The TASKS COMPLETE manifest contract."""
+
+    def test_manifest_format_literal(self) -> None:
+        """hive-core's parser keys off this exact shape."""
+        result = _hive_prompt()
+        assert "TASKS COMPLETE: 3, 4, 6" in result
+
+    def test_manifest_only_lists_committed_work(self) -> None:
+        result = _hive_prompt()
+        assert "List ONLY tasks whose work is committed" in result
+        assert "silently loses that work" in result
+
+    def test_manifest_distinguished_from_single_task_sentinel(self) -> None:
+        result = _hive_prompt()
+        assert "TASK COMPLETE" in result
+        assert "plural" in result and "singular" in result
+
+    def test_batch_framing_replaces_this_task_stop(self) -> None:
+        result = _hive_prompt()
+        assert "**After completing THIS task, STOP.**" not in result
+        assert "**After the WHOLE BATCH is done, STOP.**" in result
+
+    def test_empty_manifest_is_expressible(self) -> None:
+        result = _hive_prompt()
+        assert "Finished none?" in result
+
+
+class TestHiveSharedConstants:
+    """The prompt must not carry its own copy of hive's literals.
+
+    A duplicated batch floor or manifest label drifts silently: the prompt would
+    teach the lead one sentinel while the parser looked for another, and the
+    orchestrator would check off nothing.
+    """
+
+    def test_manifest_label_comes_from_hive(self) -> None:
+        from claude_task_master.core.hive import HIVE_MANIFEST_PREFIX
+        from claude_task_master.core.prompts_working_hive import MANIFEST_PREFIX
+
+        assert MANIFEST_PREFIX == f"{HIVE_MANIFEST_PREFIX}:"
+        assert MANIFEST_PREFIX in _hive_prompt()
+
+    def test_batch_floor_comes_from_hive(self) -> None:
+        from claude_task_master.core.hive import HIVE_MIN_BATCH_TASKS
+        from claude_task_master.core.prompts_working_hive import is_hive_batch
+
+        below = ["task"] * (HIVE_MIN_BATCH_TASKS - 1)
+        at_floor = ["task"] * HIVE_MIN_BATCH_TASKS
+        assert not is_hive_batch(below)
+        assert is_hive_batch(at_floor)
+
+    def test_emitted_manifest_shape_is_what_the_parser_reads(self) -> None:
+        """The two-line ending hive-core pinned tests against, unchanged."""
+        from claude_task_master.core.hive import parse_completed_task_numbers
+
+        result = _hive_prompt()
+        assert "TASKS COMPLETE: 3, 4, 6" in result
+        # A lead following the instruction verbatim round-trips through hive's parser:
+        # the singular sentinel is ignored, the plural manifest yields the numbers.
+        lead_output = "TASK COMPLETE\nTASKS COMPLETE: 3, 4, 6"
+        assert parse_completed_task_numbers(lead_output, HIVE_NUMBERS) == [3, 4, 6]
+
+
+class TestHiveCreatePrVariants:
+    """Both create_pr=True and create_pr=False hive batches must work."""
+
+    def test_create_pr_true_reuses_full_workflow(self) -> None:
+        result = _hive_prompt(create_pr=True)
+        assert "gh pr create" in result
+        assert "**PR:** URL (REQUIRED)" in result
+        assert "TASKS COMPLETE:" in result
+
+    def test_create_pr_true_says_batch_opens_the_pr(self) -> None:
+        result = _hive_prompt(
+            create_pr=True,
+            pr_group_info={"name": "Group", "completed_tasks": [], "remaining_tasks": 3},
+        )
+        assert "when it is done, you open the PR" in result
+
+    def test_create_pr_false_reuses_commit_only(self) -> None:
+        result = _hive_prompt(create_pr=False)
+        assert "DO NOT create PR yet" in result
+        assert "gh pr create" not in result
+        assert "TASKS COMPLETE:" in result
+
+    def test_create_pr_false_says_batch_does_not_end_group(self) -> None:
+        result = _hive_prompt(
+            create_pr=False,
+            pr_group_info={"name": "Group", "completed_tasks": [], "remaining_tasks": 5},
+        )
+        assert "does NOT end the PR group" in result
+
+    def test_both_variants_keep_batch_stop_framing(self) -> None:
+        for create_pr in (True, False):
+            result = _hive_prompt(create_pr=create_pr)
+            assert "**After the WHOLE BATCH is done, STOP.**" in result
+            assert "**After completing THIS task, STOP.**" not in result
+
+    def test_both_variants_carry_the_batch_execution_preamble(self) -> None:
+        for create_pr in (True, False):
+            result = _hive_prompt(create_pr=create_pr)
+            assert "**This is a BATCH, not one task.**" in result
+            # The reused per-task execution body is still there, unduplicated.
+            assert result.count("**1. Check git status first**") == 1
+
+    def test_conventions_guidance_survives_in_hive_mode(self) -> None:
+        result = _hive_prompt()
+        assert "CLAUDE.md" in result
+        assert "Read project conventions" in result

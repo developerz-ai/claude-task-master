@@ -375,6 +375,7 @@ Precedence (highest first): real environment variables, then the **active profil
 | `CLAUDETM_MAX_TURNS` | `400` | Max agent steps per session — a runaway backstop, not a working budget. Set `0` to disable. Overrunning retries the task rather than marking it done |
 | `CLAUDETM_STREAM_IDLE_TIMEOUT_SEC` | `1800` | Max silence between SDK stream messages before treating the stream as hung |
 | `CLAUDETM_POST_COMPLETION_IDLE_TIMEOUT_SEC` | `120` | Max wait for the final result message after the agent signals it's done |
+| `CLAUDETM_HIVE_MAX_PARALLEL` | `10` | Max concurrent `hive-worker` subagents under `--parallel-tasks` (1 lead + up to N workers) |
 
 Sessions are bounded in steps, not wall-clock: a wall-clock cap would punish a slow-but-healthy session (big test suite, slow CI) exactly as hard as a looping one. Use `--budget` for a per-session cost cap.
 
@@ -453,6 +454,7 @@ claudetm start "Your goal here" [OPTIONS]
 | `--pause-on-pr` | Pause after creating PR | False |
 | `--resolve-conflicts/--no-resolve-conflicts` | Let an agent rebase onto the base and resolve merge conflicts (3 attempts, then block) | True |
 | `--sync-before-merge/--no-sync-before-merge` | Also rebase PRs that merely trail the base, so CI verifies the combined tree (3 attempts, then merge as-is) | False |
+| `--parallel-tasks/--no-parallel-tasks` | Run a PR group's remaining tasks as one "hive" session that fans disjoint-write-set tasks out to subagents | False |
 | `--admin` | Merge via `gh pr merge --admin`, overriding base-branch protection (requires repo-admin rights) | False |
 | `--budget` | Max spending per session in USD | unlimited |
 
@@ -475,6 +477,22 @@ claudetm resume --admin               # or turn it on mid-run
 It requires repo-admin rights and it is a real override — the review requirement is bypassed, not satisfied. On a repo where those reviews are the point, leave it off and merge by hand.
 
 `--admin` also force-advances a CI **timeout** (`CI_POLL_TIMEOUT`, 120 min) to the review stage instead of blocking. It does not skip CI, ignore failures, or merge a conflicted PR: failing checks still route to the fix loop, and conflicts still go to the resolver.
+
+#### Running a PR group in parallel (`--parallel-tasks`)
+
+Normally one work session does one task. With `--parallel-tasks`, the remaining incomplete tasks of a PR group are handed to a single **hive lead** session instead:
+
+```bash
+claudetm start "Port 20 view models to the new API" --parallel-tasks
+```
+
+The lead reads the whole batch, works out which tasks have **disjoint write sets**, and fans those out to `hive-worker` subagents running concurrently in this same checkout; anything that overlaps it does itself, in order. Workers only read and write files — the lead is the only thing that runs git, so it commits, pushes and opens the PR for the group.
+
+Cap the fan-out with `CLAUDETM_HIVE_MAX_PARALLEL` (default 10 = one lead plus up to 10 workers).
+
+**When it helps:** a group of many genuinely independent edits — one file or one module each, no shared surface. That is where the per-agent cold start is paid back several times over.
+
+**When it does not:** a group of two or three small, tangled tasks. Spawning an agent per one-line edit costs more than doing it inline, which is why hive mode stays off unless you ask for it and does not engage at all below 2 remaining tasks in the group, or with `--pr-per-task` (that mode opens a PR per task, so there is nothing to batch).
 
 ### Common Workflows
 

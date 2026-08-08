@@ -155,6 +155,7 @@ Get comprehensive status information about the current task.
     "log_level": "normal",
     "log_format": "text",
     "pr_per_task": false,
+    "parallel_tasks": false,
     "max_budget_usd": null
   },
   "created_at": "2024-01-18T14:30:22Z",
@@ -419,6 +420,7 @@ Update runtime task configuration options.
 - `log_level` (string) - Log level: `quiet`, `normal`, `verbose`
 - `log_format` (string) - Log format: `text`, `json`
 - `pr_per_task` (boolean) - Create PR per task vs per group
+- `parallel_tasks` (boolean) - Run a PR group's remaining tasks as one "hive" session that fans disjoint-write-set tasks out to subagents
 - `max_budget_usd` (float) - Max spending per session in USD (null for unlimited)
 
 **Note:** Only provide the fields you want to update. At least one field is required.
@@ -465,7 +467,8 @@ Initialize a new task with the given goal and options.
   "auto_merge": true,
   "max_sessions": 10,
   "max_prs": 2,
-  "pause_on_pr": false
+  "pause_on_pr": false,
+  "parallel_tasks": false
 }
 ```
 
@@ -477,6 +480,7 @@ Initialize a new task with the given goal and options.
 - `max_sessions` (optional, integer, 1-1000) - Max sessions before pausing
 - `max_prs` (optional, integer, 1-100) - Max pull requests to create
 - `pause_on_pr` (optional, boolean) - Pause after creating PR (default: `false`)
+- `parallel_tasks` (optional, boolean) - Run a PR group's remaining tasks as one "hive" session that fans disjoint-write-set tasks out to subagents (default: `false`; needs 2+ remaining tasks in the group, ignored with `pr_per_task`)
 - `budget` (optional, float) - Max spending per session in USD (default: unlimited)
 
 **Response:** `TaskInitResponse` (201 Created)
