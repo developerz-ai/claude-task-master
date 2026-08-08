@@ -4,20 +4,26 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from .. import console
+
 if TYPE_CHECKING:
     from ...github import GitHubClient
     from ..agent import AgentWrapper
     from ..pr_context import PRContextManager
-    from ..state import StateManager
+    from ..state import StateManager, TaskState
     from ..webhook_emitter import WebhookEmitter
 
 
 class StageHandlerBase:
     """Base class for WorkflowStageHandler: constants, instance vars, __init__.
 
-    All stage-specific methods live in the subclasses declared in the other
-    modules of this package.  WorkflowStageHandler (defined in __init__.py)
-    inherits the full chain and is the public API surface.
+    Stage-specific methods live in the subclasses declared in the other modules
+    of this package.  WorkflowStageHandler (defined in __init__.py) inherits the
+    full chain and is the public API surface.
+
+    The one behaviour defined here is the poll-timeout policy that governs
+    :data:`CI_POLL_TIMEOUT`, because *two* stages wait on that one timer and
+    must not disagree about what its expiry means.
     """
 
     # CI polling configuration
@@ -120,3 +126,43 @@ class StageHandlerBase:
         # resuming should start from a clean slate rather than inherit a count
         # from an operation that may since have started working.
         self._transient_attempts: dict[str, int] = {}
+
+    def _poll_timeout_override(self, state: TaskState, reason: str) -> bool:
+        """Report whether ``--admin`` permits proceeding past a poll timeout.
+
+        The CI wait and the review wait share one timer (``CI_POLL_TIMEOUT`` via
+        ``state.ci_poll_start_time``) and must therefore share one policy: a
+        check still pending when it expires is indistinguishable from one about
+        to report a failure, so proceeding toward merge is unsafe — unless the
+        run was started with ``--admin``, which is an explicit policy override.
+
+        Only the *decision* is shared. Each caller performs its own transition:
+        ``waiting_ci`` advances to the review stage, while the review wait
+        carries on inside its own stage.
+
+        Args:
+            state: Current task state.
+            reason: Human-readable description of what timed out.
+
+        Returns:
+            True if the run may proceed despite the timeout, False if not.
+        """
+        if state.options.admin_merge:
+            console.warning(f"{reason} - proceeding anyway (--admin override)")
+            return True
+        return False
+
+    def _block_on_poll_timeout(self, state: TaskState, reason: str) -> int:
+        """Block the run on a poll timeout that ``--admin`` did not override.
+
+        Args:
+            state: Current task state (marked blocked and persisted).
+            reason: Human-readable description of what timed out.
+
+        Returns:
+            1, the loop's "blocked" exit code.
+        """
+        console.error(f"{reason} - blocking (re-run with --admin to proceed anyway)")
+        state.status = "blocked"
+        self.state_manager.save_state(state)
+        return 1

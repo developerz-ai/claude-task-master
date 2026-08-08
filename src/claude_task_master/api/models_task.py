@@ -20,6 +20,7 @@ from claude_task_master.api.models_common import (
     TaskStatus,
     WebhookStatusInfo,
     WorkflowStage,
+    _RemovedFieldGuard,
     _validate_model_field,
 )
 
@@ -101,14 +102,15 @@ class ResumeRequest(BaseModel):
     )
 
 
-class ConfigUpdateRequest(BaseModel):
+class ConfigUpdateRequest(_RemovedFieldGuard):
     """Request model for updating task configuration.
 
     Only specified fields are updated; others retain their current values.
     At least one field must be provided.
 
     Attributes:
-        auto_merge: Whether to auto-merge PRs when approved.
+        auto_merge: Whether to auto-merge PRs once CI is green and review
+            feedback is resolved. No approving review is ever required.
         max_sessions: Maximum number of work sessions before pausing.
         max_prs: Maximum number of pull requests to create.
         pause_on_pr: Whether to pause after creating PR for manual review.
@@ -116,12 +118,16 @@ class ConfigUpdateRequest(BaseModel):
         log_level: Log level (quiet, normal, verbose).
         log_format: Log format (text, json).
         pr_per_task: Whether to create PR per task vs per group.
-        parallel_tasks: Whether to run a PR group's remaining tasks as one hive session.
+        parallel: Whether a work session may split its one task across hive workers.
     """
 
     auto_merge: bool | None = Field(
         default=None,
-        description="Whether to auto-merge PRs when approved",
+        description=(
+            "Whether to auto-merge PRs. A PR merges once CI is green and review feedback "
+            "is resolved (no unresolved threads, no changes-requested review); an approving "
+            "review is never required and never waited for"
+        ),
     )
     enable_release: bool | None = Field(
         default=None,
@@ -163,11 +169,11 @@ class ConfigUpdateRequest(BaseModel):
         default=None,
         description="Whether to create PR per task vs per group",
     )
-    parallel_tasks: bool | None = Field(
+    parallel: bool | None = Field(
         default=None,
         description=(
-            "Whether to run a PR group's remaining tasks as one 'hive' session that fans "
-            "disjoint-write-set tasks out to subagents (off by default)"
+            "Whether a work session may split its one task across 'hive-worker' subagents "
+            "with disjoint write sets (on by default)"
         ),
     )
 
@@ -194,17 +200,18 @@ class ConfigUpdateRequest(BaseModel):
         return updates
 
 
-class TaskInitRequest(BaseModel):
+class TaskInitRequest(_RemovedFieldGuard):
     """Request model for initializing a new task.
 
     Attributes:
         goal: The goal to achieve.
         model: Model to use (opus, sonnet, haiku).
-        auto_merge: Whether to auto-merge PRs when approved.
+        auto_merge: Whether to auto-merge PRs once CI is green and review
+            feedback is resolved. No approving review is ever required.
         max_sessions: Max work sessions before pausing.
         max_prs: Max pull requests to create.
         pause_on_pr: Pause after creating PR for manual review.
-        parallel_tasks: Run a PR group's remaining tasks as one hive session.
+        parallel: Let a work session split its one task across hive workers.
     """
 
     goal: str = Field(
@@ -227,7 +234,11 @@ class TaskInitRequest(BaseModel):
 
     auto_merge: bool = Field(
         default=True,
-        description="Whether to auto-merge PRs when approved",
+        description=(
+            "Whether to auto-merge PRs. A PR merges once CI is green and review feedback "
+            "is resolved (no unresolved threads, no changes-requested review); an approving "
+            "review is never required and never waited for"
+        ),
     )
     enable_release: bool = Field(
         default=False,
@@ -253,12 +264,12 @@ class TaskInitRequest(BaseModel):
         default=False,
         description="Pause after creating PR for manual review",
     )
-    parallel_tasks: bool = Field(
-        default=False,
+    parallel: bool = Field(
+        default=True,
         description=(
-            "Run a PR group's remaining tasks as one 'hive' session: the lead fans the tasks "
-            "with disjoint write sets out to subagents and alone touches git. Off by default — "
-            "fan-out only pays at scale (needs 2+ remaining tasks; ignored with pr_per_task)"
+            "Let each work session split its ONE task across 'hive-worker' subagents when the "
+            "pieces have disjoint write sets. On by default; the lead sizes its own team (zero "
+            "workers is a valid answer), works in this same checkout, and alone touches git"
         ),
     )
 
@@ -272,7 +283,8 @@ class TaskOptionsResponse(BaseModel):
     """Task options in response models.
 
     Attributes:
-        auto_merge: Whether to auto-merge PRs when approved.
+        auto_merge: Whether to auto-merge PRs once CI is green and review
+            feedback is resolved. No approving review is ever required.
         max_sessions: Maximum number of work sessions before pausing.
         max_prs: Maximum number of pull requests to create.
         pause_on_pr: Whether to pause after creating PR for manual review.
@@ -280,7 +292,7 @@ class TaskOptionsResponse(BaseModel):
         log_level: Current log level.
         log_format: Current log format.
         pr_per_task: Whether to create PR per task vs per group.
-        parallel_tasks: Whether a PR group's remaining tasks run as one hive session.
+        parallel: Whether work sessions may split their task across hive workers.
     """
 
     auto_merge: bool
@@ -293,7 +305,7 @@ class TaskOptionsResponse(BaseModel):
     log_level: str
     log_format: str
     pr_per_task: bool
-    parallel_tasks: bool = False
+    parallel: bool = True
     max_budget_usd: float | None = None
 
 

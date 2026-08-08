@@ -36,8 +36,11 @@ services:
       - ../../src:/app/src:ro
       - ../../pyproject.toml:/app/pyproject.toml:ro
 
-      # Claude credentials
-      - "${CLAUDE_CREDENTIALS_PATH:-~/.claude}:/home/claudetm/.claude:ro"
+      # Agent credential - REQUIRED. Named volume holding the api-key profile
+      # (a scoped, rotatable key issued to the agent). Never mount your own
+      # ~/.claude: the container would run as, and bill, your Claude account -
+      # that is exactly how a token leaked across developers once already.
+      - "claudetm-profiles:/home/claudetm/.claudetm"
 
       # Project directory for testing
       - "${PROJECT_PATH:-../../tmp/test-project}:/app/project"
@@ -49,6 +52,9 @@ services:
       - "${HOME}/.config/gh:/home/claudetm/.config/gh:ro"
 
     environment:
+      # Agent credential - REQUIRED. The api-key profile inside claudetm-profiles.
+      - CLAUDETM_PROFILE=${CLAUDETM_PROFILE:-agent-dev}
+
       # No password in development (WARNING: insecure!)
       - CLAUDETM_PASSWORD=${CLAUDETM_PASSWORD:-}
 
@@ -75,6 +81,15 @@ services:
 
     networks:
       - claudetm-dev
+
+volumes:
+  # Created once out-of-band (see "Agent credential" below) so the credential
+  # survives `docker compose down`. Deliberately a *different* host volume from
+  # the production examples: sharing one would put the production key in reach
+  # of a dev container that is running without authentication.
+  claudetm-profiles:
+    external: true
+    name: ${CLAUDETM_PROFILES_VOLUME:-claudetm-profiles-dev}
 
 networks:
   claudetm-dev:
@@ -117,7 +132,26 @@ networks:
 #
 # Optional for development:
 #   PROJECT_PATH=../../tmp/test-project
-#   CLAUDE_CREDENTIALS_PATH=~/.claude
+#   CLAUDETM_PROFILE=agent-dev      # api-key profile in claudetm-profiles
 #   CLAUDETM_PASSWORD=dev-password  # Only if you want auth in dev
+#
+# =============================================================================
+# Agent credential (one time)
+# =============================================================================
+#
+# Even in development the container gets its own scoped key - not your personal
+# Claude login, and not the production agent's key either (hence the separate
+# claudetm-profiles-dev volume):
+#
+#   docker volume create claudetm-profiles-dev
+#   docker run --rm \
+#     -v claudetm-profiles-dev:/home/claudetm/.claudetm \
+#     -e CLAUDETM_API_KEY="$AGENT_API_KEY" \
+#     ghcr.io/developerz-ai/claude-task-master:latest \
+#     claudetm profile add agent-dev --type api-key \
+#       --base-url https://your-gateway.example/anthropic
+#
+# The key is read from the environment at creation time; keep it in your secret
+# store, never in this file, in .env, or in the image.
 #
 # =============================================================================

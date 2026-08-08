@@ -16,15 +16,18 @@ COMMAND = "merge-pr"
 # Common patch paths
 FIX_PR = "claude_task_master.cli_commands.fix_pr"
 GITHUB = "claude_task_master.github.GitHubClient"
+MERGE_FINALIZE = "claude_task_master.cli_commands.merge_finalize"
+PR_RESOLUTION = "claude_task_master.cli_commands.pr_resolution"
 
 
 @pytest.fixture(autouse=True)
 def _mock_post_merge_git():
     """Stub out post-merge git helpers so tests don't shell out to real git."""
     with (
-        patch(f"{FIX_PR}._checkout_and_pull", return_value=True),
-        patch(f"{FIX_PR}._delete_local_branch"),
-        patch(f"{FIX_PR}.get_current_branch", return_value="feature-branch"),
+        patch(f"{FIX_PR}.checkout_and_pull", return_value=True),
+        patch(f"{FIX_PR}.delete_merged_branch"),
+        patch(f"{MERGE_FINALIZE}.get_current_branch", return_value="feature-branch"),
+        patch(f"{PR_RESOLUTION}.get_current_branch", return_value="feature-branch"),
     ):
         yield
 
@@ -32,7 +35,7 @@ def _mock_post_merge_git():
 @pytest.fixture(autouse=True)
 def _fast_sleep():
     """Neutralize real sleeps (CI_START_WAIT + the CodeRabbit review grace) so tests don't block."""
-    with patch(f"{FIX_PR}.time.sleep"):
+    with patch(f"{FIX_PR}.time.sleep"), patch(f"{MERGE_FINALIZE}.time.sleep"):
         yield
 
 
@@ -46,6 +49,7 @@ def _make_pr_status(
     mergeable: str = "MERGEABLE",
     checks_passed: int = 1,
     checks_failed: int = 0,
+    state: str = "OPEN",
 ) -> MagicMock:
     """Create a mock PRStatus."""
     status = MagicMock()
@@ -56,7 +60,16 @@ def _make_pr_status(
     status.checks_failed = checks_failed
     status.check_details = []
     status.base_branch = "main"
+    status.head_branch = "feature-branch"
+    status.state = state
+    status.merged_at = "2026-08-08T00:00:00Z" if state == "MERGED" else None
+    status.merge_state_status = "CLEAN"
     return status
+
+
+def _merged_status() -> MagicMock:
+    """Status a post-merge confirmation read returns: GitHub says MERGED."""
+    return _make_pr_status(state="MERGED")
 
 
 def _setup_mocks(
@@ -74,6 +87,9 @@ def _setup_mocks(
     mock_state.is_session_active.return_value = False
     mock_state.acquire_session_lock.return_value = True
     mock_state_class.return_value = mock_state
+
+    # Default: a merge that is confirmed merged by GitHub afterwards.
+    mock_github.get_pr_status.return_value = _merged_status()
 
     return mock_github, mock_state
 

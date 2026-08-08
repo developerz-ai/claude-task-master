@@ -66,10 +66,7 @@ def get_current_branch() -> str | None:
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
-
     from .agent import AgentWrapper
-    from .hive import HiveBatch
     from .logger import TaskLogger
     from .state import StateManager, TaskState
 
@@ -106,12 +103,6 @@ class TaskRunner(_TaskRunnerSessionMixin):
         # orchestrator can extract accumulated context.md learnings from it.
         # "" when no session has run yet or the session produced no output.
         self.last_session_output: str = ""
-
-        # The hive batch the most recent work session covered, or None when it
-        # was an ordinary single-task session. Set on EVERY run_work_session
-        # call (including the early returns) so a stale batch can never be read
-        # against the next task.
-        self.last_hive_batch: HiveBatch | None = None
 
     def _get_parsed_tasks(self, plan: str) -> tuple[list[ParsedTask], list[TaskGroup]]:
         """Get parsed tasks and groups, with caching.
@@ -246,37 +237,20 @@ class TaskRunner(_TaskRunnerSessionMixin):
     def mark_task_complete(self, plan: str, task_index: int) -> None:
         """Mark a task as complete in the plan.
 
+        **Never call this in a loop over one in-memory ``plan``.** It saves the
+        string it was handed with a single checkbox flipped, so N calls write N
+        plans that each differ from the original by one mark: every mark but the
+        last is silently overwritten. Nothing loops it today — one work session
+        completes exactly one task, and the batch check-off that once did loop
+        it is gone — so the single-mark contract is the whole contract. A future
+        multi-mark caller must apply every mark to one string and save once.
+
         Args:
             plan: The plan markdown content.
             task_index: Index of the task to mark complete. If out of range,
                 the plan is saved unchanged.
         """
         updated_plan = plan_mark_task_complete(plan, task_index)
-        self.state_manager.save_plan(updated_plan)
-        self._invalidate_cache()
-
-    def mark_tasks_complete(self, plan: str, task_indices: Iterable[int]) -> None:
-        """Mark several tasks complete in a single read-modify-write.
-
-        Not a convenience wrapper — calling :meth:`mark_task_complete` in a loop
-        is *wrong*. It saves the plan string it was handed, so N calls with the
-        same in-memory ``plan`` write N plans that each differ from the original
-        by one checkbox: every mark but the last is silently overwritten. This
-        applies all the marks to one string and saves once, which is also the
-        only atomic option — a crash between two saves would otherwise leave a
-        plan claiming part of a batch was never done.
-
-        Marking by index is order-independent: a mark rewrites a task line in
-        place, so it never shifts the position of any other task.
-
-        Args:
-            plan: The plan markdown content.
-            task_indices: Zero-based indices to mark complete. Duplicates and
-                out-of-range indices are harmless (the latter no-op).
-        """
-        updated_plan = plan
-        for task_index in sorted(set(task_indices)):
-            updated_plan = plan_mark_task_complete(updated_plan, task_index)
         self.state_manager.save_plan(updated_plan)
         self._invalidate_cache()
 

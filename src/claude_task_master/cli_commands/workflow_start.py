@@ -41,7 +41,9 @@ def start(
     auto_merge: bool = typer.Option(
         True,
         "--auto-merge/--no-auto-merge",
-        help="Automatically merge PRs when CI passes and approved",
+        help="Automatically merge PRs once CI is green and review feedback is resolved "
+        "(no unresolved threads, no changes-requested review). There is no approval gate: "
+        "an approving review is never required, and never waited for.",
     ),
     admin: bool = typer.Option(
         False,
@@ -58,13 +60,13 @@ def start(
         "--sync-before-merge/--no-sync-before-merge",
         help="Also sync PRs that are merely behind the base (conflicts are always resolved)",
     ),
-    parallel_tasks: bool = typer.Option(
-        False,
-        "--parallel-tasks/--no-parallel-tasks",
-        help="Run a PR group's remaining tasks as one 'hive' session: the lead agent fans the "
-        "tasks with disjoint write sets out to subagents in this checkout, does the rest itself, "
-        "and alone touches git. Off by default — fan-out only pays at scale, so it needs 2+ "
-        "remaining tasks in the group and is ignored with --pr-per-task.",
+    parallel: bool = typer.Option(
+        True,
+        "--parallel/--no-parallel",
+        help="Let each work session split its ONE task across 'hive-worker' subagents when the "
+        "pieces have disjoint write sets. On by default; the lead sizes its own team (zero "
+        "workers is a valid answer), works in this same checkout, and alone touches git. "
+        "Use --no-parallel to keep every session strictly single-agent.",
     ),
     enable_release: bool = typer.Option(
         False,
@@ -151,7 +153,7 @@ def start(
         claudetm start "Add user auth" --prs 1
         claudetm start "Implement dashboard" --prs 3 --max-sessions 10
         claudetm start "Debug issue" -l verbose --log-format json
-        claudetm start "Port 20 modules" --parallel-tasks  # hive: one session per PR group
+        claudetm start "Tweak retry backoff" --no-parallel  # no hive fan-out inside a task
         claudetm start "Deploy feature" --webhook-url https://example.com/hooks
 
     Environment Variables:
@@ -245,7 +247,7 @@ def start(
             admin_merge=admin,
             resolve_conflicts=resolve_conflicts,
             sync_before_merge=sync_before_merge,
-            parallel_tasks=parallel_tasks,
+            parallel=parallel,
             enable_release=enable_release,
             enable_verification=enable_verification,
             max_sessions=max_sessions,

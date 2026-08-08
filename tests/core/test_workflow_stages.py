@@ -2099,12 +2099,18 @@ class TestWaitingReviewsTimeout:
         mock_pr_status,
         state_manager,
     ):
-        """Should proceed past pending checks in reviews after timeout."""
+        """Should proceed past pending checks in reviews after timeout, under --admin.
+
+        Issue #147: proceeding is now the ``--admin`` branch of the shared
+        poll-timeout policy, not the default. The default (block) is covered in
+        tests/core/test_stages_review_timeout.py.
+        """
         from datetime import datetime, timedelta
 
         state_manager.state_dir.mkdir(exist_ok=True)
         basic_task_state.current_pr = 42
         basic_task_state.workflow_stage = "waiting_reviews"
+        basic_task_state.options.admin_merge = True
         basic_task_state.ci_poll_start_time = datetime.now() - timedelta(seconds=7300)
 
         mock_pr_status.state = "OPEN"

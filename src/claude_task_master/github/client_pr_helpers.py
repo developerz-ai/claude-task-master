@@ -103,6 +103,7 @@ def _build_pr_status_query() -> str:
           state
           mergeable
           mergeStateStatus
+          reviewDecision
           baseRefName
           title
           url
@@ -232,6 +233,12 @@ def _parse_pr_status_response(pr_number: int, pr_data: dict[str, Any]) -> PRStat
     url = pr_data.get("url") or ""
     head_branch = pr_data.get("headRefName") or ""
     merged_at = pr_data.get("mergedAt")
+    # reviewDecision is null whenever GitHub has no verdict to report (no review
+    # yet, or reviews not required on the base). Anything that is not a string —
+    # a missing field on an older GitHub Enterprise, a partial response — must
+    # degrade to "no decision" rather than being carried into a merge check.
+    raw_decision = pr_data.get("reviewDecision")
+    review_decision = raw_decision if isinstance(raw_decision, str) and raw_decision else None
 
     return PRStatus(
         number=pr_number,
@@ -252,6 +259,7 @@ def _parse_pr_status_response(pr_number: int, pr_data: dict[str, Any]) -> PRStat
         url=url,
         head_branch=head_branch,
         merged_at=merged_at,
+        review_decision=review_decision,
     )
 
 

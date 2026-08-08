@@ -29,6 +29,17 @@ class _PRFixStage(_CIStage):
         # very failure. Re-run the jobs instead.
         infra_runs = self._infrastructural_runs(state)
         if infra_runs:
+            # …unless GitHub has already said the refusal is permanent (account
+            # locked, Actions disabled). Re-running that is guaranteed waste, so
+            # the breaker trips on sight rather than spending the whole re-run
+            # budget on the way to the same block.
+            blocked = self._external_block_reason(infra_runs)
+            if blocked:
+                summary = (
+                    "The failing jobs executed no step, and GitHub reports they were "
+                    "refused outright — no re-run will change that."
+                )
+                return self._trip_external_ci_breaker(state, infra_runs, summary, blocked)
             return self._rerun_failed_ci(
                 state,
                 infra_runs,
@@ -150,6 +161,69 @@ class _PRFixStage(_CIStage):
 
         return run_ids if all_infra else []
 
+    def _external_block_reason(self, run_ids: list[int]) -> str | None:
+        """GitHub's own reason for refusing to run these jobs, if it gave one.
+
+        Args:
+            run_ids: The PR's failing workflow runs.
+
+        Returns:
+            The annotation text for a *permanent* refusal, else None — as an
+            unreadable run also gives, "unknown" never being "give up".
+        """
+        from ...github.ci_infra import CIInfraDetector  # noqa: PLC0415
+
+        try:
+            detector = CIInfraDetector(repo=self.github_client._get_repo_info())
+            for run_id in run_ids:
+                reason = detector.external_block_reason(run_id)
+                if reason:
+                    return reason
+        except Exception:
+            return None
+        return None
+
+    def _trip_external_ci_breaker(
+        self, state: TaskState, run_ids: list[int], summary: str, reason: str | None = None
+    ) -> int:
+        """Stop for good on CI that no diff can fix, saying so on the PR once.
+
+        Every session spent on this failure reaches the same conclusion — the
+        branch is fine — and produces no commit, so the next poll re-reads the
+        identical red run. Looping is only expensive, never productive: a human
+        has to fix the platform. Per CLAUDE.md that makes this one of the rare
+        *correct* blocks, so it is terminal, explanatory and cheap rather than
+        a loop ending at --max-sessions with nothing to show. The explanation
+        goes on the PR exactly once — the poster checks for its own marker
+        first — since this stage is re-entered by every ``resume -f``.
+
+        Args:
+            state: Current task state.
+            run_ids: The failing workflow runs.
+            summary: One sentence saying what was tried and what it showed.
+            reason: GitHub's own words for the refusal, when it gave any.
+
+        Returns:
+            1 — the run is blocked.
+        """
+        console.error(f"{summary} Blocking — manual intervention required.")
+        if reason:
+            console.detail(f"GitHub reports: {reason}")
+
+        if state.current_pr is not None:
+            from ...github.ci_infra import post_external_block_notice  # noqa: PLC0415
+
+            try:
+                repo = self.github_client._get_repo_info()
+                if post_external_block_notice(repo, state.current_pr, run_ids, summary, reason):
+                    console.detail(f"Explained the block in a comment on PR #{state.current_pr}")
+            except Exception as e:
+                console.detail(f"Could not comment on PR #{state.current_pr}: {e}")
+
+        state.status = "blocked"
+        self.state_manager.save_state(state)
+        return 1
+
     def _rerun_failed_ci(
         self, state: TaskState, run_ids: list[int] | None, reason: str
     ) -> int | None:
@@ -190,17 +264,19 @@ class _PRFixStage(_CIStage):
             return 1
 
         if state.ci_rerun_attempts >= self.MAX_CI_RERUN_ATTEMPTS:
-            console.error(
-                f"CI still red after {self.MAX_CI_RERUN_ATTEMPTS} job re-runs ({reason}) — "
-                f"blocking, manual intervention required"
-            )
+            # The repeat case: the same red signature survived the whole re-run
+            # budget, and every look at it concluded the diff is not at fault.
+            # More cycles would only re-derive that, so the breaker trips.
             console.detail(
                 "Nothing in the diff is implicated, so this is the CI platform's to fix: "
                 f"check the runner pool, then `gh run rerun {run_ids[0]} --failed`."
             )
-            state.status = "blocked"
-            self.state_manager.save_state(state)
-            return 1
+            return self._trip_external_ci_breaker(
+                state,
+                run_ids,
+                f"CI is still red after {self.MAX_CI_RERUN_ATTEMPTS} job re-runs ({reason}).",
+                self._external_block_reason(run_ids),
+            )
 
         console.warning(
             f"Re-running failed CI jobs ({reason}) — "
@@ -228,14 +304,13 @@ class _PRFixStage(_CIStage):
                 unanswered.append(run_id)
 
         if not restarted and not unanswered:
-            console.error(
-                "GitHub refused to re-run any of the failed jobs — "
-                "blocking, manual intervention required"
-            )
             console.detail(f"Runs: {run_ids}. A run older than its retention window cannot re-run.")
-            state.status = "blocked"
-            self.state_manager.save_state(state)
-            return 1
+            return self._trip_external_ci_breaker(
+                state,
+                run_ids,
+                f"GitHub refused to re-run any of the failed jobs ({reason}).",
+                self._external_block_reason(run_ids),
+            )
 
         if unanswered:
             # A timed-out request may already have restarted the run. Asking

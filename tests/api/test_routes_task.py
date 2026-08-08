@@ -82,37 +82,37 @@ def test_post_task_init_default_options(api_client_empty_state, api_empty_state_
     assert state["options"]["max_sessions"] is None  # Default (unlimited)
     assert state["options"]["max_prs"] is None  # Default (unlimited)
     assert state["options"]["pause_on_pr"] is False  # Default
-    assert state["options"]["parallel_tasks"] is False  # Default (hive mode is opt-in)
+    assert state["options"]["parallel"] is True  # Default (parallel by default)
 
 
-def test_post_task_init_parallel_tasks(api_client_empty_state, api_empty_state_dir):
-    """parallel_tasks=true reaches TaskOptions via POST /task/init."""
+def test_post_task_init_parallel(api_client_empty_state, api_empty_state_dir):
+    """parallel=true reaches TaskOptions via POST /task/init."""
     assert not api_empty_state_dir.exists()
 
     response = api_client_empty_state.post(
         "/task/init",
-        json={"goal": "Port twenty modules", "parallel_tasks": True},
+        json={"goal": "Port twenty modules", "parallel": True},
     )
 
     assert response.status_code == 200
     assert response.json()["success"] is True
 
     state = json.loads((api_empty_state_dir / "state.json").read_text())
-    assert state["options"]["parallel_tasks"] is True
+    assert state["options"]["parallel"] is True
 
 
-def test_post_task_init_parallel_tasks_explicit_false(api_client_empty_state, api_empty_state_dir):
-    """parallel_tasks=false is persisted as False, same as omitting it."""
+def test_post_task_init_parallel_explicit_false(api_client_empty_state, api_empty_state_dir):
+    """parallel=false is persisted as False, overriding the on-by-default."""
     assert not api_empty_state_dir.exists()
 
     response = api_client_empty_state.post(
         "/task/init",
-        json={"goal": "Small fix", "parallel_tasks": False},
+        json={"goal": "Small fix", "parallel": False},
     )
 
     assert response.status_code == 200
     state = json.loads((api_empty_state_dir / "state.json").read_text())
-    assert state["options"]["parallel_tasks"] is False
+    assert state["options"]["parallel"] is False
 
 
 def test_post_task_init_invalid_model(api_client_empty_state, api_empty_state_dir):
@@ -364,3 +364,22 @@ def test_task_init_request_model_validation():
     assert request1.max_sessions == 1
     request2 = TaskInitRequest(goal="Test", max_sessions=1000)
     assert request2.max_sessions == 1000
+
+
+def test_post_task_init_rejects_removed_parallel_tasks(api_client_empty_state, api_empty_state_dir):
+    """`parallel_tasks` was removed, not aliased — sending it must 422.
+
+    Pydantic drops unknown keys, so without an explicit guard a client asking
+    for `parallel_tasks: false` would get a 200 and a run with `parallel: true`,
+    i.e. precisely the parallel execution it asked to avoid.
+    """
+    assert not api_empty_state_dir.exists()
+
+    response = api_client_empty_state.post(
+        "/task/init",
+        json={"goal": "Small fix", "parallel_tasks": False},
+    )
+
+    assert response.status_code == 422
+    assert "parallel" in response.text
+    assert not api_empty_state_dir.exists()

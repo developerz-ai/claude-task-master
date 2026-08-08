@@ -166,7 +166,7 @@ When uncertain, default to `[coding]` (uses the smartest model). The smartest ti
 - Parse `- [ ]` and `- [x]` from plan.md
 - Check `_is_task_complete()` before running (skip if [x])
 - Mark complete with `_mark_task_complete()`
-- Advance `current_task_index` to the last task the session actually completed, and save state. Treat it as the loop's **cursor**, not a counter that only goes up: several sites move it forward (the per-task advance, the group-shipping path, post-merge), one deliberately **rewinds** it so a skipped task still closes its group (`loop_working_stage`), and plan updates reconcile it against the rewritten plan (mailbox processing and `resume "message"`). Under `--parallel-tasks` one session advances it past the whole batch it finished
+- Advance `current_task_index` to the last task the session actually completed, and save state. Treat it as the loop's **cursor**, not a counter that only goes up: several sites move it forward (the per-task advance, the group-shipping path, post-merge), one deliberately **rewinds** it so a skipped task still closes its group (`loop_working_stage`), and plan updates reconcile it against the rewritten plan (mailbox processing and `resume "message"`). Hive fan-out does not touch this: a session that split its task across workers still advances the cursor by exactly one task
 
 ### Work Completion Requirements
 
@@ -179,7 +179,7 @@ Either way the agent's report is not the evidence. The orchestrator checks the r
 
 ### CLI Commands
 All commands check `state_manager.exists()` first:
-- `start`: Initialize and run planning → work loop. Opt-in flags worth knowing: `--admin`, `--sync-before-merge`, `--parallel-tasks` (hive mode, below)
+- `start`: Initialize and run planning → work loop. Flags worth knowing: `--admin`, `--sync-before-merge` (both opt-in), `--no-parallel` (turns off hive fan-out, which is on by default — see below)
 - `resume`: Resume paused task, optionally with message to update plan first
 - `status`: Show goal, status, session count, options
 - `plan`: Display plan.md with markdown rendering
@@ -267,22 +267,41 @@ Outside `--pr-per-task`, a PR is opened for exactly one reason: the task just fi
 
 A triplicated `plan.md` still runs its work N times; the parser only guarantees each block ships. If the task count looks 2–3× too large, check for repeated `### PR n:` headings before blaming the loop.
 
-### Hive mode — one session per PR group (`--parallel-tasks`, opt-in)
+### Hive mode — the task is the unit of parallelism (`--parallel`, on by default)
 
-- **Off by default.** One task per session is the cheaper, better-understood path, and fan-out only repays its per-agent cold start at real scale. Turn it on with `claudetm start --parallel-tasks` (`TaskOptions.parallel_tasks`, default False) when a PR group is a long list of genuinely independent edits — twenty view models, one file each.
-- When on, the group's **remaining incomplete tasks** are handed to a single **hive lead** work session instead of running one at a time. The lead reads the whole batch and decides for itself which tasks have **disjoint write sets** — no two agents may write the same file — fans exactly those out to `hive-worker` subagents running concurrently in this same checkout, and does everything that overlaps itself, in order. The write-set judgement is the lead's because only the lead has read the batch; the orchestrator does not try to compute it from the plan.
-- **The lead alone runs git.** Workers read, edit and run tests; they never `git add`, commit, push, or switch branches. That is what makes one shared checkout safe — there is no second writer to the index, so no `.git/index.lock` contention and no half-staged tree — and it keeps the group's history a single authored series. The lead commits, pushes and opens the PR for the whole group exactly as the last-task-in-group path already does.
-- **Hard floor of 2.** Below 2 remaining tasks in the group, hive mode does not engage at all and the normal per-task path runs. This is a floor in code, not prompt guidance, because the failure it prevents was measured on the sibling port: a run there spawned four agents to make four one-line edits.
-- **Incompatible with `--pr-per-task`,** which opens a PR per task and so has no batch to ship. Both set → hive mode simply does not engage; the flag is ignored rather than an error.
-- **Bounded by one knob:** `CLAUDETM_HIVE_MAX_PARALLEL` (default 10 — one lead plus up to 10 workers).
-- **The repository is still the evidence.** A hive session is verified like any other: the tree must be clean, and the lead's `TASKS COMPLETE:` manifest may only **narrow** what gets checked off — never widen it beyond the batch it was handed. A lead that finishes three of five reports three, and the other two stay `[ ]` for the next session; a lead that claims a task outside its batch is ignored on that task. The existing `MAX_TASK_FINISH_ATTEMPTS` retry governs unchanged: an unfinished batch re-runs with the leftover diff described as its own work to finish.
-- **A hive session is bounded like one session but spends like several.** `MAX_TURNS` (400) and `--budget` are per *query*, and the terminal `ResultMessage` aggregates the lead plus every subagent — so turns and cost accrue at N agents' rate against a single session's cap. An overrun is not a new failure mode: it lands as `error_max_turns`, the task is not checked off, and it degrades through the same retry.
+- **The parallelism lives inside one task, not across tasks.** The loop is unchanged: one work session per plan task, one task checked off per session, `TASK COMPLETE` reported exactly as before. What `--parallel` adds is that the agent running that session is a **lead** — it may cut *its own single task* into pieces with **disjoint write sets** and hand each piece to a `hive-worker` subagent, doing everything that overlaps itself. There is no batching, no manifest and no new bookkeeping; the orchestrator cannot tell a fanned-out session from a solo one except by what lands in the tree.
+- **On by default** (`TaskOptions.parallel`, default True; `--no-parallel` to keep every session strictly single-agent, `claudetm config-update --no-parallel` mid-run). Parallel is the default because the *decision* is free — the lead only spends anything if it finds real seams.
+- **The lead sizes its own team; the orchestrator never counts for it.** Nothing outside the session can tell how big a task is before it runs, so how many workers a task deserves is a judgement made in the prompt (`core/prompts_working_hive.py`), not a number computed from the plan. **Zero workers is a legitimate answer, and so is one** — most tasks are one task for a reason.
+- **Fan-out is not free, and the brief says so.** Every worker pays a full cold start re-reading the repo, and its final message is the only thing that comes back. A sibling project was observed spawning four workers for four one-line edits: four cold starts for work one agent finishes in a single pass. That is the failure the brief argues against, at length, because it is the only lever there is.
+- **`CLAUDETM_HIVE_MAX_PARALLEL` (default 10) is a safety ceiling, not a target** (`core/hive.py`). It bounds concurrent workers — one lead plus up to N — and nothing else. A typo in the env var never ends a run: anything unset, unparseable or `<= 0` falls back to the default.
+- **One checkout, shared by everyone.** Workers work directly in this same tree. Never a git worktree, never a clone, never a per-agent copy — the work has to land in the tree the lead commits from. The exclusive file sets in each worker's brief are the only lock there is; a worker that needs a file it does not own STOPS and reports the collision rather than resolving it silently.
+- **The lead alone runs git.** Workers read, edit and run narrow checks; they never `add`, `commit`, `branch`, `checkout`, `stash` or `push`. That is what makes the shared checkout safe — one writer to the index, so no `.git/index.lock` contention and no half-staged tree — and it keeps history a single authored series. The lead waits for every worker to return, verifies on disk (`git status`, read the changed files), runs the **full** project gate once, and only then commits.
+- **A worker's report is not evidence.** The lead never saw its tool calls. A worker that narrated a change without writing it is a real failure mode, so the lead re-checks on disk and re-does or re-assigns that piece itself.
+- **Backgrounded workers are forbidden** — every worker is dispatched with `run_in_background: false`. A worker still writing after the lead ends its turn leaves a dirty tree behind a finished session, which the loop correctly reads as *unfinished* and re-runs the whole task.
+- **The repository is still the evidence, unchanged.** A fanned-out session is verified like any other: clean tree or the task is not checked off, and `MAX_TASK_FINISH_ATTEMPTS` governs the retry with the leftover diff described as its own work to finish.
+- **Bounded like one session, spends like several.** `MAX_TURNS` (400) and `--budget` are per *query*, and the terminal `ResultMessage` aggregates the lead plus every subagent — turns and cost accrue at N agents' rate against a single session's cap. An overrun is not a new failure mode: `error_max_turns`, task not checked off, same retry.
+- **Fix sessions never fan out.** CI-fix, review-fix and conflict sessions are push-only and stay single-agent.
 
-Why the default is off, concretely: the sibling TypeScript port (`../ai-task-master`) built cross-group parallelism, then pinned `--concurrency` to 1 — "accepted and persisted, but runs are currently pinned to 1 (groups run sequentially in the single checkout)". With one shared checkout, parallelism across groups buys nothing once git is serialized; the only place it pays is *inside* a group, on disjoint file sets, with all git left to one agent. That is the shape implemented here, and it is still not free enough to be the default.
+What it deliberately does **not** do: batch several tasks into one session, parallelise *across* tasks or PR groups, or give any agent its own working copy. The sibling TypeScript port (`../ai-task-master`) built cross-group parallelism and then pinned `--concurrency` to 1 — with one shared checkout, parallelism across groups buys nothing once git is serialized. The only place it pays is *inside* one unit of work, on disjoint file sets, with all git left to one agent.
 
 ### CI must actually have run
 
 `ci_state == "SUCCESS"` is not sufficient. GitHub reports SUCCESS the moment the only registered checks are skipped ones — which is exactly what a PR looks like in the seconds after it is opened, before its jobs appear. Accepting it there leaves `waiting_ci` permanently on CI that never started, and with `--auto-merge --admin` that merges a red PR. `handle_waiting_ci_stage` treats **SUCCESS with `checks_passed == 0`** as unconfirmed and keeps polling through the same grace window as the no-CI fast path (`NO_CI_MIN_POLLS` 2 / `NO_CI_MIN_ELAPSED` 30s). A genuinely all-skipped run — every job path-filtered out — still passes, one poll later. `checks_passed` counts `SUCCESS`/`NEUTRAL` only, so a pending check makes the rollup PENDING and never reaches this test.
+
+### What `--auto-merge` actually gates on (there is no approval gate)
+
+Every user- and machine-facing description of `auto_merge` used to say PRs merge "when CI passes **and approved**" — wrong twice: there is no approval requirement anywhere in the code, and the conditions that *do* apply went unstated (#146). claudetm auto-merges when:
+
+- **CI is green** — confirmed to have actually run (see above), with tolerated failures discounted,
+- **no review thread is unresolved** — `waiting_reviews` counts `unresolved_threads`, routes anything actionable to `addressing_reviews`, and only advances at zero.
+
+An approving review is **never required and never waited for**; under `--admin` claudetm explicitly *overrides* a base-branch policy that demands one. If you want a human checkpoint, that is `--no-auto-merge` or `--pause-on-pr`, not an approval the loop is silently ignoring.
+
+The one review state that changes anything is **`CHANGES_REQUESTED`**: a human actively pushed back, so `_handle_requested_changes` refuses to merge over it. `APPROVED`, `REVIEW_REQUIRED`, no decision, and an unreadable decision all behave as before.
+
+**`--admin` deliberately does not override `CHANGES_REQUESTED`.** `--admin` is passed on essentially every run here just to get past branch protection, so honouring it would delete the gate entirely. This is not an undefeatable block of the kind "Blocking is a last resort" warns about: the condition lives on GitHub rather than in the working tree, so a human clears it by approving or dismissing the review and the next cycle proceeds on its own — unlike a local, deterministic block that `resume --force` could never clear.
+
+**The review-stage check timeout blocks by default**, and only `--admin` force-advances it — the same posture as the CI stage, on the same `CI_POLL_TIMEOUT` timer. It previously warned and proceeded toward merge with checks still pending, which is the opposite policy on the same clock. A *tolerated* failing or pending check (CodeRabbit "Review rate limited") no longer causes that wait or that block.
 
 ### Blocking is a last resort (unattended runs)
 
@@ -580,7 +599,7 @@ Messages are processed after each task completes. Multiple messages are merged w
 - **Running claudetm here:** pass `--admin` (`claudetm start … --admin`, `claudetm merge-pr N --admin`, `claudetm resume --admin`) or the run blocks on a finished, green PR it cannot land.
 - **Merging by hand:** `gh pr merge <n> --squash --admin`.
 
-`--admin` overrides the policy — it does not satisfy it. It never skips CI or merges a conflicted PR; failing checks still route to the fix loop and conflicts to the resolver. It also force-advances a CI *timeout* to the review stage rather than blocking.
+`--admin` overrides the policy — it does not satisfy it. It never skips CI or merges a conflicted PR; failing checks still route to the fix loop and conflicts to the resolver. It force-advances a *timeout* rather than blocking, at both the CI stage and the review stage (which now block by default, one policy on one timer). The one thing it does **not** override is `CHANGES_REQUESTED` — see "What `--auto-merge` actually gates on" above.
 
 Releases go direct-to-main under the same owner bypass — a "pull request required" banner is a nudge, not a rejection.
 

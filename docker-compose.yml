@@ -3,7 +3,16 @@
 # =============================================================================
 # This file provides a ready-to-use development and production setup for running
 # Claude Task Master with Docker. It configures the unified server with proper
-# volume mounts for Claude credentials and project files.
+# volume mounts for the agent's own credential and your project files.
+#
+# One-time setup — the agent's scoped credential:
+#   docker volume create claudetm-profiles
+#   docker run --rm \
+#     -v claudetm-profiles:/home/claudetm/.claudetm \
+#     -e CLAUDETM_API_KEY="$AGENT_API_KEY" \
+#     ghcr.io/developerz-ai/claude-task-master:latest \
+#     claudetm profile add agent --type api-key \
+#       --base-url https://your-gateway.example/anthropic
 #
 # Quick Start:
 #   docker compose up                        # Start with defaults
@@ -27,7 +36,7 @@ services:
   #   - 8080: MCP Server (SSE or streamable-http)
   #
   # Volumes:
-  #   - ~/.claude: Claude credentials (OAuth tokens for Claude Code subscription)
+  #   - claudetm-profiles: the agent's own scoped API credential (api-key profile)
   #   - ./project: Project directory for task execution (mount your repo here)
   #
   # ---------------------------------------------------------------------------
@@ -46,9 +55,10 @@ services:
 
     # Volume mounts
     volumes:
-      # Claude credentials - REQUIRED for Claude Code subscription
-      # Mount your ~/.claude directory to provide OAuth tokens
-      - "${CLAUDE_CREDENTIALS_PATH:-~/.claude}:/home/claudetm/.claude:ro"
+      # Agent credential - REQUIRED. A named volume holding the claudetm profile
+      # registry (the agent's own scoped, rotatable API key). Never bind-mount a
+      # human's ~/.claude here - see "Volume Mount Notes" at the bottom.
+      - "claudetm-profiles:/home/claudetm/.claudetm"
 
       # Project directory - mount your repository here
       # The server will execute tasks in this directory
@@ -62,6 +72,10 @@ services:
 
     # Environment variables
     environment:
+      # Agent credential (REQUIRED): the api-key profile to run as. The key
+      # itself lives in the claudetm-profiles volume, never in this file.
+      - CLAUDETM_PROFILE=${CLAUDETM_PROFILE:-agent}
+
       # Authentication (REQUIRED for production)
       # Set CLAUDETM_PASSWORD to enable password authentication
       - CLAUDETM_PASSWORD=${CLAUDETM_PASSWORD:-}
@@ -96,6 +110,16 @@ services:
         max-file: "3"
 
 # =============================================================================
+# Volumes
+# =============================================================================
+# Created once with `docker volume create claudetm-profiles` and populated with
+# `claudetm profile add` (see the one-time setup at the top of this file), so it
+# is declared external: the agent's credential outlives `docker compose down`.
+volumes:
+  claudetm-profiles:
+    external: true
+
+# =============================================================================
 # Networks (optional, for multi-service setups)
 # =============================================================================
 networks:
@@ -115,9 +139,10 @@ networks:
 #
 #    PROJECT_PATH=/path/to/your/repo docker compose up
 #
-# 3. Use custom Claude credentials path:
+# 3. Run under a different agent profile (e.g. after rotating the key into a
+#    freshly added profile):
 #
-#    CLAUDE_CREDENTIALS_PATH=/custom/path/.claude docker compose up
+#    CLAUDETM_PROFILE=agent-2 docker compose up
 #
 # 4. Enable debug logging:
 #
@@ -152,14 +177,32 @@ networks:
 # Volume Mount Notes
 # =============================================================================
 #
-# Claude Credentials (~/.claude):
-#   This directory contains OAuth tokens from your Claude Code subscription.
-#   The server needs these credentials to authenticate with Claude's API.
-#   Structure:
-#     ~/.claude/
-#       credentials.json   # OAuth tokens (accessToken, refreshToken, expiresAt)
+# Agent Credential (claudetm-profiles -> /home/claudetm/.claudetm):
+#   The container authenticates with its OWN credential: a scoped, rotatable API
+#   key stored in a claudetm "api-key" profile. claudetm injects it as
+#   ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL at the SDK subprocess boundary, and
+#   skips the OAuth credentials-file check entirely - so no ~/.claude is read.
 #
-#   Security: Mounted as read-only (:ro) since server only reads credentials.
+#   Why it is NOT a bind-mount of a human's ~/.claude:
+#     - that directory holds a personal OAuth bearer token, so the agent would
+#       run as, and bill, that human's Claude account;
+#     - the token cannot be scoped to least privilege, and rotating it breaks
+#       that person's own Claude login;
+#     - anything that can read the container can read the token. This already
+#       caused a real cross-developer credential leak - it is not theoretical.
+#
+#   Not read-only: claudetm writes the profile registry here.
+#
+#   The key comes from wherever your organisation issues agent credentials (an
+#   Anthropic API key minted for the agent, or a key from a central Claude
+#   gateway); provisioning is documented with that gateway, not in this repo.
+#   Inject it only at profile-creation time via CLAUDETM_API_KEY, from your
+#   secret store - never into this file or the image.
+#
+#   Rotation: add a new profile with the new key and switch CLAUDETM_PROFILE.
+#
+#   If you previously ran with `-v ~/.claude:/home/claudetm/.claude:ro`, treat
+#   the token that exposed as compromised and re-run /login on the host.
 #
 # Project Directory:
 #   Mount the repository you want Claude Task Master to work on.

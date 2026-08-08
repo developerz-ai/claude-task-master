@@ -20,8 +20,19 @@ cd examples/docker-compose
 # Copy the example you want to use
 cp basic-production.yml docker-compose.yml
 
+# One-time: create the agent's own scoped credential in a named volume
+docker volume create claudetm-profiles
+docker run --rm \
+  -v claudetm-profiles:/home/claudetm/.claudetm \
+  -e CLAUDETM_API_KEY="$AGENT_API_KEY" \
+  ghcr.io/developerz-ai/claude-task-master:latest \
+  claudetm profile add agent --type api-key \
+    --base-url https://your-gateway.example/anthropic
+
 # Create .env file with your configuration
+# (the API key is NOT stored here - it lives in the claudetm-profiles volume)
 cat > .env <<EOF
+CLAUDETM_PROFILE=agent
 CLAUDETM_PASSWORD=your-secure-password
 CLAUDETM_WEBHOOK_URL=https://webhook.example.com/claudetm
 CLAUDETM_WEBHOOK_SECRET=your-webhook-secret
@@ -51,15 +62,67 @@ Before using any of these examples, ensure you have:
    docker compose version  # Should be 2.0+
    ```
 
-2. **Claude Code subscription and credentials**
-   ```bash
-   # Authenticate with Claude CLI
-   pip install claude-cli
-   claude
-   /login
+2. **A scoped agent credential (an API key + base URL)**
 
-   # Verify credentials
-   ls -la ~/.claude/.credentials.json
+   The container authenticates with its **own** credential — never a human's
+   `~/.claude/.credentials.json`. That file holds a personal OAuth bearer token:
+   a container given it runs as, and bills, that person's Claude account, the
+   token cannot be scoped down, and rotating it breaks their own Claude login.
+   This has already caused a real cross-developer credential leak.
+
+   Issue one key per consumer, revocable and rotatable on its own. Where the key
+   comes from is outside this repository — it may be an Anthropic API key created
+   for the agent, or a key minted by a central Claude gateway your organisation
+   runs; provisioning is documented wherever that gateway lives.
+
+   Store it in a claudetm `api-key` profile inside a named volume (one time,
+   non-interactive — `profile add` reads `CLAUDETM_API_KEY` from the environment
+   instead of prompting):
+
+   ```bash
+   docker volume create claudetm-profiles
+
+   docker run --rm \
+     -v claudetm-profiles:/home/claudetm/.claudetm \
+     -e CLAUDETM_API_KEY="$AGENT_API_KEY" \
+     ghcr.io/developerz-ai/claude-task-master:latest \
+     claudetm profile add agent --type api-key \
+       --base-url https://your-gateway.example/anthropic
+
+   # Verify
+   docker run --rm -v claudetm-profiles:/home/claudetm/.claudetm \
+     ghcr.io/developerz-ai/claude-task-master:latest \
+     claudetm profile list
+   ```
+
+   Omit `--base-url` to talk to `api.anthropic.com` directly. All examples then
+   mount `claudetm-profiles:/home/claudetm/.claudetm` and select the profile with
+   `CLAUDETM_PROFILE`. See [docs/docker.md](../../docs/docker.md) for the full
+   setup, rotation and troubleshooting guide.
+
+   The host-side volume name is `CLAUDETM_PROFILES_VOLUME` (default
+   `claudetm-profiles`). Deployments that share it share one agent credential, so
+   give each deployment its own value — and create the volume under that name:
+
+   ```bash
+   docker volume create my-deployment-profiles
+   # ...then set CLAUDETM_PROFILES_VOLUME=my-deployment-profiles in that
+   # deployment's .env, and use it in the `docker run` lines above.
+   ```
+
+   `development.yml` already defaults to a separate volume,
+   `claudetm-profiles-dev`, so a dev container running without authentication
+   cannot reach the production agent's key. Create it with its own profile:
+
+   ```bash
+   docker volume create claudetm-profiles-dev
+
+   docker run --rm \
+     -v claudetm-profiles-dev:/home/claudetm/.claudetm \
+     -e CLAUDETM_API_KEY="$DEV_AGENT_API_KEY" \
+     ghcr.io/developerz-ai/claude-task-master:latest \
+     claudetm profile add agent-dev --type api-key \
+       --base-url https://your-gateway.example/anthropic
    ```
 
 3. **Git configuration**
@@ -240,10 +303,11 @@ All examples support these environment variables:
 
 ### Required (Production)
 - `CLAUDETM_PASSWORD` - Password for authentication
+- `CLAUDETM_PROFILE` - Name of the agent's api-key profile in the `claudetm-profiles` volume (default: `agent`)
 
 ### Optional
+- `CLAUDETM_PROFILES_VOLUME` - Host-side name of the volume holding that profile (default: `claudetm-profiles`; `claudetm-profiles-dev` in `development.yml`). Use a distinct value per deployment so they do not share one agent credential
 - `PROJECT_PATH` - Path to your project (default: current directory)
-- `CLAUDE_CREDENTIALS_PATH` - Path to ~/.claude directory (default: ~/.claude)
 - `CLAUDETM_LOG_LEVEL` - Log level: debug, info, warning, error (default: info)
 - `CLAUDETM_WEBHOOK_URL` - Webhook endpoint URL
 - `CLAUDETM_WEBHOOK_SECRET` - Webhook HMAC secret
@@ -258,9 +322,12 @@ All examples support these environment variables:
 # Authentication (REQUIRED for production)
 CLAUDETM_PASSWORD=your-secure-password-min-16-chars
 
+# Agent credential: the api-key profile to run under.
+# The key itself lives in the claudetm-profiles volume, never in this file.
+CLAUDETM_PROFILE=agent
+
 # Project Configuration
 PROJECT_PATH=/home/user/my-project
-CLAUDE_CREDENTIALS_PATH=/home/user/.claude
 
 # Server Configuration
 CLAUDETM_LOG_LEVEL=info
@@ -344,9 +411,19 @@ docker compose logs claudetm
 # Check configuration
 docker compose config
 
-# Verify volumes
-docker compose exec claudetm ls -la /home/claudetm/.claude/
+# Verify the agent credential is present and active
+docker compose exec claudetm claudetm profile list
+docker compose exec claudetm ls -la /home/claudetm/.claudetm/
 ```
+
+`Profile '<name>' not found` means `CLAUDETM_PROFILE` names a profile that is not
+in the registry — usually the volume is missing or empty, or the name is
+misspelled. claudetm fails outright here rather than falling back to ambient
+credentials, on purpose. A `Credentials not found at .../.claude/.credentials.json`
+error means the opposite: *no* profile is selected, so it fell back to an OAuth
+file the container should not have. Re-run the profile setup in Prerequisites and
+set `CLAUDETM_PROFILE`; do **not** work around either by mounting a personal
+`~/.claude`.
 
 ### Authentication errors
 

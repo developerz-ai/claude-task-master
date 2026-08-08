@@ -398,38 +398,38 @@ class TestUpdateConfigTool:
         updated_state = state_manager.load_state()
         assert updated_state.options.pause_on_pr == (not original_pause_on_pr)
 
-    def test_update_config_parallel_tasks(self, initialized_state, state_dir):
-        """update_config toggles hive mode on."""
+    def test_update_config_parallel_off(self, initialized_state, state_dir):
+        """update_config turns hive fan-out off (it is on by default)."""
         from claude_task_master.mcp.tools import update_config
 
         state_manager, state = initialized_state
-        assert state.options.parallel_tasks is False
+        assert state.options.parallel is True
 
         result = update_config(
             state_dir.parent,
-            parallel_tasks=True,
+            parallel=False,
             state_dir=str(state_dir),
         )
         assert result["success"] is True
         assert result["updated"] is not None
-        assert result["updated"]["parallel_tasks"] is True
+        assert result["updated"]["parallel"] is False
 
-        assert state_manager.load_state().options.parallel_tasks is True
+        assert state_manager.load_state().options.parallel is False
 
-    def test_update_config_parallel_tasks_off(self, initialized_state, state_dir):
-        """update_config turns hive mode back off."""
+    def test_update_config_parallel_on(self, initialized_state, state_dir):
+        """update_config turns hive fan-out back on."""
         from claude_task_master.mcp.tools import update_config
 
         state_manager, _ = initialized_state
-        update_config(state_dir.parent, parallel_tasks=True, state_dir=str(state_dir))
+        update_config(state_dir.parent, parallel=False, state_dir=str(state_dir))
 
         result = update_config(
             state_dir.parent,
-            parallel_tasks=False,
+            parallel=True,
             state_dir=str(state_dir),
         )
         assert result["success"] is True
-        assert state_manager.load_state().options.parallel_tasks is False
+        assert state_manager.load_state().options.parallel is True
 
     def test_update_config_multiple_options(self, initialized_state, state_dir):
         """Test updating multiple options at once."""

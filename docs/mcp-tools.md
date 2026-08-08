@@ -289,11 +289,11 @@ Initialize a new task with the given goal.
 |-----------|------|----------|---------|-------------|
 | `goal` | string | Yes | - | The goal to achieve |
 | `model` | string | No | `opus` | Model to use (opus, sonnet, haiku) |
-| `auto_merge` | boolean | No | `true` | Auto-merge PRs when approved |
+| `auto_merge` | boolean | No | `true` | Auto-merge PRs once CI is green and review feedback is resolved (no approving review required) |
 | `max_sessions` | integer | No | - | Max work sessions before pausing |
 | `max_prs` | integer | No | - | Max pull requests to create |
 | `pause_on_pr` | boolean | No | `false` | Pause after creating PR |
-| `parallel_tasks` | boolean | No | `false` | Run a PR group's remaining tasks as one "hive" session that fans disjoint-write-set tasks out to subagents |
+| `parallel` | boolean | No | `true` | Let a work session split its ONE task across `hive-worker` subagents with disjoint write sets; the lead sizes its own team |
 | `state_dir` | string | No | - | Custom state directory path |
 
 **Returns:**
@@ -436,7 +436,7 @@ Update task configuration options at runtime.
 **Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `auto_merge` | boolean | No | Auto-merge PRs when approved |
+| `auto_merge` | boolean | No | Auto-merge PRs once CI is green and review feedback is resolved (no approving review required) |
 | `max_sessions` | integer | No | Max work sessions before pausing |
 | `max_prs` | integer | No | Max pull requests to create |
 | `pause_on_pr` | boolean | No | Pause after creating PR |
@@ -444,7 +444,7 @@ Update task configuration options at runtime.
 | `log_level` | string | No | Log level: quiet, normal, verbose |
 | `log_format` | string | No | Log format: text, json |
 | `pr_per_task` | boolean | No | Create PR per task vs per group |
-| `parallel_tasks` | boolean | No | Run a PR group's remaining tasks as one "hive" session (see `initialize_task`) |
+| `parallel` | boolean | No | Whether a work session may split its one task across `hive-worker` subagents (see `initialize_task`) |
 | `state_dir` | string | No | Custom state directory path |
 
 **Returns:**

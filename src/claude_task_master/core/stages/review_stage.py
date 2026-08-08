@@ -4,17 +4,84 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ...github.check_tolerance import tolerated_reason
 from .. import console
 from ..agent import ModelType
 from ..shutdown import interruptible_sleep
 from .pr_fix_stage import _PRFixStage
 
 if TYPE_CHECKING:
+    from ...github.client_pr_models import PRStatus
     from ..state import TaskState
 
 
 class _ReviewStage(_PRFixStage):
     """Mixin: review-comment polling and agent-driven comment resolution."""
+
+    def _pending_review_checks(self, pr_status: PRStatus) -> list[str]:
+        """Names of checks still running that the review wait may act on.
+
+        Checks whose failure is tolerated (``github/check_tolerance.py`` — e.g.
+        CodeRabbit's "Review rate limited") are discounted here exactly as they
+        are in the CI rollup: a check we would ignore if it failed must not be
+        what makes the run wait two hours and then block. Discounting is logged,
+        never silent.
+
+        Args:
+            pr_status: Freshly fetched status for the PR.
+
+        Returns:
+            Names of the pending checks that count, in report order.
+        """
+        # Local import: cli_commands/__init__ imports core.orchestrator, so a
+        # top-level import here would be circular.
+        from ...cli_commands.ci_helpers import is_check_pending  # noqa: PLC0415
+
+        pending: list[str] = []
+        for check in pr_status.check_details:
+            if not is_check_pending(check):
+                continue
+            name = self._get_check_name(check)
+            reason = tolerated_reason(check)
+            if reason is not None:
+                console.detail(f"  ~ {name}: not waiting on it — {reason}")
+                continue
+            pending.append(name)
+        return pending
+
+    def _review_checks_timeout_action(
+        self, state: TaskState, pending_checks: list[str]
+    ) -> int | None:
+        """Apply the shared poll-timeout policy to the review wait.
+
+        Same timer as ``waiting_ci`` (``ci_poll_start_time``) and, since #147,
+        the same policy. The checks still pending at this point are the late
+        reporters — review bots and anything that starts after CI — and "still
+        pending" is not "passed": proceeding here walks the PR into
+        ``ready_to_merge`` in the same cycle. So block by default and let
+        ``--admin`` override, exactly as :meth:`_ci_timeout_action` does.
+
+        The timer is cleared either way, so a forced resume gets a fresh window
+        instead of re-blocking on the same expired one.
+
+        Args:
+            state: Current task state.
+            pending_checks: Names of the checks still pending.
+
+        Returns:
+            1 to block the run, or None to proceed with the review checks
+            (``--admin``) — the caller falls through rather than returning it.
+        """
+        self._clear_ci_poll_timer(state)
+        reason = (
+            f"Review checks timed out after {self.CI_POLL_TIMEOUT}s with "
+            f"{len(pending_checks)} still pending: {', '.join(pending_checks[:5])}"
+        )
+        if not self._poll_timeout_override(state, reason):
+            return self._block_on_poll_timeout(state, reason)
+        console.warning("Proceeding toward merge with those checks unresolved")
+        self.state_manager.save_state(state)
+        return None
 
     def handle_waiting_reviews_stage(self, state: TaskState) -> int | None:
         """Handle waiting for reviews - check for review comments."""
@@ -45,24 +112,14 @@ class _ReviewStage(_PRFixStage):
                 return 1
 
             # Check if ANY checks are still pending (CI, review bots, etc)
-            # Local import: cli_commands/__init__ imports core.orchestrator,
-            # so a top-level import here would be circular.
-            from ...cli_commands.ci_helpers import is_check_pending
-
-            pending_checks = [
-                self._get_check_name(check)
-                for check in pr_status.check_details
-                if is_check_pending(check)
-            ]
+            pending_checks = self._pending_review_checks(pr_status)
 
             if pending_checks:
                 # Use ci_poll_start_time for timeout (shared with waiting_ci stage)
                 if self._is_ci_poll_timed_out(state):
-                    console.warning(
-                        f"Review checks timed out after {self.CI_POLL_TIMEOUT}s - "
-                        f"proceeding with {len(pending_checks)} checks still pending"
-                    )
-                    self._clear_ci_poll_timer(state)
+                    blocked = self._review_checks_timeout_action(state, pending_checks)
+                    if blocked is not None:
+                        return blocked
                 else:
                     # Start timer if not already running
                     if state.ci_poll_start_time is None:

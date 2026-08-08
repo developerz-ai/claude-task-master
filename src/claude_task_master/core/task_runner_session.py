@@ -9,13 +9,11 @@ from .agent_exceptions import AgentError
 from .agent_models import TaskComplexity, parse_task_complexity
 from .config_loader import get_config
 from .console import clear_task_context, set_task_context
-from .hive import hive_max_parallel, plan_hive_batch
+from .hive import hive_max_parallel
 from .task_runner_errors import WorkSessionError
-from .task_runner_hive import build_hive_task_description, hive_batch_complexity
 
 if TYPE_CHECKING:
     from .agent import AgentWrapper
-    from .hive import HiveBatch
     from .logger import TaskLogger
     from .state import StateManager, TaskState
     from .task_group import ParsedTask, TaskGroup
@@ -33,7 +31,6 @@ class _TaskRunnerSessionMixin:
     state_manager: StateManager
     logger: TaskLogger | None
     last_session_output: str
-    last_hive_batch: HiveBatch | None
 
     # Method stubs — real implementations in TaskRunner
     def parse_tasks(self, plan: str) -> list[str]:
@@ -86,11 +83,6 @@ class _TaskRunnerSessionMixin:
         """
         from .task_runner_errors import NoPlanFoundError, NoTasksFoundError  # noqa: PLC0415
 
-        # Cleared up front, on every call: the orchestrator reads this after the
-        # session to decide how many tasks to check off, so a batch left over
-        # from a previous task must never survive into a single-task session.
-        self.last_hive_batch = None
-
         # Get current task from plan
         plan = self.state_manager.load_plan()
         if not plan:
@@ -122,34 +114,8 @@ class _TaskRunnerSessionMixin:
             self.state_manager.save_state(state)
             return "skipped_already_complete"
 
-        # Parsed tasks carry group membership, completion and complexity — both
-        # the hive batching decision and the per-task context refs read them.
-        parsed_tasks, _ = self._get_parsed_tasks(plan)
-
-        # Hive mode (opt-in): hand every remaining task of this PR group to one
-        # lead session instead of running them one at a time. None means "do
-        # exactly what we do today" (disabled, pr_per_task, or <2 tasks left).
-        #
-        # Recomputed from the CURRENT plan on every call, which is what makes
-        # this safe on a retry: any task the previous, cut-off session did check
-        # off is already `is_complete` here and drops out of the batch, so a
-        # retry re-runs only what is genuinely still open.
-        batch = plan_hive_batch(
-            parsed_tasks,
-            state.current_task_index,
-            enabled=state.options.parallel_tasks,
-            pr_per_task=state.options.pr_per_task,
-        )
-        self.last_hive_batch = batch
-
         # Parse task complexity to determine which model to use
         complexity, cleaned_task = parse_task_complexity(current_task)
-        if batch is not None:
-            # Route the lead on the hardest task in the batch, not the first
-            # one: the lead runs all of them (plus the fan-out planning and the
-            # single commit), so the first task's tag says nothing about the
-            # session's real demands. See task_runner_hive._COMPLEXITY_RANK.
-            complexity = hive_batch_complexity(parsed_tasks, batch)
         target_model = TaskComplexity.get_model_name_for_complexity(complexity)
 
         # Get PR/group context for this task (reuses _get_group_context for DRY)
@@ -166,20 +132,6 @@ class _TaskRunnerSessionMixin:
             remaining_in_group = 0
             completed_in_group = []
 
-        if batch is not None:
-            # THE dangerous line of hive mode. `is_last_in_group` above was
-            # computed for `current_task_index` — the FIRST task of the batch —
-            # and is therefore False whenever the batch has more than one task.
-            # Left like that the lead gets the commit-only prompt and no PR is
-            # ever opened for the group: tasks complete, commits stack on an
-            # unpushed local branch, and the run silently ships nothing. The
-            # batch's LAST task is the one that closes the group, so the PR
-            # decision has to be taken there.
-            last_context = self._get_group_context(state, plan, task_index=batch.last_index)
-            if last_context:
-                is_last_in_group = bool(last_context["is_last_in_group"])
-                remaining_in_group = int(last_context["remaining_in_group"])
-
         # Load context safely
         try:
             context = self.state_manager.load_context()
@@ -195,6 +147,7 @@ class _TaskRunnerSessionMixin:
             goal = "Complete the assigned task"
 
         # Get context lines from parsed task if available
+        parsed_tasks, _ = self._get_parsed_tasks(plan)
         context_refs = ""
         if state.current_task_index < len(parsed_tasks):
             parsed_task = parsed_tasks[state.current_task_index]
@@ -214,21 +167,14 @@ class _TaskRunnerSessionMixin:
                 "are its work. Finish them, don't redo them.\n"
             )
 
-        if batch is not None:
-            task_description = build_hive_task_description(goal, batch, parsed_tasks, retry_note)
-        else:
-            task_description = f"""Goal: {goal}
+        task_description = f"""Goal: {goal}
 
 Current Task (#{state.current_task_index + 1}): {cleaned_task}
 {context_refs}{retry_note}
 Please complete this task."""
 
         console.newline()
-        if batch is not None:
-            numbers = ", ".join(f"#{n}" for n in batch.numbers)
-            console.info(f"Working on {batch.size} tasks in PR group {pr_name}: {numbers}")
-        else:
-            console.info(f"Working on task #{state.current_task_index + 1}: {cleaned_task}")
+        console.info(f"Working on task #{state.current_task_index + 1}: {cleaned_task}")
         console.detail(
             f"PR: {pr_name} | Complexity: {complexity.value} → Model: {target_model.value}"
         )
@@ -261,10 +207,7 @@ Please complete this task."""
         # pr_per_task=False (default): only create PR on last task in group
         should_create_pr = state.options.pr_per_task or is_last_in_group
 
-        # Set task context for Claude prefix display [claude HH:MM:SS N/M].
-        # Still the first task of the batch: it is where the session's work
-        # starts, and the display is a position in the plan, not a claim about
-        # how many tasks this one session will close.
+        # Set task context for Claude prefix display [claude HH:MM:SS N/M]
         set_task_context(state.current_task_index + 1, len(tasks))
 
         # Load coding style guide for token-efficient style injection
@@ -291,11 +234,11 @@ Please complete this task."""
                 pr_group_info=pr_group_info,
                 target_branch=target_branch,
                 coding_style=coding_style,
-                # None for a single-task session, which keeps the work prompt
-                # byte-identical to today's.
-                hive_tasks=list(batch.descriptions) if batch else None,
-                hive_task_numbers=list(batch.numbers) if batch else None,
-                hive_max_parallel=hive_max_parallel(),
+                # Permission to split THIS task across hive-worker subagents,
+                # not an instruction to. Off leaves the prompt byte-identical to
+                # the single-agent one.
+                parallel=state.options.parallel,
+                max_parallel=hive_max_parallel(),
             )
         except AgentError:
             if self.logger:

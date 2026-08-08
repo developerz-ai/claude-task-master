@@ -155,7 +155,7 @@ Get comprehensive status information about the current task.
     "log_level": "normal",
     "log_format": "text",
     "pr_per_task": false,
-    "parallel_tasks": false,
+    "parallel": true,
     "max_budget_usd": null
   },
   "created_at": "2024-01-18T14:30:22Z",
@@ -192,7 +192,7 @@ Get comprehensive status information about the current task.
 - `waiting_reviews` - Waiting for code reviews
 - `addressing_reviews` - Addressing review feedback
 - `resolving_conflicts` - Agent resolving merge conflicts with the base branch
-- `ready_to_merge` - PR approved and ready
+- `ready_to_merge` - CI green and review feedback resolved; ready to merge
 - `merged` - PR has been merged
 
 **Error Responses:**
@@ -412,7 +412,7 @@ Update runtime task configuration options.
 
 **Supported Options:**
 
-- `auto_merge` (boolean) - Whether to auto-merge PRs when approved
+- `auto_merge` (boolean) - Whether to auto-merge PRs once CI is green and review feedback is resolved (no approving review is required)
 - `max_sessions` (integer, 1-1000) - Maximum work sessions before pausing
 - `max_prs` (integer, 1-100) - Maximum number of pull requests to create
 - `pause_on_pr` (boolean) - Whether to pause after creating PR
@@ -420,7 +420,7 @@ Update runtime task configuration options.
 - `log_level` (string) - Log level: `quiet`, `normal`, `verbose`
 - `log_format` (string) - Log format: `text`, `json`
 - `pr_per_task` (boolean) - Create PR per task vs per group
-- `parallel_tasks` (boolean) - Run a PR group's remaining tasks as one "hive" session that fans disjoint-write-set tasks out to subagents
+- `parallel` (boolean) - Whether a work session may split its one task across `hive-worker` subagents with disjoint write sets
 - `max_budget_usd` (float) - Max spending per session in USD (null for unlimited)
 
 **Note:** Only provide the fields you want to update. At least one field is required.
@@ -468,7 +468,7 @@ Initialize a new task with the given goal and options.
   "max_sessions": 10,
   "max_prs": 2,
   "pause_on_pr": false,
-  "parallel_tasks": false
+  "parallel": true
 }
 ```
 
@@ -476,11 +476,11 @@ Initialize a new task with the given goal and options.
 
 - `goal` (required, string, 1-10000 chars) - The goal to achieve
 - `model` (optional, string) - Model to use: `opus`, `sonnet`, `haiku` (default: `opus`)
-- `auto_merge` (optional, boolean) - Auto-merge PRs when approved (default: `true`)
+- `auto_merge` (optional, boolean) - Auto-merge PRs once CI is green and review feedback is resolved; no approving review is required (default: `true`)
 - `max_sessions` (optional, integer, 1-1000) - Max sessions before pausing
 - `max_prs` (optional, integer, 1-100) - Max pull requests to create
 - `pause_on_pr` (optional, boolean) - Pause after creating PR (default: `false`)
-- `parallel_tasks` (optional, boolean) - Run a PR group's remaining tasks as one "hive" session that fans disjoint-write-set tasks out to subagents (default: `false`; needs 2+ remaining tasks in the group, ignored with `pr_per_task`)
+- `parallel` (optional, boolean) - Let each work session split its ONE task across `hive-worker` subagents when the pieces have disjoint write sets (default: `true`). The lead sizes its own team; zero workers is a valid answer
 - `budget` (optional, float) - Max spending per session in USD (default: unlimited)
 
 **Response:** `TaskInitResponse` (201 Created)

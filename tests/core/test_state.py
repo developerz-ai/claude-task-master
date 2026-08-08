@@ -96,7 +96,7 @@ class TestTaskOptions:
             "max_budget_usd": None,
             "resolve_conflicts": True,
             "sync_before_merge": False,
-            "parallel_tasks": False,
+            "parallel": True,
         }
 
 

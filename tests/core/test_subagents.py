@@ -12,7 +12,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from claude_task_master.core.hive import HIVE_MANIFEST_PREFIX
 from claude_task_master.core.subagents import (
     BUILTIN_AGENT_NAMES,
     HIVE_WORKER_AGENT_NAME,
@@ -852,10 +851,14 @@ class TestBuiltinAgents:
         assert agent.tools is None
 
     def test_hive_worker_description_says_when_to_use_it(self) -> None:
-        """Claude picks agents by description; it must name the trigger."""
+        """Claude picks agents by description; it must name the trigger.
+
+        The trigger is ONE PIECE of the lead's single task — not a task of its
+        own, and not a batch of them.
+        """
         description = HIVE_WORKER_DESCRIPTION.lower()
 
-        assert "one task" in description
+        assert "one piece of the task" in description
         assert "exclusive" in description
         assert "disjoint" in description
         assert "parallel" in description
@@ -892,16 +895,29 @@ class TestBuiltinAgents:
         assert "verified" in prompt
         assert "no channel to a human" in prompt
 
-    def test_hive_worker_prompt_forbids_the_completion_manifest(self) -> None:
-        """The TASKS COMPLETE manifest belongs to the lead alone.
+    def test_hive_worker_prompt_forbids_worktrees_and_private_copies(self) -> None:
+        """One shared checkout: the work must land in the tree the lead commits.
 
-        Defence in depth for the isolation fix in agent_message.py: even if a
-        worker's narration reached the lead's result_text, the worker is told
-        never to write the label that core/hive.py parses.
+        A worker that "isolates itself" in a worktree or a copy produces a clean
+        tree here and a lost change there — the failure looks like the agent
+        having done nothing at all.
+        """
+        prompt = HIVE_WORKER_PROMPT.lower()
+
+        assert "never create a git worktree" in prompt
+        assert "never clone" in prompt
+        assert "directory of your own" in prompt
+
+    def test_hive_worker_prompt_forbids_the_leads_sign_off(self) -> None:
+        """`TASK COMPLETE` is the lead's, emitted after the commit.
+
+        Defence in depth for the subagent isolation in agent_message.py: even if
+        a worker's narration reached the lead's result_text, the worker is told
+        never to write the sentinel that signs the whole session off.
         """
         prompt = HIVE_WORKER_PROMPT
 
-        assert HIVE_MANIFEST_PREFIX in prompt
+        assert "TASK COMPLETE" in prompt
         lowered = prompt.lower()
         assert "never write" in lowered
         assert "lead" in lowered

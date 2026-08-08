@@ -10,16 +10,19 @@ This module tests:
 - RateLimitEvent handling
 - format_tool_detail tool-name routing
 - Subagent text isolation: a session accumulates only its OWN output
+- Per-worker coloring: concurrent subagents are visually separable
 """
 
 from __future__ import annotations
 
+import re
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from claude_task_master.core.agent_message import MessageProcessor, create_message_processor
-from claude_task_master.core.hive import has_completion_manifest, parse_completed_task_numbers
+
+ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 
 # =============================================================================
 # Helpers
@@ -494,7 +497,8 @@ class TestSubagentTextIsolation:
 
     The SDK streams subagent messages through the same stream, flagged only by
     ``parent_tool_use_id``. Accumulating them mixes worker narration into the
-    string that feeds the hive completion manifest and context.md.
+    string later stages scan for this session's completion/verification markers
+    and distill into context.md.
     """
 
     def test_subagent_text_not_accumulated(self):
@@ -507,35 +511,37 @@ class TestSubagentTextIsolation:
         assert out == "lead text "
         assert "worker narration" not in out
 
-    def test_worker_manifest_line_cannot_be_adopted_by_the_lead(self):
-        """A worker's TASKS COMPLETE line must not become the lead's manifest.
+    def test_worker_completion_line_cannot_be_adopted_by_the_lead(self):
+        """A worker's TASK COMPLETE line must not speak for the lead.
 
-        This is the whole blast radius: result_text is what core/hive.py reads
-        back to decide which plan tasks get checked off.
+        This is the whole blast radius: result_text is the string later stages
+        scan for the session's own completion/verification markers and distill
+        into context.md, so a worker announcing it finished would report the
+        lead's task done while the lead is still mid-task.
         """
         proc = MessageProcessor()
-        lead = _make_assistant_message([_make_text_block("Handing task 4 to a worker.\n")])
-        worker = _make_subagent_message([_make_text_block("Finished.\nTASKS COMPLETE: 3, 4\n")])
+        lead = _make_assistant_message([_make_text_block("Handing the tests to a worker.\n")])
+        worker = _make_subagent_message([_make_text_block("Finished.\nTASK COMPLETE\n")])
 
         with patch("claude_task_master.core.agent_message.console"):
             out = proc.process_message(lead, "")
             out = proc.process_message(worker, out)
 
-        assert has_completion_manifest(out) is False
-        assert parse_completed_task_numbers(out, [3, 4]) == []
+        assert "TASK COMPLETE" not in out
+        assert "Finished." not in out
+        assert "Handing the tests to a worker." in out
 
-    def test_lead_manifest_still_parsed(self):
-        """The lead's own manifest is unaffected — only subagent text is dropped."""
+    def test_lead_completion_line_still_kept(self):
+        """The lead's own marker is unaffected — only subagent text is dropped."""
         proc = MessageProcessor()
-        worker = _make_subagent_message([_make_text_block("TASKS COMPLETE: 3, 4\n")])
-        lead = _make_assistant_message([_make_text_block("TASKS COMPLETE: 4\n")])
+        worker = _make_subagent_message([_make_text_block("worker says TASK COMPLETE\n")])
+        lead = _make_assistant_message([_make_text_block("TASK COMPLETE\n")])
 
         with patch("claude_task_master.core.agent_message.console"):
             out = proc.process_message(worker, "")
             out = proc.process_message(lead, out)
 
-        assert has_completion_manifest(out) is True
-        assert parse_completed_task_numbers(out, [3, 4]) == [4]
+        assert out == "TASK COMPLETE\n"
 
     def test_lead_text_still_accumulates(self):
         """parent_tool_use_id=None (top level) accumulates exactly as before."""
@@ -694,6 +700,280 @@ class TestSubagentTextIsolation:
             proc.process_message(msg, "")
 
         assert proc._subagent_names == {}
+
+
+# =============================================================================
+# Per-worker coloring
+# =============================================================================
+
+
+class _TtyStdout:
+    """stdout stand-in that claims to be a terminal, to force color on."""
+
+    def isatty(self) -> bool:
+        return True
+
+
+class _PipedStdout:
+    """stdout stand-in for a pipe/redirect — the log-file case."""
+
+    def isatty(self) -> bool:
+        return False
+
+
+def _enable_color(monkeypatch) -> None:
+    """Make color_enabled() report True for the rest of this test.
+
+    Must be called from inside the test *body*, never from a fixture: pytest's
+    capture manager re-installs ``sys.stdout`` between the setup and call
+    phases, so a stdout patched during setup is silently replaced and the test
+    would quietly measure the uncolored path instead.
+    """
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setattr("sys.stdout", _TtyStdout())
+
+
+def _iter_strings(value: object) -> list[str]:
+    """Every string reachable inside *value*, so escapes can be matched raw.
+
+    Logger payloads nest strings inside tuples and dicts (``log_tool_use("Read",
+    {"file_path": ...})``). Stringifying the container instead would re-escape
+    them — ``repr`` turns a real ESC byte into the four characters ``\\x1b`` —
+    and silently defeat any search for an ANSI sequence.
+    """
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [s for item in value.items() for s in _iter_strings(item)]
+    if isinstance(value, list | tuple):
+        return [s for item in value for s in _iter_strings(item)]
+    return []
+
+
+def _spawn(block_id: str, subagent_type: str = "hive-worker") -> MagicMock:
+    """Build the lead's own Agent tool call that spawns a worker."""
+    msg = _make_assistant_message(
+        [_make_tool_use_block("Agent", {"subagent_type": subagent_type}, block_id=block_id)]
+    )
+    msg.parent_tool_use_id = None
+    return msg
+
+
+class TestSubagentColoring:
+    """Concurrent workers are separable from each other, not just from the lead.
+
+    Color is keyed to the worker's ``tool_use_id`` — stable for its whole life —
+    because the several ``hive-worker``s a lead runs share one agent name, so
+    coloring by name would repaint them all identically.
+    """
+
+    def test_two_concurrent_workers_are_colored_differently(self, monkeypatch):
+        """Two live hive-workers must not render as one undifferentiated stream."""
+        _enable_color(monkeypatch)
+        proc = MessageProcessor()
+        with patch("claude_task_master.core.agent_message.console") as mock_console:
+            proc.process_message(_spawn("toolu_a"), "")
+            proc.process_message(_spawn("toolu_b"), "")
+            proc.process_message(
+                _make_subagent_message([_make_text_block("A works")], "toolu_a"), ""
+            )
+            first = mock_console.claude_text.call_args[0][0]
+            proc.process_message(
+                _make_subagent_message([_make_text_block("B works")], "toolu_b"), ""
+            )
+            second = mock_console.claude_text.call_args[0][0]
+
+        assert ANSI_RE.findall(first) != ANSI_RE.findall(second)
+
+    def test_two_concurrent_workers_are_labelled_differently(self):
+        """Same agent name, different instance → a visible discriminator."""
+        proc = MessageProcessor()
+        with patch("claude_task_master.core.agent_message.console") as mock_console:
+            proc.process_message(_spawn("toolu_a"), "")
+            proc.process_message(_spawn("toolu_b"), "")
+            proc.process_message(_make_subagent_message([_make_text_block("a")], "toolu_a"), "")
+            first = mock_console.claude_text.call_args[0][0]
+            proc.process_message(_make_subagent_message([_make_text_block("b")], "toolu_b"), "")
+            second = mock_console.claude_text.call_args[0][0]
+
+        assert "hive-worker#1" in first
+        assert "hive-worker#2" in second
+
+    def test_ordinals_follow_spawn_order_not_speaking_order(self, monkeypatch):
+        """#n counts workers as the reader watched them spawn."""
+        _enable_color(monkeypatch)
+        proc = MessageProcessor()
+        with patch("claude_task_master.core.agent_message.console") as mock_console:
+            proc.process_message(_spawn("toolu_first"), "")
+            proc.process_message(_spawn("toolu_second"), "")
+            # The second-spawned worker happens to speak first.
+            proc.process_message(
+                _make_subagent_message([_make_text_block("x")], "toolu_second"), ""
+            )
+
+        assert "hive-worker#2" in mock_console.claude_text.call_args[0][0]
+
+    def test_same_worker_keeps_its_color_across_messages(self, monkeypatch):
+        """A color that changes mid-run is worse than no color at all."""
+        _enable_color(monkeypatch)
+        proc = MessageProcessor()
+        with patch("claude_task_master.core.agent_message.console") as mock_console:
+            proc.process_message(_spawn("toolu_a"), "")
+            proc.process_message(_spawn("toolu_b"), "")
+            proc.process_message(_make_subagent_message([_make_text_block("one")], "toolu_a"), "")
+            first = mock_console.claude_text.call_args[0][0]
+            proc.process_message(_make_subagent_message([_make_text_block("two")], "toolu_b"), "")
+            proc.process_message(_make_subagent_message([_make_text_block("three")], "toolu_a"), "")
+            third = mock_console.claude_text.call_args[0][0]
+
+        assert ANSI_RE.findall(first) == ANSI_RE.findall(third)
+        assert "hive-worker#1" in third
+
+    def test_tool_lines_share_the_workers_color(self, monkeypatch):
+        """Tool activity is colored like the worker's text, not separately."""
+        _enable_color(monkeypatch)
+        proc = MessageProcessor()
+        with patch("claude_task_master.core.agent_message.console") as mock_console:
+            proc.process_message(_spawn("toolu_a"), "")
+            proc.process_message(_make_subagent_message([_make_text_block("hi")], "toolu_a"), "")
+            text_line = mock_console.claude_text.call_args[0][0]
+            proc.process_message(
+                _make_subagent_message(
+                    [_make_tool_use_block("Read", {"file_path": "/x"})], "toolu_a"
+                ),
+                "",
+            )
+            tool_line = mock_console.tool.call_args[0][0]
+
+        assert ANSI_RE.findall(text_line) == ANSI_RE.findall(tool_line)
+
+    def test_lead_output_stays_plain(self, monkeypatch):
+        """The lead's own line is byte-identical to before: no marker, no color."""
+        _enable_color(monkeypatch)
+        proc = MessageProcessor()
+        msg = _make_assistant_message([_make_text_block("mine")])
+        msg.parent_tool_use_id = None
+        with patch("claude_task_master.core.agent_message.console") as mock_console:
+            proc.process_message(msg, "")
+
+        assert mock_console.claude_text.call_args[0][0] == "mine"
+
+    def test_subagent_text_still_not_accumulated_when_colored(self, monkeypatch):
+        """Coloring is cosmetic: the isolation of result_text is untouched."""
+        _enable_color(monkeypatch)
+        proc = MessageProcessor()
+        with patch("claude_task_master.core.agent_message.console"):
+            proc.process_message(_spawn("toolu_a"), "")
+            out = proc.process_message(
+                _make_subagent_message([_make_text_block("TASK COMPLETE")], "toolu_a"),
+                "lead ",
+            )
+
+        assert out == "lead "
+        assert "TASK COMPLETE" not in out
+
+    def test_logger_receives_no_escape_sequences(self, monkeypatch):
+        """Log files must stay free of ANSI — the marker is console-only."""
+        _enable_color(monkeypatch)
+        mock_logger = MagicMock()
+        proc = MessageProcessor(logger=mock_logger)
+        with patch("claude_task_master.core.agent_message.console"):
+            proc.process_message(_spawn("toolu_a"), "")
+            proc.process_message(
+                _make_subagent_message(
+                    [_make_tool_use_block("Read", {"file_path": "/foo.py"})], "toolu_a"
+                ),
+                "",
+            )
+            proc.process_message(
+                _make_subagent_message([_make_tool_result_block("tu_1")], "toolu_a"), ""
+            )
+
+        calls = mock_logger.log_tool_use.call_args_list + mock_logger.log_tool_result.call_args_list
+        # Guard the guard: an empty list would make every assertion below vacuous.
+        # Three: the lead's own Agent spawn, then the worker's tool use and result.
+        assert len(calls) == 3
+        for call in calls:
+            # Never ``repr(call)``: repr renders ESC as the four characters
+            # ``\x1b``, which ANSI_RE — matching the real 0x1B byte — can never
+            # find, so the assertion would pass on fully-colored output.
+            for text in _iter_strings(call.args) + _iter_strings(call.kwargs):
+                assert ANSI_RE.search(text) is None
+
+    def test_logger_calls_are_unchanged(self, monkeypatch):
+        """The exact log_tool_use/log_tool_result payloads are as before."""
+        _enable_color(monkeypatch)
+        mock_logger = MagicMock()
+        proc = MessageProcessor(logger=mock_logger)
+        with patch("claude_task_master.core.agent_message.console"):
+            proc.process_message(_spawn("toolu_a"), "")
+            proc.process_message(
+                _make_subagent_message(
+                    [_make_tool_use_block("Read", {"file_path": "/foo.py"})], "toolu_a"
+                ),
+                "",
+            )
+
+        mock_logger.log_tool_use.assert_called_with("Read", {"file_path": "/foo.py"})
+
+    def test_reset_clears_color_assignments(self, monkeypatch):
+        """Ordinals restart per query instead of growing across a long run."""
+        _enable_color(monkeypatch)
+        proc = MessageProcessor()
+        with patch("claude_task_master.core.agent_message.console") as mock_console:
+            proc.process_message(_spawn("toolu_a"), "")
+            proc.process_message(_spawn("toolu_b"), "")
+            proc.process_message(_make_subagent_message([_make_text_block("b")], "toolu_b"), "")
+            assert "hive-worker#2" in mock_console.claude_text.call_args[0][0]
+
+            proc.reset_result_state()
+            proc.process_message(_spawn("toolu_c"), "")
+            proc.process_message(_make_subagent_message([_make_text_block("c")], "toolu_c"), "")
+            assert "hive-worker#1" in mock_console.claude_text.call_args[0][0]
+
+
+class TestSubagentColoringDisabled:
+    """With color disabled the marker is plain text — logs stay readable."""
+
+    def test_no_color_env_suppresses_escapes(self, monkeypatch):
+        """NO_COLOR wins even on a terminal."""
+        monkeypatch.setenv("NO_COLOR", "1")
+        monkeypatch.setattr("sys.stdout", _TtyStdout())
+        proc = MessageProcessor()
+        with patch("claude_task_master.core.agent_message.console") as mock_console:
+            proc.process_message(_spawn("toolu_a"), "")
+            proc.process_message(_make_subagent_message([_make_text_block("hi")], "toolu_a"), "")
+
+        printed = mock_console.claude_text.call_args[0][0]
+        assert ANSI_RE.search(printed) is None
+        assert printed == "↳ [hive-worker#1] hi"
+
+    def test_redirected_output_has_no_escapes(self, monkeypatch):
+        """A non-TTY (pipe, redirect into a log file) gets plain text."""
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.setattr("sys.stdout", _PipedStdout())
+        proc = MessageProcessor()
+        with patch("claude_task_master.core.agent_message.console") as mock_console:
+            proc.process_message(_spawn("toolu_a"), "")
+            proc.process_message(_make_subagent_message([_make_text_block("hi")], "toolu_a"), "")
+
+        assert ANSI_RE.search(mock_console.claude_text.call_args[0][0]) is None
+
+    def test_workers_still_labelled_distinctly_without_color(self, monkeypatch):
+        """Without color the discriminator alone keeps workers apart."""
+        monkeypatch.setenv("NO_COLOR", "1")
+        proc = MessageProcessor()
+        with patch("claude_task_master.core.agent_message.console") as mock_console:
+            proc.process_message(_spawn("toolu_a"), "")
+            proc.process_message(_spawn("toolu_b"), "")
+            proc.process_message(_make_subagent_message([_make_text_block("a")], "toolu_a"), "")
+            first = mock_console.claude_text.call_args[0][0]
+            proc.process_message(_make_subagent_message([_make_text_block("b")], "toolu_b"), "")
+            second = mock_console.claude_text.call_args[0][0]
+
+        assert first != second
+        assert "hive-worker#1" in first
+        assert "hive-worker#2" in second
 
 
 # =============================================================================

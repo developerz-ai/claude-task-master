@@ -152,8 +152,8 @@ class TestStartCommand:
 
         assert "no effect" in result.output
 
-    def test_start_parallel_tasks_persists_option(self, cli_runner: CliRunner, temp_dir):
-        """--parallel-tasks persists parallel_tasks=True in the initialized state."""
+    def test_start_parallel_persists_option(self, cli_runner: CliRunner, temp_dir):
+        """--parallel persists parallel=True in the initialized state."""
         state_dir = temp_dir / ".claude-task-master"
         with patch.object(StateManager, "STATE_DIR", state_dir):
             with patch(
@@ -166,13 +166,13 @@ class TestStartCommand:
                     ) as mock_planner:
                         mock_planner.return_value.create_plan.side_effect = Exception("Test stop")
 
-                        cli_runner.invoke(app, ["start", "Test goal", "--parallel-tasks"])
+                        cli_runner.invoke(app, ["start", "Test goal", "--parallel"])
 
             state = StateManager().load_state()
-        assert state.options.parallel_tasks is True
+        assert state.options.parallel is True
 
-    def test_start_parallel_tasks_default_off(self, cli_runner: CliRunner, temp_dir):
-        """Hive mode is opt-in: without the flag, parallel_tasks stays False."""
+    def test_start_parallel_default_on(self, cli_runner: CliRunner, temp_dir):
+        """Parallel is the default: without any flag, parallel is True."""
         state_dir = temp_dir / ".claude-task-master"
         with patch.object(StateManager, "STATE_DIR", state_dir):
             with patch(
@@ -188,10 +188,10 @@ class TestStartCommand:
                         cli_runner.invoke(app, ["start", "Test goal"])
 
             state = StateManager().load_state()
-        assert state.options.parallel_tasks is False
+        assert state.options.parallel is True
 
-    def test_start_no_parallel_tasks_flag(self, cli_runner: CliRunner, temp_dir):
-        """The explicit negative flag also lands as False."""
+    def test_start_no_parallel_flag(self, cli_runner: CliRunner, temp_dir):
+        """--no-parallel turns hive fan-out off for every session."""
         state_dir = temp_dir / ".claude-task-master"
         with patch.object(StateManager, "STATE_DIR", state_dir):
             with patch(
@@ -204,10 +204,10 @@ class TestStartCommand:
                     ) as mock_planner:
                         mock_planner.return_value.create_plan.side_effect = Exception("Test stop")
 
-                        cli_runner.invoke(app, ["start", "Test goal", "--no-parallel-tasks"])
+                        cli_runner.invoke(app, ["start", "Test goal", "--no-parallel"])
 
             state = StateManager().load_state()
-        assert state.options.parallel_tasks is False
+        assert state.options.parallel is False
 
     def test_start_default_model(self, cli_runner: CliRunner, temp_dir):
         """Test start uses default model."""

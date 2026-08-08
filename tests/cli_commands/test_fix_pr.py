@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 from typer.testing import CliRunner
 
 from claude_task_master.cli import app
-from claude_task_master.cli_commands.fix_pr import _parse_pr_input
+from claude_task_master.cli_commands.pr_resolution import parse_pr_input
 
 runner = CliRunner()
 
@@ -21,33 +21,33 @@ def strip_ansi(text: str) -> str:
 
 
 class TestParsePRInput:
-    """Tests for _parse_pr_input function."""
+    """Tests for parse_pr_input function."""
 
     def test_none_input(self) -> None:
         """Should return None for None input."""
-        assert _parse_pr_input(None) is None
+        assert parse_pr_input(None) is None
 
     def test_plain_number(self) -> None:
         """Should parse plain number."""
-        assert _parse_pr_input("123") == 123
-        assert _parse_pr_input("1") == 1
-        assert _parse_pr_input("99999") == 99999
+        assert parse_pr_input("123") == 123
+        assert parse_pr_input("1") == 1
+        assert parse_pr_input("99999") == 99999
 
     def test_github_url(self) -> None:
         """Should parse GitHub PR URL."""
-        assert _parse_pr_input("https://github.com/owner/repo/pull/123") == 123
-        assert _parse_pr_input("https://github.com/foo/bar/pull/1") == 1
+        assert parse_pr_input("https://github.com/owner/repo/pull/123") == 123
+        assert parse_pr_input("https://github.com/foo/bar/pull/1") == 1
 
     def test_hash_prefix(self) -> None:
         """Should parse number with # prefix."""
-        assert _parse_pr_input("#123") == 123
-        assert _parse_pr_input("#1") == 1
+        assert parse_pr_input("#123") == 123
+        assert parse_pr_input("#1") == 1
 
     def test_invalid_input(self) -> None:
         """Should return None for invalid input."""
-        assert _parse_pr_input("abc") is None
-        assert _parse_pr_input("not-a-number") is None
-        assert _parse_pr_input("#abc") is None
+        assert parse_pr_input("abc") is None
+        assert parse_pr_input("not-a-number") is None
+        assert parse_pr_input("#abc") is None
 
 
 class TestMergePRCommand:
@@ -61,13 +61,14 @@ class TestMergePRCommand:
         assert "Monitor a PR" in output
         assert "--max-iterations" in output
         assert "--no-merge" in output
+        assert "--create-pr" in output
 
     def test_fix_pr_alias_works(self) -> None:
         """fix-pr should work as a hidden alias."""
         result = runner.invoke(app, ["fix-pr", "--help"])
         assert result.exit_code == 0
 
-    @patch("claude_task_master.cli_commands.fix_pr.get_current_branch", return_value="main")
+    @patch("claude_task_master.cli_commands.pr_resolution.get_current_branch", return_value="main")
     def test_rejects_default_branch(self, mock_branch: MagicMock) -> None:
         """Should error when on main/master branch with no PR arg."""
         result = runner.invoke(app, [COMMAND])
@@ -75,7 +76,9 @@ class TestMergePRCommand:
         output = strip_ansi(result.stdout)
         assert "default branch" in output
 
-    @patch("claude_task_master.cli_commands.fix_pr.get_current_branch", return_value="master")
+    @patch(
+        "claude_task_master.cli_commands.pr_resolution.get_current_branch", return_value="master"
+    )
     def test_rejects_master_branch(self, mock_branch: MagicMock) -> None:
         """Should error when on master branch with no PR arg."""
         result = runner.invoke(app, [COMMAND])
@@ -83,7 +86,10 @@ class TestMergePRCommand:
         output = strip_ansi(result.stdout)
         assert "default branch" in output
 
-    @patch("claude_task_master.cli_commands.fix_pr.get_current_branch", return_value="feature/foo")
+    @patch(
+        "claude_task_master.cli_commands.pr_resolution.get_current_branch",
+        return_value="feature/foo",
+    )
     @patch("claude_task_master.github.GitHubClient")
     def test_no_pr_for_branch_fails(
         self, mock_github_class: MagicMock, mock_branch: MagicMock
@@ -97,7 +103,10 @@ class TestMergePRCommand:
         assert result.exit_code == 1
         assert "No PR found" in result.stdout
 
-    @patch("claude_task_master.cli_commands.fix_pr.get_current_branch", return_value="feature/foo")
+    @patch(
+        "claude_task_master.cli_commands.pr_resolution.get_current_branch",
+        return_value="feature/foo",
+    )
     @patch("claude_task_master.cli_commands.fix_pr.StateManager")
     @patch("claude_task_master.cli_commands.fix_pr.CredentialManager")
     @patch("claude_task_master.github.GitHubClient")

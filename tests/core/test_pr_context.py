@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any
@@ -347,6 +348,59 @@ class TestSaveCIFailures:
         ci_dir = state_manager.get_pr_dir(123) / "ci"
         assert "api typecheck broke" in (ci_dir / "run-111" / "typecheck" / "1.log").read_text()
         assert "web typecheck broke" in (ci_dir / "run-222" / "typecheck" / "1.log").read_text()
+
+    def test_never_started_jobs_are_reported_as_a_signal_not_an_error(
+        self,
+        pr_context_manager: PRContextManager,
+        mock_github_client: MagicMock,
+    ) -> None:
+        """A billing-locked repo: every job 404s because none of them ran.
+
+        The jobs conclude ``failure`` about two seconds after starting with
+        ``steps: []`` — GitHub refused to start them. Asking for their logs
+        answers 404, which used to come back as an unqualified GitHubError and
+        be reported as claudetm having broken. It has not: there is nothing to
+        download, and that fact is what the re-run / breaker path needs.
+        """
+        mock_github_client.get_pr_status.return_value = MagicMock(
+            check_details=[
+                {
+                    "name": "Lint",
+                    "conclusion": "FAILURE",
+                    "url": "https://github.com/owner/repo/actions/runs/111/job/1",
+                }
+            ]
+        )
+        mock_github_client._get_repo_info.return_value = "owner/repo"
+
+        jobs = MagicMock(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "id": 1,
+                    "name": "Lint",
+                    "status": "completed",
+                    "conclusion": "failure",
+                    "started_at": "2026-08-08T10:00:00Z",
+                    "completed_at": "2026-08-08T10:00:02Z",
+                    "steps": [],
+                }
+            ),
+            stderr="",
+        )
+        not_found = subprocess.CalledProcessError(
+            returncode=1, cmd="gh api", stderr=b"gh: Not Found (HTTP 404)"
+        )
+
+        with (
+            patch("claude_task_master.core.pr_context.console") as mock_console,
+            patch("subprocess.run", side_effect=[jobs, not_found]),
+        ):
+            pr_context_manager.save_ci_failures(123, _also_save_comments=False)
+
+        warnings = " ".join(str(call) for call in mock_console.warning.call_args_list)
+        assert "never executed a step" in warnings
+        assert "Could not save CI failures" not in warnings
 
     def test_saves_failure_for_error_conclusion(
         self,

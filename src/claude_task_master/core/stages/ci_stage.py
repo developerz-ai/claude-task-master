@@ -227,18 +227,17 @@ class _CIStage(_PRRecovery):
         (error out) and let a human intervene. Admin runs (--admin) force-advance
         to the review stage, treating the timeout as a policy override.
 
+        The timer is cleared either way: a block whose condition re-fires the
+        instant the stage is re-entered cannot be cleared by ``resume --force``.
+
         Returns 1 to block the run, or None to keep the loop going after advancing.
         """
         self._clear_ci_poll_timer(state)
-        if state.options.admin_merge:
-            console.warning(f"{reason} - advancing anyway (--admin override)")
+        if self._poll_timeout_override(state, reason):
             state.workflow_stage = "waiting_reviews"
             self.state_manager.save_state(state)
             return None
-        console.error(f"{reason} - blocking (re-run with --admin to advance anyway)")
-        state.status = "blocked"
-        self.state_manager.save_state(state)
-        return 1
+        return self._block_on_poll_timeout(state, reason)
 
     def handle_waiting_ci_stage(self, state: TaskState) -> int | None:
         """Handle waiting for CI - poll CI status."""

@@ -606,3 +606,143 @@ class TestErrorBlock:
         assert block.line_number == 10
         assert block.context_before == 3
         assert block.context_after == 3
+
+
+# =============================================================================
+# "No logs" is a signal, not an error (issue #116)
+# =============================================================================
+
+
+class TestNoLogsIsASignal:
+    """A 404 on a job's logs means there is nothing to download, not a fault.
+
+    The repro comes from a repo whose GitHub account was locked for a billing
+    issue: every job concludes ``failure`` in about two seconds, records
+    ``steps: []`` and carries the check annotation *"The job was not started
+    because your account is locked due to a billing issue."* Asking for its
+    logs returns HTTP 404 because no log was ever written.
+
+    Surfacing that as an unqualified ``GitHubError`` puts a fault message in
+    front of the user every poll and tells the rest of the pipeline nothing.
+    A 404 is also what a still-queued job answers, so the classification says
+    only "no logs exist" — whether the job *never ran* comes from its own
+    recorded steps, not from the status code.
+    """
+
+    def _locked_job(self, job_id: int = 1, name: str = "Lint") -> dict:
+        """A job killed by the account lock: 2s, no steps, red."""
+        return {
+            "id": job_id,
+            "name": name,
+            "status": "completed",
+            "conclusion": "failure",
+            "started_at": "2026-08-08T10:00:00Z",
+            "completed_at": "2026-08-08T10:00:02Z",
+            "steps": [],
+        }
+
+    def test_404_is_not_a_generic_github_error(self, ci_downloader):
+        """The 404 must be distinguishable from a broken API call."""
+        from claude_task_master.github.ci_logs import CILogsUnavailableError
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = subprocess.CalledProcessError(
+                returncode=1,
+                cmd="gh api",
+                stderr=b"gh: Not Found (HTTP 404)",
+            )
+
+            with pytest.raises(CILogsUnavailableError):
+                ci_downloader.download_job_logs(job_id=123)
+
+    def test_a_real_api_failure_stays_an_error(self, ci_downloader):
+        """Only "there is nothing to download" is reclassified."""
+        from claude_task_master.github.ci_logs import CILogsUnavailableError
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = subprocess.CalledProcessError(
+                returncode=1,
+                cmd="gh api",
+                stderr=b"HTTP 503: Server Error",
+            )
+
+            with pytest.raises(GitHubError) as excinfo:
+                ci_downloader.download_job_logs(job_id=123)
+            assert not isinstance(excinfo.value, CILogsUnavailableError)
+
+    def test_empty_body_is_the_same_signal(self, ci_downloader):
+        from claude_task_master.github.ci_logs import CILogsUnavailableError
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout=b"", stderr=b"")
+
+            with pytest.raises(CILogsUnavailableError):
+                ci_downloader.download_job_logs(job_id=123)
+
+    def test_failed_jobs_record_whether_they_ever_started(self, ci_downloader):
+        """``steps: []`` is what says the job never ran — not the 404."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0, stdout=json.dumps(self._locked_job()), stderr=""
+            )
+
+            jobs = ci_downloader.get_failed_jobs(run_id=123)
+
+        assert len(jobs) == 1
+        assert jobs[0].steps_count == 0
+        assert jobs[0].never_started is True
+        assert jobs[0].duration_seconds == pytest.approx(2.0)
+
+    def test_a_job_with_steps_did_start(self, ci_downloader):
+        job = self._locked_job()
+        job["steps"] = [{"name": "Set up job", "conclusion": "success"}]
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout=json.dumps(job), stderr="")
+
+            jobs = ci_downloader.get_failed_jobs(run_id=123)
+
+        assert jobs[0].never_started is False
+
+    def test_run_of_never_started_jobs_reports_the_signal(self, ci_downloader):
+        """All the run's red jobs 404 → the run produced no logs, by design."""
+        from claude_task_master.github.ci_logs import CILogsUnavailableError
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout=json.dumps(self._locked_job()), stderr=""),
+                subprocess.CalledProcessError(
+                    returncode=1, cmd="gh api", stderr=b"gh: Not Found (HTTP 404)"
+                ),
+            ]
+
+            with pytest.raises(CILogsUnavailableError) as excinfo:
+                ci_downloader.download_failed_run_logs(run_id=123)
+
+        error = excinfo.value
+        assert error.never_started is True
+        assert error.job_names == ("Lint",)
+        # The message documents the case rather than blaming the API.
+        assert "never ran" in str(error)
+
+    def test_a_genuine_failure_among_them_still_errors(self, ci_downloader):
+        """One broken API call means the run is unreadable, not "no logs"."""
+        from claude_task_master.github.ci_logs import CILogsUnavailableError
+
+        ndjson = "\n".join(
+            json.dumps(j) for j in (self._locked_job(1, "Lint"), self._locked_job(2, "Test"))
+        )
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout=ndjson, stderr=""),
+                subprocess.CalledProcessError(
+                    returncode=1, cmd="gh api", stderr=b"gh: Not Found (HTTP 404)"
+                ),
+                subprocess.CalledProcessError(
+                    returncode=1, cmd="gh api", stderr=b"HTTP 502: Bad Gateway"
+                ),
+            ]
+
+            with pytest.raises(GitHubError) as excinfo:
+                ci_downloader.download_failed_run_logs(run_id=123)
+
+        assert not isinstance(excinfo.value, CILogsUnavailableError)

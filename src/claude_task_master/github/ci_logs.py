@@ -10,11 +10,15 @@ import json
 import re
 import subprocess
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    pass
+from .exceptions import GitHubError, GitHubTimeoutError
+
+# A job's logs 404 when no log was ever written — the job never started, or is
+# still queued. That is an answer, not a failure, so it is classified apart from
+# a 5xx or a network error, which mean the run could not be read at all.
+_NO_LOGS_RE = re.compile(r"HTTP 404|\bnot found\b|no logs? (?:are |is )?(?:available|found)", re.I)
 
 # Compiled regex for detecting error lines in CI logs.
 # Uses word boundaries (\b) to avoid false positives from substrings like FAILSAFE.
@@ -30,6 +34,40 @@ _ERROR_RE = re.compile(
 )
 
 
+class CILogsUnavailableError(GitHubError):
+    """GitHub has no logs for the job — not a failure to fetch them.
+
+    Subclasses :class:`GitHubError` and is raised where one used to be, so
+    callers that only care that the download did not happen are unaffected.
+    Callers that must tell "the platform never ran this job" from "GitHub is
+    broken" catch this instead: the first is a fact about the run and the input
+    to the re-run / circuit-breaker path, the second is a transient to retry.
+
+    ``job_names`` names the jobs that had no logs; ``never_started`` is True
+    when every one of them recorded no step, so their absent logs are explained
+    by the jobs never having executed rather than by a queued job not being
+    finished yet.
+    """
+
+    def __init__(
+        self, message: str, *, job_names: tuple[str, ...] = (), never_started: bool = False
+    ) -> None:
+        """Initialize with the jobs the missing logs belong to."""
+        super().__init__(message)
+        self.job_names = job_names
+        self.never_started = never_started
+
+
+def _elapsed(job: dict) -> float | None:
+    """Seconds a job took, or None when either timestamp is missing/unreadable."""
+    try:
+        start = datetime.fromisoformat((job.get("started_at") or "").replace("Z", "+00:00"))
+        end = datetime.fromisoformat((job.get("completed_at") or "").replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return (end - start).total_seconds()
+
+
 @dataclass
 class CIJob:
     """Represents a GitHub Actions job."""
@@ -39,6 +77,34 @@ class CIJob:
     status: str  # queued, in_progress, completed
     conclusion: str | None  # success, failure, cancelled, etc.
     run_id: int
+    # GitHub appends to ``steps`` as the job executes, so zero steps means the
+    # job never got as far as its first one. Defaulted: callers that build a
+    # CIJob by hand (tests, older code) keep working.
+    steps_count: int = 0
+    # Wall-clock seconds between the job starting and concluding, when both
+    # timestamps are readable. A red job that concludes in a couple of seconds
+    # having run nothing is the signature of a platform-side refusal.
+    duration_seconds: float | None = None
+
+    @property
+    def never_started(self) -> bool:
+        """True when the job recorded no step, so nothing of it ever ran."""
+        return self.steps_count == 0
+
+
+def _describe(job: CIJob) -> str:
+    """Render one job as "name (conclusion after Ns, no steps recorded)"."""
+    elapsed = f" after {job.duration_seconds:.0f}s" if job.duration_seconds is not None else ""
+    return f"{job.name} ({job.conclusion}{elapsed}, no steps recorded)"
+
+
+def _no_logs_message(run_id: int, jobs: list[CIJob]) -> str:
+    """Describe a run that produced no logs in terms of what its jobs did."""
+    if jobs and all(job.never_started for job in jobs):
+        detail = ", ".join(_describe(job) for job in jobs)
+        return f"Run {run_id}: {len(jobs)} job(s) never ran, so there are no logs — {detail}"
+    names = ", ".join(job.name for job in jobs)
+    return f"Run {run_id}: no logs available for {len(jobs)} job(s) — {names}"
 
 
 @dataclass
@@ -87,8 +153,6 @@ class CILogDownloader:
             GitHubError: If API call fails.
             GitHubTimeoutError: If command times out.
         """
-        from .exceptions import GitHubError, GitHubTimeoutError
-
         try:
             result = subprocess.run(
                 [
@@ -125,6 +189,8 @@ class CILogDownloader:
                         status=job.get("status", "completed"),
                         conclusion=conclusion,
                         run_id=run_id,
+                        steps_count=len(job.get("steps") or []),
+                        duration_seconds=_elapsed(job),
                     )
                 )
 
@@ -140,11 +206,12 @@ class CILogDownloader:
             Complete log content as string.
 
         Raises:
-            GitHubError: If API call fails or no logs available.
+            CILogsUnavailableError: GitHub has no logs for this job (404, or an
+                empty body). Nothing to download — distinct from a failure to
+                download, so the caller can treat it as a fact about the run.
+            GitHubError: If the API call failed for any other reason.
             GitHubTimeoutError: If command times out.
         """
-        from .exceptions import GitHubError, GitHubTimeoutError
-
         try:
             result = subprocess.run(
                 ["gh", "api", f"repos/{self.repo}/actions/jobs/{job_id}/logs"],
@@ -161,13 +228,17 @@ class CILogDownloader:
                 if isinstance(e.stderr, bytes)
                 else str(e.stderr)
             )
+            if _NO_LOGS_RE.search(stderr):
+                raise CILogsUnavailableError(
+                    f"Failed to download job logs: no logs exist for job {job_id} ({stderr.strip()})"
+                ) from e
             raise GitHubError(f"Failed to download job logs: {stderr}") from e
 
         # Decode bytes to string
         logs = result.stdout.decode("utf-8", errors="replace")
 
         if not logs.strip():
-            raise GitHubError(f"No log content available for job {job_id}")
+            raise CILogsUnavailableError(f"No log content available for job {job_id}")
 
         return logs
 
@@ -248,12 +319,14 @@ class CILogDownloader:
             Dictionary mapping job names to log content.
 
         Raises:
-            GitHubError: If API calls fail or no logs could be retrieved.
+            CILogsUnavailableError: Every failing job answered "no logs" and no
+                call failed for another reason — the run has nothing to give,
+                usually because its jobs never executed.
+            GitHubError: A download failed for a reason other than absent logs,
+                leaving the run genuinely unreadable.
             GitHubTimeoutError: If commands timeout.
         """
-        import logging
-
-        from .exceptions import GitHubError
+        import logging  # noqa: PLC0415
 
         logger = logging.getLogger(__name__)
 
@@ -265,7 +338,12 @@ class CILogDownloader:
 
         logger.debug(f"Found {len(failed_jobs)} failed jobs for run {run_id}")
         logs_by_job = {}
-        download_errors = []
+        download_errors: list[str] = []
+        # Jobs GitHub had no logs for, kept apart from jobs whose download
+        # genuinely failed: an absent log is a description of the run, an API
+        # error means we never got to look.
+        no_logs: list[CIJob] = []
+        hard_failure = False
 
         for job in failed_jobs:
             logger.debug(f"Downloading logs for job {job.id}: {job.name}")
@@ -284,15 +362,29 @@ class CILogDownloader:
                     )
                     logger.debug(f"Saved logs for {job.name} to {output_dir}")
 
+            except CILogsUnavailableError as e:
+                # Not a fault: there is nothing to download. Logged at debug so
+                # a run whose jobs never started stops printing an API-error
+                # message on every poll of every cycle.
+                no_logs.append(job)
+                download_errors.append(f"{job.name}: {e}")
+                logger.debug(f"No logs to download for job {job.name}: {e}")
+                continue
             except Exception as e:
                 # Track errors but continue with other jobs
-                error_msg = f"{job.name}: {str(e)}"
-                download_errors.append(error_msg)
+                hard_failure = True
+                download_errors.append(f"{job.name}: {e}")
                 logger.warning(f"Failed to download logs for job {job.name}: {e}")
                 continue
 
         # If all downloads failed, raise an error
         if not logs_by_job and failed_jobs:
+            if not hard_failure:
+                raise CILogsUnavailableError(
+                    _no_logs_message(run_id, no_logs),
+                    job_names=tuple(job.name for job in no_logs),
+                    never_started=all(job.never_started for job in no_logs),
+                )
             error_msg = (
                 f"Failed to download logs for {len(failed_jobs)} jobs: {'; '.join(download_errors)}"
             )
