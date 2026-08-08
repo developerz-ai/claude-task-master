@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.83] - 2026-08-08
+
+### Added
+- **A PR group's independent tasks can run as one session (`--parallel-tasks`, opt-in, off by default).** claudetm runs one work session per task: one task in, one index checked off, `current_task_index` advanced by one. Tasks in a group that touch entirely separate files still run one after another, each paying a full cold start re-reading the repo. With the flag on, a group's remaining incomplete tasks go to a single **hive lead** session instead: the lead reads the whole batch, decides for itself which tasks have **disjoint write sets**, fans exactly those out to `hive-worker` subagents running concurrently in the same checkout, does everything that overlaps itself, and is the only thing that touches git — so there is no second writer to the index and no `.git/index.lock` contention. Bounded by one knob, `CLAUDETM_HIVE_MAX_PARALLEL` (default 10 = one lead plus ten workers), and ignored under `--pr-per-task`. Surfaced on `start` and `config-update`, plus REST and MCP.
+
+  Fan-out is *inside* a group rather than across groups because the sibling TypeScript port built cross-group parallelism — a dependency DAG, a batch dispatcher, a checkout mutex — and then pinned concurrency to 1 at the wiring site. With one shared checkout, groups differ by branch, so parallelism across them buys nothing once git is serialized. That repo also measured four agents spawned to make four one-line edits, which is why the two-task floor here is code (`HIVE_MIN_BATCH_TASKS`) and not prompt guidance: prose is not a constraint.
+
+  The repository stays the evidence. The lead's `TASKS COMPLETE:` manifest is read only after the existing unfinished probe passes (clean tree, non-error terminal result), and it can only ever *narrow* a batch the orchestrator itself computed — never widen it. Three readings, kept deliberately distinct: **absent** falls back to today's single check-off, so a forgotten line neither mass-checks-off nor stalls; **explicitly empty** means the lead finished none of them, so nothing is checked off, because marking a task the lead just said it did not do silently loses that work; **numbers** check off the intersection. `MAX_TASK_FINISH_ATTEMPTS` governs retries unchanged, a cut-off session ignores the manifest entirely, and a batch that leaves a gap resumes at the lowest still-open task — the plain `+1` advance would step over it and ship the group without it. A hive session is bounded like one session but spends like several: `MAX_TURNS` (400) and `--budget` are per query while the terminal `ResultMessage` aggregates the whole tree, so an overrun lands as `error_max_turns` and degrades through the existing retry.
+
+### Fixed
+- **A red CI that no diff can fix is re-run instead of blocking the run.** Some failures carry no signal a commit can act on — an infrastructure fault, a runner that never started, a cancelled job — and the fix loop would spend its budget producing empty diffs and then block. Such a failure is now re-run against the same commit. The re-run budget ends at green CI rather than at the PR's end, and "could not ask" is kept distinct from "nothing to re-run".
+- **`mark_task_complete` no longer loses check-offs when called in a loop.** It *saves* the plan string it is handed, so N calls against one in-memory plan write N plans differing by a single checkbox each — every mark but the last silently discarded. `mark_tasks_complete()` does it as one read-modify-write, which is also the only atomic option.
+- **A session's accumulated output is its own output again.** `MessageProcessor` never read `parent_tool_use_id`, so with any subagent in play the result was the lead's prose plus every subagent's narration concatenated. That fed worker text into `context.md` as accumulated project "learnings" and — once a manifest existed to parse — let a worker-emitted `TASKS COMPLETE:` line be adopted as the lead's own. Subagent text is still streamed, now marked `↳ [hive-worker]`, but no longer accumulated; the terminal `ResultMessage` still legitimately aggregates cost and tokens for the whole tree. Any project with a `.claude/agents/` directory already had this.
+
+### Documentation
+- **Six CLAUDE.md claims that the code falsifies, corrected.** The query deliberately never `chdir`s — it passes `cwd=`, precisely so concurrent queries cannot race. The printer emits no emoji (`[claude HH:MM:SS N/M] Using tool: …`). A non-last task in a PR group gets a **commit-only** prompt and is not required to produce a PR URL, which is the default mode rather than an edge case. `current_task_index` is a cursor — three advances, one deliberate rewind, two reconciliations — not a counter that only goes up. The per-phase tool lists are the SDK's *auto-approve* list, not enforcement, since `tools=` is never passed while `permission_mode="bypassPermissions"` is; that is also why the WORKING phase could already spawn subagents with no code change. And `context_windows` is currently inert: nothing derived from it reaches `ClaudeAgentOptions`.
+
 ## [0.1.82] - 2026-08-06
 
 ### Fixed
@@ -960,7 +977,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.82...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.83...HEAD
+[0.1.83]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.82...v0.1.83
 [0.1.82]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.81...v0.1.82
 [0.1.81]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.80...v0.1.81
 [0.1.80]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.79...v0.1.80
