@@ -410,18 +410,3 @@ class _GitOps(StageHandlerBase):
             except subprocess.CalledProcessError as recovery_error:
                 console.warning(f"Failed to checkout {branch} after recovery: {recovery_error}")
                 return False
-
-    @staticmethod
-    def _delete_local_branch(branch: str) -> None:
-        """Delete a local branch (best effort)."""
-        try:
-            subprocess.run(
-                ["git", "branch", "-D", branch],
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-            console.success(f"Deleted local branch {branch}")
-        except subprocess.CalledProcessError as e:
-            console.warning(f"Could not delete local branch {branch}: {e.stderr.strip() or e}")

@@ -4,7 +4,6 @@ This module provides single-turn queries via `query()` for planning,
 verification, and working phases.
 """
 
-from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from .agent_exceptions import (
@@ -216,9 +215,8 @@ class AgentWrapper:
         target_branch: str = "main",
         coding_style: str | None = None,
         allow_rebase: bool = False,
-        hive_tasks: Sequence[str] | None = None,
-        hive_task_numbers: Sequence[int] | None = None,
-        hive_max_parallel: int = DEFAULT_HIVE_MAX_PARALLEL,
+        parallel: bool = False,
+        max_parallel: int = DEFAULT_HIVE_MAX_PARALLEL,
     ) -> dict[str, Any]:
         """Run a work session with full tools.
 
@@ -237,11 +235,10 @@ class AgentWrapper:
             coding_style: Optional coding style guide to inject into prompt.
             allow_rebase: True when rebasing onto target_branch is the session's
                 own job (conflict/sync session) rather than something to avoid.
-            hive_tasks: Descriptions of a whole PR-group batch when this is a
-                hive lead session; None (the default) keeps the work prompt
-                byte-identical to the ordinary one-task session.
-            hive_task_numbers: 1-based plan numbers parallel to ``hive_tasks``.
-            hive_max_parallel: Max concurrent hive workers the lead may use.
+            parallel: True when the agent may split this ONE task across
+                ``hive-worker`` subagents. False (the default) keeps the work
+                prompt byte-identical to the single-agent session.
+            max_parallel: Safety ceiling on concurrent workers, never a target.
 
         Returns:
             Dict with 'output', 'success', and 'model_used' keys.
@@ -260,9 +257,8 @@ class AgentWrapper:
             target_branch=target_branch,
             coding_style=coding_style,
             allow_rebase=allow_rebase,
-            hive_tasks=hive_tasks,
-            hive_task_numbers=hive_task_numbers,
-            hive_max_parallel=hive_max_parallel,
+            parallel=parallel,
+            max_parallel=max_parallel,
         )
 
     def run_release_check(

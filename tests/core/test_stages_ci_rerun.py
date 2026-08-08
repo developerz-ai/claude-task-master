@@ -45,6 +45,9 @@ def _quiet() -> Generator[None, None, None]:
         patch(f"{_PR_FIX}.interruptible_sleep", return_value=True),
         # _retry_transient lives in git_ops and sleeps through its own binding.
         patch("claude_task_master.core.stages.git_ops.interruptible_sleep", return_value=True),
+        # The terminal paths explain themselves on the PR; that is the breaker's
+        # business (test_stages_ci_breaker.py), and it must never shell out here.
+        patch("claude_task_master.github.ci_infra.post_external_block_notice", return_value=False),
     ):
         yield
 
@@ -103,10 +106,16 @@ def state(sample_task_options):
     )
 
 
-def _infra(never_ran: bool):
-    """Every failing run's jobs either never executed a step, or did."""
+def _infra(never_ran: bool, block_reason: str | None = None):
+    """Every failing run's jobs either never executed a step, or did.
+
+    ``block_reason`` is GitHub's annotation when it has declared the refusal
+    permanent; the default None is the ordinary case these tests cover — a
+    queue kill or a lost runner, which a re-run may well clear.
+    """
     detector = MagicMock()
     detector.never_ran = MagicMock(return_value=never_ran)
+    detector.external_block_reason = MagicMock(return_value=block_reason)
     return patch(_INFRA, return_value=detector)
 
 

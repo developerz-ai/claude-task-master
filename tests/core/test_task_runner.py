@@ -330,6 +330,28 @@ class TestIsTaskComplete:
 class TestMarkTaskComplete:
     """Tests for mark_task_complete method."""
 
+    def test_looping_it_over_one_plan_string_loses_all_but_the_last_mark(
+        self, task_runner, state_manager, basic_plan
+    ):
+        """Pins the sharp edge of the single-mark contract.
+
+        mark_task_complete saves the plan string it was *handed* with one
+        checkbox flipped, so two calls against the same in-memory plan write two
+        plans that each differ from the original by one mark — the first is
+        silently overwritten. Nothing loops it today (one session completes one
+        task), and this test exists so that a future multi-mark caller finds the
+        trap here instead of in a run that quietly drops completed work.
+        """
+        state_manager.state_dir.mkdir(exist_ok=True)
+        state_manager.save_plan(basic_plan)
+
+        task_runner.mark_task_complete(basic_plan, 0)
+        task_runner.mark_task_complete(basic_plan, 2)
+
+        updated_plan = state_manager.load_plan()
+        assert not task_runner.is_task_complete(updated_plan, 0)  # silently overwritten
+        assert task_runner.is_task_complete(updated_plan, 2)
+
     def test_mark_task_complete(self, task_runner, state_manager, basic_plan):
         """Should update plan to mark task complete."""
         state_manager.state_dir.mkdir(exist_ok=True)

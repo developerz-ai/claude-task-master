@@ -16,6 +16,8 @@ This module tests the colored console output functions in console.py:
 import re
 from datetime import datetime
 
+import pytest
+
 from claude_task_master.core.console import (
     BOLD,
     CYAN,
@@ -25,11 +27,14 @@ from claude_task_master.core.console import (
     ORANGE,
     RED,
     RESET,
+    SUBAGENT_PALETTE,
     YELLOW,
+    SubagentPalette,
     _claude_prefix,
     _prefix,
     claude_text,
     clear_task_context,
+    color_enabled,
     detail,
     error,
     get_task_context,
@@ -42,6 +47,8 @@ from claude_task_master.core.console import (
     tool_result,
     warning,
 )
+
+ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 
 # =============================================================================
 # ANSI Color Constants Tests
@@ -1185,3 +1192,215 @@ class TestOutputFormat:
         tool_result("result", is_error=True)
         captured = capsys.readouterr()
         assert f"{RED}result{RESET}" in captured.out
+
+
+# =============================================================================
+# color_enabled() Tests
+# =============================================================================
+
+
+class _FakeStdout:
+    """Minimal stdout stand-in with a controllable isatty()."""
+
+    def __init__(self, tty: bool | type[BaseException]):
+        self._tty = tty
+
+    def isatty(self) -> bool:
+        if isinstance(self._tty, type) and issubclass(self._tty, BaseException):
+            raise self._tty("stream detached")
+        assert isinstance(self._tty, bool)
+        return self._tty
+
+
+class TestColorEnabled:
+    """color_enabled() gates the new subagent coloring."""
+
+    def test_no_color_env_disables_even_on_a_tty(self, monkeypatch):
+        """NO_COLOR wins over an interactive terminal (no-color.org)."""
+        monkeypatch.setenv("NO_COLOR", "1")
+        monkeypatch.setattr("sys.stdout", _FakeStdout(True))
+        assert color_enabled() is False
+
+    def test_non_tty_disables(self, monkeypatch):
+        """Redirected/piped stdout gets no escapes — logs must stay clean."""
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.setattr("sys.stdout", _FakeStdout(False))
+        assert color_enabled() is False
+
+    def test_tty_without_no_color_enables(self, monkeypatch):
+        """An interactive terminal with no NO_COLOR gets color."""
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.setattr("sys.stdout", _FakeStdout(True))
+        assert color_enabled() is True
+
+    def test_empty_no_color_is_not_set(self, monkeypatch):
+        """NO_COLOR="" does not count as set, per the spec."""
+        monkeypatch.setenv("NO_COLOR", "")
+        monkeypatch.setattr("sys.stdout", _FakeStdout(True))
+        assert color_enabled() is True
+
+    def test_stdout_without_isatty_disables(self, monkeypatch):
+        """An exotic stdout with no isatty() is treated as not a terminal."""
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.setattr("sys.stdout", object())
+        assert color_enabled() is False
+
+    def test_isatty_raising_disables(self, monkeypatch):
+        """A closed stream raises from isatty(); that is not a terminal."""
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.setattr("sys.stdout", _FakeStdout(ValueError))
+        assert color_enabled() is False
+
+    def test_decision_tracks_the_live_stdout(self, monkeypatch):
+        """The check is made per call, so a swapped stdout is honored at once."""
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.setattr("sys.stdout", _FakeStdout(True))
+        assert color_enabled() is True
+        monkeypatch.setattr("sys.stdout", _FakeStdout(False))
+        assert color_enabled() is False
+
+
+# =============================================================================
+# SubagentPalette Tests
+# =============================================================================
+
+
+class TestSubagentPaletteAssignment:
+    """Colors identify a worker *instance*, not an agent type."""
+
+    def test_two_concurrent_workers_get_different_colors(self):
+        """The whole point: two live hive-workers must not look identical."""
+        palette = SubagentPalette()
+        first = palette.color("toolu_a")
+        second = palette.color("toolu_b")
+        assert first != second
+
+    def test_two_concurrent_workers_get_different_labels(self):
+        """Same agent name, different instance → different discriminator."""
+        palette = SubagentPalette()
+        assert palette.label("toolu_a", "hive-worker") == "hive-worker#1"
+        assert palette.label("toolu_b", "hive-worker") == "hive-worker#2"
+
+    def test_label_keeps_the_agent_name(self):
+        """The discriminator is added to the name, it does not replace it."""
+        palette = SubagentPalette()
+        assert palette.label("toolu_a", "hive-worker").startswith("hive-worker")
+
+    def test_same_worker_keeps_its_color(self):
+        """A color that changes mid-run is worse than no color."""
+        palette = SubagentPalette()
+        first = palette.color("toolu_a")
+        palette.color("toolu_b")
+        palette.color("toolu_c")
+        assert palette.color("toolu_a") == first
+
+    def test_same_worker_keeps_its_label(self):
+        """Ordinals are assigned once and never reshuffled."""
+        palette = SubagentPalette()
+        palette.label("toolu_a", "hive-worker")
+        palette.label("toolu_b", "hive-worker")
+        assert palette.label("toolu_a", "hive-worker") == "hive-worker#1"
+
+    def test_slot_assignment_is_first_seen_order(self):
+        """Slots are 0-based and handed out in order of first appearance."""
+        palette = SubagentPalette()
+        assert palette.slot("toolu_a") == 0
+        assert palette.slot("toolu_b") == 1
+        assert palette.slot("toolu_a") == 0
+
+    def test_palette_cycles_deterministically(self):
+        """Past the palette size, colors repeat in a fixed order."""
+        palette = SubagentPalette(("A", "B"))
+        assert [palette.color(f"t{i}") for i in range(5)] == ["A", "B", "A", "B", "A"]
+
+    def test_default_palette_avoids_semantic_colors(self):
+        """Worker colors must not read as success/error/warning or the lead."""
+        for reserved in (GREEN, RED, YELLOW, CYAN, ORANGE, MAGENTA):
+            assert reserved not in SUBAGENT_PALETTE
+
+    def test_clear_forgets_assignments(self):
+        """Between queries the ordinals restart rather than growing forever."""
+        palette = SubagentPalette()
+        palette.slot("toolu_a")
+        palette.slot("toolu_b")
+        palette.clear()
+        assert palette.slot("toolu_z") == 0
+
+    def test_empty_palette_rejected(self):
+        """An empty palette has nothing to cycle and is a construction error."""
+        with pytest.raises(ValueError):
+            SubagentPalette(())
+
+
+class TestSubagentPalettePrefix:
+    """prefix() renders the marker, colored only when color is enabled."""
+
+    def test_prefix_has_no_escapes_when_color_disabled(self):
+        """Disabled color means plain text — this string reaches log files."""
+        palette = SubagentPalette()
+        marker = palette.prefix("toolu_a", "hive-worker", color=False)
+        assert ANSI_RE.search(marker) is None
+        assert marker == "↳ [hive-worker#1] "
+
+    def test_prefix_colors_only_the_marker_when_enabled(self):
+        """Color wraps the name and closes immediately, leaving text alone."""
+        palette = SubagentPalette()
+        marker = palette.prefix("toolu_a", "hive-worker", color=True)
+        assert marker.startswith(palette.color("toolu_a"))
+        assert marker.endswith(RESET)
+        assert "hive-worker#1" in marker
+
+    def test_two_workers_prefixes_differ_in_color(self):
+        """Colored markers of two workers are distinguishable strings."""
+        palette = SubagentPalette()
+        first = palette.prefix("toolu_a", "hive-worker", color=True)
+        second = palette.prefix("toolu_b", "hive-worker", color=True)
+        assert first != second
+
+    def test_prefix_defaults_to_color_enabled(self, monkeypatch):
+        """color=None consults color_enabled(); NO_COLOR therefore suppresses."""
+        monkeypatch.setenv("NO_COLOR", "1")
+        monkeypatch.setattr("sys.stdout", _FakeStdout(True))
+        palette = SubagentPalette()
+        assert ANSI_RE.search(palette.prefix("toolu_a", "hive-worker")) is None
+
+    def test_prefix_colors_by_default_on_a_tty(self, monkeypatch):
+        """On an interactive terminal the default is colored output."""
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.setattr("sys.stdout", _FakeStdout(True))
+        palette = SubagentPalette()
+        assert ANSI_RE.search(palette.prefix("toolu_a", "hive-worker")) is not None
+
+    def test_prefix_label_is_stable_across_calls(self):
+        """The same worker renders the same marker every time."""
+        palette = SubagentPalette()
+        first = palette.prefix("toolu_a", "hive-worker", color=True)
+        palette.prefix("toolu_b", "hive-worker", color=True)
+        assert palette.prefix("toolu_a", "hive-worker", color=True) == first
+
+
+class TestLeadOutputUnchanged:
+    """The lead's own stream must look exactly as it did before colors."""
+
+    def teardown_method(self):
+        """Clean up task context after each test."""
+        clear_task_context()
+
+    def test_claude_prefix_is_orange_regardless_of_color_switch(self, monkeypatch):
+        """NO_COLOR must not silently restyle the established lead prefix.
+
+        The subagent markers are new and can honor the switch from day one; the
+        lead prefixes are the baseline every existing expectation is written
+        against, so they are deliberately left unconditional.
+        """
+        monkeypatch.setenv("NO_COLOR", "1")
+        assert _claude_prefix().startswith(ORANGE + BOLD)
+        assert _prefix().startswith(CYAN + BOLD)
+
+    def test_lead_tool_line_has_no_subagent_marker(self, capsys):
+        """No marker, no color change for the lead's own lines."""
+        tool("Using tool: Read")
+        captured = capsys.readouterr()
+        assert "↳" not in captured.out
+        for color in SUBAGENT_PALETTE:
+            assert color not in captured.out

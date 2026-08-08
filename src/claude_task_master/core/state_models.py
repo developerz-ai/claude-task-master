@@ -57,13 +57,13 @@ class TaskOptions(BaseModel):
     # clash it catches. A PR that genuinely cannot merge (CONFLICTING) is always
     # handed to the agent, regardless of this flag — see `resolve_conflicts`.
     sync_before_merge: bool = False
-    # Opt-in: run a PR group's remaining tasks as ONE "hive" session. The lead
-    # agent reads the whole batch, decides for itself which tasks have disjoint
-    # write sets, and fans those out to subagents in the same checkout; the rest
-    # it does sequentially. The lead alone touches git. Off by default — fan-out
-    # is only worth its per-agent cold start at real scale, and one task per
-    # session is the cheaper, better-understood path.
-    parallel_tasks: bool = False
+    # Let a work session's agent split its ONE task across `hive-worker`
+    # subagents when the pieces have disjoint write sets. The task stays the
+    # unit of work — one session, one task checked off — so this only ever adds
+    # a fan-out brief to the work prompt. On by default: fanning out is the
+    # lead's judgement call and zero workers is a legitimate answer, so the flag
+    # grants permission rather than mandating parallelism.
+    parallel: bool = True
 
 
 # Status type alias for type checking

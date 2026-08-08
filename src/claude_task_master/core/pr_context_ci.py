@@ -8,7 +8,7 @@ from __future__ import annotations
 import shutil
 from typing import TYPE_CHECKING
 
-from ..github.ci_logs import CILogDownloader
+from ..github.ci_logs import CILogDownloader, CILogsUnavailableError
 
 if TYPE_CHECKING:
     from ..github import GitHubClient
@@ -163,6 +163,10 @@ class _PRContextCIMixin:
             # workflow that actually broke whenever a *different* one also went
             # red, and hands the fix agent an empty ci/ directory to work from.
             total_jobs = 0
+            # Runs GitHub had no logs for *because the jobs never executed* —
+            # a description of the platform, not a failure of ours. Kept apart
+            # from a genuinely unreadable run so the message says which it is.
+            never_started_runs: list[int] = []
             for run_id in run_ids:
                 _console.detail(f"Downloading CI logs for run {run_id} from {repo}...")
                 try:
@@ -177,14 +181,30 @@ class _PRContextCIMixin:
                         output_dir=ci_dir / f"run-{run_id}",
                         max_chars_per_file=20_000,
                     )
+                except CILogsUnavailableError as e:
+                    # There is nothing to download. Reporting that as an API
+                    # error put a fault message in front of the user on every
+                    # cycle of a loop that was already going nowhere.
+                    if e.never_started:
+                        never_started_runs.append(run_id)
+                    _console.detail(str(e))
+                    continue
                 except Exception as e:
                     # One unreadable run must not cost us the others' logs.
-                    _console.detail(f"No logs for run {run_id}: {e}")
+                    _console.detail(f"Could not read logs for run {run_id}: {e}")
                     continue
                 total_jobs += len(logs)
 
             if total_jobs:
                 _console.detail(f"Downloaded CI logs to {ci_dir} ({total_jobs} jobs)")
+            elif never_started_runs:
+                # Not "we failed to fetch the logs" — there are none, because
+                # nothing ran. No edit to this branch can change that; the
+                # re-run / circuit-breaker path in ci_failed acts on it.
+                _console.warning(
+                    f"No CI logs exist for run(s) {never_started_runs}: their jobs never "
+                    f"executed a step. Nothing in this PR can turn them green."
+                )
             else:
                 # Checks are red but no GitHub Actions job produced a log. Either
                 # the failures are external (CodeRabbit and friends), or no job

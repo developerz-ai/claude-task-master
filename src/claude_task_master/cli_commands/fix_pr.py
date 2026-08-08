@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-import subprocess
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -22,54 +20,25 @@ from .ci_helpers import (
     GitHubCITimeoutError,
     wait_for_ci_complete,
 )
-from .fix_session import get_current_branch, pending_changes_summary, run_fix_session
+from .fix_session import pending_changes_summary, run_fix_session
+from .merge_finalize import (
+    checkout_and_pull,
+    delete_merged_branch,
+    merge_failure_hint,
+    verify_merged,
+)
+from .pr_resolution import (
+    DEFAULT_BRANCHES,
+    parse_pr_input,
+    resolve_pr_number,
+    validate_not_default_branch,
+)
 
 if TYPE_CHECKING:
     from ..github import GitHubClient, PRStatus
 
-DEFAULT_BRANCHES = {"main", "master", "develop", "development"}
-
-
-def _checkout_and_pull(branch: str) -> bool:
-    """Checkout a branch and pull latest changes. Returns True on success."""
-    try:
-        subprocess.run(
-            ["git", "checkout", branch], check=True, capture_output=True, text=True, timeout=30
-        )
-        subprocess.run(["git", "pull"], check=True, capture_output=True, text=True, timeout=120)
-        return True
-    except subprocess.CalledProcessError as e:
-        console.warning(f"Could not checkout/pull {branch}: {e.stderr.strip() or e}")
-        return False
-    except subprocess.TimeoutExpired:
-        console.warning(f"git operation timed out while checking out {branch}")
-        return False
-
-
-def _delete_local_branch(branch: str) -> None:
-    """Delete a local branch (best effort)."""
-    try:
-        subprocess.run(
-            ["git", "branch", "-D", branch],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        console.success(f"Deleted local branch {branch}")
-    except subprocess.CalledProcessError as e:
-        console.warning(f"Could not delete local branch {branch}: {e.stderr.strip() or e}")
-    except subprocess.TimeoutExpired:
-        console.warning(f"Timed out deleting local branch {branch}")
-
-
-def _validate_not_default_branch() -> None:
-    """Error if currently on a default branch (main, master, etc.)."""
-    branch = get_current_branch()
-    if branch and branch in DEFAULT_BRANCHES:
-        console.error(f"Cannot run merge-pr from default branch '{branch}'.")
-        console.info("Checkout the PR branch first: git checkout <branch>")
-        raise typer.Exit(1)
+# Re-exported for callers/tests that reach for them through this module.
+__all__ = ["DEFAULT_BRANCHES", "merge_pr", "parse_pr_input", "register_fix_pr_command"]
 
 
 def _wait_ci(
@@ -105,55 +74,76 @@ def _wait_ci(
         raise typer.Exit(1) from None
 
 
-def _confirm_merged(github_client: GitHubClient, pr_number: int) -> bool:
-    """Poll until the PR reports MERGED (bounded), distinguishing auto-merge from a real merge.
+def _merge_and_verify(
+    github_client: GitHubClient,
+    pr_number: int,
+    status: PRStatus,
+    admin: bool,
+    state_manager: StateManager,
+) -> None:
+    """Merge the PR, confirm it against GitHub, then clean up its head branch.
+
+    Nothing local is touched until GitHub reports the PR merged: ``gh pr merge``
+    can fail outright, and ``--auto`` can succeed while only *scheduling* a merge
+    a branch policy then blocks. Both used to read as success (#152), and the
+    cleanup that followed deleted the wrong branch (#153).
 
     Args:
         github_client: GitHub client for API calls.
-        pr_number: PR number to check.
+        pr_number: PR number to merge.
+        status: Latest known PR status (used as a fallback for branch names).
+        admin: Whether to pass ``--admin`` to override base-branch policy.
+        state_manager: State manager, so the session lock is released on exit.
 
-    Returns:
-        True if the PR is MERGED, False if not merged within the bound or the
-        state could not be confirmed (treated as auto-merge scheduled).
+    Raises:
+        typer.Exit: 1 if the merge failed or could not be confirmed.
     """
-    for attempt in range(1, 7):  # 6 polls * CI_POLL_INTERVAL = ~60s max
-        try:
-            if github_client.get_pr_status(pr_number).state == "MERGED":
-                return True
-        except Exception as e:
-            console.warning(f"Could not confirm merge state for PR #{pr_number}: {e}")
-            return False
-        if attempt < 6:
-            time.sleep(CI_POLL_INTERVAL)
-    return False
+    console.info(f"Merging PR #{pr_number}...")
+    try:
+        github_client.merge_pr(pr_number, admin=admin)
+    except Exception as e:
+        console.error(f"Merge failed: {e}")
+        hint = merge_failure_hint(str(e), admin, pr_number)
+        if hint:
+            console.info(hint)
+        console.info(f"PR #{pr_number} was left untouched; no branch was deleted.")
+        state_manager.release_session_lock()
+        raise typer.Exit(1) from None
 
+    verification = verify_merged(github_client, pr_number)
+    if not verification.merged:
+        console.error(f"PR #{pr_number} was NOT merged: {verification.detail}")
+        hint = merge_failure_hint(
+            f"{verification.detail} {verification.state or ''}", admin, pr_number
+        )
+        if hint is None and not admin and verification.state == "OPEN":
+            # Still open right after a merge that reported no error is almost
+            # always a policy block; --admin is the documented remedy here.
+            console.info(
+                f"If the base branch requires an approving review, re-run with --admin: "
+                f"claudetm merge-pr {pr_number} --admin"
+            )
+        elif hint:
+            console.info(hint)
+        console.info("No branch was deleted — the local branch still holds the PR's work.")
+        state_manager.release_session_lock()
+        raise typer.Exit(1) from None
 
-def _parse_pr_input(pr_input: str | None) -> int | None:
-    """Parse PR number from input (number or URL).
+    console.success(f"PR #{pr_number} merged successfully!")
 
-    Args:
-        pr_input: PR number as string, or GitHub PR URL, or None.
+    base_branch = verification.base_branch or getattr(status, "base_branch", None) or "main"
+    if not isinstance(base_branch, str):
+        base_branch = "main"
+    head_branch = verification.head_branch
+    if not isinstance(head_branch, str):
+        head_branch = None
 
-    Returns:
-        PR number as int, or None if not provided.
-    """
-    if pr_input is None:
-        return None
-
-    # Try as plain number
-    if pr_input.isdigit():
-        return int(pr_input)
-
-    # Try to extract from URL (e.g., https://github.com/owner/repo/pull/123)
-    match = re.search(r"/pull/(\d+)", pr_input)
-    if match:
-        return int(match.group(1))
-
-    # Try as number with # prefix
-    if pr_input.startswith("#") and pr_input[1:].isdigit():
-        return int(pr_input[1:])
-
-    return None
+    console.info(f"Checking out to {base_branch}...")
+    if not checkout_and_pull(base_branch):
+        console.warning(f"Skipping local branch cleanup — could not switch to {base_branch}")
+        return
+    console.success(f"Switched to {base_branch}")
+    delete_merged_branch(head_branch, base_branch, pr_number)
 
 
 def merge_pr(
@@ -171,12 +161,19 @@ def merge_pr(
         "--admin",
         help="Use 'gh pr merge --admin' to override base-branch policy when merging.",
     ),
+    create_pr: bool = typer.Option(
+        False,
+        "--create-pr",
+        help="If the current branch has no PR yet, push it and open one before merging.",
+    ),
 ) -> None:
     """Monitor a PR, fix CI failures and review comments, then merge.
 
     Waits for CI checks, fixes any failures using Claude, addresses review
     comments, resolves merge conflicts, and merges the PR. Loops until
-    everything is green.
+    everything is green. After a *verified* merge it switches back to the base
+    branch and deletes the merged PR's head branch (only when nothing local
+    would be lost).
 
     Examples:
         claudetm merge-pr              # Merge PR for current branch
@@ -185,35 +182,21 @@ def merge_pr(
         claudetm merge-pr 52 -m 5      # Max 5 fix iterations
         claudetm merge-pr 52 --no-merge # Fix but don't merge
         claudetm merge-pr 52 --admin   # Force-merge past base-branch policy
+        claudetm merge-pr --create-pr  # Open a PR for this branch, then merge it
     """
     # Lazy import to avoid circular imports
     from ..github import GitHubClient
 
     # Validate not on default branch (when no explicit PR given)
     if pr is None:
-        _validate_not_default_branch()
+        validate_not_default_branch()
 
     try:
         # Initialize GitHub client
         github_client = GitHubClient()
 
-        # Get PR number
-        pr_number = _parse_pr_input(pr)
-
-        # Fail fast if user provided invalid PR input
-        if pr is not None and pr_number is None:
-            console.error(f"Invalid PR input '{pr}'.")
-            console.info("Use a PR number or PR URL, e.g. claudetm merge-pr 123")
-            raise typer.Exit(1)
-
-        if pr_number is None:
-            # Try to detect from current branch (only when no PR input provided)
-            pr_number = github_client.get_pr_for_current_branch()
-            if pr_number is None:
-                console.error("No PR found for current branch.")
-                console.info("Specify a PR number: claudetm merge-pr 123")
-                raise typer.Exit(1)
-            console.success(f"Detected PR #{pr_number} for current branch")
+        # Which PR are we operating on? (explicit, current branch, or a new one)
+        pr_number = resolve_pr_number(github_client, pr, create_pr=create_pr)
 
         # Initialize credentials and agent
         cred_manager = CredentialManager()
@@ -368,35 +351,7 @@ def merge_pr(
                 state_manager.release_session_lock()
                 raise typer.Exit(1)
 
-            console.info(f"Merging PR #{pr_number}...")
-            merged_branch = get_current_branch()
-            try:
-                github_client.merge_pr(pr_number, admin=admin)
-            except Exception as e:
-                console.error(f"Merge failed: {e}")
-                console.info("You can merge manually.")
-                state_manager.release_session_lock()
-                raise typer.Exit(1) from None
-
-            if _confirm_merged(github_client, pr_number):
-                console.success(f"PR #{pr_number} merged successfully!")
-
-                # Switch back to base branch, pull, and delete the merged local branch
-                base_branch = status.base_branch or "main"
-                console.info(f"Checking out to {base_branch}...")
-                if _checkout_and_pull(base_branch):
-                    console.success(f"Switched to {base_branch}")
-                    if merged_branch and merged_branch != base_branch:
-                        _delete_local_branch(merged_branch)
-            else:
-                # Auto-merge was scheduled/enabled and will complete when checks
-                # pass. The branch is still needed, so skip local cleanup.
-                console.info(
-                    f"Auto-merge scheduled for PR #{pr_number}; "
-                    "it will merge automatically when checks pass."
-                )
-                state_manager.release_session_lock()
-                raise typer.Exit(0)
+            _merge_and_verify(github_client, pr_number, status, admin, state_manager)
         elif status.mergeable == "CONFLICTING":
             console.warning(f"PR #{pr_number} has merge conflicts - manual resolution required")
             state_manager.release_session_lock()

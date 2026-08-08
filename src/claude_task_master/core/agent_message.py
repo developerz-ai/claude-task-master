@@ -10,16 +10,20 @@ following the Single Responsibility Principle (SRP). It handles:
 subagent's messages through the same stream as the parent's, distinguished only
 by ``parent_tool_use_id`` (set inside a subagent, ``None`` at the top level).
 Accumulating those into ``result_text`` mixes every worker's narration into the
-one string callers treat as "what this session said" — which is read back as a
-hive completion manifest (``core/hive.py``) and distilled into ``context.md``
+one string callers treat as "what this session said" — which is scanned for the
+session's own completion/verification markers and distilled into ``context.md``
 (``core/loop_context.py``). Subagent text is therefore streamed for visibility
 but never accumulated; see :func:`_subagent_tool_use_id`.
+
+Streamed subagent lines are marked and colored per worker instance so several
+concurrent ``hive-worker``s stay separable — see :class:`~.console.SubagentPalette`.
 """
 
 import os
 from typing import TYPE_CHECKING, Any
 
 from . import console
+from .console import SubagentPalette
 
 if TYPE_CHECKING:
     from .logger import TaskLogger
@@ -85,6 +89,12 @@ class MessageProcessor:
         # tool_use_id -> subagent name, learned from the parent's own
         # Task/Agent tool call. Used only to label streamed subagent lines.
         self._subagent_names: dict[str, str] = {}
+        # Color + short discriminator per *worker instance*. Keyed by
+        # tool_use_id rather than agent name because the concurrent workers a
+        # lead spawns share one name; imported by symbol (not reached through
+        # the module-level ``console``) so tests that patch ``console`` to
+        # capture output still exercise the real labelling.
+        self._subagent_palette = SubagentPalette()
 
     def reset_result_state(self) -> None:
         """Clear captured terminal-result state before a new query.
@@ -99,6 +109,7 @@ class MessageProcessor:
         self.last_input_tokens = 0
         self.last_output_tokens = 0
         self._subagent_names = {}
+        self._subagent_palette.clear()
 
     def _note_subagent_spawn(self, block: Any, tool_input: Any) -> None:
         """Record the subagent name behind a Task/Agent tool call.
@@ -120,20 +131,32 @@ class MessageProcessor:
         name = tool_input.get("subagent_type") if isinstance(tool_input, dict) else None
         if isinstance(name, str) and name:
             self._subagent_names[tool_use_id] = name
+            # Claim the color/ordinal here rather than on the worker's first
+            # line, so ``#n`` counts workers in the order the lead spawned them
+            # — the order the reader just watched go past — instead of in the
+            # order they happened to speak.
+            self._subagent_palette.slot(tool_use_id)
 
     def _stream_prefix(self, subagent_id: str | None) -> str:
         """Console-only marker distinguishing subagent output from our own.
+
+        Each worker gets its own palette color and a ``#n`` discriminator, so
+        the several ``hive-worker``s a lead runs concurrently are separable
+        from each other and not merely from the lead. Color is applied to the
+        marker only, and suppressed when color is disabled — the marker also
+        ends up in redirected output, and escapes in a log file are noise.
 
         Args:
             subagent_id: The message's ``parent_tool_use_id``, or None.
 
         Returns:
             ``""`` for the session's own messages, so their output is
-            byte-identical to before; a short ``↳ [name]`` marker otherwise.
+            byte-identical to before; a ``↳ [name#n]`` marker otherwise.
         """
         if subagent_id is None:
             return ""
-        return f"↳ [{self._subagent_names.get(subagent_id, 'subagent')}] "
+        name = self._subagent_names.get(subagent_id, "subagent")
+        return self._subagent_palette.prefix(subagent_id, name)
 
     def process_message(self, message: Any, result_text: str) -> str:
         """Process a message from the query stream.
@@ -172,7 +195,7 @@ class MessageProcessor:
                     console.claude_text(f"{prefix}{block.text.strip()}", flush=True)
                     # A subagent's narration is visible but is not this
                     # session's output: accumulating it lets a worker's prose
-                    # (a stray completion manifest, say) speak for the lead.
+                    # (a stray "TASK COMPLETE", say) speak for the lead.
                     if subagent_id is None:
                         result_text += block.text
                 elif block_type == "ToolUseBlock":

@@ -5,9 +5,32 @@
 # that runs the unified server (REST API + MCP server).
 #
 # Build:   docker build -t claudetm .
-# Run:     docker run -p 8000:8000 -p 8080:8080 -v ~/.claude:/home/claudetm/.claude claudetm
+#
+# Agent credential (one time): the container authenticates with its OWN scoped,
+# rotatable API key, held in a claudetm "api-key" profile inside a named volume.
+# It must NEVER be given a human's ~/.claude/.credentials.json -- see the note
+# further down and docs/docker.md.
+#
+#   docker volume create claudetm-profiles
+#   docker run --rm \
+#     -v claudetm-profiles:/home/claudetm/.claudetm \
+#     -e CLAUDETM_API_KEY="$AGENT_API_KEY" \
+#     claudetm \
+#     claudetm profile add agent --type api-key \
+#       --base-url https://your-gateway.example/anthropic
+#
+# Run:
+#   docker run -p 8000:8000 -p 8080:8080 \
+#     -v claudetm-profiles:/home/claudetm/.claudetm \
+#     -e CLAUDETM_PROFILE=agent \
+#     -v "$(pwd)":/app/project \
+#     claudetm
 #
 # Environment Variables:
+#   CLAUDETM_PROFILE        - Required: name of the api-key profile to run as
+#   CLAUDETM_API_KEY        - Only for `claudetm profile add`: the agent's scoped
+#                             API key, read from the environment so it is never
+#                             baked into the image or a compose file
 #   CLAUDETM_PASSWORD       - Required: Password for API authentication
 #   CLAUDETM_SERVER_HOST    - Host to bind to (default: 0.0.0.0 in container)
 #   CLAUDETM_REST_PORT      - REST API port (default: 8000)
@@ -115,8 +138,18 @@ RUN groupadd --gid 1000 claudetm && \
 # Copy virtual environment from builder
 COPY --from=builder /opt/venv /opt/venv
 
-# Create directories for volumes
-RUN mkdir -p /home/claudetm/.claude /app/project && \
+# Create directories for volumes.
+#
+# /home/claudetm/.claudetm holds the claudetm profile registry -- the agent's own
+# scoped, rotatable API key. Mount a NAMED VOLUME here (claudetm-profiles), never
+# a human's ~/.claude: that directory holds a personal OAuth bearer token, so a
+# container given it runs as -- and bills -- that person's Claude account, cannot
+# be scoped down, and cannot be rotated without breaking their own login. That
+# has already leaked a token across developers once.
+#
+# The directory is created here (owned by claudetm) so the named volume inherits
+# non-root ownership and `claudetm profile add` can write to it.
+RUN mkdir -p /home/claudetm/.claudetm /app/project && \
     chown -R claudetm:claudetm /home/claudetm /app
 
 # Switch to non-root user

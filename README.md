@@ -36,11 +36,19 @@ pip install claude-task-master
 # Pull the official Docker image from GitHub Container Registry
 docker pull ghcr.io/developerz-ai/claude-task-master:latest
 
-# Run with Docker (requires Claude credentials mounted)
+# One time: give the agent its own scoped credential (never a human's ~/.claude)
+docker volume create claudetm-profiles
+docker run --rm -v claudetm-profiles:/home/claudetm/.claudetm \
+  -e CLAUDETM_API_KEY="$AGENT_API_KEY" \
+  ghcr.io/developerz-ai/claude-task-master:latest \
+  claudetm profile add agent --type api-key --base-url https://your-gateway.example/anthropic
+
+# Run with Docker
 docker run -d \
   --name claudetm \
   -p 8000:8000 \
-  -v ~/.claude:/home/claudetm/.claude:ro \
+  -v claudetm-profiles:/home/claudetm/.claudetm \
+  -e CLAUDETM_PROFILE=agent \
   -v $(pwd):/app/project \
   -v ~/.gitconfig:/home/claudetm/.gitconfig:ro \
   -v ~/.config/gh:/home/claudetm/.config/gh:ro \
@@ -62,7 +70,7 @@ claude
 claudetm doctor
 ```
 
-**For Docker users:** Ensure your `~/.claude/.credentials.json` exists before running the container, as Claude Task Master needs OAuth credentials to function.
+**For Docker users:** containers do **not** use your `~/.claude` — never bind-mount it into one. The agent runs under its own scoped, rotatable API key held in an `api-key` profile; see [Agent Credentials](./docs/docker.md#1-agent-credentials-claudetm).
 
 ### Profiles (multiple accounts / custom endpoints)
 
@@ -172,7 +180,7 @@ Claude Task Master uses the Claude Agent SDK to autonomously work on complex tas
 2. **Execute** - Work through each task, committing and pushing changes
 3. **Create PRs** - All work is pushed and submitted as pull requests
 4. **Handle CI** - Wait for checks, fix failures, address review comments
-5. **Merge** - Auto-merge when approved (configurable)
+5. **Merge** - Auto-merge once CI is green and review feedback is resolved (configurable)
 6. **Verify** - Confirm all success criteria are met
 7. **Adapt** - Accept dynamic plan updates via mailbox while working
 
@@ -375,7 +383,7 @@ Precedence (highest first): real environment variables, then the **active profil
 | `CLAUDETM_MAX_TURNS` | `400` | Max agent steps per session — a runaway backstop, not a working budget. Set `0` to disable. Overrunning retries the task rather than marking it done |
 | `CLAUDETM_STREAM_IDLE_TIMEOUT_SEC` | `1800` | Max silence between SDK stream messages before treating the stream as hung |
 | `CLAUDETM_POST_COMPLETION_IDLE_TIMEOUT_SEC` | `120` | Max wait for the final result message after the agent signals it's done |
-| `CLAUDETM_HIVE_MAX_PARALLEL` | `10` | Max concurrent `hive-worker` subagents under `--parallel-tasks` (1 lead + up to N workers) |
+| `CLAUDETM_HIVE_MAX_PARALLEL` | `10` | Safety ceiling on concurrent `hive-worker` subagents (1 lead + up to N workers) — a ceiling, not a target; the lead sizes its own team |
 
 Sessions are bounded in steps, not wall-clock: a wall-clock cap would punish a slow-but-healthy session (big test suite, slow CI) exactly as hard as a looping one. Use `--budget` for a per-session cost cap.
 
@@ -448,13 +456,13 @@ claudetm start "Your goal here" [OPTIONS]
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--model` | Model to use (sonnet, opus, haiku) | sonnet |
-| `--auto-merge/--no-auto-merge` | Auto-merge PRs when ready | True |
+| `--auto-merge/--no-auto-merge` | Auto-merge PRs once CI is green and review feedback is resolved (no approving review is required) | True |
 | `--max-sessions` | Limit number of sessions | unlimited |
 | `--prs` | Limit number of PRs to create | unlimited |
 | `--pause-on-pr` | Pause after creating PR | False |
 | `--resolve-conflicts/--no-resolve-conflicts` | Let an agent rebase onto the base and resolve merge conflicts (3 attempts, then block) | True |
 | `--sync-before-merge/--no-sync-before-merge` | Also rebase PRs that merely trail the base, so CI verifies the combined tree (3 attempts, then merge as-is) | False |
-| `--parallel-tasks/--no-parallel-tasks` | Run a PR group's remaining tasks as one "hive" session that fans disjoint-write-set tasks out to subagents | False |
+| `--parallel/--no-parallel` | Let each work session split its one task across `hive-worker` subagents with disjoint write sets | True |
 | `--admin` | Merge via `gh pr merge --admin`, overriding base-branch protection (requires repo-admin rights) | False |
 | `--budget` | Max spending per session in USD | unlimited |
 
@@ -476,23 +484,29 @@ claudetm resume --admin               # or turn it on mid-run
 
 It requires repo-admin rights and it is a real override — the review requirement is bypassed, not satisfied. On a repo where those reviews are the point, leave it off and merge by hand.
 
-`--admin` also force-advances a CI **timeout** (`CI_POLL_TIMEOUT`, 120 min) to the review stage instead of blocking. It does not skip CI, ignore failures, or merge a conflicted PR: failing checks still route to the fix loop, and conflicts still go to the resolver.
+`--admin` also force-advances a check **timeout** (`CI_POLL_TIMEOUT`, 120 min) instead of blocking — at the CI stage and at the review stage alike, both of which block by default. It does not skip CI, ignore failures, or merge a conflicted PR: failing checks still route to the fix loop, and conflicts still go to the resolver.
 
-#### Running a PR group in parallel (`--parallel-tasks`)
+It also does **not** override a **`CHANGES_REQUESTED`** review. Auto-merge never requires an *approving* review — that is the whole reason `--admin` exists — but a reviewer who actively requested changes is a human pushing back, and claudetm refuses to merge over that even with `--admin`. Clear it on GitHub by approving or dismissing the review; the run continues on its own from the next cycle.
 
-Normally one work session does one task. With `--parallel-tasks`, the remaining incomplete tasks of a PR group are handed to a single **hive lead** session instead:
+#### Parallel work inside a task (`--parallel`, on by default)
+
+Each work session still owns exactly one task from the plan. What `--parallel` adds is that the agent running that session is a **lead**: if *its own task* breaks into pieces with **disjoint write sets**, it hands those pieces to `hive-worker` subagents running concurrently and does everything that overlaps itself.
 
 ```bash
-claudetm start "Port 20 view models to the new API" --parallel-tasks
+claudetm start "Port 20 view models to the new API"     # parallel by default
+claudetm start "Tweak the retry backoff" --no-parallel  # strictly one agent per session
+claudetm config-update --no-parallel                    # turn it off mid-run
 ```
 
-The lead reads the whole batch, works out which tasks have **disjoint write sets**, and fans those out to `hive-worker` subagents running concurrently in this same checkout; anything that overlaps it does itself, in order. Workers only read and write files — the lead is the only thing that runs git, so it commits, pushes and opens the PR for the group.
+**The lead decides how many workers it needs — including none.** Nothing outside the session can tell how big a task is before it runs, so the split is the lead's judgement, not a number claudetm computes. Most tasks come back with zero workers, and that is the right answer: fan-out is not free, because every worker pays a full cold start re-reading the repo. Spawning four agents for four one-line edits costs more than doing them inline.
 
-Cap the fan-out with `CLAUDETM_HIVE_MAX_PARALLEL` (default 10 = one lead plus up to 10 workers).
+**Everyone shares this one checkout.** No git worktrees, no clones, no per-agent copies — the work has to land in the tree the lead commits from. Each worker gets an exclusive file set in its brief, and that is the only lock there is; a worker that needs a file it does not own stops and reports instead of reaching across.
 
-**When it helps:** a group of many genuinely independent edits — one file or one module each, no shared surface. That is where the per-agent cold start is paid back several times over.
+**Only the lead runs git.** Workers read, edit and run narrow checks; they never stage, commit, branch or push. The lead waits for every worker to finish, verifies the changes on disk itself, runs the full project gate, and only then commits, pushes and opens the PR — exactly as a single-agent session does.
 
-**When it does not:** a group of two or three small, tangled tasks. Spawning an agent per one-line edit costs more than doing it inline, which is why hive mode stays off unless you ask for it and does not engage at all below 2 remaining tasks in the group, or with `--pr-per-task` (that mode opens a PR per task, so there is nothing to batch).
+Cap the fan-out with `CLAUDETM_HIVE_MAX_PARALLEL` (default 10 = one lead plus up to 10 workers). It is a safety ceiling, not a target.
+
+Use `--no-parallel` when you want every session strictly single-agent — debugging a run, or a repo where concurrent edits are hard to reason about.
 
 ### Common Workflows
 
@@ -707,10 +721,11 @@ Deploy Claude Task Master to a server with git credentials and have it:
 # Server startup
 docker run -d \
   -p 8000:8000 \
-  -v ~/.claude:/root/.claude:ro \
-  -v ~/.gitconfig:/root/.gitconfig:ro \
-  -v ~/.config/gh:/root/.config/gh:ro \
-  -v ~/workspace:/root/workspace \
+  -v claudetm-profiles:/home/claudetm/.claudetm \
+  -e CLAUDETM_PROFILE=agent \
+  -v ~/.gitconfig:/home/claudetm/.gitconfig:ro \
+  -v ~/.config/gh:/home/claudetm/.config/gh:ro \
+  -v ~/workspace:/home/claudetm/workspace \
   ghcr.io/developerz-ai/claude-task-master:latest
 
 # External system sends work
@@ -915,7 +930,7 @@ Docker Container:
 │                                                                       │
 │  Volumes:                                                            │
 │  - /app/project → project directory                                 │
-│  - /root/.claude → Claude credentials (~/.claude)                   │
+│  - /home/claudetm/.claudetm → agent api-key profile (scoped key)    │
 │                                                                       │
 │  Env: CLAUDETM_PASSWORD, CLAUDETM_WEBHOOK_URL, ...                   │
 └─────────────────────────────────────────────────────────────────────┘

@@ -32,6 +32,14 @@ class PRStatus(BaseModel):
     url: str = ""
     head_branch: str = ""
     merged_at: str | None = None
+    # GitHub's aggregate review verdict: APPROVED, CHANGES_REQUESTED,
+    # REVIEW_REQUIRED, or None when there is no verdict (no review submitted, or
+    # reviews not required on the base). None is also what an unreadable or
+    # absent field degrades to — a review-state lookup must never block a merge.
+    # Only CHANGES_REQUESTED changes any behaviour (see
+    # ``_MergeStage._handle_requested_changes``); the merge gate itself remains
+    # "CI green + no unresolved review threads", never "approved".
+    review_decision: str | None = None
 
 
 class GitHubClientProtocol(Protocol):

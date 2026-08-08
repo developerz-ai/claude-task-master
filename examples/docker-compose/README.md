@@ -20,8 +20,19 @@ cd examples/docker-compose
 # Copy the example you want to use
 cp basic-production.yml docker-compose.yml
 
+# One-time: create the agent's own scoped credential in a named volume
+docker volume create claudetm-profiles
+docker run --rm \
+  -v claudetm-profiles:/home/claudetm/.claudetm \
+  -e CLAUDETM_API_KEY="$AGENT_API_KEY" \
+  ghcr.io/developerz-ai/claude-task-master:latest \
+  claudetm profile add agent --type api-key \
+    --base-url https://your-gateway.example/anthropic
+
 # Create .env file with your configuration
+# (the API key is NOT stored here - it lives in the claudetm-profiles volume)
 cat > .env <<EOF
+CLAUDETM_PROFILE=agent
 CLAUDETM_PASSWORD=your-secure-password
 CLAUDETM_WEBHOOK_URL=https://webhook.example.com/claudetm
 CLAUDETM_WEBHOOK_SECRET=your-webhook-secret
@@ -51,16 +62,43 @@ Before using any of these examples, ensure you have:
    docker compose version  # Should be 2.0+
    ```
 
-2. **Claude Code subscription and credentials**
-   ```bash
-   # Authenticate with Claude CLI
-   pip install claude-cli
-   claude
-   /login
+2. **A scoped agent credential (an API key + base URL)**
 
-   # Verify credentials
-   ls -la ~/.claude/.credentials.json
+   The container authenticates with its **own** credential — never a human's
+   `~/.claude/.credentials.json`. That file holds a personal OAuth bearer token:
+   a container given it runs as, and bills, that person's Claude account, the
+   token cannot be scoped down, and rotating it breaks their own Claude login.
+   This has already caused a real cross-developer credential leak.
+
+   Issue one key per consumer, revocable and rotatable on its own. Where the key
+   comes from is outside this repository — it may be an Anthropic API key created
+   for the agent, or a key minted by a central Claude gateway your organisation
+   runs; provisioning is documented wherever that gateway lives.
+
+   Store it in a claudetm `api-key` profile inside a named volume (one time,
+   non-interactive — `profile add` reads `CLAUDETM_API_KEY` from the environment
+   instead of prompting):
+
+   ```bash
+   docker volume create claudetm-profiles
+
+   docker run --rm \
+     -v claudetm-profiles:/home/claudetm/.claudetm \
+     -e CLAUDETM_API_KEY="$AGENT_API_KEY" \
+     ghcr.io/developerz-ai/claude-task-master:latest \
+     claudetm profile add agent --type api-key \
+       --base-url https://your-gateway.example/anthropic
+
+   # Verify
+   docker run --rm -v claudetm-profiles:/home/claudetm/.claudetm \
+     ghcr.io/developerz-ai/claude-task-master:latest \
+     claudetm profile list
    ```
+
+   Omit `--base-url` to talk to `api.anthropic.com` directly. All examples then
+   mount `claudetm-profiles:/home/claudetm/.claudetm` and select the profile with
+   `CLAUDETM_PROFILE`. See [docs/docker.md](../../docs/docker.md) for the full
+   setup, rotation and troubleshooting guide.
 
 3. **Git configuration**
    ```bash
@@ -240,10 +278,10 @@ All examples support these environment variables:
 
 ### Required (Production)
 - `CLAUDETM_PASSWORD` - Password for authentication
+- `CLAUDETM_PROFILE` - Name of the agent's api-key profile in the `claudetm-profiles` volume (default: `agent`)
 
 ### Optional
 - `PROJECT_PATH` - Path to your project (default: current directory)
-- `CLAUDE_CREDENTIALS_PATH` - Path to ~/.claude directory (default: ~/.claude)
 - `CLAUDETM_LOG_LEVEL` - Log level: debug, info, warning, error (default: info)
 - `CLAUDETM_WEBHOOK_URL` - Webhook endpoint URL
 - `CLAUDETM_WEBHOOK_SECRET` - Webhook HMAC secret
@@ -258,9 +296,12 @@ All examples support these environment variables:
 # Authentication (REQUIRED for production)
 CLAUDETM_PASSWORD=your-secure-password-min-16-chars
 
+# Agent credential: the api-key profile to run under.
+# The key itself lives in the claudetm-profiles volume, never in this file.
+CLAUDETM_PROFILE=agent
+
 # Project Configuration
 PROJECT_PATH=/home/user/my-project
-CLAUDE_CREDENTIALS_PATH=/home/user/.claude
 
 # Server Configuration
 CLAUDETM_LOG_LEVEL=info
@@ -344,9 +385,15 @@ docker compose logs claudetm
 # Check configuration
 docker compose config
 
-# Verify volumes
-docker compose exec claudetm ls -la /home/claudetm/.claude/
+# Verify the agent credential is present and active
+docker compose exec claudetm claudetm profile list
+docker compose exec claudetm ls -la /home/claudetm/.claudetm/
 ```
+
+A "Claude CLI credentials not found" error means no api-key profile was found —
+the `claudetm-profiles` volume is missing or empty, or `CLAUDETM_PROFILE` names a
+profile that was never created. Re-run the profile setup in Prerequisites; do
+**not** work around it by mounting a personal `~/.claude`.
 
 ### Authentication errors
 

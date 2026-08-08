@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, cast
 
 from .. import console
+from ..git_branch import delete_merged_branch
 from ..shutdown import interruptible_sleep
 from .merge_cleanup import _MergeCleanup
 
@@ -49,6 +50,52 @@ class _MergeStage(_MergeCleanup):
         if not interruptible_sleep(delay):
             return None
         return None
+
+    def _handle_requested_changes(self, state: TaskState, pr_status: PRStatus) -> int | None:
+        """Refuse to auto-merge a PR a reviewer has requested changes on.
+
+        The real auto-merge gate is "CI green + no unresolved review threads" —
+        it has never included an approval, and it must not start: this repo's own
+        ``main`` requires one approving review that no unattended run can obtain,
+        which is exactly why ``--admin`` exists. ``CHANGES_REQUESTED`` is the one
+        review state that is different: a human actively pushed back, so it only
+        fires when someone acted, and merging over it is wrong.
+
+        ``--admin`` deliberately does *not* override this. ``--admin`` is passed
+        on every run here to get past branch protection, so honouring it would
+        delete the gate. The condition lives on GitHub, not in the working tree,
+        so a human clears it by dismissing the review or approving — after which
+        the next cycle proceeds on its own (unlike a local, deterministic block,
+        which ``resume --force`` could never clear).
+
+        ``APPROVED`` / ``REVIEW_REQUIRED`` / no decision at all behave exactly as
+        before, as does an unreadable decision: the field degrades to ``None``
+        rather than wedging a merge, matching ``get_pr_behind_by``.
+
+        Args:
+            state: Current task state.
+            pr_status: Freshly fetched status for the PR.
+
+        Returns:
+            1 if the run was blocked, None to continue toward the merge.
+        """
+        if not state.options.auto_merge:
+            return None
+        decision = pr_status.review_decision
+        if not isinstance(decision, str) or decision.upper() != "CHANGES_REQUESTED":
+            return None
+
+        console.error(
+            f"PR #{state.current_pr} has changes requested by a reviewer - "
+            "refusing to auto-merge over an active review"
+        )
+        console.detail(
+            "Address the review and have the reviewer approve, or dismiss the "
+            "review on GitHub, then: claudetm resume"
+        )
+        state.status = "blocked"
+        self.state_manager.save_state(state)
+        return 1
 
     def _handle_stale_branch(self, state: TaskState, pr_status: PRStatus) -> int | None | object:
         """Route a PR whose branch is behind its base to the sync agent session.
@@ -179,6 +226,14 @@ class _MergeStage(_MergeCleanup):
             self._merge_unknown_attempts[pr_number] = attempt
             return self._merge_status_retry(state, f"Error checking mergeable status: {e}")
 
+        # A reviewer pressing "Request changes" is the one review state that must
+        # stop an auto-merge. Checked before the sync below so a PR that cannot
+        # merge does not first spend an agent session and a CI round chasing its
+        # base.
+        requested_changes = self._handle_requested_changes(state, pr_status)
+        if requested_changes is not None:
+            return requested_changes
+
         # Mergeable and reviewed — but is it merging the *current* base? A PR that
         # went green against a base that has since moved can still break main.
         stale = self._handle_stale_branch(state, pr_status)
@@ -247,6 +302,47 @@ class _MergeStage(_MergeCleanup):
             self.state_manager.save_state(state)
             return 2
 
+    def _delete_merged_pr_branch(
+        self,
+        pr_number: int,
+        head_branch: str | None,
+        base_branch: str,
+        merge_confirmed: bool,
+    ) -> None:
+        """Clean up the merged PR's local head branch, if that is safe.
+
+        Was "delete whatever branch we happen to be on, with ``git branch -D``"
+        — the defect issue #153 reported against the ``merge-pr`` command, where
+        it destroyed an *unrelated open PR's* branch. The orchestrator is
+        normally sitting on the PR's own branch, which is why this never bit
+        here; "normally" is not a safety property, and ``-D`` discards unmerged
+        commits with nothing but the reflog to recover them.
+
+        The policy itself is not restated here: it is
+        :func:`core.git_branch.delete_merged_branch`, one decision point for both
+        callers — this stage and ``claudetm merge-pr`` (try ``git branch -d`` and
+        let git refuse; force only when the branch is squash-merged *and* fully
+        published; keep it and print git's reason otherwise; refuse the base
+        branch; a branch that is not checked out locally is a no-op, never an
+        error).
+
+        Args:
+            pr_number: The merged PR, for messages.
+            head_branch: The PR's head branch, from GitHub. None when it could
+                not be identified — nothing is deleted then.
+            base_branch: The PR's base branch, which is never deleted.
+            merge_confirmed: Whether GitHub reports the PR as MERGED. Deleting
+                on anything less is deleting a branch whose work may still be
+                the only copy.
+        """
+        if not merge_confirmed:
+            console.detail(
+                f"PR #{pr_number} is not confirmed merged - leaving local branches alone"
+            )
+            return
+
+        delete_merged_branch(head_branch, base_branch, pr_number)
+
     def handle_merged_stage(
         self,
         state: TaskState,
@@ -299,14 +395,20 @@ class _MergeStage(_MergeCleanup):
 
         # Clear PR context files and checkout to base branch (only if PR was merged)
         if state.current_pr is not None:
-            # Capture the PR branch before we switch away so we can delete it
-            merged_branch = self._get_current_branch()
-
+            # The branch to clean up is the PR's *head* branch, read from GitHub
+            # along with the base — never "whatever we happen to be on" (#153).
+            # The same fetch answers whether the PR really merged, which is what
+            # licenses deleting anything at all; a failed fetch leaves all three
+            # unknown, so nothing is deleted.
             base_branch = "main"
+            head_branch: str | None = None
+            merge_confirmed = False
             try:
                 # Get base branch from PR before clearing
                 pr_status = self.github_client.get_pr_status(state.current_pr)
                 base_branch = pr_status.base_branch
+                head_branch = pr_status.head_branch or None
+                merge_confirmed = pr_status.state == "MERGED"
             except Exception:
                 pass  # Use default main
 
@@ -336,9 +438,9 @@ class _MergeStage(_MergeCleanup):
             self._clear_transient(f"checkout_base:{base_branch}")
             console.success(f"Switched to {base_branch}")
 
-            # Delete the merged local branch (best effort, skip if same as base)
-            if merged_branch and merged_branch != base_branch:
-                self._delete_local_branch(merged_branch)
+            self._delete_merged_pr_branch(
+                state.current_pr, head_branch, base_branch, merge_confirmed
+            )
 
         # Check if we should run release verification
         # (auto_merge + enable_release + release guide exists)

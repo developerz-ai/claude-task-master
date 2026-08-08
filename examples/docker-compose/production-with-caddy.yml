@@ -39,13 +39,19 @@ services:
       - "8080"
 
     volumes:
-      - "${CLAUDE_CREDENTIALS_PATH:-~/.claude}:/home/claudetm/.claude:ro"
+      # Agent credential - REQUIRED. Named volume holding the api-key profile
+      # (a scoped, rotatable key issued to the agent). Never mount a human's
+      # ~/.claude: that is a personal OAuth token, so the agent would run as and
+      # bill that person - it leaked across developers once already.
+      - "claudetm-profiles:/home/claudetm/.claudetm"
       - "${PROJECT_PATH:-.}:/app/project"
       - "${HOME}/.gitconfig:/home/claudetm/.gitconfig:ro"
       - "${HOME}/.config/gh:/home/claudetm/.config/gh:ro"
 
     environment:
-      - CLAUDETM_PASSWORD=${CLAUDETM_PASSWORD:?Error: CLAUDETM_PASSWORD is required}
+      # Agent credential - REQUIRED. The api-key profile inside claudetm-profiles.
+      - CLAUDETM_PROFILE=${CLAUDETM_PROFILE:-agent}
+      - "CLAUDETM_PASSWORD=${CLAUDETM_PASSWORD:?CLAUDETM_PASSWORD is required}"
       - CLAUDETM_SERVER_HOST=0.0.0.0
       - CLAUDETM_REST_PORT=8000
       - CLAUDETM_MCP_PORT=8080
@@ -92,7 +98,7 @@ services:
       - caddy_config:/config
 
     environment:
-      - DOMAIN=${DOMAIN:?Error: DOMAIN is required}
+      - "DOMAIN=${DOMAIN:?DOMAIN is required}"
       - CLAUDETM_UPSTREAM=claudetm:8000
       - MCP_UPSTREAM=claudetm:8080
 
@@ -116,6 +122,10 @@ services:
       - claudetm-internal
 
 volumes:
+  # Created once out-of-band (see "Agent credential" at the bottom) so the
+  # credential survives `docker compose down`.
+  claudetm-profiles:
+    external: true
   caddy_data:
     driver: local
   caddy_config:
@@ -159,7 +169,22 @@ networks:
 #
 # Optional:
 #   PROJECT_PATH=/path/to/project
-#   CLAUDE_CREDENTIALS_PATH=~/.claude
+#   CLAUDETM_PROFILE=agent          # api-key profile in claudetm-profiles
 #   CLAUDETM_LOG_LEVEL=info
+#
+# =============================================================================
+# Agent credential (one time)
+# =============================================================================
+#
+#   docker volume create claudetm-profiles
+#   docker run --rm \
+#     -v claudetm-profiles:/home/claudetm/.claudetm \
+#     -e CLAUDETM_API_KEY="$AGENT_API_KEY" \
+#     ghcr.io/developerz-ai/claude-task-master:latest \
+#     claudetm profile add agent --type api-key \
+#       --base-url https://your-gateway.example/anthropic
+#
+# The key is read from the environment at creation time; keep it in your secret
+# store, never in this file, in .env, or in the image.
 #
 # =============================================================================

@@ -8,6 +8,15 @@
 # - Proper volume mounts
 # - Restart policy
 #
+# One-time setup - the agent's own scoped credential (never a human's ~/.claude):
+#   docker volume create claudetm-profiles
+#   docker run --rm \
+#     -v claudetm-profiles:/home/claudetm/.claudetm \
+#     -e CLAUDETM_API_KEY="$AGENT_API_KEY" \
+#     ghcr.io/developerz-ai/claude-task-master:latest \
+#     claudetm profile add agent --type api-key \
+#       --base-url https://your-gateway.example/anthropic
+#
 # Usage:
 #   CLAUDETM_PASSWORD=your-password docker compose -f basic-production.yml up -d
 #
@@ -26,8 +35,11 @@ services:
       - "${CLAUDETM_MCP_PORT:-8080}:8080"
 
     volumes:
-      # Claude credentials - REQUIRED
-      - "${CLAUDE_CREDENTIALS_PATH:-~/.claude}:/home/claudetm/.claude:ro"
+      # Agent credential - REQUIRED. Named volume holding the api-key profile
+      # (a scoped, rotatable key issued to the agent). Never mount a human's
+      # ~/.claude: that is a personal OAuth token, so the agent would run as and
+      # bill that person - it leaked across developers once already.
+      - "claudetm-profiles:/home/claudetm/.claudetm"
 
       # Project directory
       - "${PROJECT_PATH:-.}:/app/project"
@@ -39,8 +51,11 @@ services:
       - "${HOME}/.config/gh:/home/claudetm/.config/gh:ro"
 
     environment:
+      # Agent credential - REQUIRED. The api-key profile inside claudetm-profiles.
+      - CLAUDETM_PROFILE=${CLAUDETM_PROFILE:-agent}
+
       # Authentication - REQUIRED for production
-      - CLAUDETM_PASSWORD=${CLAUDETM_PASSWORD:?Error: CLAUDETM_PASSWORD is required}
+      - "CLAUDETM_PASSWORD=${CLAUDETM_PASSWORD:?CLAUDETM_PASSWORD is required}"
 
       # Server configuration
       - CLAUDETM_SERVER_HOST=0.0.0.0
@@ -74,6 +89,12 @@ services:
         max-size: "10m"
         max-file: "3"
 
+volumes:
+  # Created once out-of-band (see the one-time setup above) so the agent's
+  # credential survives `docker compose down`.
+  claudetm-profiles:
+    external: true
+
 networks:
   default:
     name: claudetm-production
@@ -84,8 +105,8 @@ networks:
 #
 # Environment Variables (.env file or export):
 #   CLAUDETM_PASSWORD=your-secure-password          # REQUIRED
+#   CLAUDETM_PROFILE=agent                          # Agent api-key profile
 #   PROJECT_PATH=/path/to/project                   # Optional
-#   CLAUDE_CREDENTIALS_PATH=~/.claude               # Optional
 #   CLAUDETM_LOG_LEVEL=info                         # Optional
 #   CLAUDETM_WEBHOOK_URL=https://webhook.example.com # Optional
 #   CLAUDETM_WEBHOOK_SECRET=secret                  # Optional
