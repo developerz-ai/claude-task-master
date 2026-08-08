@@ -15,6 +15,38 @@ if TYPE_CHECKING:
     from .state import StateManager
 
 
+def _run_ids_from_checks(check_details: list[dict]) -> list[int]:
+    """Parse the distinct workflow run IDs out of a PR's failing checks.
+
+    Failing checks only: a passing check's run ID would otherwise be picked up
+    whenever a *different* check fails.
+
+    Args:
+        check_details: The PR status' per-check dicts.
+
+    Returns:
+        Sorted run IDs, empty when none could be parsed.
+    """
+    from ..github.check_tolerance import is_failed_check  # noqa: PLC0415
+
+    run_ids: set[int] = set()
+    for check in check_details:
+        if not is_failed_check(check):
+            continue
+        # `or ""`: a StatusContext's targetUrl is often null, so the key is
+        # present-but-None and would break the `in` check — aborting run-ID
+        # extraction for every other failing check too.
+        details_url = check.get("url") or ""
+        # URL format: .../actions/runs/123456/job/789
+        if "/runs/" in details_url:
+            try:
+                run_ids.add(int(details_url.split("/runs/")[1].split("/")[0]))
+            except (IndexError, ValueError):
+                continue
+
+    return sorted(run_ids)
+
+
 class _PRContextCIMixin:
     """Mixin providing CI log download/save helpers to PRContextManager.
 
@@ -28,6 +60,34 @@ class _PRContextCIMixin:
     # ------------------------------------------------------------------
     # CI helpers
     # ------------------------------------------------------------------
+
+    def failing_run_ids(self, pr_number: int | None) -> list[int] | None:
+        """Return the workflow run IDs behind a PR's failing checks.
+
+        One PR commonly fans out to several workflows, so a red PR usually has
+        several failing runs. Callers that need to act on the failure — read
+        its logs, decide whether it is infrastructural, re-run it — have to see
+        all of them: acting on one and ignoring the rest reports on whichever
+        run happened to sort first, not on the failure.
+
+        Args:
+            pr_number: The PR number.
+
+        Returns:
+            Sorted run IDs; ``[]`` when the PR has no failing run to act on, and
+            ``None`` when GitHub could not be asked. The two must stay distinct:
+            a caller that reads a failed status lookup as "no runs" turns a
+            momentary API blip into "nothing to re-run", which is a block.
+        """
+        if pr_number is None:
+            return []
+
+        try:
+            pr_status = self.github_client.get_pr_status(pr_number)
+        except Exception:
+            return None
+
+        return _run_ids_from_checks(pr_status.check_details)
 
     def save_ci_failures(self, pr_number: int | None, *, _also_save_comments: bool = True) -> None:
         """Save CI failure logs to files for Claude to read.
@@ -70,18 +130,7 @@ class _PRContextCIMixin:
             # Extract run IDs from *failing* checks only (distinct set).
             # Avoids picking up a passing check's run ID when a different check fails.
             failing_checks = [check for check in pr_status.check_details if is_failed_check(check)]
-            run_ids: set[int] = set()
-            for check in failing_checks:
-                # `or ""`: a StatusContext's targetUrl is often null, so the
-                # key is present-but-None and would break the `in` check —
-                # aborting run-ID extraction for every other failing check too.
-                details_url = check.get("url") or ""
-                # URL format: .../actions/runs/123456/job/789
-                if "/runs/" in details_url:
-                    try:
-                        run_ids.add(int(details_url.split("/runs/")[1].split("/")[0]))
-                    except (IndexError, ValueError):
-                        continue
+            run_ids = _run_ids_from_checks(pr_status.check_details)
 
             if not run_ids:
                 # Log available check URLs for debugging
@@ -94,10 +143,7 @@ class _PRContextCIMixin:
                 )
                 return
 
-            run_id = max(run_ids)  # Use the most-recent run among failing ones
-            _console.detail(
-                f"Extracted run ID {run_id} from failing checks (candidates: {sorted(run_ids)})"
-            )
+            _console.detail(f"Failing checks span runs: {run_ids}")
 
             # Get repository info for CILogDownloader
             _console.detail("Getting repository info via gh CLI...")
@@ -106,29 +152,48 @@ class _PRContextCIMixin:
 
             downloader = CILogDownloader(repo=repo, timeout=60)
 
-            # Download failed job logs using CILogDownloader
-            _console.detail(f"Downloading CI logs for run {run_id} from {repo}...")
-
-            # Clear old CI logs only after we have confirmed run_id and repo —
+            # Clear old CI logs only after we have confirmed run IDs and repo —
             # preserves existing data if the status/repo calls fail above.
             if ci_dir.exists():
                 shutil.rmtree(ci_dir)
             ci_dir.mkdir(parents=True, exist_ok=True)
 
-            # Download and save logs chunked (20KB per file ~5K tokens)
-            logs = downloader.download_failed_run_logs(
-                run_id=run_id,
-                output_dir=ci_dir,
-                max_chars_per_file=20_000,
-            )
+            # Every failing run, not just one of them. A PR fans out to several
+            # workflows; downloading only the highest run ID silently drops the
+            # workflow that actually broke whenever a *different* one also went
+            # red, and hands the fix agent an empty ci/ directory to work from.
+            total_jobs = 0
+            for run_id in run_ids:
+                _console.detail(f"Downloading CI logs for run {run_id} from {repo}...")
+                try:
+                    # Download and save logs chunked (20KB per file ~5K tokens).
+                    # One directory per run: job names are only unique *within* a
+                    # workflow, and a repo whose workflows each define a "typecheck"
+                    # job would otherwise have the last download overwrite the rest —
+                    # leaving the agent reading one workflow's logs under a name that
+                    # implies all of them.
+                    logs = downloader.download_failed_run_logs(
+                        run_id=run_id,
+                        output_dir=ci_dir / f"run-{run_id}",
+                        max_chars_per_file=20_000,
+                    )
+                except Exception as e:
+                    # One unreadable run must not cost us the others' logs.
+                    _console.detail(f"No logs for run {run_id}: {e}")
+                    continue
+                total_jobs += len(logs)
 
-            if logs:
-                _console.detail(f"Downloaded CI logs to {ci_dir} ({len(logs)} jobs)")
+            if total_jobs:
+                _console.detail(f"Downloaded CI logs to {ci_dir} ({total_jobs} jobs)")
             else:
-                # Checks failed but no GitHub Actions jobs failed (e.g., external checks)
+                # Checks are red but no GitHub Actions job produced a log. Either
+                # the failures are external (CodeRabbit and friends), or no job
+                # ever got far enough to write one — which is what a saturated or
+                # broken runner pool looks like.
                 _console.warning(
-                    f"CI checks failed but no GitHub Actions job logs available for run {run_id}. "
-                    f"Failures may be from external checks (CodeRabbit, etc.)"
+                    f"CI checks failed but no GitHub Actions job logs available for "
+                    f"runs {run_ids}. Failures may be from external checks "
+                    f"(CodeRabbit, etc.) or from jobs that never started."
                 )
 
         except Exception as e:
@@ -143,4 +208,4 @@ class _PRContextCIMixin:
             self.save_pr_comments(pr_number, _also_save_ci=False)  # type: ignore[attr-defined]
 
 
-__all__ = ["_PRContextCIMixin"]
+__all__ = ["_PRContextCIMixin", "_run_ids_from_checks"]

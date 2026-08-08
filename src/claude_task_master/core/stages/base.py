@@ -38,6 +38,13 @@ class StageHandlerBase:
     MERGE_CONFIRM_POLLS = 6
     # Max consecutive CI-fix cycles before blocking for manual intervention.
     MAX_CI_FIX_ATTEMPTS = 3
+    # Max times the failed jobs are re-run rather than handed to a fix agent —
+    # when the failure never executed a step (a saturated or broken runner pool)
+    # or when the fix session produced no commit, leaving nothing to re-trigger
+    # CI with. Two: a flake clears on the first retry, and a pool that is still
+    # dropping jobs on the second is an outage a human has to wait out, not
+    # something more retries or an agent session will fix.
+    MAX_CI_RERUN_ATTEMPTS = 2
     # Max conflict-resolution agent sessions per PR before blocking. A conflict the
     # agent cannot resolve in this many passes is not going to resolve itself.
     MAX_CONFLICT_FIX_ATTEMPTS = 3
