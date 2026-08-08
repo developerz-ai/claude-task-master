@@ -733,6 +733,23 @@ def _enable_color(monkeypatch) -> None:
     monkeypatch.setattr("sys.stdout", _TtyStdout())
 
 
+def _iter_strings(value: object) -> list[str]:
+    """Every string reachable inside *value*, so escapes can be matched raw.
+
+    Logger payloads nest strings inside tuples and dicts (``log_tool_use("Read",
+    {"file_path": ...})``). Stringifying the container instead would re-escape
+    them — ``repr`` turns a real ESC byte into the four characters ``\\x1b`` —
+    and silently defeat any search for an ANSI sequence.
+    """
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [s for item in value.items() for s in _iter_strings(item)]
+    if isinstance(value, list | tuple):
+        return [s for item in value for s in _iter_strings(item)]
+    return []
+
+
 def _spawn(block_id: str, subagent_type: str = "hive-worker") -> MagicMock:
     """Build the lead's own Agent tool call that spawns a worker."""
     msg = _make_assistant_message(
@@ -872,10 +889,16 @@ class TestSubagentColoring:
                 _make_subagent_message([_make_tool_result_block("tu_1")], "toolu_a"), ""
             )
 
-        for call in (
-            mock_logger.log_tool_use.call_args_list + mock_logger.log_tool_result.call_args_list
-        ):
-            assert ANSI_RE.search(repr(call)) is None
+        calls = mock_logger.log_tool_use.call_args_list + mock_logger.log_tool_result.call_args_list
+        # Guard the guard: an empty list would make every assertion below vacuous.
+        # Three: the lead's own Agent spawn, then the worker's tool use and result.
+        assert len(calls) == 3
+        for call in calls:
+            # Never ``repr(call)``: repr renders ESC as the four characters
+            # ``\x1b``, which ANSI_RE — matching the real 0x1B byte — can never
+            # find, so the assertion would pass on fully-colored output.
+            for text in _iter_strings(call.args) + _iter_strings(call.kwargs):
+                assert ANSI_RE.search(text) is None
 
     def test_logger_calls_are_unchanged(self, monkeypatch):
         """The exact log_tool_use/log_tool_result payloads are as before."""

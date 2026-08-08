@@ -789,6 +789,14 @@ services:
         max-size: "10m"
         max-file: "3"
 
+volumes:
+  # Created once out-of-band (see "Agent Credentials" above) so the agent's
+  # credential survives `docker compose down`. Set CLAUDETM_PROFILES_VOLUME to
+  # give a second deployment on the same host its own credential.
+  claudetm-profiles:
+    external: true
+    name: ${CLAUDETM_PROFILES_VOLUME:-claudetm-profiles}
+
 networks:
   default:
     name: claudetm-network
@@ -878,10 +886,18 @@ services:
 
     environment:
       - "CLAUDETM_PROFILE=${CLAUDETM_PROFILE:-agent}"
-      - "CLAUDETM_PASSWORD=${CLAUDETM_PASSWORD}"
 
     secrets:
       - claudetm_password
+
+    # claudetm reads its API password from CLAUDETM_PASSWORD (or
+    # CLAUDETM_PASSWORD_HASH) only — there is no password-file option — so the
+    # mounted secret has to become that variable before the server starts.
+    # Without this shim the variable is empty, and an empty password means
+    # authentication is simply not installed on a server bound to 0.0.0.0.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - 'export CLAUDETM_PASSWORD="$$(cat /run/secrets/claudetm_password)"; exec claudetm-server'
 
 volumes:
   claudetm-profiles:
@@ -1126,16 +1142,29 @@ docker logs claudetm
 
 #### Agent Credential Not Found
 
-**Symptom:** "Claude CLI credentials not found" error — claudetm found no api-key profile and fell
-back to looking for OAuth credentials that a container should not have.
+Two different failures, with two different messages — tell them apart before fixing anything.
+
+**Symptom A:** `Profile 'agent' not found. Run 'claudetm profile list' to see profiles.`
+
+`CLAUDETM_PROFILE` names a profile that is not in the registry. This is a hard failure:
+`ProfileManager.resolve_active` raises `ProfileNotFoundError` rather than falling back to anything,
+deliberately — silently running under the ambient credentials would mean billing the wrong account.
+Usually the `claudetm-profiles` volume is empty (never created, or a fresh anonymous volume because
+the named one was not declared `external`), or `CLAUDETM_PROFILE` is misspelled.
+
+**Symptom B:** `Credentials not found at /home/claudetm/.claude/.credentials.json`
+
+No profile is selected *at all* — `CLAUDETM_PROFILE` is unset and no active profile is stored — so
+claudetm falls back to the ambient OAuth credentials file, which a container should not have. Set
+`CLAUDETM_PROFILE` to the api-key profile; do not mount a human's `~/.claude` to satisfy this.
 
 **Solutions:**
-1. Verify the profile exists and is active:
+1. See which profiles actually exist, and which one is active:
    ```bash
    docker exec claudetm claudetm profile list
    ```
 
-2. Check the profile volume is mounted and `CLAUDETM_PROFILE` is set:
+2. Check the profile volume is mounted and `CLAUDETM_PROFILE` names one of those profiles:
    ```bash
    docker exec claudetm ls -la /home/claudetm/.claudetm/
    docker exec claudetm env | grep CLAUDETM_PROFILE

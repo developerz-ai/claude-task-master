@@ -367,3 +367,30 @@ def test_config_update_request_validation():
     # Invalid max_sessions (too high)
     with pytest.raises(ValidationError):  # Pydantic validation error
         ConfigUpdateRequest(max_sessions=10000)
+
+
+def test_patch_config_rejects_removed_parallel_tasks(api_client, api_complete_state):
+    """The removed `parallel_tasks` name 422s instead of being silently dropped.
+
+    `--parallel-tasks` became `--parallel` and the default flipped False -> True.
+    Pydantic ignores unknown keys, so a client still sending `parallel_tasks:
+    false` would otherwise get a 200 and the opposite of what it asked for.
+    """
+    response = api_client.patch("/config", json={"parallel_tasks": False})
+
+    assert response.status_code == 422
+    assert "parallel" in response.text
+
+
+def test_config_update_request_rejects_removed_parallel_tasks():
+    """The model itself raises, not just the route."""
+    with pytest.raises(ValidationError, match="parallel_tasks"):
+        ConfigUpdateRequest.model_validate({"parallel_tasks": False})
+
+
+def test_config_update_request_still_ignores_other_unknown_fields():
+    """Only *removed* names are rejected; pydantic's default stands otherwise."""
+    request = ConfigUpdateRequest.model_validate({"auto_merge": False, "unrelated_key": 1})
+
+    assert request.auto_merge is False
+    assert request.to_update_dict() == {"auto_merge": False}

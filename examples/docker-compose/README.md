@@ -100,6 +100,31 @@ Before using any of these examples, ensure you have:
    `CLAUDETM_PROFILE`. See [docs/docker.md](../../docs/docker.md) for the full
    setup, rotation and troubleshooting guide.
 
+   The host-side volume name is `CLAUDETM_PROFILES_VOLUME` (default
+   `claudetm-profiles`). Deployments that share it share one agent credential, so
+   give each deployment its own value — and create the volume under that name:
+
+   ```bash
+   docker volume create my-deployment-profiles
+   # ...then set CLAUDETM_PROFILES_VOLUME=my-deployment-profiles in that
+   # deployment's .env, and use it in the `docker run` lines above.
+   ```
+
+   `development.yml` already defaults to a separate volume,
+   `claudetm-profiles-dev`, so a dev container running without authentication
+   cannot reach the production agent's key. Create it with its own profile:
+
+   ```bash
+   docker volume create claudetm-profiles-dev
+
+   docker run --rm \
+     -v claudetm-profiles-dev:/home/claudetm/.claudetm \
+     -e CLAUDETM_API_KEY="$DEV_AGENT_API_KEY" \
+     ghcr.io/developerz-ai/claude-task-master:latest \
+     claudetm profile add agent-dev --type api-key \
+       --base-url https://your-gateway.example/anthropic
+   ```
+
 3. **Git configuration**
    ```bash
    # Set up git config if not already done
@@ -281,6 +306,7 @@ All examples support these environment variables:
 - `CLAUDETM_PROFILE` - Name of the agent's api-key profile in the `claudetm-profiles` volume (default: `agent`)
 
 ### Optional
+- `CLAUDETM_PROFILES_VOLUME` - Host-side name of the volume holding that profile (default: `claudetm-profiles`; `claudetm-profiles-dev` in `development.yml`). Use a distinct value per deployment so they do not share one agent credential
 - `PROJECT_PATH` - Path to your project (default: current directory)
 - `CLAUDETM_LOG_LEVEL` - Log level: debug, info, warning, error (default: info)
 - `CLAUDETM_WEBHOOK_URL` - Webhook endpoint URL
@@ -390,10 +416,14 @@ docker compose exec claudetm claudetm profile list
 docker compose exec claudetm ls -la /home/claudetm/.claudetm/
 ```
 
-A "Claude CLI credentials not found" error means no api-key profile was found —
-the `claudetm-profiles` volume is missing or empty, or `CLAUDETM_PROFILE` names a
-profile that was never created. Re-run the profile setup in Prerequisites; do
-**not** work around it by mounting a personal `~/.claude`.
+`Profile '<name>' not found` means `CLAUDETM_PROFILE` names a profile that is not
+in the registry — usually the volume is missing or empty, or the name is
+misspelled. claudetm fails outright here rather than falling back to ambient
+credentials, on purpose. A `Credentials not found at .../.claude/.credentials.json`
+error means the opposite: *no* profile is selected, so it fell back to an OAuth
+file the container should not have. Re-run the profile setup in Prerequisites and
+set `CLAUDETM_PROFILE`; do **not** work around either by mounting a personal
+`~/.claude`.
 
 ### Authentication errors
 

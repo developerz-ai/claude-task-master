@@ -84,9 +84,12 @@ services:
 
 volumes:
   # Created once out-of-band (see "Agent credential" below) so the credential
-  # survives `docker compose down`.
+  # survives `docker compose down`. Deliberately a *different* host volume from
+  # the production examples: sharing one would put the production key in reach
+  # of a dev container that is running without authentication.
   claudetm-profiles:
     external: true
+    name: ${CLAUDETM_PROFILES_VOLUME:-claudetm-profiles-dev}
 
 networks:
   claudetm-dev:
@@ -137,11 +140,12 @@ networks:
 # =============================================================================
 #
 # Even in development the container gets its own scoped key - not your personal
-# Claude login:
+# Claude login, and not the production agent's key either (hence the separate
+# claudetm-profiles-dev volume):
 #
-#   docker volume create claudetm-profiles
+#   docker volume create claudetm-profiles-dev
 #   docker run --rm \
-#     -v claudetm-profiles:/home/claudetm/.claudetm \
+#     -v claudetm-profiles-dev:/home/claudetm/.claudetm \
 #     -e CLAUDETM_API_KEY="$AGENT_API_KEY" \
 #     ghcr.io/developerz-ai/claude-task-master:latest \
 #     claudetm profile add agent-dev --type api-key \

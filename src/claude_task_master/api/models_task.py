@@ -20,6 +20,7 @@ from claude_task_master.api.models_common import (
     TaskStatus,
     WebhookStatusInfo,
     WorkflowStage,
+    _RemovedFieldGuard,
     _validate_model_field,
 )
 
@@ -101,7 +102,7 @@ class ResumeRequest(BaseModel):
     )
 
 
-class ConfigUpdateRequest(BaseModel):
+class ConfigUpdateRequest(_RemovedFieldGuard):
     """Request model for updating task configuration.
 
     Only specified fields are updated; others retain their current values.
@@ -199,7 +200,7 @@ class ConfigUpdateRequest(BaseModel):
         return updates
 
 
-class TaskInitRequest(BaseModel):
+class TaskInitRequest(_RemovedFieldGuard):
     """Request model for initializing a new task.
 
     Attributes:

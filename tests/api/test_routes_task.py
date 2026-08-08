@@ -364,3 +364,22 @@ def test_task_init_request_model_validation():
     assert request1.max_sessions == 1
     request2 = TaskInitRequest(goal="Test", max_sessions=1000)
     assert request2.max_sessions == 1000
+
+
+def test_post_task_init_rejects_removed_parallel_tasks(api_client_empty_state, api_empty_state_dir):
+    """`parallel_tasks` was removed, not aliased — sending it must 422.
+
+    Pydantic drops unknown keys, so without an explicit guard a client asking
+    for `parallel_tasks: false` would get a 200 and a run with `parallel: true`,
+    i.e. precisely the parallel execution it asked to avoid.
+    """
+    assert not api_empty_state_dir.exists()
+
+    response = api_client_empty_state.post(
+        "/task/init",
+        json={"goal": "Small fix", "parallel_tasks": False},
+    )
+
+    assert response.status_code == 422
+    assert "parallel" in response.text
+    assert not api_empty_state_dir.exists()

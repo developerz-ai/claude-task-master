@@ -121,9 +121,12 @@ services:
 
 volumes:
   # Created once out-of-band (see "Agent credential" at the bottom) so the
-  # credential survives `docker compose down`.
+  # credential survives `docker compose down`. The host-side name is
+  # overridable: two deployments on one host that share it also share one
+  # agent credential, so give each its own CLAUDETM_PROFILES_VOLUME.
   claudetm-profiles:
     external: true
+    name: ${CLAUDETM_PROFILES_VOLUME:-claudetm-profiles}
 
 networks:
   claudetm-internal:

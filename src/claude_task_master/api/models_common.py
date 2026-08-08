@@ -2,6 +2,7 @@
 
 Shared foundations used by the other api/models_*.py sub-modules:
 - Validation helpers (_validate_within_workspace, _validate_model_field)
+- Request base rejecting removed field names (_RemovedFieldGuard)
 - Enums (TaskStatus, WorkflowStage, LogLevel, LogFormat)
 - Base response models (ErrorResponse, APIInfo)
 """
@@ -9,13 +10,16 @@ Shared foundations used by the other api/models_*.py sub-modules:
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 __all__ = [
     # Helpers
     "_validate_within_workspace",
     "_validate_model_field",
+    "REMOVED_REQUEST_FIELDS",
+    "_RemovedFieldGuard",
     # Enums
     "TaskStatus",
     "WorkflowStage",
@@ -84,6 +88,44 @@ def _validate_model_field(value: str) -> str:
 
     validate_model(value)
     return value
+
+
+#: Request field names deleted by a breaking change, mapped to their replacement.
+#: These are **not** aliases: the field was removed because the design behind it
+#: was, so a client still sending the old name is asking for something that no
+#: longer exists and must hear about it.
+REMOVED_REQUEST_FIELDS: dict[str, str] = {
+    # 0.1.83's ``--parallel-tasks`` (batch a PR group's tasks into one session)
+    # was replaced by ``parallel`` (one session may split its OWN task). Different
+    # mechanism, and the default flipped False -> True, so a silently-dropped
+    # ``parallel_tasks: false`` would start exactly the parallel run it asked
+    # claudetm not to.
+    "parallel_tasks": "parallel",
+}
+
+
+class _RemovedFieldGuard(BaseModel):
+    """Request-model base that 422s on a field name this API used to have.
+
+    Pydantic ignores unknown keys, so without this a client posting a removed
+    field gets a 200 and the *new* field's default — the failure is invisible on
+    both ends. Only names in :data:`REMOVED_REQUEST_FIELDS` are rejected; other
+    unknown keys keep pydantic's default (ignored), because request bodies in the
+    wild legitimately carry keys these models never declared.
+    """
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_removed_fields(cls, data: Any) -> Any:
+        """Reject removed field names before pydantic can discard them."""
+        if isinstance(data, dict):
+            for removed, replacement in REMOVED_REQUEST_FIELDS.items():
+                if removed in data:
+                    raise ValueError(
+                        f"'{removed}' was removed and is not an alias for "
+                        f"'{replacement}'; send '{replacement}' instead"
+                    )
+        return data
 
 
 # =============================================================================
