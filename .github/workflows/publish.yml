@@ -59,6 +59,24 @@ jobs:
             exit 1
           fi
 
+      # The bash wrapper carries its own SCRIPT_VERSION and is what `claudetm
+      # --version` prints first, so a drifted copy tells the user they are on a
+      # release they are not on. It went unchecked here and duly drifted; two
+      # copies exist (repo root and the packaged one), and the packaged copy is
+      # the one that ships, so both are verified.
+      - name: Verify bash wrapper version
+        run: |
+          TAG_VERSION=${{ steps.get_version.outputs.version }}
+          for wrapper in bin/claudetm src/claude_task_master/bin/claudetm; do
+            SCRIPT_VERSION=$(grep -Po '(?<=^SCRIPT_VERSION=")[^"]+' "$wrapper")
+            echo "$wrapper version: $SCRIPT_VERSION"
+            if [ "$SCRIPT_VERSION" != "$TAG_VERSION" ]; then
+              echo "Error: Version mismatch!"
+              echo "$wrapper has $SCRIPT_VERSION but tag is v$TAG_VERSION"
+              exit 1
+            fi
+          done
+
   test:
     name: Run Tests
     runs-on: blacksmith-2vcpu-ubuntu-2404

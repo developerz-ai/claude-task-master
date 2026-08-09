@@ -68,9 +68,12 @@ mypy .                    # Type check
 ## Releasing
 
 ```bash
-# 1. Update version in all places:
+# 1. Update version in all places (CI's verify job checks the first three):
 #    - pyproject.toml (version = "X.Y.Z")
 #    - src/claude_task_master/__init__.py (__version__ = "X.Y.Z")
+#    - bin/claudetm AND src/claude_task_master/bin/claudetm (SCRIPT_VERSION="X.Y.Z")
+#      Two copies; the packaged one ships. It is what `claudetm --version` prints
+#      first, so a stale value reports a release the user is not on.
 #    - CHANGELOG.md (add entry, update links at bottom)
 
 # 2. Commit and tag
