@@ -1262,3 +1262,109 @@ class TestErrorHandling:
         # Should still call agent with default goal
         call_kwargs = mock_agent.run_work_session.call_args.kwargs
         assert "Complete the assigned task" in call_kwargs["task_description"]
+
+
+# =============================================================================
+# Continuation note - a re-entered task must not start from scratch
+# =============================================================================
+
+
+class TestContinuationNote:
+    """A work session re-entering a task is told the tree already holds work.
+
+    claudetm is built to be left running for hours or days, so the run *will*
+    be interrupted mid-session: Ctrl+C at the wrong moment, an OOM kill, the
+    machine going down. Whatever the agent had written is still in the shared
+    checkout, uncommitted.
+
+    The old note fired only on ``task_finish_attempts`` — a counter the
+    orchestrator increments after it *observes* an unfinished session. A killed
+    process never gets to increment anything, so ``claudetm resume`` re-entered
+    the task with a prompt that said nothing about the diff sitting in front of
+    it. The agent then guessed: redo the work, or throw it away.
+
+    The signal is now the repository itself, the same evidence every other stage
+    trusts over a report.
+    """
+
+    def _note(self, runner, *, dirty: str | None, attempts: int, options) -> str:
+        now = datetime.now().isoformat()
+        state = TaskState(
+            status="working",
+            current_task_index=0,
+            options=options,
+            task_finish_attempts=attempts,
+            created_at=now,
+            updated_at=now,
+            run_id="test-run",
+            model="sonnet",
+        )
+        with patch.object(type(runner), "_leftover_changes", return_value=dirty):
+            note: str = runner._continuation_note(state)
+        return note
+
+    def test_clean_tree_and_no_retry_says_nothing(self, task_runner, sample_task_options) -> None:
+        """The common case must stay byte-identical to a plain first run."""
+        options = TaskOptions(**sample_task_options)
+        assert self._note(task_runner, dirty=None, attempts=0, options=options) == ""
+
+    def test_dirty_tree_after_a_hard_kill_is_explained(
+        self, task_runner, sample_task_options
+    ) -> None:
+        """The case the counter could never see: nothing ran to count it."""
+        options = TaskOptions(**sample_task_options)
+        note = self._note(task_runner, dirty=" M src/app.py", attempts=0, options=options)
+        assert "Continuing an interrupted session" in note
+        assert "Finish" in note or "carry on" in note
+
+    def test_leftovers_are_shown_not_just_described(self, task_runner, sample_task_options) -> None:
+        """Naming the files costs nothing and orients the agent immediately."""
+        options = TaskOptions(**sample_task_options)
+        note = self._note(task_runner, dirty=" M src/app.py", attempts=0, options=options)
+        assert "src/app.py" in note
+
+    def test_never_discard_the_leftovers(self, task_runner, sample_task_options) -> None:
+        """Destroying them is unrecoverable; it is the one always-wrong outcome."""
+        options = TaskOptions(**sample_task_options)
+        note = self._note(task_runner, dirty=" M src/app.py", attempts=0, options=options)
+        assert "git reset --hard" in note
+        assert "git stash" in note
+
+    def test_orchestrated_retry_still_says_retry(self, task_runner, sample_task_options) -> None:
+        """The graceful path keeps its attempt number — it is useful context."""
+        options = TaskOptions(**sample_task_options)
+        note = self._note(task_runner, dirty=" M src/app.py", attempts=2, options=options)
+        assert "Retry 2" in note
+
+    def test_retry_is_announced_even_when_the_tree_reads_clean(
+        self, task_runner, sample_task_options
+    ) -> None:
+        """A session cut off after committing still needs to know it is a retry."""
+        options = TaskOptions(**sample_task_options)
+        note = self._note(task_runner, dirty=None, attempts=1, options=options)
+        assert "Retry 1" in note
+
+    def test_unreadable_tree_is_not_treated_as_leftovers(
+        self, task_runner, sample_task_options
+    ) -> None:
+        """No git, not a repo, a timeout — never invent work that isn't there."""
+        options = TaskOptions(**sample_task_options)
+        assert self._note(task_runner, dirty=None, attempts=0, options=options) == ""
+
+    def test_probe_failure_reads_as_no_leftovers(self, task_runner) -> None:
+        """_leftover_changes swallows every failure rather than ending the run."""
+        with patch(
+            "claude_task_master.core.task_runner_session.subprocess.run",
+            side_effect=OSError("no git"),
+        ):
+            assert task_runner._leftover_changes() is None
+
+    def test_a_huge_leftover_list_is_truncated_with_a_marker(
+        self, task_runner, sample_task_options
+    ) -> None:
+        """A killed codegen run can leave thousands of paths; the task must survive."""
+        options = TaskOptions(**sample_task_options)
+        huge = "\n".join(f" M src/file{i}.py" for i in range(5000))
+        note = self._note(task_runner, dirty=huge, attempts=0, options=options)
+        assert "truncated" in note
+        assert len(note) < 6000

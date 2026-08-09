@@ -217,6 +217,7 @@ class AgentWrapper:
         allow_rebase: bool = False,
         parallel: bool = False,
         max_parallel: int = DEFAULT_HIVE_MAX_PARALLEL,
+        machine: str = "",
     ) -> dict[str, Any]:
         """Run a work session with full tools.
 
@@ -238,6 +239,9 @@ class AgentWrapper:
             parallel: True when the agent may split this ONE task across
                 ``hive-worker`` subagents. False (the default) keeps the work
                 prompt byte-identical to the single-agent session.
+            machine: One-line description of the machine the run is on, passed
+                through to the fan-out brief so the lead sizes its team against
+                real capacity. Ignored unless ``parallel``.
             max_parallel: Safety ceiling on concurrent workers, never a target.
 
         Returns:
@@ -259,6 +263,7 @@ class AgentWrapper:
             allow_rebase=allow_rebase,
             parallel=parallel,
             max_parallel=max_parallel,
+            machine=machine,
         )
 
     def run_release_check(

@@ -26,6 +26,7 @@ def build_work_prompt(
     *,
     parallel: bool = False,
     max_parallel: int = DEFAULT_HIVE_MAX_PARALLEL,
+    machine: str = "",
 ) -> str:
     """Build the work session prompt.
 
@@ -54,6 +55,10 @@ def build_work_prompt(
             the single-agent one.
         max_parallel: Safety ceiling on concurrent workers, never a target.
             Ignored unless ``parallel``.
+        machine: One-line description of the machine the run is on, so the lead
+            can size its team against real capacity rather than guess. Measured
+            by the caller (this module stays pure); empty omits it. Ignored
+            unless ``parallel``.
 
     Returns:
         Complete work session prompt.
@@ -124,7 +129,8 @@ Completion report: 3-5 lines. What changed, not how."""
     # How (and whether) to split this one task across workers.
     if fan_out:
         builder.add_section(
-            hive_text.FANOUT_SECTION_TITLE, hive_text.build_fanout_section(max_parallel)
+            hive_text.FANOUT_SECTION_TITLE,
+            hive_text.build_fanout_section(max_parallel, machine),
         )
 
     # Context section
@@ -246,13 +252,9 @@ def _build_full_workflow_execution(target_branch: str = "main") -> str:
 
 **4. Make changes** — Edit/Write files. Follow the coding style from `CLAUDE.md`. Match existing patterns. Stay focused on this task.
 
-**5. Verify work** — run the repo's tests + lint (whatever it uses):
-```bash
-pytest                   # Python
-npm test                 # JS
-ruff check . && mypy .   # Python lint/types
-eslint . && tsc          # JS lint/types
-```
+**5. Verify work** — run this repo's own test and lint commands, over the whole project, not a subset. They are in the
+coding style guide above, `CLAUDE.md`, or the project's own task runner / build config — read
+them from there rather than guessing a command for the language.
 Foreground only. Never background a check and end your turn waiting on it — the session dies there and your work is lost uncommitted.
 
 **6. Commit** —
@@ -311,13 +313,9 @@ def _build_push_only_execution(target_branch: str = "main", allow_rebase: bool =
 
 **4. Make changes** — Edit/Write files. Follow the coding style from `CLAUDE.md`. Match existing patterns. Stay focused on the issues raised.
 
-**5. Verify work** — run the repo's tests + lint:
-```bash
-pytest                   # Python
-npm test                 # JS
-ruff check . && mypy .   # Python lint/types
-eslint . && tsc          # JS lint/types
-```
+**5. Verify work** — run this repo's own test and lint commands, over the whole project, not a subset. They are in the
+coding style guide above, `CLAUDE.md`, or the project's own task runner / build config — read
+them from there rather than guessing a command for the language.
 Foreground only. Never background a check and end your turn waiting on it — the session dies there and your work is lost uncommitted.
 
 **6. Commit** —
@@ -348,13 +346,9 @@ def _build_commit_only_execution() -> str:
 
 **4. Make changes** — Edit/Write files. Follow the coding style from `CLAUDE.md`. Match existing patterns. Stay focused on this task.
 
-**5. Verify work** — run the repo's tests + lint:
-```bash
-pytest                   # Python
-npm test                 # JS
-ruff check . && mypy .   # Python lint/types
-eslint . && tsc          # JS lint/types
-```
+**5. Verify work** — run this repo's own test and lint commands, over the whole project, not a subset. They are in the
+coding style guide above, `CLAUDE.md`, or the project's own task runner / build config — read
+them from there rather than guessing a command for the language.
 Foreground only. Never background a check and end your turn waiting on it — the session dies there and your work is lost uncommitted.
 
 **6. Commit** —

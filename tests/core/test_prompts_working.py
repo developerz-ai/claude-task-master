@@ -1106,37 +1106,42 @@ class TestBuildWorkPromptEdgeCases:
 
 
 class TestVerificationCommands:
-    """Tests for verification commands in execution section."""
+    """The verify step names no toolchain — claudetm runs on any project.
 
-    def test_pytest_mentioned(self) -> None:
-        """Test pytest is mentioned for Python tests."""
-        result = build_work_prompt("Any task")
-        assert "pytest" in result
+    The prompt used to carry a four-line menu of concrete commands (one per
+    language it guessed at). On a project outside that menu the menu is noise at
+    best and a wrong command at worst, and it is redundant everywhere else: the
+    real commands are already in front of the agent, in the coding style guide
+    generated from the project's own ``CLAUDE.md``. So the prompt states the
+    *idea* — run this repo's whole test and lint gate — and says where to find
+    the commands.
+    """
 
-    def test_npm_test_mentioned(self) -> None:
-        """Test npm test is mentioned for JS tests."""
+    def test_tells_the_agent_to_run_the_repos_own_gate(self) -> None:
         result = build_work_prompt("Any task")
-        assert "npm test" in result
+        assert "this repo's own test and lint commands" in result
 
-    def test_ruff_mentioned(self) -> None:
-        """Test ruff is mentioned for Python linting."""
+    def test_points_at_where_the_commands_live(self) -> None:
+        """Not a guess — the style guide, CLAUDE.md, or the project's config."""
         result = build_work_prompt("Any task")
-        assert "ruff" in result
+        assert "coding style guide" in result
+        assert "CLAUDE.md" in result
 
-    def test_mypy_mentioned(self) -> None:
-        """Test mypy is mentioned for Python types."""
+    def test_demands_the_whole_project_not_a_subset(self) -> None:
+        """A narrower gate than CI's is the drift that ships a red commit."""
         result = build_work_prompt("Any task")
-        assert "mypy" in result
+        assert "over the whole project, not a subset" in result
 
-    def test_eslint_mentioned(self) -> None:
-        """Test eslint is mentioned for JS linting."""
-        result = build_work_prompt("Any task")
-        assert "eslint" in result
-
-    def test_tsc_mentioned(self) -> None:
-        """Test tsc is mentioned for TypeScript."""
-        result = build_work_prompt("Any task")
-        assert "tsc" in result
+    def test_names_no_language_toolchain(self) -> None:
+        """No stack-specific command may reappear in any of the three modes."""
+        for params in (
+            {"task_description": "Any task"},
+            {"task_description": "Any task", "create_pr": False},
+            {"task_description": "Any task", "push_only": True},
+        ):
+            rendered = build_work_prompt(**params)
+            for command in ("pytest", "npm test", "ruff", "mypy", "eslint", "cargo", "bundle"):
+                assert command not in rendered, f"{command!r} leaked back into the prompt"
 
 
 # =============================================================================
@@ -1291,32 +1296,38 @@ def _parallel_prompt(**overrides: Any) -> str:
 
 
 class TestParallelOffIsByteIdentical:
-    """The single-agent path must not regress by a single byte.
+    """The single-agent path must not drift by a single byte unintentionally.
 
-    The digests below were taken from the prompt as it stood *before* any
-    parallelism existed. They are the whole point of `parallel` defaulting to
-    False here: every caller that does not opt in — every fix session, conflict
-    session, recovery session — gets exactly the prompt it got before. A failure
-    here means the single-agent path changed; re-read the diff rather than
-    re-recording the hash.
+    This is the whole point of `parallel` defaulting to False: every caller that
+    does not opt in — every fix session, conflict session, recovery session —
+    renders a prompt with no trace of the hive in it. The digests pin that path
+    so a change to the fan-out brief can never leak into it, and so an edit
+    elsewhere in the builder cannot quietly reshape the prompt every session
+    pays for.
+
+    They are *recorded*, not sacred: a deliberate change to the shared prompt
+    text changes every digest here at once, which is the signal to re-read the
+    diff and re-record. A change to only some of them, or a digest moving while
+    the fan-out brief was the only thing edited, is the leak this test exists to
+    catch.
     """
 
     BASELINES: dict[str, tuple[dict[str, Any], str]] = {
         "plain": (
             {"task_description": "Any task"},
-            "3489392e32bb94a469c432f509aa45fce187984da13ce9e38994a9745e76ab09",
+            "c266487f72d2acfad13b38ecf19aac0689c28e58ab62319c44b7e43bfe46fabb",
         ),
         "commit_only": (
             {"task_description": "Task", "create_pr": False},
-            "e5defd36799725ebaffaca581275cf4a3f5a255180387d0bdf9410a2e79f4944",
+            "9c5d7722456e4a428837dd25102673c7e9fcce9720237b9688399903240f8b5a",
         ),
         "push_only": (
             {"task_description": "Task", "push_only": True},
-            "827e4f31b4577bd849d08c760ab477907afc7e555fe8555865a1030795b445d7",
+            "4527b53782a26c00d91c778a49a31c231519dd32d9fceba698dd9f3e51339e43",
         ),
         "push_only_rebase": (
             {"task_description": "Task", "push_only": True, "allow_rebase": True},
-            "79727e06da77e3a2522972b04c1299d42117bbdea753d5bac60e36afde57576d",
+            "5adecee5af4e04344966edd7e6571bb485ee57cd5c82326722d991ac251b5e05",
         ),
         "everything": (
             {
@@ -1336,7 +1347,7 @@ class TestParallelOffIsByteIdentical:
                 "target_branch": "develop",
                 "coding_style": "## Naming\n- snake_case",
             },
-            "2921e6de49c9ed439a2ed544520547be74ade2de3af67bf42355330bac53692d",
+            "b7f26bdeac63accb63ac789dd6fb4cb246f8a1a595d435d02e803ad88b6e38ed",
         ),
     }
 
@@ -1493,8 +1504,20 @@ class TestFanOutRules:
 
     def test_full_gate_is_the_leads_job(self) -> None:
         result = _parallel_prompt()
-        assert "narrow checks on their own files" in result
-        assert "FULL project gate once" in result
+        assert "you run the full gate once at the end" in result
+        assert "The repo-wide commands are yours alone" in result
+
+    def test_lead_decides_whether_workers_may_check_at_all(self) -> None:
+        """Concurrent test/lint runs are a property of the project, not a rule.
+
+        Some projects happily run several scoped test files at once; others
+        share one database, one port, or one build directory and serialize by
+        force. Only the lead can see which this is, so it decides and writes the
+        answer into each brief — including "none", which is a fine answer.
+        """
+        result = _parallel_prompt()
+        assert "you say so in its brief" in result
+        assert "the exact scoped command that worker may run, or explicitly" in result
 
     def test_unfanned_work_stays_with_the_lead(self) -> None:
         result = _parallel_prompt()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from typing import TYPE_CHECKING
 
 from . import console
@@ -9,7 +10,7 @@ from .agent_exceptions import AgentError
 from .agent_models import TaskComplexity, parse_task_complexity
 from .config_loader import get_config
 from .console import clear_task_context, set_task_context
-from .hive import hive_max_parallel
+from .hive import describe_machine, hive_max_parallel
 from .task_runner_errors import WorkSessionError
 
 if TYPE_CHECKING:
@@ -17,6 +18,28 @@ if TYPE_CHECKING:
     from .logger import TaskLogger
     from .state import StateManager, TaskState
     from .task_group import ParsedTask, TaskGroup
+
+
+#: Ceiling on the leftover-changes preview spliced into a work prompt. The text
+#: is interpolated from ``git status``, whose size is a property of the repo, not
+#: of claudetm: a session killed mid-way through a generated-file rewrite can
+#: leave thousands of paths behind. Uncapped, that one block would crowd out the
+#: task itself. Truncation is marked rather than silent, so neither the agent nor
+#: a human reading the log mistakes a cut-off list for the whole tree.
+LEFTOVER_PREVIEW_MAX_LINES = 40
+LEFTOVER_PREVIEW_MAX_CHARS = 2000
+_TRUNCATION_MARKER = "… [truncated — run `git status` yourself for the full list]"
+
+
+def _capped(status: str) -> str:
+    """Trim a porcelain status to something that fits in a prompt."""
+    lines = status.splitlines()
+    truncated = len(lines) > LEFTOVER_PREVIEW_MAX_LINES
+    text = "\n".join(lines[:LEFTOVER_PREVIEW_MAX_LINES])
+    if len(text) > LEFTOVER_PREVIEW_MAX_CHARS:
+        text = text[:LEFTOVER_PREVIEW_MAX_CHARS]
+        truncated = True
+    return f"{text}\n{_TRUNCATION_MARKER}" if truncated else text
 
 
 class _TaskRunnerSessionMixin:
@@ -53,6 +76,94 @@ class _TaskRunnerSessionMixin:
     def _get_parsed_tasks(self, plan: str) -> tuple[list[ParsedTask], list[TaskGroup]]:
         """Get parsed tasks and groups, with caching."""
         raise NotImplementedError
+
+    # ------------------------------------------------------------------
+
+    def _leftover_changes(self) -> str | None:
+        """``git status --porcelain`` for the project tree, or None if unreadable.
+
+        Probed in the project directory rather than the process cwd, which a
+        caller may have moved. A failed probe (no git, not a repo, timeout) is
+        never read as leftovers: inventing a half-finished tree out of a broken
+        probe would tell the agent to "finish" work that does not exist.
+
+        Returns:
+            The porcelain output when the tree is dirty, else None.
+        """
+        try:
+            result = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=str(self.state_manager.state_dir.parent),
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+        except Exception:
+            return None
+        return result.stdout.strip() or None
+
+    def _continuation_note(self, state: TaskState) -> str:
+        """Tell the agent when the tree already holds a previous attempt's work.
+
+        A session that stops before committing leaves its half-finished changes
+        in the shared checkout. Re-entering that task with a plain prompt is the
+        worst case: the agent reads a working tree full of edits it did not make
+        and has no way to know whether to finish them, redo them, or revert
+        them — so it does whichever it guesses.
+
+        Two ways a task gets re-entered, and only one of them used to say so:
+
+        - the orchestrator judged the session unfinished and retried it
+          (``task_finish_attempts``) — a graceful path it can count; and
+        - **the run died mid-session** — Ctrl+C at the wrong moment, the machine
+          losing power, an OOM kill — and a human ran ``claudetm resume``.
+          Nothing incremented a counter, because nothing got to run. The
+          counter-only note was therefore silent in exactly the case where the
+          leftover diff is largest and least explicable.
+
+        So the note is driven by the **repository**, the same evidence every
+        other stage trusts over a report: a dirty tree entering a work session
+        means a previous attempt at this task stopped mid-flight, whatever the
+        counters say.
+
+        Args:
+            state: Current task state (read for the retry count only).
+
+        Returns:
+            The note to splice into the task description, or "" when the tree is
+            clean and no retry is in progress.
+        """
+        leftovers = self._leftover_changes()
+        if not leftovers and not state.task_finish_attempts:
+            return ""
+
+        if state.task_finish_attempts:
+            lead = (
+                f"**Retry {state.task_finish_attempts}** — the previous session on this task "
+                "stopped before committing."
+            )
+        else:
+            lead = (
+                "**Continuing an interrupted session** — this task was already started and the "
+                "run stopped before it committed (Ctrl+C, a crash, or the machine going down)."
+            )
+
+        note = (
+            f"\n{lead} `git status`/`git diff` FIRST — before you plan or edit anything. The "
+            "uncommitted changes in this checkout are that attempt's work on THIS task: read "
+            "them, carry on from where they stop, and ship them in your commit. Do not redo "
+            "work that is already there and do not revert it. Discard a change only when you "
+            "can positively identify it as a tooling dropping (a regenerated lockfile, a build "
+            "artifact) rather than task work.\n"
+            "\n**Never throw the leftovers away.** No `git checkout -- .`, `git restore`, "
+            "`git stash`, `git reset --hard`, `git clean` — none of it is recoverable, and it "
+            "is real work already done on this task. Starting over from a clean tree is the one "
+            "outcome that is always wrong here.\n"
+        )
+        if leftovers:
+            note += f"\nLeftover changes:\n```\n{_capped(leftovers)}\n```\n"
+        return note
 
     def run_work_session(self, state: TaskState) -> str:
         """Run a single work session.
@@ -156,16 +267,7 @@ class _TaskRunnerSessionMixin:
                 for ref in parsed_task.context_lines:
                     context_refs += f"  - {ref}\n"
 
-        # A retry means the previous session on this exact task stopped before
-        # committing. Say so — otherwise the agent re-reads a working tree full
-        # of its own half-finished changes with no idea where they came from.
-        retry_note = ""
-        if state.task_finish_attempts:
-            retry_note = (
-                f"\n**Retry {state.task_finish_attempts}** — the previous session on this task "
-                "stopped before committing. `git status`/`git diff` first: the leftover changes "
-                "are its work. Finish them, don't redo them.\n"
-            )
+        retry_note = self._continuation_note(state)
 
         task_description = f"""Goal: {goal}
 
@@ -239,6 +341,9 @@ Please complete this task."""
                 # the single-agent one.
                 parallel=state.options.parallel,
                 max_parallel=hive_max_parallel(),
+                # Measured per session, not once at import: an unattended run
+                # lasts days and the box it shares changes underneath it.
+                machine=describe_machine(str(self.state_manager.state_dir.parent)),
             )
         except AgentError:
             if self.logger:

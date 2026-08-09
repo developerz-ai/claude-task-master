@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.85] - 2026-08-09
+
+### Fixed
+
+- **A run killed mid-session now continues its task instead of guessing.** claudetm is built to be left running for hours or days, so it *will* be interrupted mid-work: Ctrl+C at the wrong moment, an OOM kill, the machine going down. Whatever the agent had written is still sitting in the shared checkout, uncommitted. The prompt that told the next session "the leftover changes are its work — finish them, don't redo them" fired only on `state.task_finish_attempts`, a counter the orchestrator increments *after* it observes an unfinished session — which a killed process never gets to do. So the one case with the largest and least explicable diff was the one case that said nothing, and `claudetm resume` re-entered the task with a plain prompt: the agent could redo the work, or throw it away.
+
+  The note is now driven by the **repository** — the same evidence every other stage trusts over a report. A dirty tree entering a work session means a previous attempt stopped mid-flight, whatever the counters say (`_TaskRunnerSessionMixin._continuation_note`). It names the leftover paths, says to read them and carry on from where they stop, and forbids discarding them (`git checkout --`, `restore`, `stash`, `reset --hard`, `clean`): starting over from a clean tree is unrecoverable and always wrong. An orchestrated retry keeps its `Retry N` wording; a clean tree with no retry in progress still renders nothing at all. The preview is capped at 40 lines / 2000 chars with a visible truncation marker, since a session killed during a codegen rewrite can leave thousands of paths behind and the task itself must survive in the prompt.
+
+### Changed
+
+- **Hive: two or more workers, or none — never exactly one.** A lone worker buys no speed at all, and speed is the only thing fan-out is for: the lead pays a full cold start, waits idle while the worker runs, is blind to its tool calls, and still has to verify everything on disk afterwards. Doing that piece in sequence beats it every time. The brief now leads with the point of the feature (finish this one task in less wall-clock time), tells the lead to look for the split first, and keeps zero as the right answer for anything small enough that the cold start costs more than the work.
+
+- **The lead sizes its team against the machine, not just the task.** How many workers are *useful* is half a task question (how many disjoint seams it has) and half a hardware one; the static `CLAUDETM_HIVE_MAX_PARALLEL` ceiling answers neither. `hive.describe_machine()` measures the box — CPU model and core count, load average, available/total RAM, free disk — and the figures are interpolated into the fan-out brief so the lead takes the smaller of the two limits. Every probe is best-effort and dependency-free (`/proc`, `shutil.disk_usage`); a platform that reports nothing simply omits the paragraph. Sizing a team is never a reason to fail a run.
+
+- **Disjoint file sets are not a sufficient seam — the API is.** A piece that renames an export, changes a signature or edits a shared type breaks every file importing it, *including files no worker owns*. Observed in a live run: one worker renamed a field across the files it owned, an unowned file still referenced the old name, and all six workers reported success. The lead is now told to list, per piece, what it changes that something else reads, and either pull every caller into that set or keep the piece itself.
+
+- **The lead decides whether workers may run tests or lint at all, and says so in each brief.** Whether a project tolerates several scoped check runs at once is a property of *that project* — a shared database or fixture schema, a fixed port, one build or coverage directory, a lock — and only the lead can see it. It now looks, decides, and writes the exact scoped command into each brief, or explicitly "none" (a fine answer; the lead runs the full gate at the end regardless). The worker contract follows its brief rather than improvising.
+
+- **Commands that write count as writing.** Most boundary breaks arrive this way, and workers did not read them as edits: a formatter or autofixer pointed at the repo rewrites every worker's files at once — including the half-finished file another worker is editing right now — and a build or codegen step that emits artifacts has several workers racing over the same generated output. Both were observed in a live run. Those commands are the lead's alone, never run while a worker is live. A failure in a file a worker does not own is reported, not reached across the boundary and "fixed".
+
+- **The work prompt no longer guesses at a language's toolchain.** The verify step carried a four-line menu of concrete commands (one per stack it guessed at). claudetm runs on any project: off that menu the list is a wrong command, and on it it is redundant, because the real commands are already in front of the agent in the coding style guide generated from the project's own `CLAUDE.md`. The prompt now states the idea — run this repo's own test and lint commands, over the whole project, not a subset — and says where to find them.
+
 ## [0.1.84] - 2026-08-08
 
 ### Changed
@@ -993,6 +1015,7 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 - N/A
 
 [Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.84...HEAD
+[0.1.85]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.84...v0.1.85
 [0.1.84]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.83...v0.1.84
 [0.1.83]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.82...v0.1.83
 [0.1.82]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.81...v0.1.82

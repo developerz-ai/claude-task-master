@@ -23,30 +23,59 @@ from __future__ import annotations
 FANOUT_SECTION_TITLE = "Parallel Work — You Decide"
 
 
-def build_fanout_section(max_parallel: int) -> str:
+def build_fanout_section(max_parallel: int, machine: str = "") -> str:
     """Build the lead's fan-out brief for the current task.
 
     Args:
         max_parallel: Safety ceiling on concurrent workers (never a target).
+        machine: One-line description of the machine the workers would share
+            (see :func:`~.hive.describe_machine`). Empty when nothing could be
+            measured, which simply omits the paragraph.
 
     Returns:
         The rendered section body.
     """
-    return f"""**You may split THIS task across parallel workers — you decide whether that is worth it.**
-Judge your own task. Two pieces of it may run at the same time only if their
-**write sets are disjoint**: no file either one will edit is touched by the other, and
-neither depends on the other's output. If you cannot cut them apart cleanly, do the task
-yourself in sequence — that is a good answer, not a failure.
+    machine_note = (
+        f"""
 
-**Zero workers is a legitimate answer, and so is one.** Most tasks are one task for a reason. Fan-out
-is not free: every worker pays a full cold start re-reading the repo, and its report is the only
-thing you get back. Do not fan out a small or wiring-shaped task you could finish in one focused
-pass. (Observed in a sibling project: four workers spawned for four one-line edits — four cold
-starts for work one agent finishes in a single step.)
+**This machine, right now:**
+{machine}.
+Every worker is another agent process reading this repo and running its own checks on those same
+cores, that same RAM and that same disk. That is the second half of the sizing question — the first
+is how many disjoint pieces your task has. Take the smaller of the two. Past what the box can
+actually run at once, more workers means every one of them runs slower and the task finishes
+later, which is the opposite of the point."""
+        if machine
+        else ""
+    )
+    return f"""**You may split THIS task across parallel workers. What you are buying is speed —
+finishing this one task in less wall-clock time. Nothing else.**
+So look for the split first: read the task, and if it has parts that can genuinely run at the same
+time, run them at the same time rather than walking through them in sequence. Judge your own task.
+Two pieces may run concurrently only if their **write sets are disjoint**: no file either one will
+edit is touched by the other, and neither depends on the other's output. If you cannot cut them
+apart cleanly, do the task yourself in sequence — that is a good answer, not a failure.
 
-**{max_parallel} concurrent workers is a safety ceiling, not a target.** Never pick a number because
-it is allowed; pick the number of genuinely disjoint pieces your task actually has, which is usually
-zero.
+**Disjoint files are not enough — the seam is the API, not the path.** A piece that renames an
+export, changes a signature, or edits a shared type breaks every file that imports it, including
+files no worker owns. Before you cut: for each piece, list what it changes *that something else
+reads*. If that surface has callers outside its file set, either put every caller in the same set,
+or keep that piece for yourself. Otherwise the workers all report success and the build is red for
+a rename nobody owned. (Observed: one worker renamed a field across the files it owned; an
+unowned file still referenced the old name, and every worker reported done.)
+
+**Two or more pieces, or none. Never exactly one.** A lone worker buys no speed at all: you pay a
+full cold start, then wait idle while it works, blind to its tool calls, and still have to verify
+everything on disk afterwards. Sequence beats that every time — do that piece yourself.
+Zero workers is a legitimate answer, and for a small or wiring-shaped task you could finish in
+one focused pass it is the right one: below a certain size the cold start costs more than the work.
+(Observed in a sibling project: four workers spawned for four one-line edits — four cold starts for
+work one agent finishes in a single step.)
+
+**{max_parallel} concurrent workers is a safety ceiling, not a target.** Don't pick a number because
+it is allowed, and don't pad a split to look parallel — a piece invented to fill a slot collides
+with a real one. Pick the number of genuinely disjoint pieces your task actually has: often zero,
+and when it is more, use them all at once rather than in waves.{machine_note}
 
 **How to fan out** — the Agent tool with `subagent_type: "hive-worker"`, at most {max_parallel}
 workers at a time.
@@ -83,8 +112,18 @@ verify on disk yourself: `git status`, read the changed files, and run the proje
 checks. A worker that narrated a change without writing it is a real failure mode — re-do or
 re-assign that piece yourself.
 
-**Checks:** workers run only narrow checks on their own files. You run the FULL project gate once,
-at the end, before committing.
+**Checks — you decide what a worker may run, and you say so in its brief.** Whether several
+workers can test or lint at the same time is a property of THIS project, not a general rule, and
+you are the one who can see it. Scoped runs over each worker's own files are usually fine; they are
+not when the project's checks share something exclusive — one database or fixture schema, a fixed
+port, a single build or coverage directory, a lock file, a dev server. Look before you decide.
+Then put the answer in every brief: the exact scoped command that worker may run, or explicitly
+none. "None" is a fine answer — you run the full gate once at the end regardless, and a check that
+cannot be scoped is yours, not theirs.
+
+The repo-wide commands are yours alone in every project — a formatter or autofixer pointed at the
+repo rewrites every worker's files at once, and a build or codegen step that emits artifacts has
+them racing over the same generated output. Never run either while a worker is live.
 
 **Everything you did not fan out** — dependent work, anything you could not separate — you do
 yourself. The task is yours either way; workers are an option, not a hand-off."""
