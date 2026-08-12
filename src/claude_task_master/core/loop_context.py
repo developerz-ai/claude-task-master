@@ -71,6 +71,14 @@ class _LoopContextMixin:
         session_output = getattr(orc.task_runner, "last_session_output", "") or ""
         if not session_output.strip():
             return
+        # A usage-limit refusal is not a session to learn from: distilling it
+        # would persist "You've hit your session limit …" into context.md and
+        # spend another (equally refused) extraction session doing so.
+        from .usage_limit import detect_usage_limit  # noqa: PLC0415
+
+        if detect_usage_limit(session_output) is not None:
+            console.detail("Skipping context accumulation — session output is a usage-limit notice")
+            return
         try:
             existing_context = orc.context_accumulator.get_context_for_prompt()
             learnings = orc.agent.extract_session_learnings(

@@ -233,6 +233,33 @@ Unfinished → the task is **not** checked off and the same task re-runs, with a
 
 Relatedly, an unclassified `QueryExecutionError` (a CLI crash whose text carries no keyword `_classify_api_error` recognises) is no longer fatal on sight: it retries under the same failure budget as a connection error (`rate_limit_config.max_retries`), and only a persistent one raises `ConsecutiveFailuresError`.
 
+### Usage limits are an account condition, never a task failure
+
+When the subscription exhausts its window, the CLI answers every query in seconds with only
+`You've hit your session limit · resets 1pm (America/Bogota)` and an error terminal result. Before
+this was recognized, one limited run burned both retry attempts of task after task in ninety
+seconds, **checked four untouched tasks off as complete** (the exhausted-budget fallback), spent the
+PR-recovery finish budget the same way, and blocked with a message that never named the cause.
+
+Two layers now handle it (`core/usage_limit.py`):
+
+- **The agent phase layer waits limits out.** Every query — work, fix, finish, planning,
+  verification, release check, learnings extraction, coding-style/release-guide generation — routes
+  through `run_query_riding_out_usage_limits`: a refused query parses the stated reset time
+  (clock-with-timezone or the API's epoch suffix), sleeps until it (interruptibly, Escape/SIGINT
+  honored within seconds), and re-runs. Callers never see the refusal unless the wait was
+  interrupted or `CLAUDETM_USAGE_LIMIT_MAX_WAITS` (48) consecutive waits ran out. A single wait is
+  capped at `CLAUDETM_USAGE_LIMIT_MAX_WAIT_SEC` (6h, misparse protection); an unparseable reset
+  falls back to `CLAUDETM_USAGE_LIMIT_DEFAULT_WAIT_SEC` (30 min) polls.
+- **The working stage refuses to charge a refusal to the task.** A refused session that still leaks
+  through consumes no `task_finish_attempts`, is never checked off (not even by the exhausted-budget
+  fallback), heartbeats the tracker (the progress clock was stamped at session *start*, possibly
+  hours earlier), and simply re-enters the working stage. Context accumulation likewise skips
+  limit-notice output instead of distilling it into context.md.
+
+Detection scans only the output **tail** (a refused session's whole output IS the notice), so a real
+session that merely quotes limit phrasing mid-way — claudetm working on claudetm — is not misread.
+
 ### Undelivered fix sessions (push-only stages)
 
 A CI-fix, review-fix or conflict session promises the same two things: **commit** the work, then **push** it so CI re-runs against the fix. Neither was verified — the agent's own report is not evidence, and a session killed mid-turn reports success. Both are now checked against the repository (`_GitOps._fix_session_unfinished_reason`):

@@ -464,3 +464,17 @@ class TestExecutionTracker:
         state = tracker.check_progress()
 
         assert state == ProgressState.SLOW
+
+
+class TestSuccessRateCountsCompletedOutcomes:
+    """The working stage ends good sessions as "completed" (or "skipped") —
+    matching only "success" reported 0.0% on runs that merged PRs."""
+
+    def test_completed_and_skipped_count_as_successes(self):
+        tracker = ExecutionTracker()
+        for outcome in ("completed", "skipped", "failed"):
+            tracker.start_session(1, 0, "Task")
+            tracker.end_session(outcome=outcome)
+
+        summary = tracker.get_summary()
+        assert summary["success_rate"] == pytest.approx(2 / 3 * 100)

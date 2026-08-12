@@ -31,6 +31,7 @@ from .prompts import (
     build_verification_prompt,
     build_work_prompt,
 )
+from .usage_limit import run_query_riding_out_usage_limits
 
 if TYPE_CHECKING:
     from .agent_message import MessageProcessor
@@ -106,11 +107,6 @@ class AgentPhaseExecutor(_AgentPhaseGenerationMixin):
             SDK's terminal subtype for reporting (e.g. ``"error_max_turns"``),
             and is None when no ResultMessage was seen.
         """
-        # Reset terminal-result capture so a prior session's outcome cannot
-        # leak into this session's derived success.
-        if self.message_processor is not None:
-            self.message_processor.reset_result_state()
-
         # Build prompt for planning
         prompt = build_planning_prompt(
             goal=goal,
@@ -123,16 +119,20 @@ class AgentPhaseExecutor(_AgentPhaseGenerationMixin):
         # Always use Opus for planning (smartest model)
         console.info("Planning with Opus (smartest model)...")
 
-        # Run async query with Opus override
-        result = run_async_with_cleanup(
-            self.query_executor.run_query(
+        # Run async query with Opus override. The helper resets terminal-result
+        # capture (so a prior session's outcome cannot leak into this one's
+        # derived success) and waits out account-wide usage-limit refusals.
+        result = run_query_riding_out_usage_limits(
+            lambda: self.query_executor.run_query(
                 prompt=prompt,
                 tools=self.get_tools_for_phase("planning"),
                 model_override=ModelType.OPUS,  # Always use Opus for planning
                 get_model_name_func=self.get_model_name_func,
                 get_agents_func=self.get_agents_func,
                 process_message_func=self.process_message_func,
-            )
+            ),
+            self.message_processor,
+            runner=run_async_with_cleanup,
         )
 
         success = True
@@ -212,21 +212,21 @@ class AgentPhaseExecutor(_AgentPhaseGenerationMixin):
             machine=machine,
         )
 
-        # Reset terminal-result capture so a prior session's outcome cannot
-        # leak into this session's derived success.
-        if self.message_processor is not None:
-            self.message_processor.reset_result_state()
-
-        # Run async query with optional model override
-        result = run_async_with_cleanup(
-            self.query_executor.run_query(
+        # Run async query with optional model override. The helper resets
+        # terminal-result capture (so a prior session's outcome cannot leak
+        # into this one's derived success) and waits out account-wide
+        # usage-limit refusals instead of reporting them as task failures.
+        result = run_query_riding_out_usage_limits(
+            lambda: self.query_executor.run_query(
                 prompt=prompt,
                 tools=self.get_tools_for_phase("working"),
                 model_override=model_override,
                 get_model_name_func=self.get_model_name_func,
                 get_agents_func=self.get_agents_func,
                 process_message_func=self.process_message_func,
-            )
+            ),
+            self.message_processor,
+            runner=run_async_with_cleanup,
         )
 
         # Derive success from the SDK's terminal ResultMessage instead of
@@ -276,22 +276,21 @@ class AgentPhaseExecutor(_AgentPhaseGenerationMixin):
             Dict with 'output', 'success', 'subtype', and 'model_used' keys —
             the same shape as ``run_work_session``.
         """
-        # Reset terminal-result capture so a prior session's outcome cannot
-        # leak into this session's derived success.
-        if self.message_processor is not None:
-            self.message_processor.reset_result_state()
-
         # Run the prompt directly with verification tools (read + bash for
         # gh/curl/migration checks) — no create-PR wrapper, no write tools.
-        result = run_async_with_cleanup(
-            self.query_executor.run_query(
+        # The helper resets terminal-result capture and waits out account-wide
+        # usage-limit refusals.
+        result = run_query_riding_out_usage_limits(
+            lambda: self.query_executor.run_query(
                 prompt=prompt,
                 tools=self.get_tools_for_phase("verification"),
                 model_override=model_override,
                 get_model_name_func=self.get_model_name_func,
                 get_agents_func=self.get_agents_func,
                 process_message_func=self.process_message_func,
-            )
+            ),
+            self.message_processor,
+            runner=run_async_with_cleanup,
         )
 
         # Derive success from the SDK's terminal ResultMessage (see
@@ -336,15 +335,19 @@ class AgentPhaseExecutor(_AgentPhaseGenerationMixin):
             context=context or None,
         )
 
-        # Run async query with verification tools (read + bash for running tests)
-        result = run_async_with_cleanup(
-            self.query_executor.run_query(
+        # Run async query with verification tools (read + bash for running
+        # tests). A usage-limit refusal must not be parsed as a FAIL verdict,
+        # so the helper waits the limit out before the parse below sees it.
+        result = run_query_riding_out_usage_limits(
+            lambda: self.query_executor.run_query(
                 prompt=prompt,
                 tools=self.get_tools_for_phase("verification"),
                 get_model_name_func=self.get_model_name_func,
                 get_agents_func=self.get_agents_func,
                 process_message_func=self.process_message_func,
-            )
+            ),
+            self.message_processor,
+            runner=run_async_with_cleanup,
         )
 
         # Parse the verification result
@@ -383,15 +386,19 @@ class AgentPhaseExecutor(_AgentPhaseGenerationMixin):
 
         # Read-only tools (planning phase) — extraction only summarizes text
         # already in the prompt; it must never modify the repo or run commands.
-        result = run_async_with_cleanup(
-            self.query_executor.run_query(
+        # A usage-limit refusal must not be persisted as "learnings", so the
+        # helper waits the limit out rather than returning the notice text.
+        result = run_query_riding_out_usage_limits(
+            lambda: self.query_executor.run_query(
                 prompt=prompt,
                 tools=self.get_tools_for_phase("planning"),
                 model_override=ModelType.SONNET,  # Sonnet for speed/cost
                 get_model_name_func=self.get_model_name_func,
                 get_agents_func=self.get_agents_func,
                 process_message_func=self.process_message_func,
-            )
+            ),
+            self.message_processor,
+            runner=run_async_with_cleanup,
         )
 
         return result.strip()

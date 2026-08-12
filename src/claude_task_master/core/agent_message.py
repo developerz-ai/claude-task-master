@@ -257,10 +257,17 @@ class MessageProcessor:
             cost_usd = getattr(message, "total_cost_usd", None)
             if cost_usd is not None:
                 self.last_total_cost_usd = float(cost_usd)
+            # ResultMessage.usage is a plain dict in the Python SDK; getattr
+            # on it always returned 0, so every cost report showed 0 tokens.
+            # Objects with attributes are still accepted for older shapes.
             usage = getattr(message, "usage", None)
             if usage is not None:
-                self.last_input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
-                self.last_output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
+                if isinstance(usage, dict):
+                    self.last_input_tokens = int(usage.get("input_tokens") or 0)
+                    self.last_output_tokens = int(usage.get("output_tokens") or 0)
+                else:
+                    self.last_input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
+                    self.last_output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
 
             # Log stop_reason for diagnostics (SDK v0.1.46+)
             stop_reason = getattr(message, "stop_reason", None)

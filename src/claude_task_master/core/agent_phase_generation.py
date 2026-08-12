@@ -19,8 +19,10 @@ from .prompts import (
     extract_coding_style,
     extract_release_guide,
 )
+from .usage_limit import run_query_riding_out_usage_limits
 
 if TYPE_CHECKING:
+    from .agent_message import MessageProcessor
     from .agent_query import AgentQueryExecutor
 
 
@@ -34,6 +36,7 @@ class _AgentPhaseGenerationMixin:
     get_model_name_func: Any
     get_agents_func: Any
     process_message_func: Any
+    message_processor: MessageProcessor | None
 
     def get_tools_for_phase(self, phase: str) -> list[str]:
         """Return tool list for *phase* — overridden by AgentPhaseExecutor."""
@@ -53,16 +56,20 @@ class _AgentPhaseGenerationMixin:
 
         console.info("Generating coding style guide with Opus...")
 
-        # Run with planning tools (read-only) and Opus for quality
-        result = run_async_with_cleanup(
-            self.query_executor.run_query(
+        # Run with planning tools (read-only) and Opus for quality. The guide
+        # is persisted across runs, so a usage-limit refusal must be waited
+        # out rather than extracted into coding-style.md as if it were a guide.
+        result = run_query_riding_out_usage_limits(
+            lambda: self.query_executor.run_query(
                 prompt=prompt,
                 tools=self.get_tools_for_phase("planning"),
                 model_override=ModelType.OPUS,  # Use Opus for quality
                 get_model_name_func=self.get_model_name_func,
                 get_agents_func=self.get_agents_func,
                 process_message_func=self.process_message_func,
-            )
+            ),
+            self.message_processor,
+            runner=run_async_with_cleanup,
         )
 
         # Extract the coding style content
@@ -89,16 +96,20 @@ class _AgentPhaseGenerationMixin:
 
         console.info("Discovering release infrastructure with Sonnet...")
 
-        # Use working tools (all tools including Bash) so agent can probe env/CLIs
-        result = run_async_with_cleanup(
-            self.query_executor.run_query(
+        # Use working tools (all tools including Bash) so agent can probe
+        # env/CLIs. Like the coding-style guide, release.md is persisted
+        # across runs — wait a usage-limit refusal out instead of saving it.
+        result = run_query_riding_out_usage_limits(
+            lambda: self.query_executor.run_query(
                 prompt=prompt,
                 tools=self.get_tools_for_phase("working"),  # All tools for probing
                 model_override=ModelType.SONNET,  # Sonnet for speed
                 get_model_name_func=self.get_model_name_func,
                 get_agents_func=self.get_agents_func,
                 process_message_func=self.process_message_func,
-            )
+            ),
+            self.message_processor,
+            runner=run_async_with_cleanup,
         )
 
         release_guide = extract_release_guide(result)

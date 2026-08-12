@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from . import console
 from .config_loader import get_config
 from .state import TaskState
+from .usage_limit import detect_usage_limit
 
 if TYPE_CHECKING:
     from .orchestrator import WorkLoopOrchestrator
@@ -224,6 +225,28 @@ class _LoopWorkingStageMixin:
             console.detail("No tasks remaining in plan")
             orc.state_manager.save_state_merged(state)
             return None
+
+        # A usage-limit refusal is an account condition, not a task failure:
+        # the session never got to run, so nothing may be charged to the task.
+        # The agent layer already waits limits out (usage_limit.
+        # run_query_riding_out_usage_limits); a refusal that still reaches
+        # here means that wait was interrupted or its budget ran out. Burning
+        # ``task_finish_attempts`` on it once cascaded through a whole plan in
+        # ninety seconds, checking off four untouched tasks as complete — so
+        # the task simply re-enters the working stage instead. The heartbeat
+        # matters: the progress clock was stamped at session *start*, which
+        # may be hours ago if the agent layer waited inside the session.
+        if session_result == "ran_incomplete":
+            notice = detect_usage_limit(getattr(orc.task_runner, "last_session_output", "") or "")
+            if notice is not None:
+                console.warning(
+                    f"Task #{completed_task_index + 1} session was refused by a usage limit "
+                    f"({notice.message}) — not counted against the task; it will re-run"
+                )
+                orc.tracker.record_heartbeat()
+                state.workflow_stage = "working"
+                orc.state_manager.save_state_merged(state)
+                return None
 
         unfinished = self._session_unfinished_reason(session_result)
         if unfinished and state.task_finish_attempts < MAX_TASK_FINISH_ATTEMPTS:

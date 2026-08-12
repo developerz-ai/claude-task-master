@@ -372,7 +372,12 @@ class ExecutionTracker:
         total_duration = sum(s.duration for s in self._sessions)
         total_tokens = sum(s.total_tokens for s in self._sessions)
         total_cost = sum(s.estimated_cost for s in self._sessions)
-        successes = sum(1 for s in self._sessions if s.outcome == "success")
+        # The working stage records good sessions as "completed" (or "skipped"
+        # for a task already checked off) — matching only "success" reported a
+        # permanent 0.0% on runs that merged PRs.
+        successes = sum(
+            1 for s in self._sessions if s.outcome in ("completed", "success", "skipped")
+        )
 
         return {
             "total_sessions": len(self._sessions),

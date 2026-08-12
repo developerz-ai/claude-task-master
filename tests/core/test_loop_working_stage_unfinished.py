@@ -171,3 +171,80 @@ class TestSessionUnfinishedReason:
         """Not a repo / no git / timeout must not stall a healthy run."""
         with patch(f"{_MODULE}.subprocess.run", side_effect=OSError("no git")):
             assert OrchestratorLoop(basic_orchestrator)._session_unfinished_reason("ran") is None
+
+
+_LIMIT_LINE = "You've hit your session limit · resets 1pm (America/Bogota)"
+
+
+class TestUsageLimitRefusedSession:
+    """An account-wide usage limit is never charged to the task.
+
+    Regression: a limited account answered every session in seconds with only
+    the limit notice; the loop burned both retry attempts per task in under a
+    minute and then checked untouched tasks off ``[x]`` — silent work loss on
+    resume. A refused session must consume no attempt and mark nothing.
+    """
+
+    def _refuse_with_limit(self, mock_agent):
+        mock_agent.run_work_session.return_value = {
+            "output": _LIMIT_LINE,
+            "success": False,
+            "subtype": "success",
+        }
+
+    def test_refused_session_consumes_no_attempt_and_stays_on_task(
+        self, mock_agent, basic_orchestrator, basic_task_state, state_manager, working_env
+    ):
+        self._refuse_with_limit(mock_agent)
+
+        result = basic_orchestrator._handle_working_stage(basic_task_state)
+
+        assert result is None
+        assert basic_task_state.task_finish_attempts == 0
+        assert basic_task_state.current_task_index == 0
+        assert basic_task_state.workflow_stage == "working"
+        assert "- [x]" not in (state_manager.load_plan() or "")
+
+    def test_refused_session_never_checked_off_even_with_budget_spent(
+        self, mock_agent, basic_orchestrator, basic_task_state, state_manager, working_env
+    ):
+        """The exhausted-budget fallback ("check it off anyway, the PR stage
+        ships what's on the branch") must not fire for a session that ran
+        nothing — that is exactly how four tasks were lost in the live run."""
+        basic_task_state.task_finish_attempts = MAX_TASK_FINISH_ATTEMPTS
+        self._refuse_with_limit(mock_agent)
+
+        result = basic_orchestrator._handle_working_stage(basic_task_state)
+
+        assert result is None
+        assert basic_task_state.task_finish_attempts == MAX_TASK_FINISH_ATTEMPTS
+        assert basic_task_state.workflow_stage == "working"
+        assert "- [x]" not in (state_manager.load_plan() or "")
+
+    def test_ordinary_cutoff_still_burns_an_attempt(
+        self, mock_agent, basic_orchestrator, basic_task_state, working_env
+    ):
+        """A genuine mid-task cutoff (no limit notice) keeps the old path."""
+        mock_agent.run_work_session.return_value = {
+            "output": "got halfway through the refactor",
+            "success": False,
+            "subtype": "error_max_turns",
+        }
+
+        with _mark_unfinished("session was cut off"):
+            result = basic_orchestrator._handle_working_stage(basic_task_state)
+
+        assert result is None
+        assert basic_task_state.task_finish_attempts == 1
+
+
+class TestContextAccumulationSkipsLimitNotice:
+    def test_limit_notice_is_not_distilled_into_context(
+        self, mock_agent, basic_orchestrator, basic_task_state
+    ):
+        basic_orchestrator.task_runner.last_session_output = _LIMIT_LINE
+
+        with patch("claude_task_master.core.loop_context.console"):
+            basic_orchestrator._accumulate_context(basic_task_state)
+
+        mock_agent.extract_session_learnings.assert_not_called()

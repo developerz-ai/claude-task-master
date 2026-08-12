@@ -1099,3 +1099,28 @@ class TestCreateMessageProcessor:
         """Factory with no logger leaves logger=None."""
         proc = create_message_processor()
         assert proc.logger is None
+
+
+class TestUsageDictTokens:
+    """ResultMessage.usage is a plain dict in the Python SDK — getattr on it
+    silently returned 0, so every cost report showed 0 tokens."""
+
+    def test_dict_usage_tokens_captured(self):
+        proc = MessageProcessor()
+        msg = _make_result_message()
+        msg.usage = {"input_tokens": 500, "output_tokens": 300}
+        with patch("claude_task_master.core.agent_message.console"):
+            proc.process_message(msg, "")
+
+        assert proc.last_input_tokens == 500
+        assert proc.last_output_tokens == 300
+
+    def test_dict_usage_missing_keys_keep_zeros(self):
+        proc = MessageProcessor()
+        msg = _make_result_message()
+        msg.usage = {"cache_read_input_tokens": 10}
+        with patch("claude_task_master.core.agent_message.console"):
+            proc.process_message(msg, "")
+
+        assert proc.last_input_tokens == 0
+        assert proc.last_output_tokens == 0
