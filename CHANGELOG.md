@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.86] - 2026-08-12
+
+### Fixed
+
+- **A usage limit pauses the run instead of eating the plan.** When the subscription exhausts its session window, the CLI answers every query in seconds with only `You've hit your session limit · resets 1pm (America/Bogota)` and an error terminal result. The loop read each one as an ordinary unfinished session: in a live run it burned both retry attempts of task after task in ninety seconds, the exhausted-budget fallback **checked four untouched tasks off as complete** — silent work loss on resume — the PR-recovery finish budget went the same way, and the run blocked with a message that never named the cause.
+
+  Two layers now handle it (`core/usage_limit.py`). The **agent phase layer waits limits out**: every query — work, CI-fix, finish, planning, verification, release check, learnings extraction, coding-style/release-guide generation — routes through one chokepoint that recognizes the notice in the output's tail, parses the stated reset (clock-with-timezone, or the API's `usage limit reached|<epoch>` suffix), sleeps until it (interruptibly — Escape/SIGINT honored within seconds), and re-runs. Callers never see a refusal unless the wait was interrupted or `CLAUDETM_USAGE_LIMIT_MAX_WAITS` (48) consecutive waits ran out; a single wait is capped at `CLAUDETM_USAGE_LIMIT_MAX_WAIT_SEC` (6h, misparse protection) and an unparseable reset polls every `CLAUDETM_USAGE_LIMIT_DEFAULT_WAIT_SEC` (30 min). The **working stage refuses to charge a refusal to the task**: no `task_finish_attempts` consumed, never checked off (not even by the exhausted-budget fallback), tracker heartbeated (the progress clock was stamped at session *start*, possibly hours earlier), and the task simply re-enters the working stage. Context accumulation skips limit-notice output instead of distilling it into `context.md`. Detection scans only the output tail, so a real session that merely quotes limit phrasing mid-way — claudetm working on claudetm — is not misread.
+
+- **The cost report told the truth about nothing.** `Success Rate` counted only sessions with outcome `"success"`, which no code path records — good sessions end as `"completed"` (or `"skipped"`), so runs that merged PRs reported 0.0%. And token counts read `ResultMessage.usage` via `getattr`, but the Python SDK ships it as a plain dict, so every report showed 0 tokens. Both fixed; dict and attribute shapes are accepted.
+
 ## [0.1.85] - 2026-08-09
 
 ### Fixed
@@ -1014,7 +1024,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.84...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.86...HEAD
+[0.1.86]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.85...v0.1.86
 [0.1.85]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.84...v0.1.85
 [0.1.84]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.83...v0.1.84
 [0.1.83]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.82...v0.1.83
