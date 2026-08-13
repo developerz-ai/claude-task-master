@@ -41,10 +41,11 @@ def _project_agents_note(project_agents: Sequence[tuple[str, str]] | None) -> st
 
 **This project ships its own specialists — prefer them where they fit.** From `.claude/agents/`:
 {bullets}
-When a piece of your task matches one of these descriptions, dispatch THAT agent for it (its
-`subagent_type` is its name) instead of a generic `hive-worker` — it carries project-specific
-instructions a generic worker lacks. Every rule in this section still binds it: exclusive file
-set, foreground dispatch, no git, the full four-part brief."""
+Match each piece against these FIRST: a specialist carries project-specific instructions a generic
+worker lacks, so when a piece fits one of these descriptions, dispatch THAT agent (its
+`subagent_type` is its name). Fall back to `hive-worker` only for a piece none of them fits.
+Every rule in this section binds a specialist exactly like a worker: exclusive file set,
+foreground dispatch, no git, the full four-part brief."""
 
 
 def build_fanout_section(
@@ -105,8 +106,8 @@ reported success.)
 genuinely disjoint pieces your task actually has — often zero — and never pad a split to look
 parallel.{machine_note}{_project_agents_note(project_agents)}
 
-**Dispatch is part of the speed** — the Agent tool with `subagent_type: "hive-worker"` (or a
-project specialist above), at most {max_parallel} workers at a time. Put every independent
+**Dispatch is part of the speed** — the Agent tool: a project specialist where one fits, else
+`subagent_type: "hive-worker"`, at most {max_parallel} workers at a time. Put every independent
 worker's Agent call **in a single message so they run concurrently** — never in waves when nothing
 orders them. While they run, work the pieces you kept: the coupled parts, the shared surface, the
 integration. An idle lead waiting on workers it could work alongside is wasted wall-clock.

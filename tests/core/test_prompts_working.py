@@ -1601,3 +1601,11 @@ class TestProjectAgentsInBrief:
             project_agents=[("add-primitive", "Adds a new framework primitive")],
         )
         assert "add-primitive" not in result
+
+    def test_hive_worker_is_the_fallback_not_the_default(self) -> None:
+        """Project specialists are matched FIRST; hive-worker takes what's left."""
+        result = _parallel_prompt(
+            project_agents=[("add-primitive", "Adds a new framework primitive")],
+        )
+        assert "Match each piece against these FIRST" in result
+        assert "Fall back to `hive-worker` only for a piece none of them fits" in result

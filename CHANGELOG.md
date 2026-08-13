@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.87] - 2026-08-12
+
+### Changed
+
+- **Hive workers now do real, big work.** The fan-out brief was written defensively enough that leads chose zero workers almost always; the intent is the opposite, and the calibration now says so without dropping a single safety rule. For a big task, delegation is the default posture — the lead's job is to cut well, brief well, dispatch everything at once, and verify, not to type every edit itself. Pieces are sized big on purpose: a whole module, a feature slice with its own tests and docs, a subsystem sweep — "a few LARGE self-contained pieces beat many small ones," never scattered micro-edits. The worker contract matches: plan briefly, implement the piece COMPLETELY inside the exclusive file set (code, tests, docs), never return half-done, and never spawn agents of your own. Zero workers remains the right answer for small or tightly-coupled tasks.
+
+- **Every worker gets its own turn budget.** The hive-worker definition now ships `AgentDefinition.maxTurns` — `CLAUDETM_HIVE_WORKER_MAX_TURNS`, default 200, with the same garbage-safe env parsing as every other knob — so a big piece has room to finish and one runaway worker cannot burn the session's aggregate limits on everyone else's behalf. A project agent can pin its own budget with `max_turns:` in its `.claude/agents/*.md` frontmatter.
+
+- **The project's own `.claude/agents/` specialists come first; `hive-worker` is the fallback.** They were always loaded and invocable, but the brief never mentioned them, so they went unused. `list_project_agents()` now surfaces each project agent's name and description in the fan-out brief; the lead matches every piece against them FIRST and dispatches the matching specialist (`subagent_type: <name>`) under the same rules — exclusive file set, foreground dispatch, no git, full brief. Generic `hive-worker` takes only the pieces no specialist fits — and everything, when the project defines none. Read per work session, so agents added while a long run is underway are picked up.
+
+- **Dispatch is optimized, not merely permitted.** All independent pieces go out in a single message (concurrent, never in waves), and the lead works its own kept pieces while workers run instead of idling — an idle lead waiting on workers it could work alongside is wasted wall-clock. Every brief now carries a fourth mandatory element: the context the lead already paid to gather (key file excerpts, project conventions, the exact API surface the piece must conform to), so a worker's cold start is not spent re-deriving what the lead knows. The whole brief was also rewritten tighter — same rules, fewer words.
+
 ## [0.1.86] - 2026-08-12
 
 ### Fixed
@@ -1024,7 +1036,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.86...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.87...HEAD
+[0.1.87]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.86...v0.1.87
 [0.1.86]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.85...v0.1.86
 [0.1.85]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.84...v0.1.85
 [0.1.84]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.83...v0.1.84
