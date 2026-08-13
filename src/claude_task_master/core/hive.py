@@ -25,9 +25,12 @@ import shutil
 
 __all__ = [
     "DEFAULT_HIVE_MAX_PARALLEL",
+    "DEFAULT_HIVE_WORKER_MAX_TURNS",
     "HIVE_MAX_PARALLEL_ENV",
+    "HIVE_WORKER_MAX_TURNS_ENV",
     "describe_machine",
     "hive_max_parallel",
+    "hive_worker_max_turns",
 ]
 
 
@@ -36,22 +39,47 @@ DEFAULT_HIVE_MAX_PARALLEL: int = 10
 
 HIVE_MAX_PARALLEL_ENV = "CLAUDETM_HIVE_MAX_PARALLEL"
 
+#: Per-worker turn budget, passed as ``AgentDefinition.maxTurns``. Workers are
+#: meant to carry big self-contained pieces — a module, a feature slice with
+#: its tests — so the budget is sized for real work (healthy solo sessions run
+#: tens of turns) and exists only to stop a runaway worker from burning the
+#: session's aggregate limits on everyone else's behalf.
+DEFAULT_HIVE_WORKER_MAX_TURNS: int = 200
+
+HIVE_WORKER_MAX_TURNS_ENV = "CLAUDETM_HIVE_WORKER_MAX_TURNS"
+
+
+def _env_positive_int(name: str, default: int) -> int:
+    """Read a positive int from the environment, falling back on garbage.
+
+    Never raises — a typo in an env var must not end an unattended run.
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw.strip())
+    except (ValueError, AttributeError):
+        return default
+    return value if value > 0 else default
+
 
 def hive_max_parallel() -> int:
     """Maximum concurrent hive workers (1 lead + up to N workers).
 
     Reads ``CLAUDETM_HIVE_MAX_PARALLEL``; anything unset, unparseable or ``<= 0``
-    falls back to :data:`DEFAULT_HIVE_MAX_PARALLEL`. Never raises — a typo in an
-    env var must not end an unattended run.
+    falls back to :data:`DEFAULT_HIVE_MAX_PARALLEL`.
     """
-    raw = os.environ.get(HIVE_MAX_PARALLEL_ENV)
-    if raw is None:
-        return DEFAULT_HIVE_MAX_PARALLEL
-    try:
-        value = int(raw.strip())
-    except (ValueError, AttributeError):
-        return DEFAULT_HIVE_MAX_PARALLEL
-    return value if value > 0 else DEFAULT_HIVE_MAX_PARALLEL
+    return _env_positive_int(HIVE_MAX_PARALLEL_ENV, DEFAULT_HIVE_MAX_PARALLEL)
+
+
+def hive_worker_max_turns() -> int:
+    """Turn budget each hive worker gets (``AgentDefinition.maxTurns``).
+
+    Reads ``CLAUDETM_HIVE_WORKER_MAX_TURNS``; anything unset, unparseable or
+    ``<= 0`` falls back to :data:`DEFAULT_HIVE_WORKER_MAX_TURNS`.
+    """
+    return _env_positive_int(HIVE_WORKER_MAX_TURNS_ENV, DEFAULT_HIVE_WORKER_MAX_TURNS)
 
 
 def describe_machine(working_dir: str | None = None) -> str:

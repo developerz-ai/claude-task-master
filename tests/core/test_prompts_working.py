@@ -1552,3 +1552,52 @@ class TestMaxParallelPlumbing:
         from claude_task_master.core.prompts_working_hive import FANOUT_SECTION_TITLE
 
         assert f"## {FANOUT_SECTION_TITLE}" in _parallel_prompt()
+
+
+class TestBigPieceCalibration:
+    """Subagents exist to do real, big work — the brief says so."""
+
+    def test_big_tasks_should_delegate(self) -> None:
+        result = _parallel_prompt()
+        assert "for a big task, you should" in result
+
+    def test_pieces_are_big_not_slivers(self) -> None:
+        result = _parallel_prompt()
+        assert "Cut BIG pieces, not slivers" in result
+
+    def test_brief_carries_gathered_context(self) -> None:
+        """The fourth brief element: the lead's ramp-up handed to the worker."""
+        result = _parallel_prompt()
+        assert "MUST carry four things" in result
+        assert "context you already paid to gather" in result
+
+    def test_lead_works_while_workers_run(self) -> None:
+        result = _parallel_prompt()
+        assert "While they run, work the pieces you kept" in result
+
+
+class TestProjectAgentsInBrief:
+    """The lead is told about the project's own .claude/agents specialists."""
+
+    def test_project_agents_rendered(self) -> None:
+        result = _parallel_prompt(
+            project_agents=[("add-primitive", "Adds a new framework primitive")],
+        )
+        assert "`add-primitive` — Adds a new framework primitive" in result
+        assert "prefer them where they fit" in result
+
+    def test_omitted_when_none(self) -> None:
+        result = _parallel_prompt()
+        assert "prefer them where they fit" not in result
+
+    def test_omitted_when_empty(self) -> None:
+        result = _parallel_prompt(project_agents=[])
+        assert "prefer them where they fit" not in result
+
+    def test_not_rendered_when_parallel_off(self) -> None:
+        result = build_work_prompt(
+            task_description="T",
+            parallel=False,
+            project_agents=[("add-primitive", "Adds a new framework primitive")],
+        )
+        assert "add-primitive" not in result

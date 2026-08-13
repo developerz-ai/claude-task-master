@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from . import console
+from .hive import hive_worker_max_turns
 
 if TYPE_CHECKING:
     pass
@@ -126,12 +127,26 @@ def load_agents_from_directory(working_dir: str) -> dict[str, Any]:
             if tools and not isinstance(tools, list):
                 tools = None
 
+            # Optional per-agent turn budget (max_turns / maxTurns frontmatter).
+            raw_turns = frontmatter.get("max_turns", frontmatter.get("maxTurns"))
+            max_turns: int | None = None
+            if raw_turns is not None:
+                try:
+                    max_turns = int(raw_turns)
+                except (TypeError, ValueError):
+                    console.warning(
+                        f"Agent '{name}' has invalid max_turns '{raw_turns}' - ignoring"
+                    )
+                if max_turns is not None and max_turns <= 0:
+                    max_turns = None
+
             # Create AgentDefinition
             agent_def = AgentDefinition(
                 description=description,
                 prompt=prompt,
                 model=model,
                 tools=tools,
+                maxTurns=max_turns,
             )
 
             agents[name] = agent_def
@@ -147,12 +162,13 @@ HIVE_WORKER_AGENT_NAME = "hive-worker"
 
 HIVE_WORKER_DESCRIPTION = (
     "Implements ONE piece of the task the lead is working on, confined to an exclusive, "
-    "disjoint set of files that you name in the brief. Use this when you are the lead of a "
-    "work session and your task splits into two or more pieces whose write sets do not "
-    "overlap: hand each piece to its own hive-worker, in parallel, in this same checkout. "
-    "Each worker must be given its piece in full and the exact list of files it exclusively "
-    "owns. Do NOT use it for anything touching git, for two pieces that write the same "
-    "file, or for a small edit you can finish yourself faster than the fan-out costs."
+    "disjoint set of files that you name in the brief. The piece can be LARGE — a whole "
+    "module or feature slice with its tests, implemented end to end. Use this when you are "
+    "the lead of a work session and your task splits into two or more pieces whose write "
+    "sets do not overlap: hand each piece to its own hive-worker, in parallel, in this same "
+    "checkout. Each worker must be given its piece in full and the exact list of files it "
+    "exclusively owns. Do NOT use it for anything touching git, for two pieces that write "
+    "the same file, or for a small edit you can finish yourself faster than the fan-out costs."
 )
 
 HIVE_WORKER_PROMPT = """You are a hive worker. You implement ONE piece of the task your lead
@@ -163,6 +179,14 @@ You are a team working in one directory, at the same time, on one task — that 
 point, and it is what makes you fast. It also means there is exactly one copy of everything:
 no branch of your own, no sandbox, no undo. Every rule below follows from that single fact,
 and each one is what lets the others work in parallel with you instead of on top of you.
+
+## Your piece can be big — own it end to end
+A piece is often a whole module, a feature slice, a subsystem sweep. Plan it briefly before
+editing, then implement it COMPLETELY inside your file set: the code, its tests, its docs.
+Never return half-done work or leave "the rest" for the lead — the piece was cut so you take
+it off the lead's plate entirely. You have your own turn budget sized for real work; use it.
+Never spawn agents of your own: the lead sized the team, and a worker's worker is invisible
+concurrency the exclusive file sets do not cover.
 
 ## Your file set is exclusive — and it is a hard boundary
 - You may create, edit and delete ONLY the files in your set. Reading anything in the repo
@@ -253,11 +277,49 @@ def build_builtin_agents() -> dict[str, Any]:
             prompt=HIVE_WORKER_PROMPT,
             model="inherit",
             tools=None,
+            # Workers carry big pieces, so the budget is generous — but it is
+            # theirs alone: one runaway worker must not burn the session's
+            # aggregate limits on everyone else's behalf.
+            maxTurns=hive_worker_max_turns(),
         )
     }
 
 
 BUILTIN_AGENT_NAMES: tuple[str, ...] = (HIVE_WORKER_AGENT_NAME,)
+
+
+def list_project_agents(working_dir: str) -> list[tuple[str, str]]:
+    """(name, description) of each agent the project defines in ``.claude/agents/``.
+
+    Read for the lead's fan-out brief, so it can dispatch a project specialist
+    for a piece that matches one — a generic ``hive-worker`` does not carry the
+    project-specific instructions those files do. Deliberately lighter than
+    :func:`load_agents_from_directory`: no SDK import, no console output, so it
+    is safe to call while building a prompt. Agents without a description are
+    skipped (they are skipped at load time too).
+
+    Args:
+        working_dir: The project working directory.
+
+    Returns:
+        Sorted (by filename) list of ``(name, description)`` pairs; empty when
+        the directory is missing or holds nothing usable.
+    """
+    agents_dir = Path(working_dir) / ".claude" / "agents"
+    if not agents_dir.exists():
+        return []
+
+    pairs: list[tuple[str, str]] = []
+    for agent_file in sorted(agents_dir.glob("*.md")):
+        try:
+            frontmatter, _ = parse_agent_frontmatter(agent_file.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        name = frontmatter.get("name") or agent_file.stem
+        description = frontmatter.get("description", "")
+        if isinstance(name, str) and isinstance(description, str) and description:
+            pairs.append((name, " ".join(description.split())))
+    return pairs
 
 
 def detect_claude_md(working_dir: str) -> bool:

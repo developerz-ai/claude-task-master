@@ -11,6 +11,7 @@ from .agent_models import TaskComplexity, parse_task_complexity
 from .config_loader import get_config
 from .console import clear_task_context, set_task_context
 from .hive import describe_machine, hive_max_parallel
+from .subagents import list_project_agents
 from .task_runner_errors import WorkSessionError
 
 if TYPE_CHECKING:
@@ -344,6 +345,14 @@ Please complete this task."""
                 # Measured per session, not once at import: an unattended run
                 # lasts days and the box it shares changes underneath it.
                 machine=describe_machine(str(self.state_manager.state_dir.parent)),
+                # The project's own specialists, so the lead dispatches them
+                # for matching pieces. Read per session — the project can add
+                # agents while a long run is underway.
+                project_agents=(
+                    list_project_agents(str(self.state_manager.state_dir.parent))
+                    if state.options.parallel
+                    else None
+                ),
             )
         except AgentError:
             if self.logger:

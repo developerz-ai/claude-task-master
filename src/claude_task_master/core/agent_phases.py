@@ -166,6 +166,7 @@ class AgentPhaseExecutor(_AgentPhaseGenerationMixin):
         parallel: bool = False,
         max_parallel: int = DEFAULT_HIVE_MAX_PARALLEL,
         machine: str = "",
+        project_agents: list[tuple[str, str]] | None = None,
     ) -> dict[str, Any]:
         """Run a work session with full tools.
 
@@ -191,6 +192,10 @@ class AgentPhaseExecutor(_AgentPhaseGenerationMixin):
                 through to the fan-out brief so the lead sizes its team against
                 real capacity. Ignored unless ``parallel``.
             max_parallel: Safety ceiling on concurrent workers, never a target.
+            project_agents: ``(name, description)`` of the project's own
+                ``.claude/agents/`` definitions, surfaced in the fan-out brief
+                so the lead dispatches a specialist for a matching piece.
+                Ignored unless ``parallel``.
 
         Returns:
             Dict with 'output', 'success', and 'model_used' keys.
@@ -210,6 +215,7 @@ class AgentPhaseExecutor(_AgentPhaseGenerationMixin):
             parallel=parallel,
             max_parallel=max_parallel,
             machine=machine,
+            project_agents=project_agents,
         )
 
         # Run async query with optional model override. The helper resets

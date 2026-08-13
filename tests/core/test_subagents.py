@@ -1066,3 +1066,113 @@ Prompt.
         # Values should be strings (no numeric parsing in simple YAML)
         assert frontmatter["count"] == "42"
         assert frontmatter["version"] == "1.5"
+
+
+class TestListProjectAgents:
+    """The lead's fan-out brief needs (name, description) without SDK or I/O noise."""
+
+    def test_returns_name_description_pairs(self, temp_working_dir: Path, agents_dir: Path) -> None:
+        from claude_task_master.core.subagents import list_project_agents
+
+        (agents_dir / "reviewer.md").write_text(
+            "---\nname: code-reviewer\ndescription: Reviews diffs for defects\n---\n\nPrompt.\n"
+        )
+        (agents_dir / "adder.md").write_text(
+            "---\nname: add-primitive\ndescription: Adds a new framework primitive\n---\n\nPrompt.\n"
+        )
+
+        pairs = list_project_agents(str(temp_working_dir))
+
+        assert pairs == [
+            ("add-primitive", "Adds a new framework primitive"),
+            ("code-reviewer", "Reviews diffs for defects"),
+        ]
+
+    def test_skips_agents_without_description(
+        self, temp_working_dir: Path, agents_dir: Path
+    ) -> None:
+        """Load-time skips them too — the brief must match what is invocable."""
+        from claude_task_master.core.subagents import list_project_agents
+
+        (agents_dir / "mute.md").write_text("---\nname: mute\n---\n\nPrompt.\n")
+
+        assert list_project_agents(str(temp_working_dir)) == []
+
+    def test_missing_directory_is_empty(self, temp_working_dir: Path) -> None:
+        from claude_task_master.core.subagents import list_project_agents
+
+        assert list_project_agents(str(temp_working_dir)) == []
+
+    def test_falls_back_to_filename_and_collapses_whitespace(
+        self, temp_working_dir: Path, agents_dir: Path
+    ) -> None:
+        from claude_task_master.core.subagents import list_project_agents
+
+        (agents_dir / "helper.md").write_text("---\ndescription: Does   the\tthing\n---\n\nP.\n")
+
+        assert list_project_agents(str(temp_working_dir)) == [("helper", "Does the thing")]
+
+
+class TestHiveWorkerTurnBudget:
+    """Workers carry big pieces, so each gets its own maxTurns budget."""
+
+    def test_default_budget_applied(self) -> None:
+        from claude_task_master.core.hive import DEFAULT_HIVE_WORKER_MAX_TURNS
+        from claude_task_master.core.subagents import build_builtin_agents
+
+        agents = build_builtin_agents()
+        assert agents["hive-worker"].maxTurns == DEFAULT_HIVE_WORKER_MAX_TURNS
+
+    def test_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from claude_task_master.core.subagents import build_builtin_agents
+
+        monkeypatch.setenv("CLAUDETM_HIVE_WORKER_MAX_TURNS", "500")
+        assert build_builtin_agents()["hive-worker"].maxTurns == 500
+
+    def test_garbage_env_falls_back(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from claude_task_master.core.hive import DEFAULT_HIVE_WORKER_MAX_TURNS
+        from claude_task_master.core.subagents import build_builtin_agents
+
+        monkeypatch.setenv("CLAUDETM_HIVE_WORKER_MAX_TURNS", "lots")
+        assert build_builtin_agents()["hive-worker"].maxTurns == DEFAULT_HIVE_WORKER_MAX_TURNS
+
+
+class TestProjectAgentMaxTurns:
+    """A project agent may pin its own turn budget in frontmatter."""
+
+    def test_max_turns_parsed(self, temp_working_dir: Path, agents_dir: Path) -> None:
+        from claude_task_master.core.subagents import load_agents_from_directory
+
+        (agents_dir / "big.md").write_text(
+            "---\nname: big\ndescription: Big worker\nmax_turns: 300\n---\n\nP.\n"
+        )
+
+        agents = load_agents_from_directory(str(temp_working_dir))
+        assert agents["big"].maxTurns == 300
+
+    def test_invalid_max_turns_ignored(self, temp_working_dir: Path, agents_dir: Path) -> None:
+        from claude_task_master.core.subagents import load_agents_from_directory
+
+        (agents_dir / "odd.md").write_text(
+            "---\nname: odd\ndescription: Odd worker\nmax_turns: banana\n---\n\nP.\n"
+        )
+
+        with patch("claude_task_master.core.subagents.console"):
+            agents = load_agents_from_directory(str(temp_working_dir))
+        assert agents["odd"].maxTurns is None
+
+
+class TestHiveWorkerBigPieceContract:
+    """Workers are meant to carry big self-contained pieces, finished completely."""
+
+    def test_prompt_tells_the_worker_to_own_a_big_piece(self) -> None:
+        prompt = HIVE_WORKER_PROMPT.lower()
+        assert "own it end to end" in prompt
+        assert "completely" in prompt
+
+    def test_prompt_forbids_spawning_further_agents(self) -> None:
+        prompt = HIVE_WORKER_PROMPT.lower()
+        assert "never spawn agents of your own" in prompt
+
+    def test_description_says_the_piece_can_be_large(self) -> None:
+        assert "large" in HIVE_WORKER_DESCRIPTION.lower()

@@ -6,6 +6,8 @@ executes tasks, makes changes, and creates PRs.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from . import prompts_working_hive as hive_text
 from .hive import DEFAULT_HIVE_MAX_PARALLEL
 from .prompts_base import PromptBuilder
@@ -27,6 +29,7 @@ def build_work_prompt(
     parallel: bool = False,
     max_parallel: int = DEFAULT_HIVE_MAX_PARALLEL,
     machine: str = "",
+    project_agents: Sequence[tuple[str, str]] | None = None,
 ) -> str:
     """Build the work session prompt.
 
@@ -59,6 +62,10 @@ def build_work_prompt(
             can size its team against real capacity rather than guess. Measured
             by the caller (this module stays pure); empty omits it. Ignored
             unless ``parallel``.
+        project_agents: ``(name, description)`` of the project's own
+            ``.claude/agents/`` definitions, surfaced in the fan-out brief so
+            the lead dispatches a specialist for a matching piece. Gathered by
+            the caller (this module stays pure); ignored unless ``parallel``.
 
     Returns:
         Complete work session prompt.
@@ -130,7 +137,7 @@ Completion report: 3-5 lines. What changed, not how."""
     if fan_out:
         builder.add_section(
             hive_text.FANOUT_SECTION_TITLE,
-            hive_text.build_fanout_section(max_parallel, machine),
+            hive_text.build_fanout_section(max_parallel, machine, project_agents),
         )
 
     # Context section
