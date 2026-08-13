@@ -77,17 +77,24 @@ class TestWorkerDispatchIsForegroundAndBounded:
         assert "Task" in disallowed
         assert "Agent" in disallowed
 
-    def test_worker_turn_budget_leaves_room_for_a_team(self) -> None:
+    def test_the_session_has_room_for_a_team(self) -> None:
         """Turns are charged against ONE session cap, lead and workers together.
 
-        Regression: a flat 200-turn worker against a 400-turn session meant two
-        busy workers could end the session in ``error_max_turns`` with nothing
-        committed — re-running the whole fanned-out task.
+        Regression: the cap was 400, written for a soloist, while each worker
+        carries 200 — so a lead plus two busy workers could end the session in
+        ``error_max_turns`` with nothing committed, re-running the whole
+        fanned-out task. The cap now has room for a real team; workers are not
+        rationed to fit inside a number written for one agent, because a worker
+        that stops mid-piece hands the lead back work that was nearly done.
         """
         from claude_task_master.core.agent_query import MAX_TURNS
 
         assert MAX_TURNS is not None
-        assert hive_worker_max_turns() * 3 <= MAX_TURNS
+        assert hive_worker_max_turns() * 4 <= MAX_TURNS
+
+    def test_workers_keep_a_generous_budget(self) -> None:
+        """A worker takes a whole module end to end; 200 is a backstop, not a ration."""
+        assert hive_worker_max_turns() == 200
 
     def test_worker_turn_budget_env_override_still_wins(
         self, monkeypatch: pytest.MonkeyPatch

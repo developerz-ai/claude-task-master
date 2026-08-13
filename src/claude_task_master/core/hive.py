@@ -51,26 +51,21 @@ DEFAULT_HIVE_MAX_PARALLEL: int = 10
 
 HIVE_MAX_PARALLEL_ENV = "CLAUDETM_HIVE_MAX_PARALLEL"
 
-#: Per-worker turn budget when the session's own cap is unknown or disabled.
+#: Per-worker turn budget, passed as ``AgentDefinition.maxTurns``.
 #:
-#: Workers carry big self-contained pieces, so the budget is sized for real work
-#: (healthy solo sessions run tens of turns). It exists to stop a runaway worker
-#: from burning the session's aggregate limits on everyone else's behalf — which
-#: is why the *usual* value is derived from that aggregate rather than fixed:
-#: see :func:`hive_worker_max_turns`.
+#: A worker is meant to take a whole module or feature slice off the lead's
+#: plate and finish it — code, tests, docs — so this is sized for real work, not
+#: rationed. Healthy solo sessions run tens of turns; 200 is a runaway backstop
+#: for one worker, not a working budget it is expected to feel.
+#:
+#: It is deliberately **not** derived from the session cap. The two do share a
+#: pot — ``MAX_TURNS`` bounds the whole query and the terminal ``ResultMessage``
+#: aggregates the lead plus every subagent — but the answer to that is to give
+#: the session room for a team (see ``MAX_TURNS`` in :mod:`.agent_query`), not to
+#: shrink each worker until several fit inside a cap that was written for one
+#: agent. A squeezed worker stops mid-piece, which costs the lead the whole
+#: piece: it must verify, re-cut and re-do work that was nearly finished.
 DEFAULT_HIVE_WORKER_MAX_TURNS: int = 200
-
-#: Share of the session's turn budget one worker may take, as a divisor. The
-#: session cap (``MAX_TURNS``, 400) counts the lead *and* every subagent, so a
-#: flat 200-turn worker meant two busy workers could exhaust the whole session
-#: on their own — ending it with ``error_max_turns``, nothing committed, and the
-#: entire fanned-out task re-run at N agents' cost. Five gives a realistic team
-#: (a lead plus three or four workers) room to finish inside one session.
-_WORKER_TURN_SHARE: int = 5
-
-#: Floor for the derived budget. Below this a worker cannot finish a real piece,
-#: and a worker that runs out mid-piece costs more than one that never started.
-_MIN_WORKER_MAX_TURNS: int = 40
 
 HIVE_WORKER_MAX_TURNS_ENV = "CLAUDETM_HIVE_WORKER_MAX_TURNS"
 
@@ -141,33 +136,10 @@ def hive_max_parallel() -> int:
 def hive_worker_max_turns() -> int:
     """Turn budget each hive worker gets (``AgentDefinition.maxTurns``).
 
-    An explicit ``CLAUDETM_HIVE_WORKER_MAX_TURNS`` wins. Otherwise the budget is
-    derived from the session's own cap, because the two are spent from the same
-    pot: ``max_turns`` bounds the whole query, and the terminal ``ResultMessage``
-    aggregates the lead plus every subagent. A per-worker budget set independent
-    of that is not a bound at all — at the old flat 200 against a 400-turn
-    session, two busy workers could end the session in ``error_max_turns`` with
-    nothing committed, which re-runs the entire task, fan-out included. The
-    derived value is the session cap divided by :data:`_WORKER_TURN_SHARE`,
-    floored at :data:`_MIN_WORKER_MAX_TURNS`.
-
-    With the session cap disabled (``CLAUDETM_MAX_TURNS=0``) there is nothing to
-    divide, so :data:`DEFAULT_HIVE_WORKER_MAX_TURNS` applies.
-
-    Returns:
-        The per-worker turn budget, always positive.
+    Reads ``CLAUDETM_HIVE_WORKER_MAX_TURNS``; anything unset, unparseable or
+    ``<= 0`` falls back to :data:`DEFAULT_HIVE_WORKER_MAX_TURNS`.
     """
-    raw = os.environ.get(HIVE_WORKER_MAX_TURNS_ENV)
-    if raw is not None:
-        return _env_positive_int(HIVE_WORKER_MAX_TURNS_ENV, DEFAULT_HIVE_WORKER_MAX_TURNS)
-
-    # Deferred: agent_query pulls in the config stack, and this module is a leaf
-    # imported by prompt building.
-    from .agent_query import MAX_TURNS  # noqa: PLC0415
-
-    if not MAX_TURNS or MAX_TURNS <= 0:
-        return DEFAULT_HIVE_WORKER_MAX_TURNS
-    return max(_MIN_WORKER_MAX_TURNS, MAX_TURNS // _WORKER_TURN_SHARE)
+    return _env_positive_int(HIVE_WORKER_MAX_TURNS_ENV, DEFAULT_HIVE_WORKER_MAX_TURNS)
 
 
 def hive_worker_effort() -> EffortLevel | None:

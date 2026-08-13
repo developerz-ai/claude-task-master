@@ -86,16 +86,25 @@ POST_COMPLETION_IDLE_TIMEOUT_SEC = _env_positive_float(
 # wall-clock cap punishes a session that is legitimately slow (big test suite,
 # slow CI) exactly as hard as one that is looping.
 #
-# Set well above real work: observed healthy sessions run tens of turns, so 400
-# is a runaway backstop, not a working budget. Hitting it yields an
-# `error_max_turns` terminal result, which the orchestrator now treats as "task
-# not done" — it retries the task (leftover changes intact) rather than checking
-# it off. Set to 0 to disable the cap entirely.
-_max_turns_env = os.environ.get("CLAUDETM_MAX_TURNS", "400")
+# Set well above real work: observed healthy solo sessions run tens of turns, so
+# this is a runaway backstop, not a working budget. Hitting it yields an
+# `error_max_turns` terminal result, which the orchestrator treats as "task not
+# done" — it retries the task (leftover changes intact) rather than checking it
+# off. Set to 0 to disable the cap entirely.
+#
+# It is sized for a **hive**, not a soloist. The cap bounds the whole query and
+# the terminal ResultMessage aggregates the lead plus every subagent, so a value
+# written for one agent silently rations the team: at 400, a lead plus two busy
+# 200-turn workers could exhaust the session, ending it with nothing committed
+# and re-running the entire fanned-out task. The fix is room, not rationing —
+# squeezing each worker to fit would have them stop mid-piece, handing the lead
+# back work that was nearly done. A solo session never approaches either number,
+# so raising it costs nothing and it remains a backstop.
+_max_turns_env = os.environ.get("CLAUDETM_MAX_TURNS", "2000")
 try:
     _parsed_max_turns = int(_max_turns_env.strip())
 except (ValueError, AttributeError):
-    _parsed_max_turns = 400
+    _parsed_max_turns = 2000
 # 0 disables the cap; a negative value is a typo, not a request to disable, and
 # passing it through to the SDK as max_turns=-1 raises a non-retryable
 # SDKInitializationError on every query.
