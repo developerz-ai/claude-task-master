@@ -44,7 +44,7 @@ class _LoopVerificationMixin:
         if not criteria:
             return {"success": True, "details": "No criteria specified"}
 
-        context = orc.state_manager.load_context()
+        context = orc.state_manager.load_context_for_prompt()
         tasks_summary = self._build_completed_tasks_summary(state)  # type: ignore[attr-defined]
         result = orc.agent.verify_success_criteria(
             criteria=criteria, context=context, tasks_summary=tasks_summary
@@ -67,7 +67,7 @@ class _LoopVerificationMixin:
         orc = self._orc
         console.info("Running agent to fix verification failures...")
         criteria = orc.state_manager.load_criteria() or ""
-        context = orc.state_manager.load_context()
+        context = orc.state_manager.load_context_for_prompt()
 
         task_description = f"""Verification of success criteria has FAILED.
 
@@ -317,7 +317,7 @@ Important:
 - Push changes to trigger a new CI run
 """
 
-            context = orc.state_manager.load_context()
+            context = orc.state_manager.load_context_for_prompt()
             coding_style = orc.state_manager.load_coding_style()
             # Route through orc.* so patch.object on orchestrator intercepts it.
             current_branch = orc._get_current_branch()

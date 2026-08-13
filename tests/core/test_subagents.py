@@ -1009,7 +1009,7 @@ Prompt.
 """
         frontmatter, prompt = parse_agent_frontmatter(content)
 
-        assert frontmatter["tools"] == [""]
+        assert frontmatter["tools"] == []
 
     def test_frontmatter_without_newline_after_closing(self) -> None:
         """Test frontmatter without newline after closing marker."""
@@ -1116,12 +1116,20 @@ class TestListProjectAgents:
 class TestHiveWorkerTurnBudget:
     """Workers carry big pieces, so each gets its own maxTurns budget."""
 
-    def test_default_budget_applied(self) -> None:
-        from claude_task_master.core.hive import DEFAULT_HIVE_WORKER_MAX_TURNS
+    def test_default_budget_derives_from_the_session_cap(self) -> None:
+        """The worker budget is a share of the session's, not a flat number.
+
+        Regression: a flat 200 against a 400-turn session meant two busy workers
+        could exhaust the whole session, ending it in error_max_turns with
+        nothing committed — which re-runs the entire fanned-out task.
+        """
+        from claude_task_master.core.agent_query import MAX_TURNS
         from claude_task_master.core.subagents import build_builtin_agents
 
-        agents = build_builtin_agents()
-        assert agents["hive-worker"].maxTurns == DEFAULT_HIVE_WORKER_MAX_TURNS
+        budget = build_builtin_agents()["hive-worker"].maxTurns
+        assert budget is not None
+        assert MAX_TURNS is not None
+        assert budget < MAX_TURNS // 2
 
     def test_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from claude_task_master.core.subagents import build_builtin_agents
@@ -1151,6 +1159,7 @@ class TestProjectAgentMaxTurns:
         assert agents["big"].maxTurns == 300
 
     def test_invalid_max_turns_ignored(self, temp_working_dir: Path, agents_dir: Path) -> None:
+        from claude_task_master.core.hive import hive_worker_max_turns
         from claude_task_master.core.subagents import load_agents_from_directory
 
         (agents_dir / "odd.md").write_text(
@@ -1159,7 +1168,10 @@ class TestProjectAgentMaxTurns:
 
         with patch("claude_task_master.core.subagents.console"):
             agents = load_agents_from_directory(str(temp_working_dir))
-        assert agents["odd"].maxTurns is None
+        # Falls back to the shared worker budget, never to unbounded: the lead
+        # is told to prefer project specialists, so an unbounded one could spend
+        # the session's whole aggregate turn budget by itself.
+        assert agents["odd"].maxTurns == hive_worker_max_turns()
 
 
 class TestHiveWorkerBigPieceContract:

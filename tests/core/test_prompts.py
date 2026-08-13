@@ -308,7 +308,8 @@ class TestBuildContextExtractionPrompt:
 
         assert "Found new pattern" in prompt
         assert "Previously: uses Redis" in prompt
-        assert "Existing Context" in prompt
+        assert "Already Captured" in prompt
+        assert "do NOT repeat" in prompt
 
     def test_includes_extraction_categories(self) -> None:
         """Test extraction categories are included."""

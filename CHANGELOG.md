@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.88] - 2026-08-13
+
+### Fixed
+
+- **Fan-out was on everywhere, including where it can never pay.** Reported as "token usage has gone very up since the subagents". It had: measured across real runs, subagents account for 20–45% of tokens on recent days, and the share of work sessions that got *re-run* went from 0–5% before hive to 11–20% after. Some of that is fan-out working as designed. The rest was this.
+
+  `hive-worker` was registered on **every** query. The agent loader was wired into the phase executor once and used unconditionally, so `--no-parallel` removed the fan-out *brief* and nothing else — the worker definition stayed, the Agent tool was always available (the working phase allows every tool), and a session told nothing about fan-out could still fan out. Planning, verification, release checks, learnings extraction and every push-only fix session carried the ~1.4k-token worker contract in their system prompt and could act on it; a review-fix session was observed dispatching `hive-worker`s. `fan_out_enabled(parallel, push_only)` is now the single source of truth, consulted by both the prompt builder and the query builder: no brief, no agent definitions. Two more cases answer no — a **resumed task** (a dirty tree means a previous attempt's work is half-written, so the lead cannot hand out a file set it can vouch for, and a fan-out that already failed once would re-run at N agents' cost on the retry it caused) and a **`[quick]` task** (already judged small enough for Haiku, so the brief's own answer is guaranteed to be zero workers).
+
+- **Backgrounded workers are now impossible, not merely forbidden.** The brief has always said to pass `run_in_background: false` on every worker; leads ignored it 27% of the time (39 of 210 dispatches explicitly backgrounded, 18 more omitting the parameter, which the Agent tool defaults to background). Each miss costs the whole task: the worker keeps writing after the lead ends its turn, the orchestrator finds a dirty tree, reads the session as unfinished and re-runs everything, fan-out included. Pinned with `AgentDefinition.background=False`. Recursive fan-out is blocked the same way (`disallowedTools=["Task", "Agent"]`) instead of by prose.
+
+- **The worker turn budget was arithmetically incompatible with the session cap.** `MAX_TURNS` (400) bounds the whole query and the terminal `ResultMessage` aggregates the lead plus every subagent — so a flat 200-turn worker meant two busy workers could exhaust the session on their own, ending it in `error_max_turns` with nothing committed, which re-runs the entire fanned-out task. The budget is now derived from the session's (`MAX_TURNS // 5`, floored at 40). Project agents inherit it instead of running unbounded, and `max_turns: yes` no longer parses to a 1-turn worker.
+
+- **Workers ran at maximum reasoning effort.** `model="inherit"` is unchanged — a worker on a `[coding]` task is still Opus — but `effort` was unset, so it inherited the session's, which for Opus is `"max"`: the deepest thinking tier on every mechanical turn of every worker. Pinned to `"high"`, still an extended reasoning tier, since a worker's piece arrives specified with its file set and API surface handed over. `CLAUDETM_HIVE_WORKER_EFFORT` overrides, `inherit` restores the old behaviour.
+
+- **Accumulated context was injected uncapped into every prompt.** `ContextAccumulator` has always defined a 32k-char cap, but it lived on a method with one caller (the cheap distillation step) while the twelve sites that build the prompts that matter called `load_context()` and injected the raw file. A real `context.md` reached 157 KB — ~39k tokens in every session's prompt, re-read from cache on every turn of it. The cap now lives at the read (`StateManager.load_context_for_prompt()`). The growth is bounded from the other end too: the learnings extractor now reads the **tail** of the session output (the completion report, not the opening exploration narration) and only the last 8k chars of accumulated context, told not to restate it — feeding it the whole file made it paraphrase the backlog into every new entry, which was appended and re-injected forever (one carried-forward line was found restated in 26 separate entries).
+
+- **A failing query could retry forever.** The consecutive-failure counter decayed on a ~60s window measured from the *first* failure and sized from the retry backoff, not from how long a query takes. Any session that ran longer than a minute before failing reset the counter on every failure, so the threshold was never reached and the retry loop was unbounded — an unattended run could re-run a twenty-minute Opus session indefinitely, at N workers a time, with the backoff exponent pinned at zero so it was a ~1s tight loop. "Consecutive" now means what it says: no successful query in between.
+
+- **A typo in a timeout env var crashed every command.** `CLAUDETM_STREAM_IDLE_TIMEOUT_SEC` and `CLAUDETM_POST_COMPLETION_IDLE_TIMEOUT_SEC` were parsed with a bare `float()` on a module-level constant, so `30s` or an empty value raised at import — taking down `status` and `doctor` too. `CLAUDETM_MAX_TURNS=-1` was passed straight through to the SDK as `max_turns=-1`, a non-retryable init error on every query. Both parse defensively now, like every other knob.
+
+- **The model fallback chain skipped straight to the bottom.** The SDK's own first hop was seeded as already-attempted unconditionally, but most chains are one hop long (SONNET → [HAIKU], HAIKU → [SONNET]) — so the first `ModelUnavailableError` on any `[general]`, `[quick]` or `[debugging-qa]` task raised "All fallback models exhausted" having tried nothing, and Opus silently skipped Sonnet.
+
+- **The project's own `.claude/agents/` specialists were being mangled before the lead ever saw them.** The hand-rolled frontmatter parser turned a folded `description: >` into the single character `>` (so the specialist was advertised as `>` and never matched — every piece fell back to a generic worker), kept the quotes on `name: "my-agent"` (so dispatch failed), read a block-list `tools:` as `""`, let an indented nested `name:` clobber the top-level one, coerced `description: no` to `False`, and failed outright on a file with no trailing newline.
+
+- **The release gate failed open.** `parse_release_check_result` tested PASS before FAIL, and the prompt prints all three marker strings to the agent — so any output quoting the instructions, or reporting per-check verdicts ("checks 1-3 PASS … check 4 FAIL"), scored as a pass. FAIL now wins when both appear.
+
+- **Retry counters leaked to the next task.** `task_finish_attempts` survived the two no-session early returns, so the following task's prompt opened with "**Retry 1** — the previous session on this task stopped before committing" about a session that never ran, and started with half its retry budget spent. `fix_finish_attempts` — shared by all three fix stages — was left set when `addressing_reviews` exited with nothing to fix, blocking a later CI fix one attempt early.
+
+- **A dirty git submodule made every session look unfinished.** The `git status --porcelain` probes that decide "did the agent commit its work" report ` M sub` when a submodule's worktree is merely dirty, which a top-level `git add -A` cannot clean — so in a repo with submodules, running the test suite dirtied one on every session and every task burned its full retry budget. All four probes now pass `--ignore-submodules=dirty`.
+
+### Changed
+
+- **Prompts stopped paying for the same context repeatedly.** All three work-prompt execution modes and the planning prompt told the agent to "Read project conventions FIRST — check the repository root for `CLAUDE.md`", while the style guide extracted from that same file was already injected above it and the CLI loads `CLAUDE.md` itself. On a repo with a 60 KB `CLAUDE.md` that is ~15k tokens read again per session — and once more per hive worker. The fan-out brief's fourth element changed from "the context you already paid to gather: key file excerpts" to **point, don't paste**: cite `path:line`, because the worker has the same checkout. The brief also now states that turns and cost are shared across the whole hive, tells the lead what to do when the cut leaves exactly one piece (fold it back in, dispatch nobody), and asks for the other workers' paths as a flat "do not touch" list rather than a per-worker roster that grew with N².
+
+- **CI-fix sessions grep before they read.** The prompt said "Use Glob to find all `.txt` files" for a directory of chunked `.log` files, then "Read ALL files in the ci/ directory" — over an unbounded set, contradicting the codebase's own warning elsewhere that reading a whole job's logs overflows context.
+
+- **Every session reports what it cost** (`Session cost: $X | in N out N tok`). Only working sessions were ever recorded, so planning, the three kinds of fix session, release checks, verification and learnings extraction spent money that appeared in no total — and a fanned-out session's figure, which aggregates the lead and every worker, was the one number that would have shown a fan-out costing N agents' tokens.
+
+- Bumped `claude-agent-sdk` to `>=0.2.137` (from `0.2.126`).
+
 ## [0.1.87] - 2026-08-12
 
 ### Changed
@@ -1036,7 +1076,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.87...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.88...HEAD
+[0.1.88]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.87...v0.1.88
 [0.1.87]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.86...v0.1.87
 [0.1.86]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.85...v0.1.86
 [0.1.85]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.84...v0.1.85

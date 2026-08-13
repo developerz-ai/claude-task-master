@@ -1231,11 +1231,19 @@ class TestClaudeMdGuidance:
         # Conventions should come first
         assert conventions_step < make_changes_step
 
-    def test_conventions_files_in_repository_root(self) -> None:
-        """Test prompt specifies CLAUDE.md is at repository root."""
+    def test_conventions_are_not_re_read(self) -> None:
+        """CLAUDE.md is already in context; the prompt must not order a re-read.
+
+        Regression: all three execution builders told the agent to "Read project
+        conventions FIRST — check the repository root for CLAUDE.md", while the
+        style guide extracted from that same file was already injected above and
+        the CLI loads CLAUDE.md itself. On this repo that is a 60 KB file read
+        again per session — and once per hive worker on top.
+        """
         result = build_work_prompt("Any task")
-        # Should mention repository root
-        assert "repository root" in result.lower() or "root" in result
+        assert "already loaded in your context" in result
+        assert "don't re-read" in result
+        assert "Read project conventions FIRST" not in result
 
     def test_coding_requirements_context_preserved(self) -> None:
         """Test coding requirements guidance appears regardless of other parameters."""
@@ -1261,7 +1269,7 @@ class TestClaudeMdGuidance:
         result_commit = build_work_prompt("Task", create_pr=False)
 
         # Extract the "Read project conventions" sections from both
-        conventions_marker = "Read project conventions"
+        conventions_marker = "Follow project conventions"
         full_conventions_pos = result_full.find(conventions_marker)
         commit_conventions_pos = result_commit.find(conventions_marker)
 
@@ -1315,19 +1323,19 @@ class TestParallelOffIsByteIdentical:
     BASELINES: dict[str, tuple[dict[str, Any], str]] = {
         "plain": (
             {"task_description": "Any task"},
-            "c266487f72d2acfad13b38ecf19aac0689c28e58ab62319c44b7e43bfe46fabb",
+            "f3dc41e9ef35aff3a0c791fc53b34f7ec9e195ebae8cac42d8183fd5ec009dc0",
         ),
         "commit_only": (
             {"task_description": "Task", "create_pr": False},
-            "9c5d7722456e4a428837dd25102673c7e9fcce9720237b9688399903240f8b5a",
+            "aaeb717ea4689264d5ac80aca712cd0f8e775e1928ccf4164b15f419286ffc1a",
         ),
         "push_only": (
             {"task_description": "Task", "push_only": True},
-            "4527b53782a26c00d91c778a49a31c231519dd32d9fceba698dd9f3e51339e43",
+            "2175201e221cb901a132938b01313b42bd2f3da25b54abad75a1f901fab52849",
         ),
         "push_only_rebase": (
             {"task_description": "Task", "push_only": True, "allow_rebase": True},
-            "5adecee5af4e04344966edd7e6571bb485ee57cd5c82326722d991ac251b5e05",
+            "9b3ce33b9ea461d91aabcdea9ce949e1cdbf4abdd9da0e884eb58316f6c39d39",
         ),
         "everything": (
             {
@@ -1347,7 +1355,7 @@ class TestParallelOffIsByteIdentical:
                 "target_branch": "develop",
                 "coding_style": "## Naming\n- snake_case",
             },
-            "b7f26bdeac63accb63ac789dd6fb4cb246f8a1a595d435d02e803ad88b6e38ed",
+            "f5c6d3374932603077596b8272291c0f9cef820145eacd574655edbbbad4bd73",
         ),
     }
 
@@ -1415,7 +1423,7 @@ class TestParallelIsPurelyAdditive:
     def test_conventions_guidance_survives(self) -> None:
         result = _parallel_prompt()
         assert "CLAUDE.md" in result
-        assert "Read project conventions" in result
+        assert "Follow project conventions" in result
 
     def test_both_create_pr_variants_carry_the_section(self) -> None:
         for create_pr in (True, False):
@@ -1462,10 +1470,16 @@ class TestFanOutRules:
         assert "in a single message so they run concurrently" in result
 
     def test_workers_must_not_be_backgrounded(self) -> None:
-        """Backgrounded workers outlive the session and strand a dirty tree."""
+        """Backgrounded workers outlive the session and strand a dirty tree.
+
+        The flag itself is now pinned on the agent definition
+        (``AgentDefinition.background=False``) because leads ignored the prose
+        rule about a quarter of the time; the brief keeps the consequence, which
+        is the part the lead has to act on.
+        """
         result = _parallel_prompt()
-        assert "`run_in_background: false`" in result
-        assert "Never end your turn while a worker is still running." in result
+        assert "Workers run in the foreground" in result
+        assert "never end your turn while one is live" in result
 
     def test_wait_for_workers_before_gate_or_git(self) -> None:
         result = _parallel_prompt()
@@ -1485,7 +1499,7 @@ class TestFanOutRules:
     def test_brief_names_work_files_and_neighbours(self) -> None:
         result = _parallel_prompt()
         assert "EXCLUSIVE file set" in result
-        assert "which other workers are live" in result
+        assert "the paths owned by other workers" in result
 
     def test_collision_is_reported_not_resolved(self) -> None:
         result = _parallel_prompt()
@@ -1566,10 +1580,17 @@ class TestBigPieceCalibration:
         assert "Cut BIG pieces, not slivers" in result
 
     def test_brief_carries_gathered_context(self) -> None:
-        """The fourth brief element: the lead's ramp-up handed to the worker."""
+        """The fourth brief element: what the worker cannot read for itself.
+
+        Regression: this used to be "the context you already paid to gather:
+        key file excerpts", which had the lead re-emit the same excerpts once
+        per worker — paid as output tokens by the lead and input tokens by every
+        worker, for a checkout each worker already has.
+        """
         result = _parallel_prompt()
         assert "MUST carry four things" in result
-        assert "context you already paid to gather" in result
+        assert "what it cannot read for itself" in result
+        assert "Point, don't paste" in result
 
     def test_lead_works_while_workers_run(self) -> None:
         result = _parallel_prompt()

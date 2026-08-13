@@ -210,10 +210,15 @@ def parse_release_check_result(result: str) -> dict[str, str]:
     Returns:
         Dict with 'status' (pass/fail/skip) and 'details'.
     """
-    if RELEASE_CHECK_PASS in result:
-        return {"status": "pass", "details": result}
-    elif RELEASE_CHECK_FAIL in result:
+    # FAIL is tested first, deliberately. The prompt prints all three marker
+    # strings to the agent, so any output that quotes the instructions, or
+    # reports per-check verdicts ("checks 1-3 PASS … check 4 FAIL"), contains
+    # both markers. Testing PASS first scored every one of those as a pass — a
+    # post-merge gate that fails open. When both appear, the failure wins.
+    if RELEASE_CHECK_FAIL in result:
         return {"status": "fail", "details": result}
+    elif RELEASE_CHECK_PASS in result:
+        return {"status": "pass", "details": result}
     elif RELEASE_CHECK_SKIP in result:
         return {"status": "skip", "details": result}
     else:

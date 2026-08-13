@@ -42,6 +42,35 @@ class _AgentPhaseGenerationMixin:
         """Return tool list for *phase* — overridden by AgentPhaseExecutor."""
         raise NotImplementedError  # pragma: no cover
 
+    def agents_for(self, fan_out: bool) -> Any:
+        """The agent loader to hand this query, or None to register no agents.
+
+        Subagent definitions are not free and not harmless. Each one ships its
+        full prompt in the query's system prompt (``hive-worker`` alone is ~1.4k
+        tokens, re-read from cache on every turn of the session), and — because
+        the working phase allows every tool and ``allowed_tools`` is only an
+        auto-approve list — registering one is what makes fan-out *possible*.
+
+        They used to be attached to every query unconditionally, which had two
+        consequences neither documented nor intended: ``--no-parallel`` removed
+        the fan-out brief but left the machinery in place, and phases that must
+        never fan out — planning, verification, release checks, learnings
+        extraction, and every push-only fix session — carried the worker
+        contract and could act on it. A review-fix session was observed
+        dispatching ``hive-worker`` subagents this way.
+
+        So the rule is now the obvious one: agents are registered exactly where
+        fan-out is permitted, and nowhere else.
+
+        Args:
+            fan_out: Whether this query may dispatch workers — see
+                :func:`~.hive.fan_out_enabled`.
+
+        Returns:
+            ``self.get_agents_func`` when fan-out is permitted, else None.
+        """
+        return self.get_agents_func if fan_out else None
+
     def generate_coding_style(self) -> dict[str, Any]:
         """Generate a coding style guide by analyzing the codebase.
 
@@ -65,7 +94,7 @@ class _AgentPhaseGenerationMixin:
                 tools=self.get_tools_for_phase("planning"),
                 model_override=ModelType.OPUS,  # Use Opus for quality
                 get_model_name_func=self.get_model_name_func,
-                get_agents_func=self.get_agents_func,
+                get_agents_func=self.agents_for(False),
                 process_message_func=self.process_message_func,
             ),
             self.message_processor,
@@ -105,7 +134,7 @@ class _AgentPhaseGenerationMixin:
                 tools=self.get_tools_for_phase("working"),  # All tools for probing
                 model_override=ModelType.SONNET,  # Sonnet for speed
                 get_model_name_func=self.get_model_name_func,
-                get_agents_func=self.get_agents_func,
+                get_agents_func=self.agents_for(False),
                 process_message_func=self.process_message_func,
             ),
             self.message_processor,

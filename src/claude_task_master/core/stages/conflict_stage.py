@@ -79,7 +79,7 @@ class _ConflictStage(_MergeStage):
         required_branch = self._get_pr_head_branch(state)
 
         try:
-            context = self.state_manager.load_context()
+            context = self.state_manager.load_context_for_prompt()
         except Exception:
             context = ""
 

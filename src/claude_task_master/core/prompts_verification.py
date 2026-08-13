@@ -11,6 +11,14 @@ from __future__ import annotations
 
 from .prompts_base import PromptBuilder
 
+#: How much already-accumulated context the learnings extractor is shown. Enough
+#: to recognise a repeat, far less than the full file — this prompt's output is
+#: appended to that same file, so whatever it echoes here it pays for forever.
+_EXTRACTION_CONTEXT_CHARS = 8_000
+
+#: How much of the session's output the extractor reads (the tail — see below).
+_EXTRACTION_OUTPUT_CHARS = 5_000
+
 
 def build_verification_prompt(
     criteria: str,
@@ -79,9 +87,22 @@ def build_context_extraction_prompt(
     )
 
     if existing_context:
-        builder.add_section("Existing Context", existing_context)
+        # Only the tail, and only enough of it to recognise a repeat. Handing
+        # the model the whole accumulated file made it restate the backlog into
+        # every new entry, which was then appended — so the file grew
+        # superlinearly and each restatement was re-injected into every prompt
+        # thereafter. One real file reached 157 KB with a single carried-forward
+        # line present in 26 separate session entries.
+        builder.add_section(
+            "Already Captured (do NOT repeat any of this)",
+            existing_context[-_EXTRACTION_CONTEXT_CHARS:],
+        )
 
-    builder.add_section("Session Output", session_output[:5000])  # Limit length
+    # The TAIL of the session, not the head. This text is the whole accumulated
+    # assistant output of the session, and the part worth learning from — what
+    # changed, what broke, the completion report — is at the end. Slicing from
+    # the front kept the opening exploration narration and discarded all of it.
+    builder.add_section("Session Output", session_output[-_EXTRACTION_OUTPUT_CHARS:])
 
     builder.add_section(
         "Extract",
@@ -91,7 +112,8 @@ def build_context_extraction_prompt(
 - **Issues** hit and solutions
 - **Feedback** received and response
 
-Only include what helps future tasks. Skip obvious things.""",
+Only include what helps future tasks. Skip obvious things, and skip anything already captured
+above — a learning that is already in the accumulated context must NOT be restated.""",
     )
 
     return builder.build()

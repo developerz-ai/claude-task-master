@@ -103,7 +103,7 @@ class PlanUpdater:
 
         # Load optional context
         goal = self.state_manager.load_goal()
-        context = self.state_manager.load_context()
+        context = self.state_manager.load_context_for_prompt()
 
         # Get max_prs constraint from state options
         state = self.state_manager.load_state()

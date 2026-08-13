@@ -72,7 +72,7 @@ class _PRFixStage(_CIStage):
 
         # Run agent with Opus for complex debugging
         try:
-            context = self.state_manager.load_context()
+            context = self.state_manager.load_context_for_prompt()
         except Exception:
             context = ""
 
@@ -385,11 +385,11 @@ This is more efficient than fixing them separately.
 **CI Failure logs:** `{ci_path}`
 **Review comments:** `{comments_path}`
 
-Use Glob to find all .txt files in both directories, then Read each one.
+CI logs are chunked `.log` files; comments are `.txt`. **Grep before you read** — `Grep` the ci/ directory for `FAIL|Error|error:|✗|panic` to find the chunks that matter, then Read only those. A failing job's logs can run to hundreds of chunks; reading them all overflows the context and buries the failure.
 
 ## Step 2: Fix CI Failures (Priority 1)
 
-- Read ALL files in the ci/ directory
+- Grep the ci/ directory for failures, then Read the matching chunks (and their neighbours for context)
 - Understand ALL error messages (lint, tests, types, etc.)
 - Fix everything that's failing - don't skip anything
 - Pre-existing issues, flaky tests, lint errors - fix them all
@@ -435,13 +435,13 @@ After fixing ALL CI issues AND addressing ALL comments, end with: TASK COMPLETE"
 
 **Read the CI failure logs from:** `{ci_path}`
 
-Use Glob to find all .txt files, then Read each one to understand the errors.
+CI logs are chunked `.log` files. **Grep before you read** — `Grep` for `FAIL|Error|error:|✗|panic` to locate the failures, then Read only the matching chunks. Never read every chunk; a big job's logs will overflow your context and bury the actual error.
 
 **IMPORTANT:** Fix ALL CI failures, even if they seem unrelated to your current work.
 Your job is to keep CI green. Pre-existing issues, flaky tests, lint errors - fix them all.
 
 Please:
-1. Read ALL files in the ci/ directory
+1. Grep the ci/ directory for failures, then Read the matching chunks
 2. Understand ALL error messages (lint, tests, types, etc.)
 3. Fix everything that's failing - don't skip anything
 4. Run tests/lint locally to verify ALL passes
@@ -456,7 +456,7 @@ After fixing, end with: TASK COMPLETE"""
 
 **Read the review comments from:** `{comments_path}`
 
-Use Glob to find all .txt files, then Read each one to understand the feedback.
+Use Glob to find all `.txt` files in the comments/ directory, then Read each one.
 
 Please:
 1. Read ALL comment files in the comments/ directory

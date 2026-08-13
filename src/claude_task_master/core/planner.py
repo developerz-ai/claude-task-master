@@ -109,7 +109,7 @@ class Planner:
         release_guide = self.ensure_release_guide(enable_release=enable_release)
 
         # Load any existing context
-        context = self.state_manager.load_context()
+        context = self.state_manager.load_context_for_prompt()
 
         # Run planning phase with Claude (with coding style, release guide, and max_prs)
         result = self.agent.run_planning_phase(

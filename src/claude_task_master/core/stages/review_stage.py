@@ -201,6 +201,11 @@ class _ReviewStage(_PRFixStage):
                 # against the API (observed when save_pr_comments raised).
                 if not interruptible_sleep(self.CI_POLL_INTERVAL):
                     return None
+            # Leaving the stage with nothing to fix ends this stage's streak.
+            # fix_finish_attempts is shared by all three fix stages, so a value
+            # left behind here is spent by whichever runs next — a later CI fix
+            # would block one attempt early on a review that needed no session.
+            state.fix_finish_attempts = 0
             # Go back to waiting_reviews to re-check
             state.workflow_stage = "waiting_reviews"
             self.state_manager.save_state(state)
@@ -245,7 +250,7 @@ Copy Thread ID from each comment file. Do NOT resolve threads via GraphQL — or
 End with: TASK COMPLETE"""
 
         try:
-            context = self.state_manager.load_context()
+            context = self.state_manager.load_context_for_prompt()
         except Exception:
             context = ""
 

@@ -184,7 +184,7 @@ Steps:
 End with: TASK COMPLETE"""
 
         try:
-            context = self.state_manager.load_context()
+            context = self.state_manager.load_context_for_prompt()
         except Exception:
             context = ""
 

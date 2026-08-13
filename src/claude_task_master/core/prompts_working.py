@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from . import prompts_working_hive as hive_text
-from .hive import DEFAULT_HIVE_MAX_PARALLEL
+from .hive import DEFAULT_HIVE_MAX_PARALLEL, fan_out_enabled
 from .prompts_base import PromptBuilder
 
 
@@ -71,8 +71,10 @@ def build_work_prompt(
         Complete work session prompt.
     """
     # Fix sessions (push_only) never fan out: they add one focused commit to an
-    # existing PR, which is not work worth cutting into disjoint pieces.
-    fan_out = parallel and not push_only
+    # existing PR, which is not work worth cutting into disjoint pieces. Shared
+    # with the query builder, which decides on the same predicate whether to
+    # register the worker definitions at all.
+    fan_out = fan_out_enabled(parallel, push_only)
 
     branch_info = ""
     if required_branch:
@@ -255,7 +257,7 @@ def _build_full_workflow_execution(target_branch: str = "main") -> str:
 
 **2. Understand the task** — Read files before modifying. Check existing patterns; identify which tests to run.
 
-**3. Read project conventions FIRST** — Check the repository root for `CLAUDE.md` (coding standards you MUST follow); also `.claude/instructions.md`, `CONTRIBUTING.md`, `.cursorrules`.
+**3. Follow project conventions** — `CLAUDE.md` is already loaded in your context and the style guide above is extracted from it: follow both, don't re-read them. Open `CONTRIBUTING.md` / `.cursorrules` / `.claude/instructions.md` only if this task touches something they cover.
 
 **4. Make changes** — Edit/Write files. Follow the coding style from `CLAUDE.md`. Match existing patterns. Stay focused on this task.
 
@@ -316,7 +318,7 @@ def _build_push_only_execution(target_branch: str = "main", allow_rebase: bool =
 
 **2. Understand the task** — Read the CI logs / PR comments referenced above and the relevant files before modifying. Identify tests/lint to run.
 
-**3. Read project conventions FIRST** — Check the repository root for `CLAUDE.md` (coding standards you MUST follow); also `.claude/instructions.md`, `CONTRIBUTING.md`, `.cursorrules`.
+**3. Follow project conventions** — `CLAUDE.md` is already loaded in your context and the style guide above is extracted from it: follow both, don't re-read them. Open `CONTRIBUTING.md` / `.cursorrules` / `.claude/instructions.md` only if this task touches something they cover.
 
 **4. Make changes** — Edit/Write files. Follow the coding style from `CLAUDE.md`. Match existing patterns. Stay focused on the issues raised.
 
@@ -349,7 +351,7 @@ def _build_commit_only_execution() -> str:
 
 **2. Understand the task** — Read files before modifying. Check existing patterns; identify which tests to run.
 
-**3. Read project conventions FIRST** — Check the repository root for `CLAUDE.md` (coding standards you MUST follow); also `.claude/instructions.md`, `CONTRIBUTING.md`, `.cursorrules`.
+**3. Follow project conventions** — `CLAUDE.md` is already loaded in your context and the style guide above is extracted from it: follow both, don't re-read them. Open `CONTRIBUTING.md` / `.cursorrules` / `.claude/instructions.md` only if this task touches something they cover.
 
 **4. Make changes** — Edit/Write files. Follow the coding style from `CLAUDE.md`. Match existing patterns. Stay focused on this task.
 
