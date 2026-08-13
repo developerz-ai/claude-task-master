@@ -93,7 +93,7 @@ class _MergeCleanup(_ReviewStage):
         self.state_manager.save_state(state)
 
         try:
-            context = self.state_manager.load_context()
+            context = self.state_manager.load_context_for_prompt()
         except Exception:
             context = ""
 

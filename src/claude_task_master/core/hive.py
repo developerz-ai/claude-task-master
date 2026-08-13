@@ -22,16 +22,28 @@ from __future__ import annotations
 
 import os
 import shutil
+from typing import Literal, cast
 
 __all__ = [
     "DEFAULT_HIVE_MAX_PARALLEL",
+    "DEFAULT_HIVE_WORKER_EFFORT",
     "DEFAULT_HIVE_WORKER_MAX_TURNS",
     "HIVE_MAX_PARALLEL_ENV",
+    "HIVE_WORKER_EFFORT_ENV",
     "HIVE_WORKER_MAX_TURNS_ENV",
     "describe_machine",
+    "fan_out_enabled",
     "hive_max_parallel",
+    "hive_worker_effort",
     "hive_worker_max_turns",
 ]
+
+
+#: Effort levels the SDK accepts (``AgentDefinition.effort``). ``"inherit"`` is
+#: ours, not the SDK's: it means "set nothing and follow the session".
+EffortLevel = Literal["low", "medium", "high", "xhigh", "max"]
+
+_VALID_EFFORTS: frozenset[str] = frozenset({"low", "medium", "high", "xhigh", "max"})
 
 
 # One knob: 1 lead + up to this many workers running at once.
@@ -39,14 +51,62 @@ DEFAULT_HIVE_MAX_PARALLEL: int = 10
 
 HIVE_MAX_PARALLEL_ENV = "CLAUDETM_HIVE_MAX_PARALLEL"
 
-#: Per-worker turn budget, passed as ``AgentDefinition.maxTurns``. Workers are
-#: meant to carry big self-contained pieces — a module, a feature slice with
-#: its tests — so the budget is sized for real work (healthy solo sessions run
-#: tens of turns) and exists only to stop a runaway worker from burning the
-#: session's aggregate limits on everyone else's behalf.
+#: Per-worker turn budget, passed as ``AgentDefinition.maxTurns``.
+#:
+#: A worker is meant to take a whole module or feature slice off the lead's
+#: plate and finish it — code, tests, docs — so this is sized for real work, not
+#: rationed. Healthy solo sessions run tens of turns; 200 is a runaway backstop
+#: for one worker, not a working budget it is expected to feel.
+#:
+#: It is deliberately **not** derived from the session cap. The two do share a
+#: pot — ``MAX_TURNS`` bounds the whole query and the terminal ``ResultMessage``
+#: aggregates the lead plus every subagent — but the answer to that is to give
+#: the session room for a team (see ``MAX_TURNS`` in :mod:`.agent_query`), not to
+#: shrink each worker until several fit inside a cap that was written for one
+#: agent. A squeezed worker stops mid-piece, which costs the lead the whole
+#: piece: it must verify, re-cut and re-do work that was nearly finished.
 DEFAULT_HIVE_WORKER_MAX_TURNS: int = 200
 
 HIVE_WORKER_MAX_TURNS_ENV = "CLAUDETM_HIVE_WORKER_MAX_TURNS"
+
+#: Reasoning effort each worker runs at (``AgentDefinition.effort``).
+#:
+#: Left unset, a worker inherits the *session's* effort, and the session's is
+#: keyed off its model — so a ``[coding]`` task put every worker on Opus at
+#: ``"max"``, the deepest thinking tier, for every turn it took. That is the
+#: right tier for the lead, which is deciding how to cut the work; it is not
+#: the right tier for a worker, whose piece arrives already specified, with its
+#: file set and the API surface to conform to handed over in the brief. The
+#: model is unchanged (``"inherit"``, so Opus stays Opus) — only the per-turn
+#: thinking depth is dialled from "max" to "high", which is still an extended
+#: reasoning tier. Set :data:`HIVE_WORKER_EFFORT_ENV` to ``max`` to restore the
+#: old behaviour, or to ``inherit`` to go back to following the session.
+DEFAULT_HIVE_WORKER_EFFORT: EffortLevel = "high"
+
+HIVE_WORKER_EFFORT_ENV = "CLAUDETM_HIVE_WORKER_EFFORT"
+
+
+def fan_out_enabled(parallel: bool, push_only: bool) -> bool:
+    """Whether this work session may split its task across workers.
+
+    The single source of truth for the question, because two places have to
+    agree on it and used not to: the prompt builder (does the session get the
+    fan-out brief?) and the query builder (does the session get the
+    ``hive-worker`` agent definition at all?). While only the prompt consulted
+    it, ``--no-parallel`` removed the brief but left the worker registered and
+    the Agent tool available — so a session told nothing about fan-out could
+    still fan out, and push-only fix sessions, documented as never fanning out,
+    were observed doing exactly that.
+
+    Args:
+        parallel: ``TaskOptions.parallel`` — the user's opt-out.
+        push_only: True for a fix session (CI, review, conflict), which adds one
+            focused commit to an existing PR and is never worth cutting up.
+
+    Returns:
+        True when the session may dispatch workers.
+    """
+    return parallel and not push_only
 
 
 def _env_positive_int(name: str, default: int) -> int:
@@ -80,6 +140,26 @@ def hive_worker_max_turns() -> int:
     ``<= 0`` falls back to :data:`DEFAULT_HIVE_WORKER_MAX_TURNS`.
     """
     return _env_positive_int(HIVE_WORKER_MAX_TURNS_ENV, DEFAULT_HIVE_WORKER_MAX_TURNS)
+
+
+def hive_worker_effort() -> EffortLevel | None:
+    """Reasoning effort for a hive worker (``AgentDefinition.effort``).
+
+    Reads ``CLAUDETM_HIVE_WORKER_EFFORT``. ``"inherit"`` (any case) returns None,
+    which leaves the field unset so the worker follows the session's effort.
+    Anything unset falls back to :data:`DEFAULT_HIVE_WORKER_EFFORT`; anything
+    unrecognised falls back to it too rather than raising — a typo in an env var
+    must not end an unattended run.
+    """
+    raw = os.environ.get(HIVE_WORKER_EFFORT_ENV)
+    if raw is None:
+        return DEFAULT_HIVE_WORKER_EFFORT
+    value = raw.strip().lower()
+    if value == "inherit":
+        return None
+    if value in _VALID_EFFORTS:
+        return cast("EffortLevel", value)
+    return DEFAULT_HIVE_WORKER_EFFORT
 
 
 def describe_machine(working_dir: str | None = None) -> str:

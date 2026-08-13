@@ -9,7 +9,51 @@ from .state import StateManager
 # the plan, task instructions, and code that the agent actually needs to act on.
 # ~32 k chars ≈ 8 k tokens at ~4 chars/token — large enough to hold dozens of
 # session summaries while leaving ample headroom in the context window.
-_MAX_CONTEXT_CHARS = 32_000
+MAX_CONTEXT_CHARS = 32_000
+
+#: Backwards-compatible alias for the pre-existing private name.
+_MAX_CONTEXT_CHARS = MAX_CONTEXT_CHARS
+
+
+def truncate_context_for_prompt(context: str, max_chars: int = MAX_CONTEXT_CHARS) -> str:
+    """Trim accumulated context to the most recent ``max_chars`` characters.
+
+    Keeps the tail, because the newest entries are the relevant ones, and marks
+    the trim so the agent knows it is not seeing everything. Aligning to the
+    next newline avoids injecting half a line.
+
+    This lives at module level, not on :class:`ContextAccumulator`, because the
+    cap has to be applied wherever ``context.md`` is read *for a prompt* — which
+    turned out to be a dozen call sites that all read the raw file directly and
+    bypassed the cap entirely. See ``StateManager.load_context_for_prompt``.
+
+    Args:
+        context: Raw contents of ``context.md``.
+        max_chars: Maximum characters to keep.
+
+    Returns:
+        The trimmed context, or ``context`` unchanged when already short enough.
+
+    Raises:
+        ValueError: If ``max_chars`` is not positive. At ``0`` the slice
+            ``context[-0:]`` degrades to ``context[0:]`` and would inject the
+            entire unbounded context, defeating the cap; negatives truncate
+            from the wrong end.
+    """
+    if max_chars <= 0:
+        raise ValueError(f"max_chars must be positive, got {max_chars}")
+    if len(context) <= max_chars:
+        return context
+    truncated = context[-max_chars:]
+    newline_pos = truncated.find("\n")
+    # Align to a line boundary, but not at the cost of the context itself: when
+    # the retained slice opens with one very long line, its first newline can sit
+    # near the end, and dropping everything before it would leave a short suffix
+    # where the cap promised 32k of recent history. Half is the cut-off — beyond
+    # that, a partial first line is the lesser evil.
+    if 0 <= newline_pos < len(truncated) // 2:
+        truncated = truncated[newline_pos + 1 :]
+    return f"*[Earlier context truncated — showing last {max_chars:,} chars]*\n\n{truncated}"
 
 
 class ContextAccumulator:
@@ -78,23 +122,9 @@ class ContextAccumulator:
                 ``context[0:]`` and would inject the *entire* unbounded context,
                 defeating the cap; negatives truncate incorrectly.
         """
-        if max_chars <= 0:
-            raise ValueError(f"max_chars must be positive, got {max_chars}")
-
         context = self.state_manager.load_context()
 
         if not context:
             return ""
 
-        if len(context) > max_chars:
-            # Keep the tail (most recent entries) and add a truncation note.
-            truncated = context[-max_chars:]
-            # Align to the next newline so we don't inject a partial line.
-            newline_pos = truncated.find("\n")
-            if newline_pos != -1:
-                truncated = truncated[newline_pos + 1 :]
-            context = (
-                f"*[Earlier context truncated — showing last {max_chars:,} chars]*\n\n{truncated}"
-            )
-
-        return f"\n\n# Previous Context\n\n{context}"
+        return f"\n\n# Previous Context\n\n{truncate_context_for_prompt(context, max_chars)}"

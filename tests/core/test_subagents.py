@@ -746,8 +746,16 @@ class TestGetAgentsForWorkingDir:
 
         mock_detect.assert_called_once_with(str(temp_working_dir))
 
-    def test_returns_loaded_agents(self, temp_working_dir: Path, agents_dir: Path) -> None:
-        """Test that loaded agents are returned."""
+    def test_project_agents_are_left_to_the_cli(
+        self, temp_working_dir: Path, agents_dir: Path
+    ) -> None:
+        """Project agents are NOT passed via agents= — the CLI already loads them.
+
+        Regression: passing them too registered every one twice (verified live:
+        "listed twice, identically — a duplicate entry in the registry"), so
+        each project agent's full prompt sat in the system prompt of every
+        fan-out query twice — ~27k duplicated tokens on a 16-agent project.
+        """
         agent_content = """---
 name: test-agent
 description: Test agent for verification
@@ -765,7 +773,7 @@ Prompt content.
             with patch("claude_task_master.core.subagents.console"):
                 result = get_agents_for_working_dir(str(temp_working_dir))
 
-        assert "test-agent" in result
+        assert "test-agent" not in result
 
     def test_returns_only_builtins_when_no_project_agents(self, temp_working_dir: Path) -> None:
         """Test only built-in agents are returned when the project defines none."""
@@ -804,9 +812,11 @@ Prompt {i}.
             with patch("claude_task_master.core.subagents.console"):
                 result = get_agents_for_working_dir(str(temp_working_dir))
 
-        assert len(result) == 2 + len(BUILTIN_AGENT_NAMES)
-        assert "agent-0" in result
-        assert "agent-1" in result
+        # Only our built-ins go over the wire; the CLI loads agent-0/agent-1
+        # from disk itself, and sending them again would register each twice.
+        assert len(result) == len(BUILTIN_AGENT_NAMES)
+        assert "agent-0" not in result
+        assert "agent-1" not in result
         assert HIVE_WORKER_AGENT_NAME in result
 
 
@@ -933,7 +943,8 @@ class TestBuiltinAgents:
         with patch("claude_task_master.core.subagents.console"):
             result = get_agents_for_working_dir(str(temp_working_dir))
 
-        assert "custom-agent" in result
+        # The CLI registers custom-agent from disk; we must not send it again.
+        assert "custom-agent" not in result
         assert HIVE_WORKER_AGENT_NAME in result
 
     def test_project_agent_overrides_builtin(
@@ -948,10 +959,10 @@ class TestBuiltinAgents:
         with patch("claude_task_master.core.subagents.console"):
             result = get_agents_for_working_dir(str(temp_working_dir))
 
-        agent = result[HIVE_WORKER_AGENT_NAME]
-        assert agent.description == "My own worker contract"
-        assert agent.prompt == "My prompt."
-        assert agent.model == "haiku"
+        # We stand down rather than overwrite: passing ours alongside the
+        # project's would put two definitions of the same name in the registry
+        # with no rule about which a dispatch resolves to.
+        assert HIVE_WORKER_AGENT_NAME not in result
 
     def test_builtins_are_rebuilt_per_call(self) -> None:
         """Mutating one call's result must not poison the next."""
@@ -1009,7 +1020,7 @@ Prompt.
 """
         frontmatter, prompt = parse_agent_frontmatter(content)
 
-        assert frontmatter["tools"] == [""]
+        assert frontmatter["tools"] == []
 
     def test_frontmatter_without_newline_after_closing(self) -> None:
         """Test frontmatter without newline after closing marker."""
@@ -1116,10 +1127,13 @@ class TestListProjectAgents:
 class TestHiveWorkerTurnBudget:
     """Workers carry big pieces, so each gets its own maxTurns budget."""
 
-    def test_default_budget_applied(self) -> None:
+    def test_default_budget_applied(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from claude_task_master.core.hive import DEFAULT_HIVE_WORKER_MAX_TURNS
         from claude_task_master.core.subagents import build_builtin_agents
 
+        # The budget is read from the environment at call time, so an externally
+        # configured value would fail this assertion about correct code.
+        monkeypatch.delenv("CLAUDETM_HIVE_WORKER_MAX_TURNS", raising=False)
         agents = build_builtin_agents()
         assert agents["hive-worker"].maxTurns == DEFAULT_HIVE_WORKER_MAX_TURNS
 
@@ -1151,6 +1165,7 @@ class TestProjectAgentMaxTurns:
         assert agents["big"].maxTurns == 300
 
     def test_invalid_max_turns_ignored(self, temp_working_dir: Path, agents_dir: Path) -> None:
+        from claude_task_master.core.hive import hive_worker_max_turns
         from claude_task_master.core.subagents import load_agents_from_directory
 
         (agents_dir / "odd.md").write_text(
@@ -1159,7 +1174,10 @@ class TestProjectAgentMaxTurns:
 
         with patch("claude_task_master.core.subagents.console"):
             agents = load_agents_from_directory(str(temp_working_dir))
-        assert agents["odd"].maxTurns is None
+        # Falls back to the shared worker budget, never to unbounded: the lead
+        # is told to prefer project specialists, so an unbounded one could spend
+        # the session's whole aggregate turn budget by itself.
+        assert agents["odd"].maxTurns == hive_worker_max_turns()
 
 
 class TestHiveWorkerBigPieceContract:

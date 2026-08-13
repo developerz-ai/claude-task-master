@@ -61,7 +61,7 @@ knows exactly where to write tests and what style to follow.
     # Exploration phase - READ ONLY
     builder.add_section(
         "Step 1: Explore Codebase",
-        """Read `CLAUDE.md` first (coding requirements). Also check `.claude/instructions.md`, `CONTRIBUTING.md`, `.cursorrules`.
+        """`CLAUDE.md` is already loaded in your context (and the style guide above is extracted from it) — don't re-read it. Check `.claude/instructions.md`, `CONTRIBUTING.md`, `.cursorrules` only if this codebase has them and they cover the goal.
 
 Then: Read key files, Glob for patterns, Grep for code, identify tests and CI config.
 Include any coding requirements in task descriptions so workers follow project standards.""",

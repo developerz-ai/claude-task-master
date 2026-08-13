@@ -41,6 +41,24 @@ if TYPE_CHECKING:
     from .rate_limit import RateLimitConfig
 
 
+def _env_positive_float(name: str, default: float) -> float:
+    """Read a positive float from the environment, falling back on garbage.
+
+    These are module-level constants, so a bare ``float()`` here made a typo
+    (``CLAUDETM_STREAM_IDLE_TIMEOUT_SEC=30s``, or an empty string) raise at
+    *import* time — taking down every claudetm command, ``status`` and
+    ``doctor`` included, with a traceback. An env var must never do that.
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw.strip())
+    except (ValueError, AttributeError):
+        return default
+    return value if value > 0 else default
+
+
 # Maximum gap (seconds) between consecutive messages from the SDK stream before
 # we treat the stream as stalled. The SDK's wait_for_result_and_end_input
 # (query.py:809) deliberately applies NO timeout; under known bug
@@ -49,7 +67,7 @@ if TYPE_CHECKING:
 # 30 minutes accommodates legitimate slow tool calls (full pytest, gh run watch
 # on slow CI, long builds) while still catching real hangs well before infinite.
 # Override via env var.
-STREAM_IDLE_TIMEOUT_SEC = float(os.environ.get("CLAUDETM_STREAM_IDLE_TIMEOUT_SEC", "1800"))
+STREAM_IDLE_TIMEOUT_SEC = _env_positive_float("CLAUDETM_STREAM_IDLE_TIMEOUT_SEC", 1800.0)
 
 # Shorter timeout that kicks in AFTER the agent has signaled end-of-turn with
 # no tool calls pending. In that state the only remaining message is the
@@ -59,8 +77,8 @@ STREAM_IDLE_TIMEOUT_SEC = float(os.environ.get("CLAUDETM_STREAM_IDLE_TIMEOUT_SEC
 # flow steadily). On timeout in this state we return the accumulated text
 # gracefully instead of retrying — the work IS done, retrying would re-run a
 # completed task and risk duplicate PRs.
-POST_COMPLETION_IDLE_TIMEOUT_SEC = float(
-    os.environ.get("CLAUDETM_POST_COMPLETION_IDLE_TIMEOUT_SEC", "120")
+POST_COMPLETION_IDLE_TIMEOUT_SEC = _env_positive_float(
+    "CLAUDETM_POST_COMPLETION_IDLE_TIMEOUT_SEC", 120.0
 )
 
 # Hard ceiling on agent steps (assistant turns) in one session. Bounds work in
@@ -68,16 +86,35 @@ POST_COMPLETION_IDLE_TIMEOUT_SEC = float(
 # wall-clock cap punishes a session that is legitimately slow (big test suite,
 # slow CI) exactly as hard as one that is looping.
 #
-# Set well above real work: observed healthy sessions run tens of turns, so 400
-# is a runaway backstop, not a working budget. Hitting it yields an
-# `error_max_turns` terminal result, which the orchestrator now treats as "task
-# not done" — it retries the task (leftover changes intact) rather than checking
-# it off. Set to 0 to disable the cap entirely.
-_max_turns_env = os.environ.get("CLAUDETM_MAX_TURNS", "400")
+# Set well above real work: observed healthy solo sessions run tens of turns, so
+# this is a runaway backstop, not a working budget. Hitting it yields an
+# `error_max_turns` terminal result, which the orchestrator treats as "task not
+# done" — it retries the task (leftover changes intact) rather than checking it
+# off. Set to 0 to disable the cap entirely.
+#
+# It is sized for a **hive**, not a soloist. The cap bounds the whole query and
+# the terminal ResultMessage aggregates the lead plus every subagent, so a value
+# written for one agent silently rations the team: at 400, a lead plus two busy
+# 200-turn workers could exhaust the session, ending it with nothing committed
+# and re-running the entire fanned-out task. The fix is room, not rationing —
+# squeezing each worker to fit would have them stop mid-piece, handing the lead
+# back work that was nearly done. A solo session never approaches either number,
+# so raising it costs nothing and it remains a backstop.
+_max_turns_env = os.environ.get("CLAUDETM_MAX_TURNS", "2000")
 try:
-    MAX_TURNS: int | None = int(_max_turns_env) or None
-except ValueError:
-    MAX_TURNS = 400
+    _parsed_max_turns = int(_max_turns_env.strip())
+except (ValueError, AttributeError):
+    _parsed_max_turns = 2000
+# Only 0 disables the cap. A negative value is a typo, not a request to disable
+# it — and passing it through to the SDK as max_turns=-1 raises a non-retryable
+# SDKInitializationError on every query — so it falls back to the default like
+# any other garbage, leaving an unattended run bounded.
+if _parsed_max_turns == 0:
+    MAX_TURNS: int | None = None
+elif _parsed_max_turns > 0:
+    MAX_TURNS = _parsed_max_turns
+else:
+    MAX_TURNS = 2000
 
 
 class AgentQueryExecutor(_AgentQueryExecuteMixin, _AgentQueryHelpersMixin):
@@ -187,22 +224,21 @@ class AgentQueryExecutor(_AgentQueryExecuteMixin, _AgentQueryHelpersMixin):
         """
         current_time = time.time()
 
-        # Scale the failure window based on total possible backoff time,
-        # with a minimum of 60 seconds to handle fast retries
-        effective_window = max(
-            self._failure_window,
-            self.rate_limit_config.get_total_max_time() * 2,
-        )
-
-        # Check if we're still within the failure window
-        if self._first_failure_time is not None:
-            time_since_first = current_time - self._first_failure_time
-            if time_since_first > effective_window:
-                # Window expired, reset counter
-                self._consecutive_failures = 0
-                self._first_failure_time = None
-
-        # Record this failure
+        # "Consecutive" means "with no successful query in between" — and the
+        # only thing that can establish that is a success, which resets the
+        # counter in _reset_failures.
+        #
+        # It used to also decay on wall-clock: if this failure landed more than
+        # a ~60s window after the *first* one, the counter reset to zero. The
+        # window was sized from the retry backoff (1+2+4s), not from how long a
+        # query takes — so any session that ran longer than a minute before
+        # failing reset the counter on every single failure, `_consecutive_failures`
+        # never reached the threshold, and `_run_query_with_retry`'s `while True`
+        # became unbounded. An unattended run could re-run a twenty-minute Opus
+        # work session forever, and with fan-out on, at N workers a time. (The
+        # stream-stall path only escaped this because it grew a separate cap of
+        # its own; nothing else had one.) The same reset pinned the backoff
+        # exponent at zero, so the "exponential" retry was a ~1s tight loop.
         if self._first_failure_time is None:
             self._first_failure_time = current_time
 
@@ -213,10 +249,11 @@ class AgentQueryExecutor(_AgentQueryExecuteMixin, _AgentQueryHelpersMixin):
 
         # Check if we've hit the threshold
         if self._consecutive_failures >= max_failures:
+            elapsed = current_time - self._first_failure_time
             console.newline()
             console.error(
-                f"API failed {max_failures} consecutive times within "
-                f"{effective_window:.0f}s window - stopping execution",
+                f"API failed {max_failures} consecutive times over "
+                f"{elapsed:.0f}s with no success in between - stopping execution",
                 flush=True,
             )
             raise ConsecutiveFailuresError(max_failures, error)
@@ -307,7 +344,14 @@ class AgentQueryExecutor(_AgentQueryExecuteMixin, _AgentQueryHelpersMixin):
         effective_model = model_override or self.model
         fallback_chain = get_fallback_chain(effective_model)
         attempted_models = {effective_model}
-        if fallback_chain:
+        # Only seed the SDK's own hop as attempted when there is somewhere left
+        # to go afterwards. Most chains are one hop long (SONNET → [HAIKU],
+        # HAIKU → [SONNET]), so seeding unconditionally emptied the chain and
+        # the first ModelUnavailableError raised "All fallback models exhausted"
+        # having descended nowhere — for every [general], [quick] and
+        # [debugging-qa] task. For Opus it skipped Sonnet and dropped straight
+        # to Haiku, a silent quality collapse.
+        if len(fallback_chain) > 1:
             attempted_models.add(fallback_chain[0])
         current_model = model_override
 

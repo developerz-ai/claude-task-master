@@ -269,6 +269,16 @@ class MessageProcessor:
                     self.last_input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
                     self.last_output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
 
+            # Report what the session cost, here, where every session type ends.
+            # The tracker only ever recorded working sessions, so planning, the
+            # three kinds of fix session, release checks, verification and
+            # learnings extraction spent money that appeared in no total — and
+            # a fanned-out session's figure, which aggregates the lead and every
+            # worker, was the one number that would have shown a fan-out costing
+            # N agents' tokens. An unattended run that cannot report its own
+            # spend cannot be tuned.
+            self._report_session_cost()
+
             # Log stop_reason for diagnostics (SDK v0.1.46+)
             stop_reason = getattr(message, "stop_reason", None)
             if stop_reason and self.logger:
@@ -292,6 +302,24 @@ class MessageProcessor:
                 # Otherwise keep our accumulated text (it has the markers)
 
         return result_text
+
+    def _report_session_cost(self) -> None:
+        """Print and log what the session just ended cost.
+
+        Best-effort and never raises: a missing or malformed figure must not
+        take down a session that has already finished its work. Silent when the
+        SDK reported no cost at all (an error result often carries none).
+        """
+        cost = self.last_total_cost_usd
+        if cost is None:
+            return
+        tokens = ""
+        if self.last_input_tokens or self.last_output_tokens:
+            tokens = f" | in {self.last_input_tokens:,} out {self.last_output_tokens:,} tok"
+        summary = f"Session cost: ${cost:.4f}{tokens}"
+        console.detail(summary)
+        if self.logger:
+            self.logger.log_tool_result("SessionCost", summary)
 
     @staticmethod
     def _relative_path(path: str) -> str:

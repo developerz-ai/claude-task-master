@@ -24,7 +24,7 @@ from .agent_async_utils import (
 )
 from .agent_models import ModelType, get_tools_for_phase
 from .agent_phase_generation import _AgentPhaseGenerationMixin
-from .hive import DEFAULT_HIVE_MAX_PARALLEL
+from .hive import DEFAULT_HIVE_MAX_PARALLEL, fan_out_enabled
 from .prompts import (
     build_context_extraction_prompt,
     build_planning_prompt,
@@ -128,7 +128,7 @@ class AgentPhaseExecutor(_AgentPhaseGenerationMixin):
                 tools=self.get_tools_for_phase("planning"),
                 model_override=ModelType.OPUS,  # Always use Opus for planning
                 get_model_name_func=self.get_model_name_func,
-                get_agents_func=self.get_agents_func,
+                get_agents_func=self.agents_for(False),
                 process_message_func=self.process_message_func,
             ),
             self.message_processor,
@@ -200,6 +200,12 @@ class AgentPhaseExecutor(_AgentPhaseGenerationMixin):
         Returns:
             Dict with 'output', 'success', and 'model_used' keys.
         """
+        # One decision, used twice: the fan-out brief goes in the prompt, and
+        # the worker definitions go in the query — or neither does. Deriving
+        # both from the same predicate is the point; when only the prompt
+        # consulted it, a session with no brief still had the machinery.
+        fan_out = fan_out_enabled(parallel, push_only)
+
         # Build prompt for work session
         prompt = build_work_prompt(
             task_description=task_description,
@@ -228,7 +234,7 @@ class AgentPhaseExecutor(_AgentPhaseGenerationMixin):
                 tools=self.get_tools_for_phase("working"),
                 model_override=model_override,
                 get_model_name_func=self.get_model_name_func,
-                get_agents_func=self.get_agents_func,
+                get_agents_func=self.agents_for(fan_out),
                 process_message_func=self.process_message_func,
             ),
             self.message_processor,
@@ -292,7 +298,7 @@ class AgentPhaseExecutor(_AgentPhaseGenerationMixin):
                 tools=self.get_tools_for_phase("verification"),
                 model_override=model_override,
                 get_model_name_func=self.get_model_name_func,
-                get_agents_func=self.get_agents_func,
+                get_agents_func=self.agents_for(False),
                 process_message_func=self.process_message_func,
             ),
             self.message_processor,
@@ -349,7 +355,7 @@ class AgentPhaseExecutor(_AgentPhaseGenerationMixin):
                 prompt=prompt,
                 tools=self.get_tools_for_phase("verification"),
                 get_model_name_func=self.get_model_name_func,
-                get_agents_func=self.get_agents_func,
+                get_agents_func=self.agents_for(False),
                 process_message_func=self.process_message_func,
             ),
             self.message_processor,
@@ -400,7 +406,7 @@ class AgentPhaseExecutor(_AgentPhaseGenerationMixin):
                 tools=self.get_tools_for_phase("planning"),
                 model_override=ModelType.SONNET,  # Sonnet for speed/cost
                 get_model_name_func=self.get_model_name_func,
-                get_agents_func=self.get_agents_func,
+                get_agents_func=self.agents_for(False),
                 process_message_func=self.process_message_func,
             ),
             self.message_processor,

@@ -91,8 +91,10 @@ sibling project: four workers spawned for four one-line edits — four cold star
 finishes in a single pass). A few LARGE self-contained pieces beat many small ones.
 
 **Two or more pieces, or none — never exactly one.** A lone worker buys no speed: you pay its cold
-start, wait idle, and still verify everything afterwards. Zero workers is a legitimate answer below
-the size where the cold start costs more than the work.
+start, wait idle, and still verify everything afterwards. So when the cut leaves you holding exactly
+one piece to delegate, **fold it back into your own work and dispatch nobody** — that is the correct
+resolution, not a smaller split and not a padded one. Zero workers is a legitimate answer any time
+the cold start costs more than the work.
 
 Two pieces may run concurrently only if their **write sets are disjoint**: no file either one will
 edit is touched by the other, and neither depends on the other's output. And disjoint files are not
@@ -112,13 +114,18 @@ worker's Agent call **in a single message so they run concurrently** — never i
 orders them. While they run, work the pieces you kept: the coupled parts, the shared surface, the
 integration. An idle lead waiting on workers it could work alongside is wasted wall-clock.
 
-**Pass `run_in_background: false` on EVERY worker.** Agent calls that omit it run in the background,
-and a backgrounded worker keeps writing files after you end your turn — the session ends underneath
-it, the orchestrator sees a dirty tree, calls the session unfinished and re-runs the whole task.
-Never end your turn while a worker is still running.
+**Workers run in the foreground — never end your turn while one is live.** Their definitions pin
+this, so you do not have to pass anything; what you must not do is finish your turn with a worker
+still writing. The session would end underneath it, the orchestrator would find a dirty tree, call
+the session unfinished and re-run this whole task from the top.
 
 **Wait for every worker to return before you run the gate or touch git.** No staging, no commit, no
 push while any worker is live — you would be committing a half-written tree.
+
+**Turns and cost are shared across the whole hive.** This session has ONE turn budget and ONE cost
+cap, and every worker's turns and tokens are charged against them alongside your own. Overrunning
+ends the session with nothing committed and re-runs the task. That is the real reason to cut a few
+large pieces rather than many small ones: each worker you add spends the same budget you do.
 
 **One checkout, shared by everyone.** Never create a git worktree, never clone, never copy the
 project into a per-agent directory — the work has to land in the tree you commit from. The
@@ -129,10 +136,12 @@ tool calls are invisible to you — only its final message comes back — so the
 it has:
 1. its piece of the task, stated in full — never a pointer to something it cannot see,
 2. its EXCLUSIVE file set — the only paths it may create or edit,
-3. which other workers are live right now, and on which paths,
-4. the context you already paid to gather: key file excerpts, the project's conventions, and the
-   exact API surface its piece must conform to. The worker starts cold; everything you hand it here
-   is ramp-up it does not repeat.
+3. the paths owned by other workers right now, as a flat list of "do not touch",
+4. what it cannot read for itself: the API surface its piece must conform to (exact signatures,
+   types, names), the decisions you have already made, and the conventions that are not obvious
+   from the code. **Point, don't paste.** The worker has this same checkout and reads it as fast
+   as you do, so cite `path:line` and let it read; a file excerpt copied into a brief costs you
+   the tokens to write it and the worker the tokens to read it, for something it already has.
 A worker that needs a file it does not own STOPS and reports the collision instead of resolving it
 silently. You then re-cut the boundary or make that change yourself.
 

@@ -85,7 +85,7 @@ class _GitOps(StageHandlerBase):
         """
         try:
             result = subprocess.run(
-                ["git", "status", "--porcelain"],
+                ["git", "status", "--porcelain", "--ignore-submodules=dirty"],
                 cwd=self._project_dir(),
                 check=True,
                 capture_output=True,
@@ -357,7 +357,7 @@ class _GitOps(StageHandlerBase):
             try:
                 # Check if there are uncommitted changes
                 status = subprocess.run(
-                    ["git", "status", "--porcelain"],
+                    ["git", "status", "--porcelain", "--ignore-submodules=dirty"],
                     check=True,
                     capture_output=True,
                     text=True,

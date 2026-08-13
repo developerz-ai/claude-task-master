@@ -482,13 +482,16 @@ class TestParseReleaseCheckResultPriority:
         result = parse_release_check_result(raw)
         assert result["status"] == "fail"
 
-    def test_pass_before_fail_returns_pass(self) -> None:
-        """If PASS marker appears before FAIL, the first check (PASS) wins."""
-        # Implementation checks PASS first, so PASS wins
+    def test_pass_before_fail_returns_fail(self) -> None:
+        """A report carrying both markers is a FAIL, whichever comes first.
+
+        Regression: PASS was tested first, so per-check output ("checks 1-3
+        PASS ... check 4 FAIL") and any output quoting the instructions scored
+        as a pass — a post-merge gate that failed open.
+        """
         raw = f"Mostly ok. {RELEASE_CHECK_PASS} But one thing failed. {RELEASE_CHECK_FAIL}"
         result = parse_release_check_result(raw)
-        # PASS is checked first in the implementation → status is pass
-        assert result["status"] == "pass"
+        assert result["status"] == "fail"
 
 
 class TestParseReleaseCheckResultStructure:

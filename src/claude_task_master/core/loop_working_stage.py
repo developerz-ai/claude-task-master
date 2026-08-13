@@ -59,7 +59,7 @@ class _LoopWorkingStageMixin:
             return "session was cut off"
         try:
             result = subprocess.run(
-                ["git", "status", "--porcelain"],
+                ["git", "status", "--porcelain", "--ignore-submodules=dirty"],
                 # The project tree the run operates on — not the process cwd,
                 # which a caller may have moved.
                 cwd=str(self._orc.state_manager.state_dir.parent),
@@ -213,8 +213,15 @@ class _LoopWorkingStageMixin:
                     recoverable=True,
                 )
 
+        # Both early returns below leave the task without running a session, so
+        # they must clear the retry counter the same way the normal path does at
+        # the end of this method. Left set, it belongs to a task that is over:
+        # the next task's prompt opens with "**Retry 1** — the previous session
+        # on this task stopped before committing" about a session that never
+        # ran, and that task starts with half its retry budget already spent.
         if session_result == "skipped_already_complete":
             console.info(f"Task #{completed_task_index + 1} already complete - skipping")
+            state.task_finish_attempts = 0
             self._ship_group_if_skipped_task_closed_it(state, completed_task_index)
             orc.state_manager.save_state_merged(state)
             return None
@@ -223,6 +230,7 @@ class _LoopWorkingStageMixin:
             # The index is past the end of the plan — no session ran, so there is
             # nothing to check off and nothing to ship.
             console.detail("No tasks remaining in plan")
+            state.task_finish_attempts = 0
             orc.state_manager.save_state_merged(state)
             return None
 

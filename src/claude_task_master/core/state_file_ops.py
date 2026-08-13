@@ -132,7 +132,10 @@ class FileOperationsMixin:
         context_file.write_text(context)
 
     def load_context(self) -> str:
-        """Load accumulated context from context.md.
+        """Load accumulated context from context.md, in full and uncapped.
+
+        For appending to, or distilling. **Not** for injecting into a prompt —
+        use :meth:`load_context_for_prompt`, which applies the size cap.
 
         Returns:
             The accumulated context, or empty string if not found.
@@ -141,6 +144,31 @@ class FileOperationsMixin:
         if context_file.exists():
             return context_file.read_text()
         return ""
+
+    def load_context_for_prompt(self) -> str:
+        """Load accumulated context, trimmed to the size cap, for prompt injection.
+
+        ``ContextAccumulator`` has always defined a 32k-char cap on how much
+        accumulated context may enter a prompt, for the obvious reason: the file
+        grows by a summary per session forever, and an unbounded injection
+        eventually crowds out the task itself. But the cap lived on a method
+        with a single caller — the cheap distillation step — while every prompt
+        that actually matters (work, planning, verification, plan update, and
+        all six fix/recovery stages) called :meth:`load_context` and injected
+        the raw file. On a long-running project that file reaches 150 KB, and
+        those ~39k tokens then sit in the prompt of every session and are
+        re-read from cache on every turn of it.
+
+        So the cap is applied at the read, where it cannot be bypassed by
+        forgetting to route through the accumulator.
+
+        Returns:
+            The most recent portion of the accumulated context (with a note when
+            trimmed), or empty string if there is none.
+        """
+        from .context_accumulator import truncate_context_for_prompt  # noqa: PLC0415
+
+        return truncate_context_for_prompt(self.load_context())
 
     def save_coding_style(self, coding_style: str) -> None:
         """Save coding style guide to coding-style.md.

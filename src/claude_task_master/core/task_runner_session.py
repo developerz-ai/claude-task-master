@@ -93,7 +93,7 @@ class _TaskRunnerSessionMixin:
         """
         try:
             result = subprocess.run(
-                ["git", "status", "--porcelain"],
+                ["git", "status", "--porcelain", "--ignore-submodules=dirty"],
                 cwd=str(self.state_manager.state_dir.parent),
                 check=True,
                 capture_output=True,
@@ -246,7 +246,7 @@ class _TaskRunnerSessionMixin:
 
         # Load context safely
         try:
-            context = self.state_manager.load_context()
+            context = self.state_manager.load_context_for_prompt()
         except Exception as e:
             console.warning(f"Could not load context: {e}")
             context = ""
@@ -269,6 +269,33 @@ class _TaskRunnerSessionMixin:
                     context_refs += f"  - {ref}\n"
 
         retry_note = self._continuation_note(state)
+
+        # A resumed task does not fan out. `retry_note` is non-empty exactly
+        # when the tree already holds a previous attempt's uncommitted work, and
+        # that is the worst possible ground for a fan-out: the brief argues for
+        # cutting the task into big disjoint pieces, while the note explains
+        # that pieces of it are already half-written by someone else. The lead
+        # cannot hand a worker an exclusive file set it can vouch for, workers
+        # pay a full cold start each to rediscover a diff the lead can already
+        # see, and a fan-out that failed once (a backgrounded worker, an
+        # overrun) re-runs at N agents' cost on the retry that exists because of
+        # it. Finish the leftover work in one agent, then let the next task
+        # split cleanly.
+        #
+        # A `[quick]` task does not fan out either. The planner has already
+        # classified it as a simple fix, a config change, a small tweak — and
+        # routed it to Haiku on exactly that judgement. There is no big task
+        # here to cut up, so the brief's own answer is guaranteed to be "zero
+        # workers"; all it can do is add ~1.4k tokens of prose about a decision
+        # already made, to the cheapest sessions in the run. Fan-out stays a
+        # live option for every tier above it, where the lead judges its own
+        # task, which is the one place that judgement can be made.
+        small_task = complexity is TaskComplexity.QUICK
+        may_fan_out = state.options.parallel and not retry_note and not small_task
+        if state.options.parallel and retry_note:
+            console.detail("   (resuming unfinished work — this session runs solo)")
+        elif state.options.parallel and small_task:
+            console.detail("   (quick task — this session runs solo)")
 
         task_description = f"""Goal: {goal}
 
@@ -339,18 +366,23 @@ Please complete this task."""
                 coding_style=coding_style,
                 # Permission to split THIS task across hive-worker subagents,
                 # not an instruction to. Off leaves the prompt byte-identical to
-                # the single-agent one.
-                parallel=state.options.parallel,
+                # the single-agent one, and registers no worker definitions.
+                parallel=may_fan_out,
                 max_parallel=hive_max_parallel(),
                 # Measured per session, not once at import: an unattended run
-                # lasts days and the box it shares changes underneath it.
-                machine=describe_machine(str(self.state_manager.state_dir.parent)),
+                # lasts days and the box it shares changes underneath it. Only
+                # measured when it can be used — the brief is the only reader.
+                machine=(
+                    describe_machine(str(self.state_manager.state_dir.parent))
+                    if may_fan_out
+                    else ""
+                ),
                 # The project's own specialists, so the lead dispatches them
                 # for matching pieces. Read per session — the project can add
                 # agents while a long run is underway.
                 project_agents=(
                     list_project_agents(str(self.state_manager.state_dir.parent))
-                    if state.options.parallel
+                    if may_fan_out
                     else None
                 ),
             )
