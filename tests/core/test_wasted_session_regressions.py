@@ -157,6 +157,27 @@ class TestEnvVarsNeverCrashTheCli:
         monkeypatch.setenv("CLAUDETM_TEST_TIMEOUT", "42.5")
         assert _env_positive_float("CLAUDETM_TEST_TIMEOUT", 1800.0) == 42.5
 
+    @pytest.mark.parametrize(("raw", "expected"), [("0", None), ("-1", 2000), ("750", 750)])
+    def test_only_zero_disables_the_turn_cap(
+        self, monkeypatch: pytest.MonkeyPatch, raw: str, expected: int | None
+    ) -> None:
+        """A negative value is a typo, not a request to run unbounded.
+
+        Regression: any non-positive value mapped to None, which disables the
+        cap — so `CLAUDETM_MAX_TURNS=-1` left an unattended run with no runaway
+        backstop at all, the opposite of what the typo intended.
+        """
+        import importlib
+
+        import claude_task_master.core.agent_query as aq
+
+        monkeypatch.setenv("CLAUDETM_MAX_TURNS", raw)
+        try:
+            assert importlib.reload(aq).MAX_TURNS == expected
+        finally:
+            monkeypatch.delenv("CLAUDETM_MAX_TURNS", raising=False)
+            importlib.reload(aq)
+
 
 class TestRetryCounterDoesNotLeakToTheNextTask:
     """Regression: task_finish_attempts survived the no-session early returns.

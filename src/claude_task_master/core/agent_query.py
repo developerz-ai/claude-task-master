@@ -105,10 +105,16 @@ try:
     _parsed_max_turns = int(_max_turns_env.strip())
 except (ValueError, AttributeError):
     _parsed_max_turns = 2000
-# 0 disables the cap; a negative value is a typo, not a request to disable, and
-# passing it through to the SDK as max_turns=-1 raises a non-retryable
-# SDKInitializationError on every query.
-MAX_TURNS: int | None = _parsed_max_turns if _parsed_max_turns > 0 else None
+# Only 0 disables the cap. A negative value is a typo, not a request to disable
+# it — and passing it through to the SDK as max_turns=-1 raises a non-retryable
+# SDKInitializationError on every query — so it falls back to the default like
+# any other garbage, leaving an unattended run bounded.
+if _parsed_max_turns == 0:
+    MAX_TURNS: int | None = None
+elif _parsed_max_turns > 0:
+    MAX_TURNS = _parsed_max_turns
+else:
+    MAX_TURNS = 2000
 
 
 class AgentQueryExecutor(_AgentQueryExecuteMixin, _AgentQueryHelpersMixin):

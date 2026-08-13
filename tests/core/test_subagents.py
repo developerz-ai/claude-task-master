@@ -1116,10 +1116,13 @@ class TestListProjectAgents:
 class TestHiveWorkerTurnBudget:
     """Workers carry big pieces, so each gets its own maxTurns budget."""
 
-    def test_default_budget_applied(self) -> None:
+    def test_default_budget_applied(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from claude_task_master.core.hive import DEFAULT_HIVE_WORKER_MAX_TURNS
         from claude_task_master.core.subagents import build_builtin_agents
 
+        # The budget is read from the environment at call time, so an externally
+        # configured value would fail this assertion about correct code.
+        monkeypatch.delenv("CLAUDETM_HIVE_WORKER_MAX_TURNS", raising=False)
         agents = build_builtin_agents()
         assert agents["hive-worker"].maxTurns == DEFAULT_HIVE_WORKER_MAX_TURNS
 

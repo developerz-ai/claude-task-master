@@ -58,6 +58,23 @@ class TestAgentsRegisteredOnlyWhereFanOutIsAllowed:
         assert fan_out_enabled(parallel, push_only) is expected
 
 
+@pytest.fixture
+def default_hive_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Assert against claudetm's defaults, not the developer's shell.
+
+    These knobs are read from the environment at call time, so a valid
+    ``CLAUDETM_HIVE_WORKER_MAX_TURNS`` or ``CLAUDETM_HIVE_WORKER_EFFORT`` set
+    outside the test run would fail an assertion about a correct implementation.
+    """
+    for name in (
+        "CLAUDETM_HIVE_WORKER_MAX_TURNS",
+        "CLAUDETM_HIVE_WORKER_EFFORT",
+        "CLAUDETM_HIVE_MAX_PARALLEL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.mark.usefixtures("default_hive_env")
 class TestWorkerDispatchIsForegroundAndBounded:
     """Regression: rules that cost a whole task when broken lived in prose only."""
 
@@ -103,6 +120,7 @@ class TestWorkerDispatchIsForegroundAndBounded:
         assert hive_worker_max_turns() == 321
 
 
+@pytest.mark.usefixtures("default_hive_env")
 class TestWorkerEffort:
     """Regression: workers inherited the session's effort, i.e. Opus at "max"."""
 
@@ -155,6 +173,20 @@ class TestAccumulatedContextIsCappedAtTheRead:
     def test_zero_is_rejected_rather_than_disabling_the_cap(self) -> None:
         with pytest.raises(ValueError, match="must be positive"):
             truncate_context_for_prompt("anything", 0)
+
+    def test_one_long_line_does_not_swallow_the_retained_tail(self) -> None:
+        """Aligning to the next newline must not throw the context away.
+
+        Regression: the retained slice was cut at its first newline
+        unconditionally. When that slice opens with one very long line — a
+        pasted diff, a stack trace, a single-line summary — the newline sits
+        near the end, and everything before it was dropped, leaving a short
+        suffix where the cap promised 32k of recent history.
+        """
+        context = "prefix\n" + "x" * 5_000 + "\ntail line"
+        trimmed = truncate_context_for_prompt(context, 1_000)
+        assert len(trimmed) > 900
+        assert "tail line" in trimmed
 
 
 class TestLearningsExtractionReadsTheEnd:

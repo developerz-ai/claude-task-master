@@ -46,7 +46,12 @@ def truncate_context_for_prompt(context: str, max_chars: int = MAX_CONTEXT_CHARS
         return context
     truncated = context[-max_chars:]
     newline_pos = truncated.find("\n")
-    if newline_pos != -1:
+    # Align to a line boundary, but not at the cost of the context itself: when
+    # the retained slice opens with one very long line, its first newline can sit
+    # near the end, and dropping everything before it would leave a short suffix
+    # where the cap promised 32k of recent history. Half is the cut-off — beyond
+    # that, a partial first line is the lesser evil.
+    if 0 <= newline_pos < len(truncated) // 2:
         truncated = truncated[newline_pos + 1 :]
     return f"*[Earlier context truncated — showing last {max_chars:,} chars]*\n\n{truncated}"
 
