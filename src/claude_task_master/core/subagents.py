@@ -150,6 +150,14 @@ def load_agents_from_directory(working_dir: str) -> dict[str, Any]:
     Reads markdown files from {working_dir}/.claude/agents/ and converts
     them to AgentDefinition objects.
 
+    .. note::
+       **Not on the query path.** ``get_agents_for_working_dir`` no longer calls
+       this: the CLI loads the project's agent files itself, and passing them
+       again registered every one twice. Kept as the executable statement of the
+       frontmatter contract (and exercised by its tests), so changing the parser
+       here changes what :func:`list_project_agents` advertises to the lead —
+       but the ``AgentDefinition`` fields it builds no longer reach the SDK.
+
     Args:
         working_dir: The project working directory.
 
