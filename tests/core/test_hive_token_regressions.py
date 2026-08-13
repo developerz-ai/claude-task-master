@@ -121,6 +121,47 @@ class TestWorkerDispatchIsForegroundAndBounded:
 
 
 @pytest.mark.usefixtures("default_hive_env")
+class TestProjectAgentsAreNotRegisteredTwice:
+    """Regression: every project agent was sent to the SDK on top of the CLI's copy.
+
+    ``setting_sources`` includes ``"project"`` — it must, or ``CLAUDE.md`` would
+    not load either — and that is what puts ``.claude/agents/*.md`` in the
+    model's registry. claudetm passed the same definitions again via ``agents=``,
+    and the two copies are not deduplicated: a live session reported the agent
+    "listed twice, identically — a duplicate entry in the registry". Each
+    project agent's full prompt was therefore in the system prompt of every
+    fan-out query twice — ~14k duplicated tokens on an 11-agent project, ~27k on
+    a 16-agent one — and with two identical entries there was no rule about
+    which copy a dispatch resolved to.
+    """
+
+    @staticmethod
+    def _project(tmp_path, *names: str):
+        agents_dir = tmp_path / ".claude" / "agents"
+        agents_dir.mkdir(parents=True)
+        for name in names:
+            (agents_dir / f"{name}.md").write_text(
+                f"---\nname: {name}\ndescription: The {name} specialist\n---\n\nPrompt.\n"
+            )
+        return tmp_path
+
+    def test_only_builtins_go_over_the_wire(self, tmp_path) -> None:
+        from claude_task_master.core.subagents import get_agents_for_working_dir
+
+        project = self._project(tmp_path, "frontend-dev", "api-dev")
+        agents = get_agents_for_working_dir(str(project))
+
+        assert set(agents) == {"hive-worker"}
+
+    def test_a_project_override_makes_us_stand_down(self, tmp_path) -> None:
+        """A project hive-worker.md wins by us not sending ours, not by overwrite."""
+        from claude_task_master.core.subagents import get_agents_for_working_dir
+
+        project = self._project(tmp_path, "hive-worker")
+        assert get_agents_for_working_dir(str(project)) == {}
+
+
+@pytest.mark.usefixtures("default_hive_env")
 class TestWorkerEffort:
     """Regression: workers inherited the session's effort, i.e. Opus at "max"."""
 

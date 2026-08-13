@@ -421,6 +421,36 @@ def list_project_agents(working_dir: str) -> list[tuple[str, str]]:
     return pairs
 
 
+def project_agent_names(working_dir: str) -> set[str]:
+    """Names of every agent the project defines in ``.claude/agents/``.
+
+    Unlike :func:`list_project_agents` this does not require a description: the
+    caller needs to know whether a name is *taken*, and an unusable file still
+    takes it. Used to decide which built-ins to stand down for.
+
+    Args:
+        working_dir: The project working directory.
+
+    Returns:
+        The set of names, empty when the directory is missing or unreadable.
+    """
+    agents_dir = Path(working_dir) / ".claude" / "agents"
+    if not agents_dir.exists():
+        return set()
+
+    names: set[str] = set()
+    for agent_file in agents_dir.glob("*.md"):
+        try:
+            frontmatter, _ = parse_agent_frontmatter(agent_file.read_text(encoding="utf-8"))
+        except Exception:
+            names.add(agent_file.stem)
+            continue
+        name = frontmatter.get("name") or agent_file.stem
+        if isinstance(name, str):
+            names.add(name)
+    return names
+
+
 def detect_claude_md(working_dir: str) -> bool:
     """Detect and log if CLAUDE.md exists in the working directory.
 
@@ -489,15 +519,30 @@ def detect_project_config(working_dir: str) -> dict[str, Any]:
 
 
 def get_agents_for_working_dir(working_dir: str) -> dict[str, Any]:
-    """Get all available agents for a working directory.
+    """Agent definitions to pass to the SDK for this working directory.
 
-    This is the main entry point for loading subagents.
-    Also detects and logs CLAUDE.md and other project config.
+    **Only claudetm's own built-ins** (``hive-worker``). The project's
+    ``.claude/agents/*.md`` are deliberately *not* included, because the CLI
+    already loads them: ``setting_sources`` includes ``"project"`` (which it
+    must, or ``CLAUDE.md`` would not load either), and that is what puts the
+    project's agent files in the model's registry.
 
-    Built-in definitions (``hive-worker``) are merged with the project's
-    ``.claude/agents/`` files; a project file of the same name wins, so a user
-    override always beats ours. An unused definition is harmless — Claude only
-    invokes an agent when the prompt asks for it.
+    Passing them again registered every one of them **twice**. Verified against
+    a live session: with a single project agent on disk and the same definition
+    passed via ``agents=``, the model reported it "listed twice, identically —
+    a duplicate entry in the registry". The two copies are not deduplicated, so
+    each project agent's full prompt was in the system prompt of every fan-out
+    query twice: ~14k duplicated tokens on a project with 11 agents, ~27k on one
+    with 16. And with two identical entries there is no guarantee a dispatch
+    resolves to *our* copy anyway, so the duplicate bought nothing.
+
+    The trade-off is deliberate and narrow: the ``background=False`` and default
+    turn budget claudetm applies in :func:`load_agents_from_directory` reach only
+    the definitions it passes, so a *project specialist* is bound by the fan-out
+    brief rather than by its definition. ``hive-worker`` — claudetm's own, and
+    the fallback for every piece no specialist fits — keeps both structurally.
+    Specialists remain fully usable: the CLI registers them, and
+    :func:`list_project_agents` still advertises them in the brief.
 
     Args:
         working_dir: The project working directory.
@@ -508,7 +553,12 @@ def get_agents_for_working_dir(working_dir: str) -> dict[str, Any]:
     # Detect and log project configuration
     detect_project_config(working_dir)
 
-    # Built-ins first, so project files of the same name overwrite them.
-    agents = build_builtin_agents()
-    agents.update(load_agents_from_directory(working_dir))
-    return agents
+    # A project file of the same name still wins — by us standing down, rather
+    # than by overwriting. Passing ours alongside would put two definitions of
+    # that name in the registry with no rule about which a dispatch resolves to.
+    overridden = project_agent_names(working_dir)
+    return {
+        name: definition
+        for name, definition in build_builtin_agents().items()
+        if name not in overridden
+    }
