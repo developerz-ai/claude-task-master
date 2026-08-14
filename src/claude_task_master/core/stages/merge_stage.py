@@ -72,6 +72,27 @@ class _MergeStage(_MergeCleanup):
         before, as does an unreadable decision: the field degrades to ``None``
         rather than wedging a merge, matching ``get_pr_behind_by``.
 
+        **A review bot is not "a human actively pushed back".** ``reviewDecision``
+        reports CHANGES_REQUESTED identically whether a person or a GitHub App
+        submitted it, and reading only that field made this gate permanent for
+        the bot case: claudetm answers a bot's comments and resolves its threads
+        (``addressing_reviews``), but no bot comes back to dismiss its own review
+        afterwards, so a green, fully-addressed PR blocked forever — three did in
+        one night, two of them on a CodeRabbit review whose body was a *quota
+        notice*, the same condition already discounted on the CI axis
+        (:mod:`~...github.check_tolerance`). Every reviewer being a bot therefore
+        discounts the decision, logged like a tolerated check. One human among
+        them still blocks: that is the case the gate was written for.
+
+        Not knowing who requested changes is not the same as nobody having: an
+        empty reviewer list (older GitHub Enterprise, a partial response) falls
+        back to blocking, and so does a *partial* one — a reviewer whose author
+        could not be identified, or a page never fetched, could be the single
+        human in a list that otherwise reads as all-bots
+        (``changes_requested_complete``). This half fails **closed** on purpose,
+        unlike the decision field itself — the cost of a wrong block here is a
+        resume, the cost of a wrong merge is an unreviewed change on main.
+
         Args:
             state: Current task state.
             pr_status: Freshly fetched status for the PR.
@@ -85,8 +106,20 @@ class _MergeStage(_MergeCleanup):
         if not isinstance(decision, str) or decision.upper() != "CHANGES_REQUESTED":
             return None
 
+        reviewers = list(pr_status.changes_requested_by)
+        bots = set(pr_status.changes_requested_bots)
+        humans = [name for name in reviewers if name not in bots]
+        if reviewers and not humans and pr_status.changes_requested_complete:
+            console.detail(
+                f"~ CHANGES_REQUESTED from {', '.join(reviewers)} ignored — "
+                "a review bot is not a human pushing back, and its comments were "
+                "addressed and resolved before this stage"
+            )
+            return None
+
         console.error(
-            f"PR #{state.current_pr} has changes requested by a reviewer - "
+            f"PR #{state.current_pr} has changes requested by "
+            f"{', '.join(humans) if humans else 'a reviewer'} - "
             "refusing to auto-merge over an active review"
         )
         console.detail(

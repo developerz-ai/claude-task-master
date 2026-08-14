@@ -77,3 +77,134 @@ class TestReviewDecisionIsCarried:
 
     def test_query_selects_the_field(self):
         assert "reviewDecision" in _build_pr_status_query()
+
+
+class TestWhoRequestedChanges:
+    """Regression: `reviewDecision` never says *who*, so a bot read as a human.
+
+    A review bot's CHANGES_REQUESTED is indistinguishable from a person's in the
+    aggregate decision, and the merge gate blocked on it forever — no bot returns
+    to dismiss its own review after claudetm resolves its threads.
+    """
+
+    def _status(self, nodes):
+        return _parse_pr_status_response(7, {"latestOpinionatedReviews": {"nodes": nodes}})
+
+    def test_bot_reviewer_is_reported_as_a_bot(self):
+        status = self._status(
+            [
+                {
+                    "state": "CHANGES_REQUESTED",
+                    "author": {"__typename": "Bot", "login": "coderabbitai"},
+                }
+            ]
+        )
+        assert status.changes_requested_by == ["coderabbitai"]
+        assert status.changes_requested_bots == ["coderabbitai"]
+
+    def test_human_reviewer_is_not_a_bot(self):
+        status = self._status(
+            [{"state": "CHANGES_REQUESTED", "author": {"__typename": "User", "login": "sebi"}}]
+        )
+        assert status.changes_requested_by == ["sebi"]
+        assert status.changes_requested_bots == []
+
+    def test_bot_login_suffix_counts_even_when_typed_user(self):
+        status = self._status(
+            [{"state": "CHANGES_REQUESTED", "author": {"__typename": "User", "login": "dep[bot]"}}]
+        )
+        assert status.changes_requested_bots == ["dep[bot]"]
+
+    def test_approvals_are_not_collected(self):
+        status = self._status(
+            [{"state": "APPROVED", "author": {"__typename": "User", "login": "sebi"}}]
+        )
+        assert status.changes_requested_by == []
+
+    def test_missing_field_reads_as_unknown_not_as_nobody(self):
+        """Both lists empty is what makes the merge gate fall back to blocking."""
+        status = _parse_pr_status_response(7, {})
+        assert status.changes_requested_by == []
+        assert status.changes_requested_bots == []
+
+    def test_malformed_nodes_are_skipped_without_raising(self):
+        status = self._status(
+            [
+                None,
+                {},
+                {"state": "CHANGES_REQUESTED"},
+                {"state": "CHANGES_REQUESTED", "author": None},
+            ]
+        )
+        assert status.changes_requested_by == []
+
+
+class TestReviewerAttributionCompleteness:
+    """Regression: silently dropping a reviewer could merge over a human.
+
+    `_parse_changes_requested` skips a CHANGES_REQUESTED node it cannot attribute
+    and reads at most one page. Either gap can hide the single human in a list
+    that otherwise reads as all-bots, which is exactly the list the merge gate
+    discounts — so the gap is reported instead of swallowed.
+    """
+
+    def test_unidentifiable_reviewer_marks_it_incomplete(self):
+        status = _parse_pr_status_response(
+            7,
+            {
+                "latestOpinionatedReviews": {
+                    "nodes": [
+                        {
+                            "state": "CHANGES_REQUESTED",
+                            "author": {"__typename": "Bot", "login": "coderabbitai"},
+                        },
+                        {"state": "CHANGES_REQUESTED", "author": None},
+                    ]
+                }
+            },
+        )
+        assert status.changes_requested_by == ["coderabbitai"]
+        assert status.changes_requested_complete is False
+
+    def test_another_page_marks_it_incomplete(self):
+        status = _parse_pr_status_response(
+            7,
+            {
+                "latestOpinionatedReviews": {
+                    "pageInfo": {"hasNextPage": True},
+                    "nodes": [
+                        {
+                            "state": "CHANGES_REQUESTED",
+                            "author": {"__typename": "Bot", "login": "coderabbitai"},
+                        }
+                    ],
+                }
+            },
+        )
+        assert status.changes_requested_complete is False
+
+    def test_a_fully_read_single_page_is_complete(self):
+        status = _parse_pr_status_response(
+            7,
+            {
+                "latestOpinionatedReviews": {
+                    "pageInfo": {"hasNextPage": False},
+                    "nodes": [
+                        {
+                            "state": "CHANGES_REQUESTED",
+                            "author": {"__typename": "Bot", "login": "coderabbitai"},
+                        }
+                    ],
+                }
+            },
+        )
+        assert status.changes_requested_complete is True
+
+    def test_an_absent_collection_is_not_reported_as_partial(self):
+        """Empty reviewer lists already block; partial is a distinct signal."""
+        assert _parse_pr_status_response(7, {}).changes_requested_complete is True
+
+    def test_the_query_asks_for_the_page_marker(self):
+        query = _build_pr_status_query()
+        reviews = query[query.index("latestOpinionatedReviews") :]
+        assert "pageInfo { hasNextPage }" in reviews[: reviews.index("reviewThreads")]
