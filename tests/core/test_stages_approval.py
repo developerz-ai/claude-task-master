@@ -75,8 +75,15 @@ def state(sample_task_options) -> TaskState:
     )
 
 
-def _pr_status(review_decision: str | None) -> MagicMock:
+def _pr_status(
+    review_decision: str | None,
+    changes_requested_by: list[str] | None = None,
+    changes_requested_bots: list[str] | None = None,
+) -> MagicMock:
     status = MagicMock()
+    # Default to "who requested changes is unreadable", which must keep blocking.
+    status.changes_requested_by = changes_requested_by or []
+    status.changes_requested_bots = changes_requested_bots or []
     status.number = 42
     status.state = "OPEN"
     status.ci_state = "SUCCESS"
@@ -179,3 +186,71 @@ class TestEveryOtherDecisionBehavesAsBefore:
 
         assert result == 1
         mock_github_client.merge_pr.assert_not_called()
+
+
+class TestBotChangesRequestedDoesNotBlock:
+    """Regression: a review bot's CHANGES_REQUESTED blocked green PRs forever.
+
+    claudetm answers a bot's comments and resolves its threads, but no bot comes
+    back to dismiss its own review, so `reviewDecision` stayed CHANGES_REQUESTED
+    and the run blocked on a fully-addressed, green PR. Three PRs blocked this way
+    in one night; two of the reviews were CodeRabbit quota notices, the same
+    condition already discounted on the CI axis.
+    """
+
+    def test_bot_only_changes_requested_merges(self, handler, state, mock_github_client):
+        mock_github_client.get_pr_status.side_effect = [
+            _pr_status(
+                "CHANGES_REQUESTED",
+                changes_requested_by=["coderabbitai"],
+                changes_requested_bots=["coderabbitai"],
+            ),
+            _merged(),
+        ]
+
+        result = handler.handle_ready_to_merge_stage(state)
+
+        assert state.status != "blocked"
+        assert result != 1
+        mock_github_client.merge_pr.assert_called_once()
+
+    def test_human_among_bots_still_blocks(self, handler, state, mock_github_client):
+        """The gate exists for the human. One is enough, however many bots agree."""
+        mock_github_client.get_pr_status.return_value = _pr_status(
+            "CHANGES_REQUESTED",
+            changes_requested_by=["coderabbitai", "sebi"],
+            changes_requested_bots=["coderabbitai"],
+        )
+
+        result = handler.handle_ready_to_merge_stage(state)
+
+        assert result == 1
+        assert state.status == "blocked"
+        mock_github_client.merge_pr.assert_not_called()
+
+    def test_unreadable_reviewers_still_blocks(self, handler, state, mock_github_client):
+        """Not knowing who requested changes is not the same as nobody having."""
+        mock_github_client.get_pr_status.return_value = _pr_status("CHANGES_REQUESTED")
+
+        result = handler.handle_ready_to_merge_stage(state)
+
+        assert result == 1
+        assert state.status == "blocked"
+        mock_github_client.merge_pr.assert_not_called()
+
+    def test_bot_login_suffix_counts_as_a_bot(self, handler, state, mock_github_client):
+        """An integration reporting itself as a User still reads as a bot."""
+        mock_github_client.get_pr_status.side_effect = [
+            _pr_status(
+                "CHANGES_REQUESTED",
+                changes_requested_by=["coderabbitai[bot]"],
+                changes_requested_bots=["coderabbitai[bot]"],
+            ),
+            _merged(),
+        ]
+
+        result = handler.handle_ready_to_merge_stage(state)
+
+        assert result != 1
+        assert state.status != "blocked"
+        mock_github_client.merge_pr.assert_called_once()

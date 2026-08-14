@@ -45,11 +45,17 @@ class _AgentPhaseGenerationMixin:
     def agents_for(self, fan_out: bool) -> Any:
         """The agent loader to hand this query, or None to register no agents.
 
-        Subagent definitions are not free and not harmless. Each one ships its
-        full prompt in the query's system prompt (``hive-worker`` alone is ~1.4k
-        tokens, re-read from cache on every turn of the session), and — because
-        the working phase allows every tool and ``allowed_tools`` is only an
-        auto-approve list — registering one is what makes fan-out *possible*.
+        Subagent definitions are not free. Each one ships its full prompt in the
+        query's system prompt (``hive-worker`` alone is ~1.4k tokens, re-read
+        from cache on every turn of the session).
+
+        What they are *not* is the switch that makes fan-out possible. That was
+        believed here and is false: the CLI registers built-in dispatch types
+        (``general-purpose``, ``Explore``, ``Plan``) on every query, so
+        withholding definitions removes ``hive-worker`` and leaves the Agent tool
+        working. The capability is denied where fan-out is not permitted by
+        ``_execute_query``, which disallows the dispatch tools outright whenever
+        this returns None — so returning None really does mean "cannot fan out".
 
         They used to be attached to every query unconditionally, which had two
         consequences neither documented nor intended: ``--no-parallel`` removed

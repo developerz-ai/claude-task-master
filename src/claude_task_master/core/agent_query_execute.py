@@ -27,6 +27,11 @@ if TYPE_CHECKING:
     from .agent_models import ModelType
     from .logger import TaskLogger
 
+#: The SDK tool names that spawn a subagent. Denied outright on any query that
+#: may not fan out — the same pair ``hive-worker`` denies itself so a worker
+#: cannot recursively spawn workers.
+DISPATCH_TOOLS: tuple[str, ...] = ("Task", "Agent")
+
 
 class _AgentQueryExecuteMixin:
     """Mixin providing single-attempt query execution to AgentQueryExecutor.
@@ -109,7 +114,8 @@ class _AgentQueryExecuteMixin:
                 FileNotFoundError(f"No such directory: {self.working_dir}"),
             )
 
-        # Load subagents from .claude/agents/ directory
+        # Load subagents from .claude/agents/ directory. No loader means this
+        # phase may not fan out at all (see ``_AgentPhaseGeneration.agents_for``).
         if get_agents_func:
             agents = get_agents_func(self.working_dir)
         else:
@@ -164,6 +170,25 @@ class _AgentQueryExecuteMixin:
                 "max_buffer_size": 5 * 1024 * 1024,
                 "env": cli_env,
             }
+
+            # Withholding the worker definitions was believed to be what made
+            # fan-out impossible. It is not, and never was: the built-in
+            # dispatch types (`general-purpose`, `Explore`, `Plan`, ...) are
+            # registered by the CLI itself, so `agents=None` removes only
+            # `hive-worker` and leaves the Agent tool fully able to spawn
+            # subagents — with none of the guardrails that definition carries
+            # (`background=False`, `disallowedTools=["Task", "Agent"]`, a sized
+            # turn budget) and no worker contract in the prompt. Verified live:
+            # a query under these exact options reported `general-purpose` among
+            # its subagent types with `agents=None`. A review-fix session was
+            # then observed dispatching two `general-purpose` agents that edited
+            # the same tree concurrently and collided on a shared file.
+            #
+            # So a phase that may not fan out has the capability denied, not
+            # merely unadvertised. Fail-closed by design: a future caller that
+            # passes no loader gets no dispatch.
+            if get_agents_func is None:
+                options_kwargs["disallowed_tools"] = list(DISPATCH_TOOLS)
 
             # Add effort level for extended thinking depth control
             if effort_level:

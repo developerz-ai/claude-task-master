@@ -136,6 +136,12 @@ def _build_pr_status_query() -> str:
               }
             }
           }
+          latestOpinionatedReviews(first: 20, writersOnly: true) {
+            nodes {
+              state
+              author { __typename login }
+            }
+          }
           reviewThreads(first: 100) {
             pageInfo { hasNextPage }
             nodes {
@@ -154,6 +160,51 @@ def _build_pr_status_query() -> str:
       }
     }
     """
+
+
+def _parse_changes_requested(pr_data: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """Split the reviewers holding an open CHANGES_REQUESTED into all and bots.
+
+    ``reviewDecision`` says *that* changes were requested, never by whom, and a
+    review bot's verdict is indistinguishable from a person's in it.
+    ``latestOpinionatedReviews`` is the collection GitHub derives that decision
+    from — one latest opinionated (APPROVED / CHANGES_REQUESTED) review per
+    reviewer — so it is where "who" lives.
+
+    A GitHub App reviews as an ``author`` of ``__typename`` ``Bot``. The
+    ``[bot]`` login suffix is accepted too: it is what the UI shows and costs
+    nothing to honour if an integration ever reports itself as a ``User``.
+
+    Args:
+        pr_data: The ``pullRequest`` data from GraphQL. A missing or malformed
+            ``latestOpinionatedReviews`` yields two empty lists, which callers
+            must read as "unknown", never as "nobody".
+
+    Returns:
+        ``(logins, bot_logins)`` — every reviewer with an open
+        CHANGES_REQUESTED, and the subset of those that are bot accounts.
+    """
+    reviews = pr_data.get("latestOpinionatedReviews")
+    nodes = reviews.get("nodes") if isinstance(reviews, dict) else None
+    if not isinstance(nodes, list):
+        return [], []
+
+    logins: list[str] = []
+    bots: list[str] = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        if str(node.get("state") or "").upper() != "CHANGES_REQUESTED":
+            continue
+        author = node.get("author")
+        author = author if isinstance(author, dict) else {}
+        login = str(author.get("login") or "").strip()
+        if not login:
+            continue
+        logins.append(login)
+        if author.get("__typename") == "Bot" or login.lower().endswith("[bot]"):
+            bots.append(login)
+    return logins, bots
 
 
 def _parse_pr_status_response(pr_number: int, pr_data: dict[str, Any]) -> PRStatus:
@@ -239,6 +290,7 @@ def _parse_pr_status_response(pr_number: int, pr_data: dict[str, Any]) -> PRStat
     # degrade to "no decision" rather than being carried into a merge check.
     raw_decision = pr_data.get("reviewDecision")
     review_decision = raw_decision if isinstance(raw_decision, str) and raw_decision else None
+    changes_requested_by, changes_requested_bots = _parse_changes_requested(pr_data)
 
     return PRStatus(
         number=pr_number,
@@ -260,6 +312,8 @@ def _parse_pr_status_response(pr_number: int, pr_data: dict[str, Any]) -> PRStat
         head_branch=head_branch,
         merged_at=merged_at,
         review_decision=review_decision,
+        changes_requested_by=changes_requested_by,
+        changes_requested_bots=changes_requested_bots,
     )
 
 
