@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.89] - 2026-08-14
+
+### Fixed
+
+- **A review bot's `CHANGES_REQUESTED` blocked green PRs forever.** `reviewDecision` says *that* changes were requested, never by whom, so the merge gate read a GitHub App's review as "a human actively pushed back". That block never clears on its own: claudetm answers a bot's comments and resolves its threads, but no bot returns to dismiss its own review. Three PRs blocked this way in one night across two repos — each logging `All N review comments resolved!` and then `refusing to auto-merge over an active review`. Two of the blocking reviews were CodeRabbit *quota notices*, the exact condition already discounted on the CI axis. The status query now also selects `latestOpinionatedReviews` (what GitHub derives the decision from) and classifies each reviewer; a decision whose reviewers are all bots is discounted with a logged reason. One human among them still blocks — that is the case the gate was written for. `--admin` semantics are unchanged: it gets past branch protection, it is not consent to merge over a person's review.
+- **Reviewer attribution fails closed.** An empty reviewer list was already "unknown, not nobody" and blocked; a *partial* one now does too. A CHANGES_REQUESTED whose author cannot be identified, or a page of reviewers never fetched, could each hide the single human in a list that otherwise reads as all-bots, so both are recorded on `changes_requested_complete` and the discount requires it.
+- **"May not fan out" removed the definitions, not the capability.** Withholding the `hive-worker` definition was believed to be what made fan-out impossible. It is not: the CLI registers built-in dispatch types (`general-purpose`, `Explore`, `Plan`) on every query regardless of `agents=` — verified live under claudetm's exact options. So every phase documented as never fanning out — planning, verification, release checks, learnings extraction and every push-only fix session — could still spawn subagents, just unguarded ones: no `background=False`, no `disallowedTools`, no sized turn budget, no worker contract. A review-fix session was observed dispatching two `general-purpose` agents that edited the same tree concurrently and collided on a shared file, precisely what the exclusive-file-set design exists to prevent. `_execute_query` now denies `Task`/`Agent` whenever `agents_for()` returns None. Fail-closed: no loader, no dispatch.
+
+### Verified
+
+- Project specialist registration was probed live and is correct: with `agents=None`, a project `.claude/agents/*.md` definition still appears among a session's `subagent_type` values via `setting_sources: ["project"]`. The fan-out brief's instruction to dispatch a specialist by name resolves as intended.
+
 ## [0.1.88] - 2026-08-13
 
 ### Fixed
@@ -1078,7 +1090,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.88...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.89...HEAD
+[0.1.89]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.88...v0.1.89
 [0.1.88]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.87...v0.1.88
 [0.1.87]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.86...v0.1.87
 [0.1.86]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.85...v0.1.86
