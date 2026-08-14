@@ -15,6 +15,8 @@ The capability is now denied, not merely unadvertised.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -27,7 +29,7 @@ from claude_task_master.core.circuit_breaker import CircuitBreaker
 from claude_task_master.core.rate_limit import RateLimitConfig
 
 
-async def _capture_options(tmp_path, get_agents_func: Any) -> dict[str, Any]:
+async def _capture_options(tmp_path: Path, get_agents_func: Any) -> dict[str, Any]:
     """Run one query attempt and return the kwargs handed to the SDK options."""
     captured: dict[str, Any] = {}
 
@@ -35,7 +37,7 @@ async def _capture_options(tmp_path, get_agents_func: Any) -> dict[str, Any]:
         captured.update(kwargs)
         return MagicMock()
 
-    async def query(*_args: Any, **_kwargs: Any):
+    async def query(*_args: Any, **_kwargs: Any) -> AsyncIterator[Any]:
         yield MagicMock(content=None)
 
     executor = AgentQueryExecutor(
@@ -57,7 +59,7 @@ async def _capture_options(tmp_path, get_agents_func: Any) -> dict[str, Any]:
 
 class TestDispatchIsDeniedWhereFanOutIsNot:
     @pytest.mark.asyncio
-    async def test_no_agent_loader_denies_the_dispatch_tools(self, tmp_path):
+    async def test_no_agent_loader_denies_the_dispatch_tools(self, tmp_path: Path) -> None:
         """A push-only fix session got no worker definitions — and could still fan out."""
         captured = await _capture_options(tmp_path, None)
 
@@ -66,7 +68,7 @@ class TestDispatchIsDeniedWhereFanOutIsNot:
         assert "Agent" in captured["disallowed_tools"]
 
     @pytest.mark.asyncio
-    async def test_a_fan_out_session_keeps_dispatch(self, tmp_path):
+    async def test_a_fan_out_session_keeps_dispatch(self, tmp_path: Path) -> None:
         """The working phase must be able to spawn its team, exactly as before."""
         captured = await _capture_options(tmp_path, lambda _d: {"hive-worker": MagicMock()})
 
@@ -74,7 +76,7 @@ class TestDispatchIsDeniedWhereFanOutIsNot:
         assert captured["agents"]
 
     @pytest.mark.asyncio
-    async def test_a_loader_returning_nothing_still_keeps_dispatch(self, tmp_path):
+    async def test_a_loader_returning_nothing_still_keeps_dispatch(self, tmp_path: Path) -> None:
         """claudetm stands down when the project defines its own worker.
 
         The definitions then come from the CLI via ``setting_sources``, so an

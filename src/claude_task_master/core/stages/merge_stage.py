@@ -86,9 +86,12 @@ class _MergeStage(_MergeCleanup):
 
         Not knowing who requested changes is not the same as nobody having: an
         empty reviewer list (older GitHub Enterprise, a partial response) falls
-        back to blocking. This half fails **closed** on purpose, unlike the
-        decision field itself — the cost of a wrong block here is a resume, the
-        cost of a wrong merge is an unreviewed change on main.
+        back to blocking, and so does a *partial* one — a reviewer whose author
+        could not be identified, or a page never fetched, could be the single
+        human in a list that otherwise reads as all-bots
+        (``changes_requested_complete``). This half fails **closed** on purpose,
+        unlike the decision field itself — the cost of a wrong block here is a
+        resume, the cost of a wrong merge is an unreviewed change on main.
 
         Args:
             state: Current task state.
@@ -106,7 +109,7 @@ class _MergeStage(_MergeCleanup):
         reviewers = list(pr_status.changes_requested_by)
         bots = set(pr_status.changes_requested_bots)
         humans = [name for name in reviewers if name not in bots]
-        if reviewers and not humans:
+        if reviewers and not humans and pr_status.changes_requested_complete:
             console.detail(
                 f"~ CHANGES_REQUESTED from {', '.join(reviewers)} ignored — "
                 "a review bot is not a human pushing back, and its comments were "

@@ -47,6 +47,11 @@ class PRStatus(BaseModel):
     # falls back to blocking (see ``_MergeStage._handle_requested_changes``).
     changes_requested_by: list[str] = []
     changes_requested_bots: list[str] = []
+    # False when a reviewer who requested changes could not be accounted for
+    # (unidentifiable author, or an unfetched page). The one human in an
+    # otherwise all-bot list could be the one that was dropped, so the merge
+    # gate declines to discount anything unless this is True.
+    changes_requested_complete: bool = True
 
 
 class GitHubClientProtocol(Protocol):

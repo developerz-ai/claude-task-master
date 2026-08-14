@@ -79,11 +79,13 @@ def _pr_status(
     review_decision: str | None,
     changes_requested_by: list[str] | None = None,
     changes_requested_bots: list[str] | None = None,
+    changes_requested_complete: bool = True,
 ) -> MagicMock:
     status = MagicMock()
     # Default to "who requested changes is unreadable", which must keep blocking.
     status.changes_requested_by = changes_requested_by or []
     status.changes_requested_bots = changes_requested_bots or []
+    status.changes_requested_complete = changes_requested_complete
     status.number = 42
     status.state = "OPEN"
     status.ci_state = "SUCCESS"
@@ -254,3 +256,18 @@ class TestBotChangesRequestedDoesNotBlock:
         assert result != 1
         assert state.status != "blocked"
         mock_github_client.merge_pr.assert_called_once()
+
+    def test_partial_attribution_still_blocks(self, handler, state, mock_github_client):
+        """A dropped reviewer could be the one human, so all-bots is not provable."""
+        mock_github_client.get_pr_status.return_value = _pr_status(
+            "CHANGES_REQUESTED",
+            changes_requested_by=["coderabbitai"],
+            changes_requested_bots=["coderabbitai"],
+            changes_requested_complete=False,
+        )
+
+        result = handler.handle_ready_to_merge_stage(state)
+
+        assert result == 1
+        assert state.status == "blocked"
+        mock_github_client.merge_pr.assert_not_called()
