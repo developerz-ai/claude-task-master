@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.90] - 2026-09-01
+
 ### Changed
 
 - **Upgraded `claude-agent-sdk` to `>=0.2.150,<0.3`** (from `0.2.137`). Thirteen releases; twelve of them are bundled-CLI bumps carrying Claude Code **2.1.229 → 2.1.257**. The one substantive release is 0.2.140, and three of its four features land here (`ResultError`, `forward_subagent_text`, and the MCP 2.x widening that forced the pin below); `can_use_tool` for string prompts is not used — claudetm runs `permission_mode="bypassPermissions"` and has no permission callback to install.
@@ -1126,7 +1128,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.89...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.90...HEAD
+[0.1.90]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.89...v0.1.90
 [0.1.89]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.88...v0.1.89
 [0.1.88]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.87...v0.1.88
 [0.1.87]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.86...v0.1.87
