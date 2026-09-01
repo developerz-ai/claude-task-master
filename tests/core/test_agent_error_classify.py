@@ -521,3 +521,52 @@ class TestImportableWithoutSDK:
         code = "\n".join(line for line in source.splitlines() if not line.lstrip().startswith("#"))
         assert "import claude_agent_sdk" not in code
         assert "from claude_agent_sdk" not in code
+
+
+class TestBareStatusNumbersInPayloadProse:
+    """A bare 401/403 in echoed output must not end an unattended run.
+
+    Folding ``result``/``errors`` into the searched text is what lets a real
+    failure be recognised — and it also drags tool and command output in with
+    it. A false ``APIServerError`` is merely retried; a false
+    ``APIAuthenticationError`` is not retryable and kills the run, so auth
+    status matching requires a status-like word nearby and 5xx does not.
+    """
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "wrote 403 bytes to disk",
+            "process exited 401",
+            "read 401 lines from the log",
+            "offset 403 in the buffer",
+        ],
+    )
+    def test_bare_number_is_not_an_auth_error(self, message: str) -> None:
+        assert not isinstance(classify_api_error(Exception(message)), APIAuthenticationError)
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "HTTP 401 Unauthorized",
+            "HTTP 403 Forbidden",
+            "status: 403",
+            "error 401 returned by the API",
+            "response code 403",
+        ],
+    )
+    def test_status_with_context_is_still_an_auth_error(self, message: str) -> None:
+        assert isinstance(classify_api_error(Exception(message)), APIAuthenticationError)
+
+    def test_bare_number_inside_result_payload_prose(self) -> None:
+        """The realistic shape: the number arrives via `errors`, not `str(e)`."""
+        err = Exception("Claude Code returned an error result: error_during_execution")
+        err.errors = ["Command output: wrote 403 bytes"]  # type: ignore[attr-defined]
+        assert not isinstance(classify_api_error(err), APIAuthenticationError)
+
+    def test_forbidden_word_alone_is_an_auth_error(self) -> None:
+        """`403 Forbidden` must survive even without the digits."""
+        assert isinstance(
+            classify_api_error(Exception("Forbidden: you lack access")),
+            APIAuthenticationError,
+        )

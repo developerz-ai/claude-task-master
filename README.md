@@ -380,7 +380,7 @@ Precedence (highest first): real environment variables, then the **active profil
 
 | Environment Variable | Default | Description |
 |---------------------|---------|-------------|
-| `CLAUDETM_MAX_TURNS` | `400` | Max agent steps per session — a runaway backstop, not a working budget. Set `0` to disable. Overrunning retries the task rather than marking it done |
+| `CLAUDETM_MAX_TURNS` | `2000` | Max agent steps per session — a runaway backstop, not a working budget. Counts the lead **and every subagent**, so it is sized for a hive. Set `0` to disable. Overrunning retries the task rather than marking it done |
 | `CLAUDETM_STREAM_IDLE_TIMEOUT_SEC` | `1800` | Max silence between SDK stream messages before treating the stream as hung |
 | `CLAUDETM_POST_COMPLETION_IDLE_TIMEOUT_SEC` | `120` | Max wait for the final result message after the agent signals it's done |
 | `CLAUDETM_HIVE_MAX_PARALLEL` | `6` | Safety ceiling on concurrent worker subagents (1 lead + up to N workers) — a ceiling, not a target; the lead sizes its own team, and may run N of the same kind, N different kinds, or any mix |

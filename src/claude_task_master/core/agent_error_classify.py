@@ -32,6 +32,12 @@ misclassifications lived in the loose version, both of them one-way:
   commit message this project writes — turning any error that echoed a git
   command into a *non*-retryable :class:`APIAuthenticationError` that ends the
   run.
+
+A bare ``401``/``403`` is the same trap one step further in: because the payload
+prose is searched, echoed command output such as ``"wrote 403 bytes"`` would
+match. Status matching for auth therefore requires a status-like word nearby,
+while the 5xx rule does not need to — a false 5xx is retried, a false auth kills
+the run.
 """
 
 from __future__ import annotations
@@ -56,13 +62,23 @@ __all__ = ["classify_api_error", "result_error_fields", "searchable_error_text"]
 #: A standalone HTTP 5xx status, not a digit inside a larger number.
 _SERVER_STATUS_RE = re.compile(r"(?<!\d)(5\d\d)(?!\d)")
 
-#: Standalone 401/403. Same boundary rule, same reason.
-_AUTH_STATUS_RE = re.compile(r"(?<!\d)(?:401|403)(?!\d)")
+#: 401/403 preceded by a status-like word, never a bare number.
+#:
+#: Digit boundaries alone are not enough *here*, and the asymmetry with the 5xx
+#: rule is deliberate. The searched text now includes the ``result``/``errors``
+#: payload, which routinely carries tool and command output — so "wrote 403
+#: bytes" or "exit 401" would match a bare-number rule. A false 5xx is merely
+#: retried; a false auth error is **not** retryable and ends an unattended run,
+#: so this side has to be the strict one.
+_AUTH_STATUS_RE = re.compile(
+    r"\b(?:http|https|status|code|error|response)\b[^0-9\n]{0,12}(?<!\d)(?:401|403)(?!\d)",
+    re.IGNORECASE,
+)
 
 #: Auth phrasings, whole words only — never a bare ``auth`` substring.
 _AUTH_RE = re.compile(
     r"\b(?:unauthorized|unauthenticated|authentication|authenticate|oauth"
-    r"|invalid[ _-]api[ _-]key|not logged in|credentials?)\b",
+    r"|forbidden|invalid[ _-]api[ _-]key|not logged in|credentials?)\b",
     re.IGNORECASE,
 )
 

@@ -77,6 +77,7 @@ runs slower and the task finishes later."""
         if machine
         else ""
     )
+    agents_note = _project_agents_note(project_agents)
     return f"""**You may split THIS task across parallel workers — and for a big task, you should.
 You are buying speed: this ONE task finished in less wall-clock time.**
 A task that spans several modules, layers or features almost always has seams. Map the parts that
@@ -113,7 +114,8 @@ once, and they may be {max_parallel} of the same kind, one each of {max_parallel
 or any mix. Four concurrent `hive-worker`s is exactly as legitimate as one `backend-dev`, one
 `frontend-dev` and two `hive-worker`s — nothing rewards variety for its own sake. What selects each
 worker is the piece it is being handed: the specialist whose description fits that piece, else a
-generic `hive-worker`. Two pieces that suit the same specialist get two instances of it.{machine_note}{_project_agents_note(project_agents)}
+generic `hive-worker`. Two pieces that suit the same specialist get two instances of it.\
+{machine_note}{agents_note}
 
 **Dispatch is part of the speed** — the Agent tool: a project specialist where one fits, else
 `subagent_type: "hive-worker"`, at most {max_parallel} workers at a time. Put every independent
