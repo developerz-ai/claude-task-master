@@ -1124,3 +1124,119 @@ class TestUsageDictTokens:
 
         assert proc.last_input_tokens == 0
         assert proc.last_output_tokens == 0
+
+
+# =============================================================================
+# Hive roster wiring — the team view of a fanned-out session
+# =============================================================================
+
+
+class TestHiveRosterWiring:
+    """The roster is fed from the stream, and only from the right parts of it.
+
+    The roster itself is deliberately tolerant — it adopts an unfamiliar
+    tool-use id on sight, because a worker can speak before the block that
+    spawned it has been processed. That tolerance makes the *call sites* the
+    thing under test: feeding it the wrong ids is what invents workers that
+    never existed.
+    """
+
+    def test_dispatch_registers_a_worker(self):
+        """A Task/Agent tool call puts that worker on the roster."""
+        proc = MessageProcessor()
+        block = _make_tool_use_block("Agent", {"subagent_type": "hive-worker"}, block_id="toolu_w1")
+        proc.process_message(_make_assistant_message([block]), "")
+
+        assert proc._roster.live_count == 1
+        assert any("hive-worker#1" in line for line in proc._roster.render())
+
+    def test_ordinary_tool_results_do_not_invent_workers(self):
+        """Regression: a top-level Read/Bash result is not a worker returning.
+
+        ``finish()`` adopts an unknown id, so passing it every top-level
+        ToolResultBlock produced a phantom ``subagent#n  done`` row per tool
+        call — on a solo session with no hive at all. Only an id we recorded as
+        a dispatch may close a worker out.
+        """
+        proc = MessageProcessor()
+        for tool_id in ("toolu_read_1", "toolu_bash_2", "toolu_grep_3"):
+            proc.process_message(_make_assistant_message([_make_tool_result_block(tool_id)]), "")
+        # A *failing* ordinary tool call is the dangerous one: only errored
+        # results reach finish(), so that is where a phantom row would appear.
+        proc.process_message(
+            _make_assistant_message([_make_tool_result_block("toolu_bash_4", is_error=True)]),
+            "",
+        )
+
+        assert proc._roster.live_count == 0
+        assert proc._roster.render() == []
+
+    def test_successful_dispatch_result_does_not_finish_the_worker(self):
+        """Regression: a dispatch's tool result is an ACK, not a completion.
+
+        Measured against a live session: the ``ToolResultBlock`` for an
+        ``Agent`` call arrives ~0.1s after the dispatch, while that worker's
+        own messages keep arriving for the next 40 seconds. Treating it as the
+        worker returning produced a roster that jumped straight to ``3 done``
+        at ``0s`` elapsed with all three still working.
+        """
+        proc = MessageProcessor()
+        spawn = _make_tool_use_block("Agent", {"subagent_type": "hive-worker"}, block_id="toolu_w1")
+        proc.process_message(_make_assistant_message([spawn]), "")
+        assert proc._roster.live_count == 1
+
+        proc.process_message(_make_assistant_message([_make_tool_result_block("toolu_w1")]), "")
+        assert proc._roster.live_count == 1, "an ack must not retire a live worker"
+
+    def test_failed_dispatch_finishes_the_worker(self):
+        """A refused spawn is the one completion the stream states outright.
+
+        The CLI refuses an over-ceiling dispatch with "Concurrent subagent
+        limit reached"; that worker never runs, so it must not sit on the
+        roster as live for the rest of the session.
+        """
+        proc = MessageProcessor()
+        spawn = _make_tool_use_block("Agent", {"subagent_type": "hive-worker"}, block_id="toolu_w1")
+        proc.process_message(_make_assistant_message([spawn]), "")
+
+        proc.process_message(
+            _make_assistant_message([_make_tool_result_block("toolu_w1", is_error=True)]), ""
+        )
+        assert proc._roster.live_count == 0
+        assert any("failed" in line for line in proc._roster.render())
+
+    def test_subagent_activity_and_usage_are_attributed(self):
+        """A worker's own lines update its activity and token totals."""
+        proc = MessageProcessor()
+        spawn = _make_tool_use_block("Agent", {"subagent_type": "hive-worker"}, block_id="toolu_w1")
+        proc.process_message(_make_assistant_message([spawn]), "")
+
+        msg = _make_subagent_message(
+            [_make_text_block("rewriting the migration tests")],
+            parent_tool_use_id="toolu_w1",
+        )
+        msg.usage = {"input_tokens": 4000, "output_tokens": 250}
+        proc.process_message(msg, "")
+
+        rendered = "\n".join(proc._roster.render())
+        assert "rewriting the migration tests" in rendered
+        assert "4.0k" in rendered
+
+    def test_subagent_text_is_not_accumulated_into_the_lead_result(self):
+        """Roster wiring must not disturb the existing accumulation rule."""
+        proc = MessageProcessor()
+        msg = _make_subagent_message(
+            [_make_text_block("TASK COMPLETE")], parent_tool_use_id="toolu_w1"
+        )
+        assert proc.process_message(msg, "lead text") == "lead text"
+
+    def test_reset_clears_the_roster(self):
+        """A reused processor must not carry a prior session's team forward."""
+        proc = MessageProcessor()
+        spawn = _make_tool_use_block("Agent", {"subagent_type": "hive-worker"}, block_id="toolu_w1")
+        proc.process_message(_make_assistant_message([spawn]), "")
+        assert proc._roster.live_count == 1
+
+        proc.reset_result_state()
+        assert proc._roster.live_count == 0
+        assert proc._roster.render() == []

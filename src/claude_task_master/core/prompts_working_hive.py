@@ -106,7 +106,14 @@ reported success.)
 
 **{max_parallel} concurrent workers is a safety ceiling, not a target.** Pick the number of
 genuinely disjoint pieces your task actually has — often zero — and never pad a split to look
-parallel.{machine_note}{_project_agents_note(project_agents)}
+parallel.
+
+**Within that ceiling the composition is entirely yours.** Up to {max_parallel} workers running at
+once, and they may be {max_parallel} of the same kind, one each of {max_parallel} different kinds,
+or any mix. Four concurrent `hive-worker`s is exactly as legitimate as one `backend-dev`, one
+`frontend-dev` and two `hive-worker`s — nothing rewards variety for its own sake. What selects each
+worker is the piece it is being handed: the specialist whose description fits that piece, else a
+generic `hive-worker`. Two pieces that suit the same specialist get two instances of it.{machine_note}{_project_agents_note(project_agents)}
 
 **Dispatch is part of the speed** — the Agent tool: a project specialist where one fits, else
 `subagent_type: "hive-worker"`, at most {max_parallel} workers at a time. Put every independent

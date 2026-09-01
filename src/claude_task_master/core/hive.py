@@ -25,14 +25,17 @@ import shutil
 from typing import Literal, cast
 
 __all__ = [
+    "DEFAULT_FORWARD_SUBAGENT_TEXT",
     "DEFAULT_HIVE_MAX_PARALLEL",
     "DEFAULT_HIVE_WORKER_EFFORT",
     "DEFAULT_HIVE_WORKER_MAX_TURNS",
+    "FORWARD_SUBAGENT_TEXT_ENV",
     "HIVE_MAX_PARALLEL_ENV",
     "HIVE_WORKER_EFFORT_ENV",
     "HIVE_WORKER_MAX_TURNS_ENV",
     "describe_machine",
     "fan_out_enabled",
+    "forward_subagent_text_enabled",
     "hive_max_parallel",
     "hive_worker_effort",
     "hive_worker_max_turns",
@@ -46,10 +49,34 @@ EffortLevel = Literal["low", "medium", "high", "xhigh", "max"]
 _VALID_EFFORTS: frozenset[str] = frozenset({"low", "medium", "high", "xhigh", "max"})
 
 
-# One knob: 1 lead + up to this many workers running at once.
-DEFAULT_HIVE_MAX_PARALLEL: int = 10
+#: One knob: 1 lead + up to this many workers running at once.
+#:
+#: Six, not ten. The ceiling is interpolated verbatim into the fan-out brief
+#: (``prompts_working_hive``), so this number is what the lead is told it may
+#: dispatch — it is a prompt-visible constant, not merely an internal guard.
+#: Ten invited a split wider than a shared checkout rewards: every worker is a
+#: full agent process re-reading this repo on the same cores, and past a handful
+#: the cold starts and the lead's own verification pass cost more than the
+#: concurrency returns. It stays a *ceiling*, never a target — the brief says so
+#: at length, and zero remains the right answer for most tasks.
+DEFAULT_HIVE_MAX_PARALLEL: int = 6
 
 HIVE_MAX_PARALLEL_ENV = "CLAUDETM_HIVE_MAX_PARALLEL"
+
+#: Whether a fanned-out session streams its workers' own text and thinking.
+#:
+#: The SDK forwards a subagent's *tool calls* to the parent stream on its own,
+#: but not its prose — so a lead's ``↳ [hive-worker#2]`` lines showed what a
+#: worker touched and never what it was doing or why. ``forward_subagent_text``
+#: (claude-agent-sdk >= 0.2.140) closes that gap, and the rendering it needs
+#: already existed here: per-worker colour, a stable ``#n`` ordinal, and the
+#: rule that a worker's text is displayed but never accumulated into the lead's
+#: own result. Forwarding is display-only — it costs no tokens, because those
+#: blocks were generated either way; the only price is log volume, which is the
+#: thing a fanned-out session was most missing.
+DEFAULT_FORWARD_SUBAGENT_TEXT: bool = True
+
+FORWARD_SUBAGENT_TEXT_ENV = "CLAUDETM_FORWARD_SUBAGENT_TEXT"
 
 #: Per-worker turn budget, passed as ``AgentDefinition.maxTurns``.
 #:
@@ -122,6 +149,40 @@ def _env_positive_int(name: str, default: int) -> int:
     except (ValueError, AttributeError):
         return default
     return value if value > 0 else default
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    """Read a boolean from the environment, falling back on anything unclear.
+
+    Never raises. A typo in an env var must not change a run's semantics, so
+    only the recognised spellings count and everything else defers to *default*
+    rather than being read as a silent "off".
+
+    Args:
+        name: Environment variable to read.
+        default: Value to use when unset or unrecognised.
+
+    Returns:
+        The parsed flag, or *default*.
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    if value in ("1", "true", "yes", "on"):
+        return True
+    if value in ("0", "false", "no", "off"):
+        return False
+    return default
+
+
+def forward_subagent_text_enabled() -> bool:
+    """Whether to stream workers' own text and thinking into the session log.
+
+    Reads ``CLAUDETM_FORWARD_SUBAGENT_TEXT``; anything unset or unrecognised
+    falls back to :data:`DEFAULT_FORWARD_SUBAGENT_TEXT`.
+    """
+    return _env_bool(FORWARD_SUBAGENT_TEXT_ENV, DEFAULT_FORWARD_SUBAGENT_TEXT)
 
 
 def hive_max_parallel() -> int:
