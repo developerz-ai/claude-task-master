@@ -215,11 +215,12 @@ wheels = [
 
 [[package]]
 name = "claude-task-master"
-version = "0.1.90"
+version = "0.1.91"
 source = { editable = "." }
 dependencies = [
     { name = "claude-agent-sdk" },
     { name = "httpx" },
+    { name = "mcp" },
     { name = "pydantic" },
     { name = "rich" },
     { name = "typer" },
@@ -274,6 +275,7 @@ requires-dist = [
     { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.128.7" },
     { name = "httpx", specifier = ">=0.28.0,<1" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.151.6" },
+    { name = "mcp", specifier = ">=1.26.0,<2" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.26.0,<2" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.19.0,<2" },
     { name = "passlib", extras = ["bcrypt"], marker = "extra == 'api'", specifier = ">=1.7.4" },

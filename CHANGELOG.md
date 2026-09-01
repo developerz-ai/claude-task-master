@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.91] - 2026-09-01
+
+### Fixed
+
+- **`claudetm-mcp` was still broken on a default install; v0.1.90's fix only covered the `[mcp]` extra.** The `mcp<2` upper bound was placed on the optional `mcp` extra, but **mcp is not optional in practice**: `claude-agent-sdk` depends on it and allows `<3`, so mcp lands in *every* install, and the `claudetm-mcp` console script ships unconditionally. A plain `uv tool install claude-task-master` therefore still resolved **mcp 2.1.1** — verified on the released v0.1.90 artifact, where `create_server()` raised `ImportError`. The bound now sits on the base dependency list, where it always applies. An upper bound only helps where it is actually reachable.
+- **The failure said "MCP SDK not installed" while mcp was installed.** 2.x renamed `FastMCP` to `MCPServer` and removed `mcp.server.fastmcp`, so the import fails with the package very much present — and the advice to `pip install mcp` sent the user in a circle. The message now names the installed version and the real constraint, keeping the plain wording only when mcp genuinely is absent.
+
+## [0.1.91] - 2026-09-01
+
 ## [0.1.90] - 2026-09-01
 
 ### Changed
@@ -1128,7 +1137,8 @@ Release tag alignment - all features documented under v0.1.2 are now properly in
 ### Security
 - N/A
 
-[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.90...HEAD
+[Unreleased]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.91...HEAD
+[0.1.91]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.90...v0.1.91
 [0.1.90]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.89...v0.1.90
 [0.1.89]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.88...v0.1.89
 [0.1.88]: https://github.com/developerz-ai/claude-task-master/compare/v0.1.87...v0.1.88

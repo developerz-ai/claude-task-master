@@ -58,11 +58,45 @@ from .server_specs import (
 if TYPE_CHECKING:
     pass
 
-# Import MCP SDK - using try/except for graceful degradation
+# Import MCP SDK - using try/except for graceful degradation.
+#
+# The failure is recorded, not just flattened to None: "absent" and "present but
+# the wrong major version" need different advice, and conflating them cost real
+# debugging time. mcp 2.x renamed FastMCP to MCPServer and deleted
+# mcp.server.fastmcp, so on 2.x this ImportError fires with mcp very much
+# installed — and telling the user to "pip install mcp" then sends them in a
+# circle.
+_MCP_IMPORT_ERROR: str | None = None
 try:
     from mcp.server.fastmcp import FastMCP
-except ImportError:
+except ImportError as _exc:  # pragma: no cover - depends on the installed mcp
     FastMCP = None  # type: ignore[misc, assignment]
+    _MCP_IMPORT_ERROR = str(_exc)
+
+
+def _mcp_unavailable_message() -> str:
+    """Explain *why* the MCP SDK could not be loaded, with the right fix.
+
+    Returns:
+        A message naming the installed mcp version when there is one, so a
+        major-version mismatch does not read as a missing package.
+    """
+    try:
+        from importlib.metadata import version  # noqa: PLC0415
+
+        installed = version("mcp")
+    except Exception:
+        installed = ""
+
+    if not installed:
+        return "MCP SDK not installed. Install with: pip install 'mcp<2'"
+    return (
+        f"MCP SDK {installed} is installed but incompatible: claude-task-master "
+        f"needs mcp<2 (2.x renamed FastMCP to MCPServer and removed "
+        f"mcp.server.fastmcp). Fix with: pip install 'mcp<2'"
+        + (f" [import error: {_MCP_IMPORT_ERROR}]" if _MCP_IMPORT_ERROR else "")
+    )
+
 
 # Import auth utilities - optional, only needed for network transports
 try:
@@ -106,7 +140,7 @@ def create_server(
     import time
 
     if FastMCP is None:
-        raise ImportError("MCP SDK not installed. Install with: pip install mcp")
+        raise ImportError(_mcp_unavailable_message())
 
     # Create the server
     mcp = FastMCP(name)

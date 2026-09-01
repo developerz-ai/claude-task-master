@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "claude-task-master"
-version = "0.1.90"
+version = "0.1.91"
 description = "Autonomous task orchestration system that keeps Claude working until a goal is achieved"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -31,6 +31,15 @@ dependencies = [
     "pydantic>=2.12.0,<3",
     "rich>=14.3.2,<16",
     "httpx>=0.28.0,<1",
+    # Bounded here and not only on the [mcp] extra, because mcp is NOT actually
+    # optional: claude-agent-sdk depends on it (allowing <3), so it lands in
+    # every install, and the `claudetm-mcp` console script ships unconditionally.
+    # v0.1.90 bounded it on the extra alone, which left a plain
+    # `uv tool install claude-task-master` resolving mcp 2.1.1 — where
+    # create_server() dies with a misleading "MCP SDK not installed" because 2.x
+    # removed mcp.server.fastmcp. An upper bound only helps where it always
+    # applies. Lift with the MCPServer migration.
+    "mcp>=1.26.0,<2",
 ]
 
 [project.urls]
