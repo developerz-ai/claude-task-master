@@ -22,6 +22,7 @@ from .agent_exceptions import (
     StreamStallError,
     WorkingDirectoryError,
 )
+from .hive import forward_subagent_text_enabled, hive_max_parallel
 
 if TYPE_CHECKING:
     from .agent_models import ModelType
@@ -149,6 +150,19 @@ class _AgentQueryExecuteMixin:
         cli_env = {
             "CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS": stall_timeout_ms,
             "API_TIMEOUT_MS": stall_timeout_ms,
+            # Make the hive ceiling structural instead of merely stated. The
+            # number has always been interpolated into the fan-out brief, but
+            # prose was the only thing holding it: nothing stopped a lead from
+            # dispatching twelve workers, and this repo has already measured
+            # what a prose-only rule is worth (leads ignored the
+            # "never background a worker" instruction in 27% of dispatches,
+            # which is why that one is now pinned on the definition).
+            #
+            # The CLI enforces this one itself — it hands out concurrency slots
+            # and refuses the overflow dispatch with "Concurrent subagent limit
+            # reached", defaulting to 20 when unset. Handing it our own ceiling
+            # means the brief and the runtime finally agree on one number.
+            "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": str(hive_max_parallel()),
         }
         # Inject the active profile's auth context (isolated CLAUDE_CONFIG_DIR
         # for oauth profiles, or ANTHROPIC_API_KEY/BASE_URL for api-key
@@ -189,6 +203,18 @@ class _AgentQueryExecuteMixin:
             # passes no loader gets no dispatch.
             if get_agents_func is None:
                 options_kwargs["disallowed_tools"] = list(DISPATCH_TOOLS)
+            else:
+                # This session may fan out, so its workers' own prose is worth
+                # having. The SDK forwards a subagent's tool calls unasked but
+                # not its text or thinking, which left the hive half-visible:
+                # you could see that a worker edited a file and never what it
+                # was trying to do. The renderer for it already exists — each
+                # worker's lines carry a stable colour and ``#n`` ordinal, and
+                # subagent text is deliberately not accumulated into the lead's
+                # own result (see ``MessageProcessor.process_message``), so the
+                # only thing this changes is what reaches the log.
+                if forward_subagent_text_enabled():
+                    options_kwargs["forward_subagent_text"] = True
 
             # Add effort level for extended thinking depth control
             if effort_level:

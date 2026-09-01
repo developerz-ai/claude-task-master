@@ -26,7 +26,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "claude-agent-sdk>=0.2.137,<0.3",
+    "claude-agent-sdk>=0.2.150,<0.3",
     "typer>=0.22.0,<1",
     "pydantic>=2.12.0,<3",
     "rich>=14.3.2,<16",
@@ -41,7 +41,14 @@ Issues = "https://github.com/developerz-ai/claude-task-master/issues"
 Changelog = "https://github.com/developerz-ai/claude-task-master/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
-mcp = ["mcp>=1.26.0"]
+# Upper-bounded on purpose. mcp 2.x removed `mcp.server.fastmcp` (FastMCP was
+# renamed to MCPServer), which every module in `claude_task_master/mcp/` imports,
+# so a 2.x resolution makes `claudetm-mcp` fail at import. Until claude-agent-sdk
+# 0.2.140 the SDK's own `mcp<2.0.0` pin was silently holding this line for us;
+# it widened to `mcp<3.0.0`, so a fresh `pip install claude-task-master[mcp]`
+# started resolving mcp 2.1.1. Lift this only together with the MCPServer
+# migration: https://py.sdk.modelcontextprotocol.io/v2/migration/
+mcp = ["mcp>=1.26.0,<2"]
 api = [
     "fastapi>=0.128.7",
     "uvicorn[standard]>=0.40.0",

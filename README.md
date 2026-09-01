@@ -380,10 +380,12 @@ Precedence (highest first): real environment variables, then the **active profil
 
 | Environment Variable | Default | Description |
 |---------------------|---------|-------------|
-| `CLAUDETM_MAX_TURNS` | `400` | Max agent steps per session — a runaway backstop, not a working budget. Set `0` to disable. Overrunning retries the task rather than marking it done |
+| `CLAUDETM_MAX_TURNS` | `2000` | Max agent steps per session — a runaway backstop, not a working budget. Counts the lead **and every subagent**, so it is sized for a hive. Set `0` to disable. Overrunning retries the task rather than marking it done |
 | `CLAUDETM_STREAM_IDLE_TIMEOUT_SEC` | `1800` | Max silence between SDK stream messages before treating the stream as hung |
 | `CLAUDETM_POST_COMPLETION_IDLE_TIMEOUT_SEC` | `120` | Max wait for the final result message after the agent signals it's done |
-| `CLAUDETM_HIVE_MAX_PARALLEL` | `10` | Safety ceiling on concurrent `hive-worker` subagents (1 lead + up to N workers) — a ceiling, not a target; the lead sizes its own team |
+| `CLAUDETM_HIVE_MAX_PARALLEL` | `6` | Safety ceiling on concurrent worker subagents (1 lead + up to N workers) — a ceiling, not a target; the lead sizes its own team, and may run N of the same kind, N different kinds, or any mix |
+| `CLAUDETM_FORWARD_SUBAGENT_TEXT` | `1` | Stream each worker's own text and thinking into the session log, not just its tool calls. `0` to quiet a fanned-out run |
+| `CLAUDETM_HIVE_ROSTER_INTERVAL_SEC` | `60` | How often the live worker roster (who is running, on what, for how long, at what cost) is printed during a fanned-out session. `0` disables it |
 
 Sessions are bounded in steps, not wall-clock: a wall-clock cap would punish a slow-but-healthy session (big test suite, slow CI) exactly as hard as a looping one. Use `--budget` for a per-session cost cap.
 
@@ -504,7 +506,7 @@ claudetm config-update --no-parallel                    # turn it off mid-run
 
 **Only the lead runs git.** Workers read, edit and run narrow checks; they never stage, commit, branch or push. The lead waits for every worker to finish, verifies the changes on disk itself, runs the full project gate, and only then commits, pushes and opens the PR — exactly as a single-agent session does.
 
-Cap the fan-out with `CLAUDETM_HIVE_MAX_PARALLEL` (default 10 = one lead plus up to 10 workers). It is a safety ceiling, not a target.
+Cap the fan-out with `CLAUDETM_HIVE_MAX_PARALLEL` (default 6 = one lead plus up to 6 workers). It is a safety ceiling, not a target, and within it the composition is the lead's: 6 of the same kind, 6 different kinds, or any mix.
 
 Use `--no-parallel` when you want every session strictly single-agent — debugging a run, or a repo where concurrent edits are hard to reason about.
 

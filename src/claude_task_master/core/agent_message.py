@@ -23,7 +23,9 @@ import os
 from typing import TYPE_CHECKING, Any
 
 from . import console
+from .agent_message_roster import _MessageRosterMixin
 from .console import SubagentPalette
+from .hive_roster import HiveRoster
 
 if TYPE_CHECKING:
     from .logger import TaskLogger
@@ -58,7 +60,7 @@ def _subagent_tool_use_id(message: Any) -> str | None:
     return None
 
 
-class MessageProcessor:
+class MessageProcessor(_MessageRosterMixin):
     """Handles processing of messages from the Claude Agent SDK query stream.
 
     This class is responsible for parsing messages, displaying tool usage,
@@ -95,6 +97,11 @@ class MessageProcessor:
         # the module-level ``console``) so tests that patch ``console`` to
         # capture output still exercise the real labelling.
         self._subagent_palette = SubagentPalette()
+        # Team-level view of a fanned-out session. The per-worker prefixes show
+        # each line as it happens; this answers the question they cannot — how
+        # many workers are live right now, what each is on, and what each has
+        # burned. Pure state plus a renderer: it prints nothing itself.
+        self._roster = HiveRoster()
 
     def reset_result_state(self) -> None:
         """Clear captured terminal-result state before a new query.
@@ -110,6 +117,7 @@ class MessageProcessor:
         self.last_output_tokens = 0
         self._subagent_names = {}
         self._subagent_palette.clear()
+        self._roster.clear()
 
     def _note_subagent_spawn(self, block: Any, tool_input: Any) -> None:
         """Record the subagent name behind a Task/Agent tool call.
@@ -135,7 +143,28 @@ class MessageProcessor:
             # line, so ``#n`` counts workers in the order the lead spawned them
             # — the order the reader just watched go past — instead of in the
             # order they happened to speak.
-            self._subagent_palette.slot(tool_use_id)
+            ordinal = self._subagent_palette.slot(tool_use_id)
+            self._roster_note_dispatch(tool_use_id, name, ordinal)
+
+    def _render_roster(self, *, force: bool = False) -> None:
+        """Print the team view, if one is due and there is a team to show.
+
+        Lives here rather than on the roster mixin so that it resolves the same
+        ``console`` the rest of this processor prints through — a second import
+        in another module is a second thing to patch, and the streamed-output
+        tests rightly patch exactly one.
+
+        Args:
+            force: Bypass the interval (a worker started, or a dispatch failed).
+        """
+        if not self._roster.due(force=force):
+            return
+        lines = self._roster.render()
+        if not lines:
+            return
+        console.newline()
+        for line in lines:
+            console.detail(line)
 
     def _stream_prefix(self, subagent_id: str | None) -> str:
         """Console-only marker distinguishing subagent output from our own.
@@ -193,6 +222,8 @@ class MessageProcessor:
                 if block_type == "TextBlock":
                     # Claude's text response - show with [claude] prefix
                     console.claude_text(f"{prefix}{block.text.strip()}", flush=True)
+                    if subagent_id is not None:
+                        self._roster.note_activity(subagent_id, block.text)
                     # A subagent's narration is visible but is not this
                     # session's output: accumulating it lets a worker's prose
                     # (a stray "TASK COMPLETE", say) speak for the lead.
@@ -205,10 +236,20 @@ class MessageProcessor:
                     tool_detail = self.format_tool_detail(block.name, tool_input)
                     console.tool(f"{prefix}Using tool: {block.name} {tool_detail}", flush=True)
                     self._note_subagent_spawn(block, tool_input)
+                    if subagent_id is not None:
+                        self._roster.note_activity(
+                            subagent_id, f"{block.name} {tool_detail}".strip()
+                        )
                     # Log to file if logger is available
                     if self.logger:
                         self.logger.log_tool_use(block.name, tool_input)
                 elif block_type == "ToolResultBlock":
+                    # A top-level result for a dispatch we are tracking is that
+                    # worker returning. Only the lead's own stream can close a
+                    # worker out: the id inside a subagent's stream is one of
+                    # *its* tool calls, not the worker itself.
+                    if subagent_id is None:
+                        self._roster_note_dispatch_result(block)
                     # Tool result - show completion with [claude] prefix
                     if block.is_error:
                         console.tool_result(f"{prefix}Tool error", is_error=True)
@@ -218,6 +259,9 @@ class MessageProcessor:
                         console.tool_result(f"{prefix}Tool completed")
                         if self.logger:
                             self.logger.log_tool_result(block.tool_use_id, "completed")
+
+        if subagent_id is not None:
+            self._roster_note_worker_message(subagent_id, message)
 
         # Handle RateLimitEvent typed messages from SDK v0.1.49+
         if message_type == "RateLimitEvent":

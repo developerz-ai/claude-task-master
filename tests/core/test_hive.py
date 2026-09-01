@@ -17,9 +17,12 @@ from pathlib import Path
 import pytest
 
 from claude_task_master.core.hive import (
+    DEFAULT_FORWARD_SUBAGENT_TEXT,
     DEFAULT_HIVE_MAX_PARALLEL,
+    FORWARD_SUBAGENT_TEXT_ENV,
     HIVE_MAX_PARALLEL_ENV,
     describe_machine,
+    forward_subagent_text_enabled,
     hive_max_parallel,
 )
 
@@ -71,7 +74,13 @@ class TestHiveMaxParallel:
         assert hive_max_parallel() == 7
 
     def test_default_value(self) -> None:
-        assert DEFAULT_HIVE_MAX_PARALLEL == 10
+        """Six, and pinned: the number is interpolated into the fan-out brief.
+
+        ``DEFAULT_HIVE_MAX_PARALLEL`` is not an internal guard — it is rendered
+        verbatim into the lead's prompt as the ceiling it may dispatch up to, so
+        changing it silently changes what every lead is told.
+        """
+        assert DEFAULT_HIVE_MAX_PARALLEL == 6
 
 
 # =============================================================================
@@ -135,3 +144,47 @@ class TestDescribeMachine:
             raising=False,
         )
         assert isinstance(describe_machine("/nonexistent-path-for-test"), str)
+
+
+# =============================================================================
+# forward_subagent_text_enabled - workers' own prose in the session log
+# =============================================================================
+
+
+class TestForwardSubagentTextEnabled:
+    """Failure cases first: an unrecognised value must never flip the flag.
+
+    Reading a typo as "off" would silently blind a fanned-out run, which is the
+    exact opposite of what the knob is for — so anything unclear keeps the
+    default rather than being coerced to False.
+    """
+
+    def test_unset_uses_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv(FORWARD_SUBAGENT_TEXT_ENV, raising=False)
+        assert forward_subagent_text_enabled() is DEFAULT_FORWARD_SUBAGENT_TEXT
+
+    @pytest.mark.parametrize("raw", ["garbage", "", "   ", "2", "maybe", "None"])
+    def test_unrecognised_falls_back(self, monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
+        monkeypatch.setenv(FORWARD_SUBAGENT_TEXT_ENV, raw)
+        assert forward_subagent_text_enabled() is DEFAULT_FORWARD_SUBAGENT_TEXT
+
+    @pytest.mark.parametrize("raw", ["0", "false", "FALSE", "no", "off", " Off "])
+    def test_off_spellings(self, monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
+        monkeypatch.setenv(FORWARD_SUBAGENT_TEXT_ENV, raw)
+        assert forward_subagent_text_enabled() is False
+
+    @pytest.mark.parametrize("raw", ["1", "true", "TRUE", "yes", "on", " On "])
+    def test_on_spellings(self, monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
+        monkeypatch.setenv(FORWARD_SUBAGENT_TEXT_ENV, raw)
+        assert forward_subagent_text_enabled() is True
+
+    def test_default_is_on(self) -> None:
+        """A fanned-out session is worth watching; opting out is the exception."""
+        assert DEFAULT_FORWARD_SUBAGENT_TEXT is True
+
+    def test_env_read_at_call_time(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Not frozen at import, like every other knob in this module."""
+        monkeypatch.setenv(FORWARD_SUBAGENT_TEXT_ENV, "off")
+        assert forward_subagent_text_enabled() is False
+        monkeypatch.setenv(FORWARD_SUBAGENT_TEXT_ENV, "on")
+        assert forward_subagent_text_enabled() is True

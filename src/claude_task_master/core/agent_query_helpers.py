@@ -4,24 +4,14 @@ Provides :class:`_AgentQueryHelpersMixin` with:
 
 - :meth:`_default_get_model_name` — maps ModelType to API model name string
 - :meth:`_default_process_message` — accumulates text from SDK stream messages
-- :meth:`_classify_api_error` — maps raw exceptions to typed AgentError subclasses
+- :meth:`_classify_api_error` — thin delegator to :mod:`.agent_error_classify`
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from .agent_exceptions import (
-    AgentError,
-    APIAuthenticationError,
-    APIConnectionError,
-    APIRateLimitError,
-    APIServerError,
-    APITimeoutError,
-    ContentFilterError,
-    ModelUnavailableError,
-    QueryExecutionError,
-)
+from .agent_exceptions import AgentError
 from .config_loader import get_config
 
 if TYPE_CHECKING:
@@ -92,60 +82,21 @@ class _AgentQueryHelpersMixin:
     def _classify_api_error(self, error: Exception) -> AgentError:
         """Classify an API error into a specific error type.
 
+        Delegates to :func:`~.agent_error_classify.classify_api_error`. The
+        policy lives in its own module because the verdict decides whether an
+        unattended run retries or dies, and because it now has two sources to
+        reconcile — the SDK's structured ``ResultError`` payload and the message
+        text — which is more than one reason for this mixin to change.
+
         Args:
             error: The original exception.
 
         Returns:
             A classified AgentError subclass.
         """
-        error_str = str(error).lower()
-        error_type = type(error).__name__
+        from .agent_error_classify import classify_api_error  # noqa: PLC0415
 
-        # Check for content filtering errors (not retryable)
-        if "content filtering" in error_str or "output blocked" in error_str:
-            return ContentFilterError(error)
-
-        # Check for model-availability errors (recover via fallback chain, not by
-        # retrying the same model). Anthropic returns not_found_error for an
-        # unknown/unavailable model id. Require both "model" and a not-found
-        # keyword so generic messages like "503 Service Unavailable" or
-        # "Network unreachable" are not misclassified.
-        if "model" in error_str and any(
-            kw in error_str
-            for kw in ("not_found", "not found", "does not exist", "unavailable", "invalid model")
-        ):
-            return ModelUnavailableError(error)
-
-        # Check for rate limiting
-        if "rate" in error_str and "limit" in error_str:
-            # Try to extract retry-after if present
-            retry_after = None
-            if hasattr(error, "retry_after"):
-                retry_after = error.retry_after
-            return APIRateLimitError(retry_after, error)
-
-        # Check for authentication errors
-        if any(kw in error_str for kw in ["auth", "unauthorized", "403", "401"]):
-            return APIAuthenticationError(error)
-
-        # Check for timeout errors
-        if "timeout" in error_str or error_type in ("TimeoutError", "AsyncioTimeoutError"):
-            return APITimeoutError(30.0, error)
-
-        # Check for connection errors
-        if any(kw in error_str for kw in ["connect", "connection", "network"]):
-            return APIConnectionError(error)
-
-        # Check for server errors (5xx)
-        if "500" in error_str or "502" in error_str or "503" in error_str or "504" in error_str:
-            # Try to extract status code
-            for code in [500, 502, 503, 504]:
-                if str(code) in error_str:
-                    return APIServerError(code, error)
-            return APIServerError(500, error)
-
-        # Default to generic query execution error
-        return QueryExecutionError(f"API error: {error}", error)
+        return classify_api_error(error)
 
 
 __all__ = ["_AgentQueryHelpersMixin"]
