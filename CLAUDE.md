@@ -711,7 +711,7 @@ Releases go direct-to-main under the same owner bypass — a "pull request requi
 
 ## CI standard
 
-- CI runs on Blacksmith (`blacksmith-2vcpu-ubuntu-2404`; `publish-test` on 4vcpu — deliberate). Every workflow declares a `concurrency` group with cancel-in-progress, and every job sets `timeout-minutes`. Publish workflows (PyPI / TestPyPI / Docker tag) are hard `cancel-in-progress: false` — publishes are irreversible.
+- CI runs on GitHub-hosted runners (`ubuntu-latest`; public repo — org rule: private on Ubicloud, public on GitHub-hosted). Every workflow declares a `concurrency` group with cancel-in-progress, and every job sets `timeout-minutes`. Publish workflows (PyPI / TestPyPI / Docker tag) are hard `cancel-in-progress: false` — publishes are irreversible.
 
 ### The local gate is the CI gate
 
