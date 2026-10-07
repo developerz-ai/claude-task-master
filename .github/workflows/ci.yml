@@ -21,7 +21,8 @@ env:
 jobs:
   lint:
     name: Lint
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    # GitHub-hosted runner (org rule: private repos on Ubicloud, public on GitHub-hosted).
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -56,7 +57,7 @@ jobs:
   # 4 vCPU: the suite is CPU-bound and scales with workers.
   test:
     name: Tests
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
@@ -107,7 +108,7 @@ jobs:
   # parallel rather than after it keeps wall-clock at max(job), not sum(jobs).
   package:
     name: Build & CLI Smoke Test
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     if: github.event_name == 'pull_request'
     steps:

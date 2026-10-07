@@ -16,7 +16,8 @@ permissions:
 jobs:
   verify:
     name: Verify Version Consistency
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    # GitHub-hosted runner (org rule: private repos on Ubicloud, public on GitHub-hosted).
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
       version: ${{ steps.get_version.outputs.version }}
@@ -79,7 +80,7 @@ jobs:
 
   test:
     name: Run Tests
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: verify
     steps:
@@ -101,7 +102,7 @@ jobs:
 
   build:
     name: Build Package
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [verify, test]
     steps:
@@ -129,7 +130,7 @@ jobs:
 
   create-release:
     name: Create GitHub Release
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [verify, build]
     steps:
@@ -182,7 +183,7 @@ jobs:
 
   publish-pypi:
     name: Publish to PyPI
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [verify, build, create-release]
     environment: pypi
