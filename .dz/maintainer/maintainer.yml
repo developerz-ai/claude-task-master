@@ -1,0 +1,66 @@
+# yaml-language-server: $schema=https://developerz.ai/schemas/maintainer.v1.json
+# developerz.ai maintainer policy: developerz-ai/claude-task-master
+#
+# AI-maintained: the agent triages, answers, reviews, closes what has stalled and merges on green,
+# for everyone and for the dependency bots. Releases follow the work: see `.dz/briefs/release-due.md`.
+version: 1
+
+tone:
+  voice: friendly
+  language: en
+
+triage:
+  ask_for_repro: true
+  required_fields: [steps, expected, actual, version]
+  qualify_into: [bug, feature, dupe, question, docs]
+  close_unanswered_repro_after_days: 14
+  stale_after_days: 30
+  stale_action: comment_then_close
+  non_goals:
+    - "A source file past 500 lines: split it by responsibility instead"
+    - "Git worktrees or per-agent copies for hive workers: one shared checkout is the design"
+    - "Outside human contributors' changes to CI, release or publish automation (.github/, scripts/bump_version.py, scripts/sync_version.py, RELEASING.md): members own that pipeline"
+
+handoff:
+  mode: fleet
+  ask_reporter_first: false
+
+pr:
+  wait_for_other_bots: [coderabbit]
+  # Named so the agent knows which red check is the author's to fix. Re-check against the
+  # repo's ruleset and `.github/workflows/` when either changes; this list is not the ruleset.
+  required_checks:
+    - "Lint"
+    - "Tests"
+    - "Build & CLI Smoke Test"
+  auto_merge: true
+  auto_merge_scope: any
+  require_review: true
+  close_awaiting_author_after_days: 21
+
+review:
+  force: true # CodeRabbit is active here; without this the native review defers forever
+
+release:
+  # `none`: there is no release manager. Empty channels: the agent publishes nothing itself.
+  # A `v*.*.*` tag runs publish.yml (PyPI) and docker-publish.yml. See `.dz/briefs/release-due.md`.
+  manager: none
+  channels: []
+
+escalate:
+  # Empty: nothing beyond the platform's hardcoded asks (security, license, CLA).
+  ask_before_acting: []
+
+schedules:
+  - name: release-due
+    days: [mon, tue, wed, thu, fri]
+    hours_utc: [6]
+    brief_file: .dz/briefs/release-due.md
+  - name: health
+    days: [mon, tue, wed, thu, fri, sat, sun]
+    hours_utc: [7]
+    brief_file: .dz/briefs/health.md
+  - name: improve
+    days: [mon]
+    hours_utc: [8]
+    brief_file: .dz/briefs/improve.md
