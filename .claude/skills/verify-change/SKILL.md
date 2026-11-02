@@ -10,15 +10,49 @@ applies: [python]
 
 ## The one gate
 
-`bin/check` is the gate. CI runs it and the pre-commit hook runs it, so a change that
-passes it locally passes everywhere.
+`bin/check` is the local gate, also invoked by the pre-commit hook. CI does not
+invoke it: `.github/workflows/ci.yml` independently runs equivalent lint, test,
+and PR-package commands. Keep this script aligned with those gates; a local pass
+is evidence for the local environment, not a guarantee that CI will pass.
 
 | Step | Command | What it is |
 |------|---------|------------|
 | install | `bin/setup` | (dpkg -s build-essential git curl gh >/dev/null 2>&1 \|\| (sudo -n apt-get update && sudo -n apt-get install -y --no-install-recommends build-essential git curl gh)) && mise use -g uv@0.13 && mise use -g python@3.14 && uv sync --all-extras --python 3.14 && docker volume create claudetm-profiles |
 | run | `bin/dev` | docker compose up -d — on developerz.ai runs, start it with code_bash_background when you need a running stack |
-| prove | `bin/check` | uv run ruff check . && uv run ruff format --check . && uv run mypy . && TMPDIR=/tmp uv run pytest tests/ -n 2 -q --timeout=120 |
+| prove | `bin/check` | Whole-tree Ruff lint/format checks and mypy; CI-profile tests with coverage; distribution build and CLI help/doctor/status smoke checks (mapping below). |
 | stop | `bin/stop` | docker compose stop — on developerz.ai runs, the platform runs this when your session ends — do not stop the stack yourself |
+
+## CI-to-local gate mapping
+
+Use Python 3.14 and install all extras before proving a change:
+`uv sync --all-extras --python 3.14` (also performed by `bin/setup`). CI selects
+Python 3.14 and installs the editable package with `uv pip install -e ".[all]"`.
+
+| CI job | Local equivalent in `bin/check` |
+|--------|--------------------------------|
+| Lint | `uv run ruff check .`, `uv run ruff format --check .`, and `uv run mypy .` retain CI's whole-tree scope. |
+| Tests | `HYPOTHESIS_PROFILE=ci` and `TMPDIR=/tmp uv run pytest tests/ -n 2 -q --timeout=120 --cov=claude_task_master --cov-report=xml:coverage.xml --cov-report=term-missing`. |
+| Build & CLI Smoke Test (PRs only in CI) | `uv build --out-dir "$build_dir"`, then `uv run claudetm --help`, `uv run claudetm doctor`, and `uv run claudetm status`. |
+
+Local tests deliberately use two workers rather than CI's `-n auto` to stay within
+the shared box's resource ceiling. `TMPDIR=/tmp` remains scoped to pytest.
+Coverage produces `.coverage` data, `coverage.xml`, and a terminal missing-lines
+report. These artifacts are local evidence; the script does not upload them.
+
+The build uses a unique temporary directory under `${TMPDIR:-/tmp}` and cleans it
+on exit, including failed builds or smoke checks. Pre-existing `dist/` artifacts
+are neither overwritten nor deleted. As in CI, the CLI probes run against the
+editable project environment, not an installation of the built wheel.
+
+Lint, formatter check, typecheck, tests, build, and CLI help must all succeed;
+the script stops on failure. Only doctor and status use CI's explicit `|| true`
+tolerance: missing credentials or project state may make them fail. Their output
+remains visible, but a successful gate does not certify those two probes passed.
+
+CI's test-output/build-artifact uploads and Codecov submission are reporting,
+not local gates. Tag-triggered package/Docker publishing and manual test
+publishing workflows are release operations, not part of this local PR gate.
+No workflow restructuring is needed to keep these commands aligned.
 
 ## Rules
 
