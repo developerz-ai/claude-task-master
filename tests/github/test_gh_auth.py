@@ -10,6 +10,7 @@ tests pin is that *whatever* credential is injected stays out of the output.
 """
 
 import os
+import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -232,12 +233,51 @@ class TestSubprocessPropagation:
 class TestFailClosed:
     """With no credential the run stops, naming the variable that carries one."""
 
-    def test_missing_credential_fails_closed_naming_the_env_var(self):
-        """A container with no credential cannot authenticate, and says why."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="not logged in")
-            with pytest.raises(GitHubAuthError) as exc_info:
-                GitHubClient()
+    @pytest.mark.parametrize("container_config", ["Dockerfile", "docker-compose.yml"])
+    def test_missing_credential_fails_closed_naming_the_env_var(
+        self, tmp_path, monkeypatch, container_config
+    ):
+        """Real gh cannot fall back to a personal login in the container config."""
+        home = tmp_path / "home"
+        personal_config = home / ".config" / "gh"
+        personal_config.mkdir(parents=True)
+        personal_config.joinpath("hosts.yml").write_text(
+            "github.com:\n"
+            "    user: fixture-personal-user\n"
+            "    oauth_token: fixture-personal-token\n"
+            "    git_protocol: https\n"
+        )
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
+        for var in ("GH_CONFIG_DIR", "GH_HOST", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"):
+            monkeypatch.delenv(var, raising=False)
+
+        # Token lookup is offline. Bypass only the constructor's auth check for
+        # this positive control; command execution and gh itself remain real.
+        client = GitHubClient.__new__(GitHubClient)
+        command = ["gh", "auth", "token", "--hostname", "github.com"]
+        personal = client._run_gh_command(command, check=False)
+        assert personal.returncode == 0
+        assert personal.stdout.strip() == "fixture-personal-token"
+
+        # Read the shipped setting, not a duplicate that could stay green if
+        # the image or Compose regressed. Relocate the container home only.
+        repo = Path(__file__).resolve().parents[2]
+        setting = re.search(
+            r"^\s*(?:-\s*)?GH_CONFIG_DIR=(\S+)",
+            (repo / container_config).read_text(),
+            re.MULTILINE,
+        )
+        assert setting is not None, f"{container_config} must isolate gh configuration"
+        config_dir = home / Path(setting.group(1)).relative_to("/home/claudetm")
+        config_dir.mkdir(parents=True)
+        monkeypatch.setenv("GH_CONFIG_DIR", str(config_dir))
+
+        isolated = client._run_gh_command(command, check=False)
+        assert isolated.returncode != 0
+        assert "fixture-personal-token" not in isolated.stdout
+        with pytest.raises(GitHubAuthError) as exc_info:
+            GitHubClient()
 
         message = str(exc_info.value)
         assert "not authenticated" in message
