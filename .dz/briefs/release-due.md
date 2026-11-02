@@ -36,3 +36,13 @@ File nothing if an open issue title is exactly `Release <next>`, or an open PR i
 5. Watch `publish.yml` to the end. A failure is an issue for a maintainer.
 
 Never re-tag, move or delete a tag, and never publish by hand. A failed publish is an issue for a maintainer; the fix ships as the next patch.
+
+## Rows
+
+- `decide-commands-ok`: Every command in Decide succeeded; a failed command is no verdict — surface it, file nothing.
+- `window-not-empty`: The window between `$last` and `origin/main`, over the pathspec in Decide, holds at least one shipping commit.
+- `no-release-in-flight`: The stamped version in `pyproject.toml` is not ahead of `$last`; a version already ahead means a release is in flight — watch `publish.yml`.
+- `oldest-shipping-commit-24h`: The oldest shipping commit in the window is at least 24 h old; a younger one may still be released by its author.
+- `main-green`: The latest `ci.yml` push run on `main` is `success`; a red `main` belongs to `health`.
+- `no-breaking-change`: The window carries no breaking change; one means no release ask, and a `Major release pending` issue for a maintainer.
+- `release-due`: Every condition above holds — the window is not blocked, so it owes a release, and one ask `Release <next>` lists the commits.
