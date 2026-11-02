@@ -2,4 +2,6 @@
 # one-command dev — established by dz-runner setup mode. One command; adjust as the repo grows.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-docker compose up -d
+# --wait implies detached mode and waits for the Compose REST health check.
+# The health-readiness timeout does not bound the image build itself.
+docker compose up --build --wait --wait-timeout 180

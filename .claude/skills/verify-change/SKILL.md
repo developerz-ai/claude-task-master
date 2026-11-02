@@ -17,10 +17,39 @@ is evidence for the local environment, not a guarantee that CI will pass.
 
 | Step | Command | What it is |
 |------|---------|------------|
-| install | `bin/setup` | (dpkg -s build-essential git curl gh >/dev/null 2>&1 \|\| (sudo -n apt-get update && sudo -n apt-get install -y --no-install-recommends build-essential git curl gh)) && mise use -g uv@0.13 && mise use -g python@3.14 && uv sync --all-extras --python 3.14 && docker volume create claudetm-profiles |
-| run | `bin/dev` | docker compose up -d — on developerz.ai runs, start it with code_bash_background when you need a running stack |
+| install | `bin/setup` | Check host prerequisites, install missing apt packages as root or via non-interactive sudo, run mise install, select global uv@0.13 and python@3.14, sync all extras, then create the empty external profile volume. Each failed step stops setup. |
+| run | `bin/dev` | `docker compose up --build --wait --wait-timeout 180` rebuilds the checkout and returns success only after health readiness. On developerz.ai runs, start it with code_bash_background when you need a running stack. |
 | prove | `bin/check` | Whole-tree Ruff lint/format checks and mypy; CI-profile tests with coverage; distribution build and CLI help/doctor/status smoke checks (mapping below). |
 | stop | `bin/stop` | docker compose stop — on developerz.ai runs, the platform runs this when your session ends — do not stop the stack yourself |
+
+## Supported setup and startup
+
+`bin/setup` supports Debian/Ubuntu-style hosts with Bash, dpkg and apt-get.
+Install mise and Docker with the Compose plugin first, and put mise-managed tools
+on PATH (including uv after `mise use`). Compose must support `up --wait` and
+`--wait-timeout`. The caller needs Docker daemon access and, when apt packages
+are missing, root privileges or working non-interactive `sudo -n` access.
+Network access is needed for apt, mise and uv downloads. Setup retains the global
+mise selections for uv 0.13 and Python 3.14 and installs all project extras.
+It creates `claudetm-profiles` only after dependency sync succeeds; it never reads,
+copies or provisions credentials.
+
+`bin/dev` builds from the checked-out Compose build context rather than relying
+on a potentially stale image. Compose waits for the existing REST `/health`
+check; startup/health failures return nonzero, with a 180-second readiness wait
+bound. This is not a wall-clock bound on the image build. Successful startup
+leaves the stack detached. Compose mounts and credential isolation are unchanged:
+health readiness does not require a personal login or an agent credential, and
+is not proof that authenticated agent operations work.
+
+`uv run pytest tests/test_bin_scripts.py -q --timeout=120` runs copied scripts in
+a temporary repo using PATH-injected fake tools and an isolated HOME. It pins
+ordering, root/sudo package installation, fail-fast behavior and dev rebuild/wait
+arguments without invoking real apt, Docker, credentials or global mise changes.
+These regressions are not evidence of real downloads, image builds or service
+health. The coordinator's read-only survey could not execute real setup/dev;
+record actual `bin/setup`, `bin/dev` and `bin/check` results separately when run
+on a supported host. Do not claim real startup based on fake-tool tests alone.
 
 ## CI-to-local gate mapping
 

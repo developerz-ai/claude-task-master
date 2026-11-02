@@ -2,5 +2,38 @@
 # one-command setup — established by dz-runner setup mode. One command; adjust as the repo grows.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-command -v mise >/dev/null && mise install
-(dpkg -s build-essential git curl gh >/dev/null 2>&1 || (sudo -n apt-get update && sudo -n apt-get install -y --no-install-recommends build-essential git curl gh)) && mise use -g uv@0.13 && mise use -g python@3.14 && uv sync --all-extras --python 3.14 && docker volume create claudetm-profiles
+require_command() {
+    if ! command -v "$1" >/dev/null; then
+        printf 'bin/setup requires %s on PATH.\n' "$1" >&2
+        exit 1
+    fi
+}
+
+# Supported host: Debian/Ubuntu with mise and Docker Compose already installed.
+require_command mise
+require_command docker
+require_command dpkg
+if ! docker compose version >/dev/null; then
+    printf 'bin/setup requires the Docker Compose plugin.\n' >&2
+    exit 1
+fi
+
+if ! dpkg -s build-essential git curl gh >/dev/null 2>&1; then
+    require_command apt-get
+    apt_command=(apt-get)
+    if [[ "$(id -u)" != 0 ]]; then
+        require_command sudo
+        apt_command=(sudo -n apt-get)
+    fi
+    "${apt_command[@]}" update
+    "${apt_command[@]}" install -y --no-install-recommends build-essential git curl gh
+fi
+
+# Keep each operation outside an AND list so errexit stops on the first failure.
+mise install
+mise use -g uv@0.13
+mise use -g python@3.14
+uv sync --all-extras --python 3.14
+
+# Create only the empty external volume; never provision or copy credentials.
+docker volume create claudetm-profiles
