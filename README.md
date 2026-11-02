@@ -923,7 +923,7 @@ When running with the unified server (`claudetm-server`), the following componen
 │                                                                       │
 │  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐             │
 │  │  REST API    │   │  MCP Server  │   │   Webhooks   │             │
-│  │  (FastAPI)   │   │  (FastMCP)   │   │   (httpx)    │             │
+│  │  (FastAPI)   │   │  (MCPServer) │   │   (httpx)    │             │
 │  └──────┬───────┘   └──────┬───────┘   └──────┬───────┘             │
 │         │                  │                  │                      │
 │         └──────────────────┼──────────────────┘                      │

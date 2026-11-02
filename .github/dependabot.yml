@@ -24,11 +24,6 @@ updates:
       - dependency-type: "all"
     versioning-strategy: "auto"
     rebase-strategy: "auto"
-    # This major breaks the grouped PR until its migration lands: mcp 2 removed
-    # mcp.server.fastmcp.
-    ignore:
-      - dependency-name: "mcp"
-        update-types: ["version-update:semver-major"]
     groups:
       minor-and-patch:
         update-types:

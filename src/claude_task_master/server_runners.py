@@ -90,13 +90,11 @@ async def _run_mcp_server(
         ) from err
 
     mcp = create_server(name="claude-task-master", working_dir=str(working_dir))
-    mcp.settings.host = host
-    mcp.settings.port = port
-    # FastMCP expects uppercase log level; type: ignore for mypy as it's a string literal
+    # MCPServer expects uppercase log level; type: ignore for mypy as it's a string literal
     mcp.settings.log_level = log_level.upper()  # type: ignore[assignment]
 
     # Get the Starlette app with authentication
-    app = _get_authenticated_app(mcp, transport)
+    app = _get_authenticated_app(mcp, transport, host=host)
 
     config = uvicorn.Config(
         app,

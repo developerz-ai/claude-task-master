@@ -31,15 +31,9 @@ dependencies = [
     "pydantic>=2.12.0,<3",
     "rich>=14.3.2,<16",
     "httpx>=0.28.0,<1",
-    # Bounded here and not only on the [mcp] extra, because mcp is NOT actually
-    # optional: claude-agent-sdk depends on it (allowing <3), so it lands in
-    # every install, and the `claudetm-mcp` console script ships unconditionally.
-    # v0.1.90 bounded it on the extra alone, which left a plain
-    # `uv tool install claude-task-master` resolving mcp 2.1.1 — where
-    # create_server() dies with a misleading "MCP SDK not installed" because 2.x
-    # removed mcp.server.fastmcp. An upper bound only helps where it always
-    # applies. Lift with the MCPServer migration.
-    "mcp>=1.26.0,<2",
+    # MCPServer requires MCP 2. Keep the requirement in base dependencies as
+    # well as the extra: the SDK installs mcp and claudetm-mcp always ships.
+    "mcp>=2.1.1,<3",
 ]
 
 [project.urls]
@@ -50,14 +44,8 @@ Issues = "https://github.com/developerz-ai/claude-task-master/issues"
 Changelog = "https://github.com/developerz-ai/claude-task-master/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
-# Upper-bounded on purpose. mcp 2.x removed `mcp.server.fastmcp` (FastMCP was
-# renamed to MCPServer), which every module in `claude_task_master/mcp/` imports,
-# so a 2.x resolution makes `claudetm-mcp` fail at import. Until claude-agent-sdk
-# 0.2.140 the SDK's own `mcp<2.0.0` pin was silently holding this line for us;
-# it widened to `mcp<3.0.0`, so a fresh `pip install claude-task-master[mcp]`
-# started resolving mcp 2.1.1. Lift this only together with the MCPServer
-# migration: https://py.sdk.modelcontextprotocol.io/v2/migration/
-mcp = ["mcp>=1.26.0,<2"]
+# Retained for compatibility with existing installs using the [mcp] extra.
+mcp = ["mcp>=2.1.1,<3"]
 api = [
     "fastapi>=0.128.7",
     "uvicorn[standard]>=0.40.0",

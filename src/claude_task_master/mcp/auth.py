@@ -4,7 +4,7 @@ This module provides authentication middleware for MCP network transports
 (SSE and streamable-http). It uses the shared password authentication
 module to validate Bearer tokens in the Authorization header.
 
-The middleware wraps the Starlette apps created by FastMCP to add
+The middleware wraps the Starlette apps created by MCPServer to add
 authentication before MCP protocol handling.
 
 Security Notes:
@@ -51,12 +51,12 @@ def add_auth_middleware(
 ) -> Starlette:
     """Add password authentication middleware to a Starlette app.
 
-    This function wraps an existing Starlette app (from FastMCP) with
+    This function wraps an existing Starlette app (from MCPServer) with
     our PasswordAuthMiddleware to enforce Bearer token authentication.
 
     Args:
-        app: The Starlette application to wrap (from FastMCP.sse_app() or
-            FastMCP.streamable_http_app()).
+        app: The Starlette application to wrap (from MCPServer.sse_app() or
+            MCPServer.streamable_http_app()).
         public_paths: Set of paths that don't require authentication.
             Defaults to MCP_PUBLIC_PATHS.
 
@@ -67,8 +67,8 @@ def add_auth_middleware(
         ImportError: If Starlette or auth middleware is not available.
 
     Example:
-        >>> from mcp.server.fastmcp import FastMCP
-        >>> mcp = FastMCP("my-server")
+        >>> from mcp.server.mcpserver import MCPServer
+        >>> mcp = MCPServer("my-server")
         >>> app = mcp.sse_app()
         >>> app_with_auth = add_auth_middleware(app)
     """
