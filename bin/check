@@ -1,5 +1,23 @@
 #!/usr/bin/env bash
-# one-command check (typecheck + lint + test) — established by dz-runner setup mode. One command; adjust as the repo grows.
+# Local equivalent of CI's lint, test, and PR package gates.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-uv run ruff check . && uv run ruff format --check . && uv run mypy . && TMPDIR=/tmp uv run pytest tests/ -n 2 -q --timeout=120
+export HYPOTHESIS_PROFILE=ci
+
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy .
+TMPDIR=/tmp uv run pytest tests/ -n 2 -q --timeout=120 \
+  --cov=claude_task_master \
+  --cov-report=xml:coverage.xml \
+  --cov-report=term-missing
+
+# Never overwrite or remove an existing dist/ directory.
+build_dir=$(mktemp -d "${TMPDIR:-/tmp}/claudetm-check.XXXXXX")
+trap 'rm -rf -- "$build_dir"' EXIT
+uv build --out-dir "$build_dir"
+uv run claudetm --help
+# Match CI: credentials and project state are not required for these probes.
+uv run claudetm doctor || true
+uv run claudetm status || true
+
