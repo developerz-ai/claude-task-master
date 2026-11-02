@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# one-command setup — established by dz-runner setup mode. One command; adjust as the repo grows.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+command -v mise >/dev/null && mise install
+(dpkg -s build-essential git curl gh >/dev/null 2>&1 || (sudo -n apt-get update && sudo -n apt-get install -y --no-install-recommends build-essential git curl gh)) && mise use -g uv@0.13 && mise use -g python@3.14 && uv sync --all-extras --python 3.14 && docker volume create claudetm-profiles
