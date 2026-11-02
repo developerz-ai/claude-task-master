@@ -25,3 +25,11 @@ a missing publish and a stuck Dependabot PR belong to `health`.
 
 One small PR per improvement, its evidence in the body, `ruff check . && ruff format --check . && mypy . && pytest` green first. Never bump the version or touch release automation here.
 Check no open PR or issue already covers it. If nothing is worth changing, do nothing: no empty PRs, no churn.
+
+## Rows
+
+- `gate-broken-or-flaky`: First, address anything the gate on fresh `main` found broken or flaky: the root cause, never a retry or a skip.
+- `dependency-majors`: Next, consider dependency majors from `uv tree --outdated`, starting with `claude-agent-sdk`, one per PR.
+- `open-bugs`: Next, consider open bugs from the Signals command, each starting from a test that fails on `main`.
+- `stale-doc-claims`: Next, consider `CLAUDE.md` and README claims that no longer match the code.
+- `dead-code`: Finally, consider dead code, after stale `CLAUDE.md` and README claims.
