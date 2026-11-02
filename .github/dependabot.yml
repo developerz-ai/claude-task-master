@@ -24,12 +24,10 @@ updates:
       - dependency-type: "all"
     versioning-strategy: "auto"
     rebase-strategy: "auto"
-    # These majors break the grouped PR until their migrations land: mcp 2 removed
-    # mcp.server.fastmcp, and bcrypt 5 rejects the probe passlib runs at startup.
+    # This major breaks the grouped PR until its migration lands: mcp 2 removed
+    # mcp.server.fastmcp.
     ignore:
       - dependency-name: "mcp"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "bcrypt"
         update-types: ["version-update:semver-major"]
     groups:
       minor-and-patch:

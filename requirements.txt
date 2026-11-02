@@ -20,10 +20,8 @@ attrs==26.1.0
     # via
     #   jsonschema
     #   referencing
-bcrypt==4.3.0
-    # via
-    #   claude-task-master (pyproject.toml)
-    #   passlib
+bcrypt==5.0.0
+    # via claude-task-master (pyproject.toml)
 certifi==2026.10.18
     # via
     #   httpcore
@@ -88,8 +86,6 @@ opentelemetry-api==1.45.2
     # via fastapi
 packaging==26.3
     # via pytest
-passlib==1.7.4
-    # via claude-task-master (pyproject.toml)
 pathspec==1.1.1
     # via mypy
 pluggy==1.7.0

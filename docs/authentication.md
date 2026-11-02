@@ -51,8 +51,8 @@ claudetm-server --rest-port 8000 --mcp-port 8080
 For production deployments, pre-hash your password with bcrypt:
 
 ```bash
-# Generate a bcrypt hash (requires passlib[bcrypt])
-python3 -c "from passlib.hash import bcrypt; print(bcrypt.hash('your-secure-password'))"
+# Generate a bcrypt hash (requires the bcrypt package)
+python3 -c "import bcrypt; print(bcrypt.hashpw(b'your-secure-password', bcrypt.gensalt(rounds=12)).decode())"
 # Output: $2b$12$...hash...
 
 # Set the hash as an environment variable
@@ -138,7 +138,7 @@ CLAUDETM_PASSWORD_HASH=$2b$12$...your-hash...
 provided_password = "user-input"
 stored_hash = "$2b$12$..."
 
-# Uses passlib's verify() - constant-time by design
+# Uses bcrypt's checkpw() - constant-time by design
 verify_password(provided_password, stored_hash)  # True/False
 ```
 
@@ -157,7 +157,7 @@ secrets.compare_digest(provided, expected)  # True/False
 
 - **Algorithm**: bcrypt with 12 rounds (cost factor)
 - **Hash Format**: `$2b$12$...` (60 character string)
-- **Password Limit**: 72 bytes (UTF-8 encoded) - automatically truncated
+- **Password Limit**: 72 bytes (UTF-8 encoded) - a longer password is rejected, not truncated
 - **Security**: Designed to be slow (prevents brute force attacks)
 
 ## REST API Authentication
@@ -1830,15 +1830,15 @@ CLAUDETM_PASSWORD="password" claudetm-server
 
 #### bcrypt Import Error
 
-**Problem:** `passlib[bcrypt]` not installed
+**Problem:** `bcrypt` not installed
 
 **Solutions:**
 ```bash
 # Install API dependencies
 pip install 'claude-task-master[api]'
 
-# Or install passlib directly
-pip install 'passlib[bcrypt]'
+# Or install bcrypt directly
+pip install 'bcrypt'
 ```
 
 #### Webhook Signature Verification Failed

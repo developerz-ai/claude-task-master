@@ -122,18 +122,18 @@ Passwords are secured using bcrypt, a deliberately slow cryptographic hash funct
 **Algorithm Details:**
 - Hashing function: bcrypt with 12 rounds
 - Hash format: `$2b$12$...` (60 character string)
-- Password limit: 72 bytes (UTF-8 encoded)
+- Password limit: 72 bytes (UTF-8 encoded) - a longer password is rejected, not silently truncated
 - Cost factor: 12 rounds (configurable in `src/claude_task_master/auth/password.py`)
 
 **Verification Method:**
-- bcrypt's `verify()` uses constant-time comparison by design
+- bcrypt's `checkpw()` uses constant-time comparison by design
 - Automatically resistant to timing attacks
 - See `src/claude_task_master/auth/password.py` for implementation
 
 **Password Generation:**
 ```bash
-# Generate bcrypt hash (requires passlib[bcrypt])
-python3 -c "from passlib.hash import bcrypt; print(bcrypt.hash('your-secure-password'))"
+# Generate bcrypt hash (requires the bcrypt package)
+python3 -c "import bcrypt; print(bcrypt.hashpw(b'your-secure-password', bcrypt.gensalt(rounds=12)).decode())"
 ```
 
 **Production Deployment:**
