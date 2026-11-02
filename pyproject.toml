@@ -74,8 +74,8 @@ dev = [
     "pytest-timeout>=2.4.0",
     "pytest-xdist>=3.8.0",
     "hypothesis>=6.151.6",
-    "ruff>=0.16.1,<0.17",
-    "mypy>=1.19.0,<2",
+    "ruff>=0.16.1,<0.18",
+    "mypy>=1.19.0,<3",
 ]
 all = [
     "claude-task-master[mcp,api,dev]",
