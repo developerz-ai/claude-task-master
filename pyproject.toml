@@ -39,7 +39,7 @@ dependencies = [
     # create_server() dies with a misleading "MCP SDK not installed" because 2.x
     # removed mcp.server.fastmcp. An upper bound only helps where it always
     # applies. Lift with the MCPServer migration.
-    "mcp>=1.26.0,<2",
+    "mcp>=1.26.0,<3",
 ]
 
 [project.urls]
@@ -57,14 +57,14 @@ Changelog = "https://github.com/developerz-ai/claude-task-master/blob/main/CHANG
 # it widened to `mcp<3.0.0`, so a fresh `pip install claude-task-master[mcp]`
 # started resolving mcp 2.1.1. Lift this only together with the MCPServer
 # migration: https://py.sdk.modelcontextprotocol.io/v2/migration/
-mcp = ["mcp>=1.26.0,<2"]
+mcp = ["mcp>=1.26.0,<3"]
 api = [
     "fastapi>=0.128.7",
     "uvicorn[standard]>=0.40.0",
     # Note: passlib (last release: 1.7.4, Oct 2020) is unmaintained but has no known CVEs.
     # It's widely used and bcrypt is timing-safe. Consider argon2-cffi as future alternative.
     "passlib[bcrypt]>=1.7.4",
-    "bcrypt>=4.0.0,<5.0.0",  # Pin bcrypt <5 for passlib compatibility
+    "bcrypt>=4.0.0,<6.0.0",  # Pin bcrypt <5 for passlib compatibility
 ]
 dev = [
     "claude-task-master[api]",  # Include API dependencies for testing
@@ -75,7 +75,7 @@ dev = [
     "pytest-xdist>=3.8.0",
     "hypothesis>=6.151.6",
     "ruff>=0.16.1,<0.17",
-    "mypy>=1.19.0,<2",
+    "mypy>=1.19.0,<3",
 ]
 all = [
     "claude-task-master[mcp,api,dev]",

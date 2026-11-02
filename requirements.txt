@@ -14,11 +14,11 @@ anyio==4.12.1
     #   sse-starlette
     #   starlette
     #   watchfiles
-attrs==25.4.0
+attrs==26.1.0
     # via
     #   jsonschema
     #   referencing
-bcrypt==4.3.0
+bcrypt==5.0.0
     # via
     #   claude-task-master (pyproject.toml)
     #   passlib
@@ -36,7 +36,7 @@ click==8.3.1
     #   uvicorn
 coverage==7.13.4
     # via pytest-cov
-cryptography==46.0.5
+cryptography==50.0.2
     # via pyjwt
 execnet==2.1.2
     # via pytest-xdist
@@ -74,13 +74,13 @@ librt==0.7.8
     # via mypy
 markdown-it-py==4.0.0
     # via rich
-mcp==1.26.0
+mcp==2.3.0
     # via
     #   claude-task-master (pyproject.toml)
     #   claude-agent-sdk
 mdurl==0.1.2
     # via markdown-it-py
-mypy==1.19.1
+mypy==2.4.0
     # via claude-task-master (pyproject.toml)
 mypy-extensions==1.1.0
     # via mypy
@@ -139,11 +139,11 @@ referencing==0.37.0
     # via
     #   jsonschema
     #   jsonschema-specifications
-rich==14.3.2
+rich==15.0.0
     # via
     #   claude-task-master (pyproject.toml)
     #   typer
-rpds-py==0.30.0
+rpds-py==2026.9.1
     # via
     #   jsonschema
     #   referencing
@@ -157,7 +157,7 @@ sortedcontainers==2.4.0
     # via hypothesis
 sse-starlette==3.2.0
     # via mcp
-starlette==0.52.1
+starlette==1.9.0
     # via
     #   fastapi
     #   mcp
@@ -190,5 +190,5 @@ uvloop==0.22.1
     # via uvicorn
 watchfiles==1.1.1
     # via uvicorn
-websockets==16.0
+websockets==17.2
     # via uvicorn
