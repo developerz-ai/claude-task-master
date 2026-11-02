@@ -10,6 +10,17 @@
 # Usage:
 #   docker compose -f production-monitoring.yml up -d
 #
+# GitHub credential - injected per run, never mounted:
+#   export GH_TOKEN="$(cat /run/secrets/claudetm_github_token)"   # your secret store
+#   docker compose -f production-monitoring.yml up -d
+#
+#   A repository-scoped, least-privilege token owned by a bot account (e.g.
+#   claudetm[bot]). It carries no admin scope - CI, required reviews and
+#   branch protection stay mandatory - and it is revoked and rotated
+#   independently of the Claude credential. Never written into this file, never
+#   stored in the image, never printed. CLAUDETM_GITHUB_TOKEN is an accepted
+#   alias for the same value.
+#
 # Access:
 #   Claude Task Master: http://localhost:8000
 #   Grafana: http://localhost:3000 (admin/admin)
@@ -39,12 +50,35 @@ services:
       # bill that person - it leaked across developers once already.
       - "claudetm-profiles:/home/claudetm/.claudetm"
       - "${PROJECT_PATH:-.}:/app/project"
-      - "${HOME}/.gitconfig:/home/claudetm/.gitconfig:ro"
-      - "${HOME}/.config/gh:/home/claudetm/.config/gh:ro"
+
+      # NO personal GitHub or git configuration is mounted here:
+      #   - the operator's ~/.config/gh holds a personal login, so the agent
+      #     would act as - and be billed to - that person;
+      #   - the operator's ~/.gitconfig carries their identity and can carry a
+      #     personal push credential.
+      # The image configures git itself (bot identity + a gh-backed credential
+      # helper) and points gh at an isolated, empty GH_CONFIG_DIR.
 
     environment:
       # Agent credential - REQUIRED. The api-key profile inside claudetm-profiles.
       - CLAUDETM_PROFILE=${CLAUDETM_PROFILE:-agent}
+
+      # GitHub credential (REQUIRED for PR and CI operations): injected per run
+      # from the deployment's environment, never read from disk and never
+      # written into this file. GH_TOKEN is gh's own standard variable;
+      # CLAUDETM_GITHUB_TOKEN is claudetm's alias for the same value.
+      #
+      # The default is empty, never the "${VAR:?...}" form: a missing
+      # credential must fail closed at the gh call - with a message naming the
+      # variable - not stop the container from starting.
+      - GH_TOKEN=${GH_TOKEN:-}
+      - CLAUDETM_GITHUB_TOKEN=${CLAUDETM_GITHUB_TOKEN:-}
+
+      # gh's config directory, isolated inside the container: empty, owned by
+      # claudetm, never the operator's ~/.config/gh. A personal "gh auth login"
+      # is therefore not a fallback - with no credential injected the
+      # container fails closed and names the variable that carries one.
+      - GH_CONFIG_DIR=/home/claudetm/.claudetm/gh
       - "CLAUDETM_PASSWORD=${CLAUDETM_PASSWORD:?CLAUDETM_PASSWORD is required}"
       - CLAUDETM_SERVER_HOST=0.0.0.0
       - CLAUDETM_REST_PORT=8000
@@ -217,5 +251,22 @@ networks:
 #
 # The key is read from the environment at creation time; keep it in your secret
 # store, never in this file, in .env, or in the image.
+#
+# =============================================================================
+# GitHub credential (per run)
+# =============================================================================
+#
+#   export GH_TOKEN="$(cat /run/secrets/claudetm_github_token)"
+#   docker compose -f production-monitoring.yml up -d
+#
+# The token is a repository-scoped, least-privilege bot credential: no admin
+# scope, so CI, required reviews and branch protection stay mandatory, and it
+# is revoked and rotated independently of the Claude credential. It is read
+# from the environment, never written into this file, never stored in the
+# image and never printed.
+#
+# gh reads its configuration from GH_CONFIG_DIR (/home/claudetm/.claudetm/gh)
+# - an empty directory owned by claudetm - so the operator's ~/.config/gh is
+# never read and a personal "gh auth login" is not a fallback.
 #
 # =============================================================================

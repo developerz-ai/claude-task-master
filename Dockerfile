@@ -23,14 +23,41 @@
 #   docker run -p 8000:8000 -p 8080:8080 \
 #     -v claudetm-profiles:/home/claudetm/.claudetm \
 #     -e CLAUDETM_PROFILE=agent \
+#     -e GH_TOKEN="$AGENT_GITHUB_TOKEN" \
 #     -v "$(pwd)":/app/project \
 #     claudetm
+#
+# GitHub credential (per run, never baked in): the agent authenticates to
+# GitHub with an INJECTED, repository-scoped, least-privilege token owned by a
+# bot account (e.g. claudetm[bot]). It carries no admin scope - CI, required
+# reviews and branch protection stay mandatory - and it is revoked and
+# rotated independently of the Claude credential.
+#
+#   docker run -e GH_TOKEN="$(cat /run/secrets/claudetm_github_token)" ...
+#
+#   GH_TOKEN is gh's own standard variable (so git's gh-backed credential
+#   helper and the agent's own gh calls authenticate the same way);
+#   CLAUDETM_GITHUB_TOKEN is an accepted alias for the same value. The token is
+#   never read from disk, never committed, never stored in the image and never
+#   printed.
+#
+#   GH_CONFIG_DIR is set in the image to a claudetm-owned, empty directory
+#   (/home/claudetm/.claudetm/gh), so an operator's ~/.config/gh is never read
+#   and a personal "gh auth login" can never take over an agent run. A
+#   container with no credential injected has no personal login to fall back
+#   to: it fails closed, naming the environment variable that carries one.
 #
 # Environment Variables:
 #   CLAUDETM_PROFILE        - Required: name of the api-key profile to run as
 #   CLAUDETM_API_KEY        - Only for `claudetm profile add`: the agent's scoped
 #                             API key, read from the environment so it is never
 #                             baked into the image or a compose file
+#   GH_TOKEN                - The injected GitHub credential (a repository-
+#                             scoped, least-privilege bot token), read from the
+#                             environment; never baked into the image
+#   CLAUDETM_GITHUB_TOKEN   - Accepted alias for GH_TOKEN
+#   GH_CONFIG_DIR           - gh's config directory, isolated in the image
+#                             (default: /home/claudetm/.claudetm/gh)
 #   CLAUDETM_PASSWORD       - Required: Password for API authentication
 #   CLAUDETM_SERVER_HOST    - Host to bind to (default: 0.0.0.0 in container)
 #   CLAUDETM_REST_PORT      - REST API port (default: 8000)
@@ -113,7 +140,19 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     # Path configuration
     PATH="/opt/venv/bin:$PATH" \
     # Home directory for non-root user
-    HOME=/home/claudetm
+    HOME=/home/claudetm \
+    # gh reads its configuration from here, never from an operator's
+    # ~/.config/gh. The directory is created below, owned by claudetm, and
+    # stays empty: a personal "gh auth login" is not a fallback for an agent
+    # run.
+    GH_CONFIG_DIR=/home/claudetm/.claudetm/gh \
+    # Git activity is attributed to a disclosed bot identity, never to a human.
+    # Override these per deployment if your organisation issues its own bot
+    # identity - the point is that the agent never signs as an operator.
+    GIT_AUTHOR_NAME="claudetm[bot]" \
+    GIT_COMMITTER_NAME="claudetm[bot]" \
+    GIT_AUTHOR_EMAIL="claudetm[bot]@users.noreply.github.com" \
+    GIT_COMMITTER_EMAIL="claudetm[bot]@users.noreply.github.com"
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -148,12 +187,30 @@ COPY --from=builder /opt/venv /opt/venv
 # has already leaked a token across developers once.
 #
 # The directory is created here (owned by claudetm) so the named volume inherits
-# non-root ownership and `claudetm profile add` can write to it.
-RUN mkdir -p /home/claudetm/.claudetm /app/project && \
+# non-root ownership and `claudetm profile add` can write to it. The gh/ sub
+# directory is the claudetm-owned GH_CONFIG_DIR: gh reads its configuration
+# from there, so the image can never read an operator's ~/.config/gh.
+RUN mkdir -p /home/claudetm/.claudetm/gh /app/project && \
     chown -R claudetm:claudetm /home/claudetm /app
 
 # Switch to non-root user
 USER claudetm
+
+# Git configuration for the agent:
+#   - the bot identity, so a commit is attributed to claudetm[bot] rather than
+#     to the operator whose repository is mounted. The GIT_* environment
+#     variables above already say this; the config is the fallback for a tool
+#     that scrubs the environment.
+#   - a gh-backed credential helper, so a push authenticates with the
+#     injected GH_TOKEN instead of a personal login. With no credential
+#     injected the helper has nothing to offer and the push fails.
+#   - the mounted project tree is owned by the operator, not by the container
+#     user, so git's ownership check is relaxed for it; without this, git
+#     refuses to operate on the repository the agent was asked to work on.
+RUN git config --global credential.helper '!gh auth git-credential' && \
+    git config --global user.name "claudetm[bot]" && \
+    git config --global user.email "claudetm[bot]@users.noreply.github.com" && \
+    git config --global --add safe.directory '*'
 
 # Set working directory (project files will be mounted here)
 WORKDIR /app/project

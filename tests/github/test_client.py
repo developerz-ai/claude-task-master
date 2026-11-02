@@ -3,6 +3,7 @@
 import json
 import subprocess
 from enum import Enum
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -142,28 +143,50 @@ class TestPRStatusModel:
 class TestGitHubClientInit:
     """Tests for GitHubClient initialization and gh CLI check."""
 
-    def test_init_gh_cli_authenticated(self):
+    def test_init_gh_cli_authenticated(self, monkeypatch):
         """Test initialization when gh CLI is authenticated."""
+        monkeypatch.setenv("GH_TOKEN", "ghp_test_token")
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
             client = GitHubClient()
-            mock_run.assert_called_once_with(
-                ["gh", "auth", "status"],
-                timeout=10,
-                check=False,
-                capture_output=True,
-                text=True,
-            )
+            args, kwargs = mock_run.call_args
+            assert args[0] == ["gh", "auth", "status"]
+            assert kwargs["timeout"] == 10
+            assert kwargs["check"] is False
+            assert kwargs["capture_output"] is True
+            assert kwargs["text"] is True
+            # The injected credential is what gh authenticates with, and gh's
+            # config directory is claudetm's own - never the operator's.
+            assert kwargs["env"]["GH_TOKEN"] == "ghp_test_token"
+            assert kwargs["env"]["GH_CONFIG_DIR"].endswith("/gh")
+            assert ".config/gh" not in kwargs["env"]["GH_CONFIG_DIR"]
             assert client is not None
 
-    def test_init_gh_cli_not_authenticated(self):
+    def test_init_gh_cli_authenticated_with_injected_credential(self, monkeypatch):
+        """The injected agent credential is what gh is asked to authenticate with."""
+        monkeypatch.setenv("CLAUDETM_GITHUB_TOKEN", "ghp_injected_token")
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            GitHubClient()
+            env = mock_run.call_args.kwargs["env"]
+        assert env["GH_TOKEN"] == "ghp_injected_token"
+        assert env["GH_CONFIG_DIR"] != str(Path.home() / ".config" / "gh")
+
+    def test_init_gh_cli_not_authenticated(self, monkeypatch):
         """Test initialization when gh CLI is not authenticated."""
+        for var in ("CLAUDETM_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"):
+            monkeypatch.delenv(var, raising=False)
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="not logged in")
             with pytest.raises(GitHubAuthError) as exc_info:
                 GitHubClient()
-            assert "gh CLI not authenticated" in str(exc_info.value)
-            assert "gh auth login" in str(exc_info.value)
+            message = str(exc_info.value)
+            assert "not authenticated" in message
+            # The failure names the variable that carries the credential and
+            # no longer tells the operator to run a personal login.
+            assert "GH_TOKEN" in message
+            assert "CLAUDETM_GITHUB_TOKEN" in message
+            assert "gh auth login" not in message
 
     def test_init_gh_cli_not_installed(self):
         """Test initialization when gh CLI is not installed."""

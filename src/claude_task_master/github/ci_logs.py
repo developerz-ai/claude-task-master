@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .exceptions import GitHubError, GitHubTimeoutError
+from .gh_auth import gh_subprocess_env
 
 # A job's logs 404 when no log was ever written — the job never started, or is
 # still queued. That is an answer, not a failure, so it is classified apart from
@@ -167,6 +168,7 @@ class CILogDownloader:
                 text=True,
                 check=True,
                 timeout=self.timeout,
+                env=gh_subprocess_env(),
             )
         except subprocess.TimeoutExpired as e:
             raise GitHubTimeoutError(f"Timeout getting jobs for run {run_id}") from e
@@ -218,6 +220,7 @@ class CILogDownloader:
                 capture_output=True,
                 check=True,
                 timeout=self.timeout,
+                env=gh_subprocess_env(),
             )
         except subprocess.TimeoutExpired as e:
             raise GitHubTimeoutError(f"Timeout downloading logs for job {job_id}") from e

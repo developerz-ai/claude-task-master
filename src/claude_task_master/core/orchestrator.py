@@ -113,9 +113,11 @@ class WorkLoopOrchestrator:
 
                 self._github_client = GitHubClient()
             except Exception as e:
+                from ..github.gh_auth import CREDENTIAL_HINT
+
                 raise OrchestratorError(
                     "GitHub client not available",
-                    f"Install gh CLI and run 'gh auth login': {e}",
+                    f"Install gh CLI and provide a GitHub credential. {CREDENTIAL_HINT}: {e}",
                 ) from e
         return self._github_client
 

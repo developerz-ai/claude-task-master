@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING
 import typer
 
 from ..core import console
+from ..github.exceptions import GitHubAuthError
+from ..github.gh_auth import gh_subprocess_env, require_github_token
 from .fix_session import get_current_branch, pending_changes_summary
 from .merge_finalize import git_failure, run_git
 
@@ -96,6 +98,7 @@ def open_pr_for_current_branch(branch: str) -> int | None:
             capture_output=True,
             text=True,
             timeout=120,
+            env=gh_subprocess_env(),
         )
     except (OSError, subprocess.SubprocessError) as e:
         console.error(f"Could not create a PR for {branch}: {e}")
@@ -104,6 +107,12 @@ def open_pr_for_current_branch(branch: str) -> int | None:
     output = f"{created.stdout}\n{created.stderr}".strip()
     if created.returncode != 0:
         console.error(f"Could not create a PR for {branch}: {output or 'gh pr create failed'}")
+        try:
+            require_github_token()
+        except GitHubAuthError as e:
+            # No credential was injected: name the variable that carries one
+            # rather than leaving gh's own login advice as the only hint.
+            console.info(str(e))
         return None
 
     match = PR_URL_PATTERN.search(output)

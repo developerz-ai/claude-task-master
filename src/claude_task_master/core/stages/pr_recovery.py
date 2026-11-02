@@ -269,6 +269,15 @@ Don't merge, don't wait for CI. Done = clean `git status` + PR URL."""
         Raises on failure — every caller treats a failed push as a reason to
         stop, never as something to log and continue past.
         """
+        # The push runs with the agent's GitHub credential overlay applied
+        # (``GH_TOKEN`` plus an isolated ``GH_CONFIG_DIR``): the container
+        # image's credential helper is gh-backed and gh reads ``GH_TOKEN``, so
+        # a credential injected under the ``CLAUDETM_GITHUB_TOKEN`` alias
+        # would never reach it and the push would fail. Imported inside the
+        # function because `github` reaches back into `core` — a module-level
+        # import would close an import cycle.
+        from ...github.gh_auth import gh_subprocess_env
+
         subprocess.run(
             ["git", "push", "-u", "origin", "HEAD"],
             cwd=self._project_dir(),
@@ -276,4 +285,5 @@ Don't merge, don't wait for CI. Done = clean `git status` + PR URL."""
             capture_output=True,
             text=True,
             timeout=120,
+            env=gh_subprocess_env(),
         )

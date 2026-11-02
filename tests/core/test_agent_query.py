@@ -26,6 +26,11 @@ from claude_task_master.core.agent_exceptions import (
 )
 from claude_task_master.core.rate_limit import RateLimitConfig
 
+# A stand-in for the injected agent credential — not a secret. It is only ever
+# written into the environment; what the overlay must carry is read back from
+# there, so no assertion in this file spells the value out.
+GH_CREDENTIAL = "ghp_TESTcredentialValue0123456789ab"
+
 # =============================================================================
 # AgentWrapper Query Execution Tests
 # =============================================================================
@@ -775,6 +780,64 @@ class TestStreamIdleTimeoutWatchdog:
         expected_ms = str(int(STREAM_IDLE_TIMEOUT_SEC * 1000))
         assert env["CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS"] == expected_ms
         assert env["API_TIMEOUT_MS"] == expected_ms
+
+    async def _capture_options_env(self, agent) -> dict[str, str]:
+        """Run one query and return the env the SDK subprocess was handed."""
+        options_calls: list[dict] = []
+
+        def capture_options(**kwargs):
+            options_calls.append(kwargs)
+            return MagicMock()
+
+        agent._query_executor.options_class = capture_options
+
+        async def mock_query_gen(*args, **kwargs):
+            yield MagicMock(content=None)
+
+        agent._query_executor.query = mock_query_gen
+
+        await agent._run_query("test prompt", ["Read"])
+
+        assert len(options_calls) == 1
+        return dict(options_calls[0].get("env", {}) or {})
+
+    @pytest.mark.asyncio
+    async def test_options_carry_the_injected_gh_credential(self, agent, monkeypatch, tmp_path):
+        """The SDK subprocess gets the agent's GitHub credential.
+
+        The agent's own gh and git commands must authenticate as the agent
+        rather than as whatever login the host happens to have, so the
+        subprocess env carries GH_TOKEN and points GH_CONFIG_DIR at a
+        claudetm-owned directory — the operator's ~/.config/gh is never read.
+        """
+        from pathlib import Path
+
+        monkeypatch.setenv("CLAUDETM_HOME", str(tmp_path))
+        monkeypatch.setenv("CLAUDETM_GITHUB_TOKEN", GH_CREDENTIAL)
+
+        env = await self._capture_options_env(agent)
+
+        # The injected value, read back from where it was injected.
+        assert env.get("GH_TOKEN") == os.environ["CLAUDETM_GITHUB_TOKEN"]
+        config_dir = env.get("GH_CONFIG_DIR", "")
+        assert config_dir == str(tmp_path / "gh")
+        assert config_dir != str(Path.home() / ".config" / "gh")
+        assert ".config/gh" not in config_dir
+
+    @pytest.mark.asyncio
+    async def test_options_omit_the_gh_credential_when_none_is_injected(self, agent, monkeypatch):
+        """With no credential injected the overlay is empty.
+
+        That is what keeps a developer host's own gh login working; a
+        container has none to fall back to and fails closed instead.
+        """
+        for var in ("CLAUDETM_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"):
+            monkeypatch.delenv(var, raising=False)
+
+        env = await self._capture_options_env(agent)
+
+        assert "GH_TOKEN" not in env
+        assert "GH_CONFIG_DIR" not in env
 
     @pytest.mark.asyncio
     async def test_post_completion_missing_result_returns_gracefully(self, agent):

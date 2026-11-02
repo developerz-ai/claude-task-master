@@ -20,6 +20,11 @@ This guide covers deploying Claude Task Master using Docker, including the unifi
 > **Containers never mount a human's `~/.claude`.** The agent authenticates with its own scoped,
 > rotatable API key, held in an [api-key profile](#1-agent-credentials-claudetm). Set that up first —
 > the examples below assume a profile named `agent` in the `claudetm-profiles` volume.
+>
+> **Nor do they mount a human's GitHub configuration.** `~/.config/gh` and `~/.gitconfig` are
+> deliberately not given to the container: the GitHub credential is [injected per
+> run](#4-github-credential-injected-scoped) as `GH_TOKEN` (alias `CLAUDETM_GITHUB_TOKEN`), and the
+> image configures git's bot identity itself.
 
 The fastest way to get started with Claude Task Master in Docker:
 
@@ -48,9 +53,8 @@ docker run -d \
   -p 8080:8080 \
   -v claudetm-profiles:/home/claudetm/.claudetm \
   -e CLAUDETM_PROFILE=agent \
+  -e GH_TOKEN="$AGENT_GITHUB_TOKEN" \
   -v $(pwd):/app/project \
-  -v ~/.gitconfig:/home/claudetm/.gitconfig:ro \
-  -v ~/.config/gh:/home/claudetm/.config/gh:ro \
   ghcr.io/developerz-ai/claude-task-master:latest
 
 # Check logs
@@ -73,9 +77,8 @@ docker run -d \
   -e CLAUDETM_PASSWORD=your-secure-password \
   -v claudetm-profiles:/home/claudetm/.claudetm \
   -e CLAUDETM_PROFILE=agent \
+  -e GH_TOKEN="$AGENT_GITHUB_TOKEN" \
   -v $(pwd):/app/project \
-  -v ~/.gitconfig:/home/claudetm/.gitconfig:ro \
-  -v ~/.config/gh:/home/claudetm/.config/gh:ro \
   ghcr.io/developerz-ai/claude-task-master:latest
 ```
 
@@ -289,49 +292,71 @@ The project directory is where Claude Task Master executes tasks, creates commit
 -v %cd%:/app/project
 ```
 
-### Recommended Volumes
+### Git and GitHub Configuration (no host mounts required)
 
-#### 3. Git Configuration (`~/.gitconfig`)
+Neither the operator's `~/.gitconfig` nor their `~/.config/gh` is mounted: the first carries a
+person's identity and can carry a personal push credential, the second a personal login — and a
+container given either would act as, and be billed to, that person. The image configures both sides
+itself, and the credential itself is injected.
 
-**Purpose:** Git user configuration for commits
+#### 3. Git identity (configured in the image)
 
-**Mount:** `~/.gitconfig:/home/claudetm/.gitconfig:ro`
+**Purpose:** commit attribution and the push credential
 
-**Read-only:** ✅ Yes
+**Mount:** none — deliberately
 
-Required for proper git commit attribution. Without this, commits may fail or use incorrect author information.
+The image sets the bot identity and a `gh`-backed credential helper:
 
-**Minimal `.gitconfig` example:**
-```ini
-[user]
-    name = Your Name
-    email = your.email@example.com
-```
+- `GIT_AUTHOR_NAME` / `GIT_COMMITTER_NAME` = `claudetm[bot]`
+- `GIT_AUTHOR_EMAIL` / `GIT_COMMITTER_EMAIL` = `claudetm[bot]@users.noreply.github.com`
+- `git config --global credential.helper '!gh auth git-credential'`
 
-#### 4. GitHub CLI Configuration (`~/.config/gh`)
+So every commit and push is attributed to a **disclosed bot**, not to whoever's repository happens to
+be mounted, and the push authenticates with the injected token rather than with a personal login.
+Override the `GIT_*` variables per deployment if your organisation issues its own bot identity — the
+point is that the agent never signs as an operator.
 
-**Purpose:** GitHub authentication for PR operations
+#### 4. GitHub credential (injected, scoped)
 
-**Mount:** `~/.config/gh:/home/claudetm/.config/gh:ro`
+**Purpose:** GitHub authentication for PR, CI and review operations
 
-**Read-only:** ✅ Yes
+**Mount:** none — the credential is injected per run
 
-Required for creating and managing pull requests via the GitHub CLI.
+**Inject:** `-e GH_TOKEN="$AGENT_GITHUB_TOKEN"` (alias: `CLAUDETM_GITHUB_TOKEN`)
 
-**Setup GitHub CLI:**
+`GH_TOKEN` is gh's own standard variable, so the agent's `gh` calls and git's gh-backed credential
+helper authenticate the same way. The value is a:
+
+- **repository-scoped, least-privilege token** owned by a **bot account** (e.g. `claudetm[bot]`)
+- **revoked and rotated independently** of the Claude credential — rotating one never touches the other
+- **never committed, never printed**, never written into the image or into a compose file
+- **carrying no admin scope**: CI, required reviews and branch protection stay mandatory, and the
+  credential never bypasses a merge gate
+
+`gh` reads its own configuration from `GH_CONFIG_DIR`, which the image points at
+`/home/claudetm/.claudetm/gh` — an empty directory owned by `claudetm`. The operator's `~/.config/gh`
+is therefore never read, and a personal `gh auth login` can never take over an agent run. With **no**
+credential injected, a container has no personal login to fall back to: it fails closed, naming the
+environment variable that carries one.
+
+**Never** put the token in the image, in `docker-compose.yml`, or in any file committed to version
+control. Inject it at container-creation time from your secret store, and prefer a Docker/Swarm/K8s
+secret over a plain `-e` where the platform supports one.
+
+**Setup:**
 ```bash
-# Install GitHub CLI
-# See: https://cli.github.com/
+# Inject the credential from your secret store at container start
+export GH_TOKEN="$(cat /run/secrets/claudetm_github_token)"
 
-# Authenticate
-gh auth login
+docker run -d ... -e GH_TOKEN="$GH_TOKEN" ...
 
-# Verify authentication
-gh auth status
-
-# Check config location
-ls -la ~/.config/gh/
+# Check what gh sees inside the container (the token value is never printed)
+docker exec claudetm gh auth status
 ```
+
+> [!NOTE]
+> If you previously bind-mounted your `~/.config/gh` into the container, remove that mount and
+> treat the token it exposed as compromised: revoke it and issue a new one for the bot account.
 
 ### Volume Mount Examples
 
@@ -340,6 +365,7 @@ ls -la ~/.config/gh/
 docker run -d \
   -v claudetm-profiles:/home/claudetm/.claudetm \
   -e CLAUDETM_PROFILE=agent \
+  -e GH_TOKEN="$AGENT_GITHUB_TOKEN" \
   -v $(pwd):/app/project \
   ghcr.io/developerz-ai/claude-task-master:latest
 ```
@@ -349,9 +375,8 @@ docker run -d \
 docker run -d \
   -v claudetm-profiles:/home/claudetm/.claudetm \
   -e CLAUDETM_PROFILE=agent \
+  -e GH_TOKEN="$AGENT_GITHUB_TOKEN" \
   -v /path/to/project:/app/project \
-  -v ~/.gitconfig:/home/claudetm/.gitconfig:ro \
-  -v ~/.config/gh:/home/claudetm/.config/gh:ro \
   -e CLAUDETM_PASSWORD=secure-password \
   ghcr.io/developerz-ai/claude-task-master:latest
 ```
@@ -385,6 +410,19 @@ Configure Claude Task Master using environment variables. All variables are opti
 **Example:**
 ```bash
 -e CLAUDETM_PASSWORD=your-secure-password
+```
+
+### GitHub Credential
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `GH_TOKEN` | ⚠️ For PR/CI work | None | The injected GitHub credential — a repository-scoped, least-privilege bot token. Read from the environment; never stored in the image or in a compose file, and never printed |
+| `CLAUDETM_GITHUB_TOKEN` | No | None | Accepted alias for `GH_TOKEN` |
+| `GH_CONFIG_DIR` | No | `/home/claudetm/.claudetm/gh` | gh's config directory, isolated in the image so the operator's `~/.config/gh` is never read |
+
+**Example:**
+```bash
+-e GH_TOKEN="$AGENT_GITHUB_TOKEN"
 ```
 
 ### Server Configuration
@@ -449,41 +487,37 @@ See [Webhooks Documentation](./webhooks.md) for more details on webhook events a
 
 ### Complete Environment Variable Example
 
+Every variable in one runnable command, in this order: the authentication password; the server host,
+ports and log level; the CORS origin; the webhook URL and secret; the task options; the volumes; and
+the injected GitHub credential.
+
 ```bash
 docker run -d \
   --name claudetm \
   -p 8000:8000 \
   -p 8080:8080 \
-  \
-  # Authentication
   -e CLAUDETM_PASSWORD=secure-password \
-  \
-  # Server
   -e CLAUDETM_SERVER_HOST=0.0.0.0 \
   -e CLAUDETM_REST_PORT=8000 \
   -e CLAUDETM_MCP_PORT=8080 \
   -e CLAUDETM_LOG_LEVEL=info \
-  \
-  # CORS
   -e CLAUDETM_CORS_ORIGINS=http://localhost:3000 \
-  \
-  # Webhooks
   -e CLAUDETM_WEBHOOK_URL=https://webhook.example.com/claudetm \
   -e CLAUDETM_WEBHOOK_SECRET=webhook-secret \
-  \
-  # Tasks
   -e CLAUDETM_TARGET_BRANCH=main \
   -e CLAUDETM_AUTO_MERGE=true \
-  \
-  # Volumes
   -v claudetm-profiles:/home/claudetm/.claudetm \
   -e CLAUDETM_PROFILE=agent \
   -v $(pwd):/app/project \
-  -v ~/.gitconfig:/home/claudetm/.gitconfig:ro \
-  -v ~/.config/gh:/home/claudetm/.config/gh:ro \
-  \
+  -e GH_TOKEN="$AGENT_GITHUB_TOKEN" \
+  -e GH_CONFIG_DIR=/home/claudetm/.claudetm/gh \
   ghcr.io/developerz-ai/claude-task-master:latest
 ```
+
+> [!NOTE]
+> Keep the example a single `\`-continued command. A `#` comment or a blank line inside it ends the
+> command at that point, so the lines after it run as separate commands and never reach `docker run`
+> — the injected GitHub credential included.
 
 ## Authentication
 
@@ -608,11 +642,15 @@ services:
     volumes:
       - claudetm-profiles:/home/claudetm/.claudetm
       - .:/app/project
-      - ~/.gitconfig:/home/claudetm/.gitconfig:ro
-      - ~/.config/gh:/home/claudetm/.config/gh:ro
+      # No personal GitHub or git configuration: the operator's ~/.config/gh and
+      # ~/.gitconfig are deliberately not given to the container.
 
     environment:
       - CLAUDETM_PROFILE=agent
+      # GitHub credential: injected per run from the deployment's environment
+      - GH_TOKEN=${GH_TOKEN:-}
+      - CLAUDETM_GITHUB_TOKEN=${CLAUDETM_GITHUB_TOKEN:-}
+      - GH_CONFIG_DIR=/home/claudetm/.claudetm/gh
       - CLAUDETM_PASSWORD=${CLAUDETM_PASSWORD}
       - CLAUDETM_LOG_LEVEL=info
 
@@ -752,12 +790,18 @@ services:
     volumes:
       - claudetm-profiles:/home/claudetm/.claudetm
       - ${PROJECT_PATH:-.}:/app/project
-      - ~/.gitconfig:/home/claudetm/.gitconfig:ro
-      - ~/.config/gh:/home/claudetm/.config/gh:ro
+      # No personal GitHub or git configuration: the operator's ~/.config/gh and
+      # ~/.gitconfig are deliberately not given to the container.
 
     environment:
       # Agent credential (required): api-key profile in the claudetm-profiles volume
       - CLAUDETM_PROFILE=${CLAUDETM_PROFILE:-agent}
+
+      # GitHub credential (required for PR/CI work): injected per run, never
+      # mounted and never written into this file
+      - GH_TOKEN=${GH_TOKEN:-}
+      - CLAUDETM_GITHUB_TOKEN=${CLAUDETM_GITHUB_TOKEN:-}
+      - GH_CONFIG_DIR=/home/claudetm/.claudetm/gh
 
       # API authentication (required)
       - CLAUDETM_PASSWORD=${CLAUDETM_PASSWORD:?Password is required}
@@ -886,18 +930,24 @@ services:
 
     environment:
       - "CLAUDETM_PROFILE=${CLAUDETM_PROFILE:-agent}"
+      - "GH_CONFIG_DIR=/home/claudetm/.claudetm/gh"
 
     secrets:
       - claudetm_password
+      - claudetm_github_token
 
     # claudetm reads its API password from CLAUDETM_PASSWORD (or
     # CLAUDETM_PASSWORD_HASH) only — there is no password-file option — so the
     # mounted secret has to become that variable before the server starts.
     # Without this shim the variable is empty, and an empty password means
     # authentication is simply not installed on a server bound to 0.0.0.0.
+    #
+    # The same shim turns the mounted GitHub secret into GH_TOKEN, the variable
+    # every gh call reads. The token is never written into a file in the
+    # container and never printed.
     entrypoint: ["/bin/sh", "-c"]
     command:
-      - 'export CLAUDETM_PASSWORD="$$(cat /run/secrets/claudetm_password)"; exec claudetm-server'
+      - 'export CLAUDETM_PASSWORD="$$(cat /run/secrets/claudetm_password)"; export GH_TOKEN="$$(cat /run/secrets/claudetm_github_token)"; exec claudetm-server'
 
 volumes:
   claudetm-profiles:
@@ -906,12 +956,18 @@ volumes:
 secrets:
   claudetm_password:
     external: true
+  claudetm_github_token:
+    external: true
 ```
 
 Deploy:
 ```bash
 # Create the API password secret
 echo "your-secure-password" | docker secret create claudetm_password -
+
+# Create the agent's GitHub secret: a repository-scoped, least-privilege bot
+# token (never an admin-scoped one, never a personal login)
+docker secret create claudetm_github_token /path/to/your/bot-token
 
 # Create the agent's scoped credential once, into the external volume
 docker volume create claudetm-profiles
@@ -990,6 +1046,15 @@ spec:
             secretKeyRef:
               name: claudetm-secrets
               key: password
+        # The agent's GitHub credential: a repository-scoped, least-privilege
+        # bot token, injected per pod and never written to a file in the pod.
+        - name: GH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: claudetm-github-credential
+              key: token
+        - name: GH_CONFIG_DIR
+          value: "/home/claudetm/.claudetm/gh"
         - name: CLAUDETM_LOG_LEVEL
           value: "info"
         volumeMounts:
@@ -1035,12 +1100,16 @@ spec:
     targetPort: 8080
 ```
 
-Create the two Secrets (placeholders — never commit a real key):
+Create the Secrets (placeholders — never commit a real key):
 
 ```bash
 # The agent's own scoped, rotatable API key
 kubectl create secret generic claudetm-agent-credential \
   --from-literal=api-key='REPLACE_WITH_SCOPED_AGENT_KEY'
+
+# The agent's GitHub credential: a repository-scoped, least-privilege bot token
+kubectl create secret generic claudetm-github-credential \
+  --from-literal=token='REPLACE_WITH_SCOPED_BOT_TOKEN'
 
 # The REST/MCP API password
 kubectl create secret generic claudetm-secrets \
@@ -1185,20 +1254,25 @@ claudetm falls back to the ambient OAuth credentials file, which a container sho
 **Symptom:** Git commits fail or PR creation fails
 
 **Solutions:**
-1. Mount git config:
+
+1. Inject the GitHub credential — do **not** mount a personal gh config:
    ```bash
-   -v ~/.gitconfig:/home/claudetm/.gitconfig:ro
+   -e GH_TOKEN="$AGENT_GITHUB_TOKEN"
+   ```
+   A container with no credential injected fails closed with a message naming
+   `GH_TOKEN` (or `CLAUDETM_GITHUB_TOKEN`); it has no personal login to fall
+   back to, because `GH_CONFIG_DIR` points at an empty, claudetm-owned
+   directory.
+
+2. Check what gh sees inside the container:
+   ```bash
+   docker exec claudetm gh auth status
    ```
 
-2. Mount GitHub CLI config:
-   ```bash
-   -v ~/.config/gh:/home/claudetm/.config/gh:ro
-   ```
-
-3. Verify GitHub authentication:
-   ```bash
-   gh auth status
-   ```
+3. Git identity is already configured by the image (`claudetm[bot]`), so there
+   is nothing to mount. If your deployment needs a different identity, set
+   `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` / `GIT_COMMITTER_NAME` /
+   `GIT_COMMITTER_EMAIL` per run rather than mounting a host `~/.gitconfig`.
 
 #### Volume Permission Issues
 

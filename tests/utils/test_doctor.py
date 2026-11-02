@@ -153,6 +153,12 @@ class TestSystemDoctorRunChecks:
 class TestCheckGhCli:
     """Tests for _check_gh_cli method."""
 
+    @pytest.fixture(autouse=True)
+    def _no_ambient_credential(self, monkeypatch):
+        """No injected credential unless a test injects one."""
+        for var in ("CLAUDETM_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"):
+            monkeypatch.delenv(var, raising=False)
+
     def test_gh_cli_success(self):
         """Test successful gh CLI check."""
         doctor = SystemDoctor()
@@ -167,12 +173,11 @@ class TestCheckGhCli:
         with patch("subprocess.run", return_value=mock_result) as mock_run:
             doctor._check_gh_cli()
 
-        mock_run.assert_called_once_with(
-            ["gh", "auth", "status"],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+        args, kwargs = mock_run.call_args
+        assert args[0] == ["gh", "auth", "status"]
+        assert kwargs["check"] is False
+        assert kwargs["capture_output"] is True
+        assert kwargs["text"] is True
         assert doctor.checks_passed is True
 
     def test_gh_cli_not_authenticated(self):
@@ -232,7 +237,45 @@ class TestCheckGhCli:
 
         calls = [str(call) for call in mock_console.print.call_args_list]
         assert any("gh CLI not authenticated" in call for call in calls)
-        assert any("gh auth login" in call for call in calls)
+        # The hint names the variable that carries the credential; it never
+        # tells the operator to run a personal login.
+        assert any("GH_TOKEN" in call for call in calls)
+        assert any("CLAUDETM_GITHUB_TOKEN" in call for call in calls)
+        assert not any("gh auth login" in call for call in calls)
+
+    def test_gh_cli_reports_the_injected_credential_without_its_value(self):
+        """Test the injected credential is reported by name only."""
+        doctor = SystemDoctor()
+        mock_console = MagicMock()
+        doctor.console = mock_console
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+
+        with patch.dict("os.environ", {"GH_TOKEN": "ghp_doctor_token"}):
+            with patch("subprocess.run", return_value=mock_result):
+                doctor._check_gh_cli()
+
+        calls = [str(call) for call in mock_console.print.call_args_list]
+        assert any("GH_TOKEN" in call for call in calls)
+        assert not any("ghp_doctor_token" in call for call in calls)
+        assert doctor.checks_passed is True
+
+    def test_gh_cli_without_an_injected_credential_names_the_variable(self):
+        """A host with its own login still passes, and is told what is missing."""
+        doctor = SystemDoctor()
+        mock_console = MagicMock()
+        doctor.console = mock_console
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+
+        with patch("subprocess.run", return_value=mock_result):
+            doctor._check_gh_cli()
+
+        calls = [str(call) for call in mock_console.print.call_args_list]
+        assert any("GH_TOKEN" in call for call in calls)
+        assert doctor.checks_passed is True
 
     def test_gh_cli_not_installed_prints_error(self):
         """Test gh CLI not installed prints error message."""

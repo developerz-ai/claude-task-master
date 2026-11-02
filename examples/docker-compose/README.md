@@ -39,6 +39,9 @@ CLAUDETM_WEBHOOK_SECRET=your-webhook-secret
 PROJECT_PATH=/path/to/your/project
 EOF
 
+# Inject the agent's GitHub credential for this run (never in the .env file)
+export GH_TOKEN="$(cat /run/secrets/claudetm_github_token)"
+
 # Start the services
 docker compose up -d
 
@@ -125,19 +128,44 @@ Before using any of these examples, ensure you have:
        --base-url https://your-gateway.example/anthropic
    ```
 
-3. **Git configuration**
+3. **Git configuration** (for the CLI on your host)
    ```bash
    # Set up git config if not already done
    git config --global user.name "Your Name"
    git config --global user.email "your.email@example.com"
    ```
 
-4. **GitHub CLI authentication** (for PR operations)
+   The container does not use these: the operator's `~/.gitconfig` is
+   deliberately not mounted, and the image configures git itself — commits and
+   pushes are made as `claudetm[bot]`, and the credential helper asks `gh` for
+   the credential, so a push authenticates with the injected token rather than
+   with a personal login.
+
+4. **A scoped agent GitHub credential** (injected, never mounted)
+
+   The container authenticates to GitHub with its **own** token, not with a
+   personal `gh` login: `~/.config/gh` is deliberately not mounted, and
+   `GH_CONFIG_DIR` points at an empty, claudetm-owned directory, so a personal
+   `gh auth login` can never take over an agent run.
+
+   The token is **repository-scoped** and **least privilege**, owned by a **bot
+   account** (e.g. `claudetm[bot]`), and it is **revoked and rotated
+   independently** of the Claude credential — rotating one never touches the
+   other. It is never written into a compose file, never stored in the image and
+   never printed by claudetm. It carries **no admin scope**: CI, required
+   reviews and branch protection stay mandatory, and the credential never
+   bypasses a merge gate.
+
+   Inject it per run from your secret store:
+
    ```bash
-   # Install and authenticate GitHub CLI
-   gh auth login
-   gh auth status
+   export GH_TOKEN="$(cat /run/secrets/claudetm_github_token)"
+   docker compose -f basic-production.yml up -d
    ```
+
+   `CLAUDETM_GITHUB_TOKEN` is an accepted alias for the same value. With no
+   credential injected, the container has no personal login to fall back to and
+   fails closed, naming the variable that carries one.
 
 ## Basic Production
 
@@ -306,6 +334,8 @@ All examples support these environment variables:
 - `CLAUDETM_PROFILE` - Name of the agent's api-key profile in the `claudetm-profiles` volume (default: `agent`)
 
 ### Optional
+- `GH_TOKEN` - The agent's GitHub credential: a repository-scoped, least-privilege bot token, injected per run from your secret store. `CLAUDETM_GITHUB_TOKEN` is an accepted alias. Never written into a compose file, never stored in the image, never printed
+- `GH_CONFIG_DIR` - gh's config directory, isolated inside the container (`/home/claudetm/.claudetm/gh`) so the operator's `~/.config/gh` is never read and a personal login is never a fallback
 - `CLAUDETM_PROFILES_VOLUME` - Host-side name of the volume holding that profile (default: `claudetm-profiles`; `claudetm-profiles-dev` in `development.yml`). Use a distinct value per deployment so they do not share one agent credential
 - `PROJECT_PATH` - Path to your project (default: current directory)
 - `CLAUDETM_LOG_LEVEL` - Log level: debug, info, warning, error (default: info)
@@ -399,6 +429,10 @@ SSL_KEY_PATH=/etc/letsencrypt/live/claudetm.example.com/privkey.pem
        max-size: "10m"
        max-file: "3"
    ```
+
+8. **Never commit the agent's GitHub credential**
+   - Inject it per run (`GH_TOKEN`) from your secret store — never into a compose file, never into the image, never into a committed `.env`
+   - Keep it repository-scoped and least privilege, and rotate it independently of the Claude credential
 
 ## Troubleshooting
 
