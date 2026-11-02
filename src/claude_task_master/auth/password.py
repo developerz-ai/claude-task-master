@@ -1,6 +1,6 @@
 """Password hashing and verification utilities for Claude Task Master.
 
-This module provides secure password hashing using bcrypt via passlib,
+This module provides secure password hashing using the bcrypt package,
 along with environment variable configuration and password comparison.
 
 Environment Variables:
@@ -11,6 +11,8 @@ Security Notes:
     - Always use CLAUDETM_PASSWORD_HASH in production to avoid plaintext passwords in env
     - Passwords are compared using constant-time comparison to prevent timing attacks
     - bcrypt automatically handles salting and multiple rounds
+    - bcrypt cannot represent more than 72 bytes: a longer password is rejected
+      rather than silently truncated
 """
 
 from __future__ import annotations
@@ -18,10 +20,6 @@ from __future__ import annotations
 import logging
 import os
 import secrets
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -72,67 +70,57 @@ class InvalidPasswordError(AuthenticationError):
 # Password Hashing
 # =============================================================================
 
-# Try to import passlib for bcrypt hashing
+# bcrypt ships with the optional [api] extra, so the import stays guarded:
+# the module must import cleanly without it and only hashing/verifying may
+# raise ImportError. Nothing here probes a backend at import time.
 try:
-    from passlib.context import CryptContext
+    import bcrypt
 
-    # Create a bcrypt context for password hashing
-    # Using bcrypt with default rounds (12) for security
-    _pwd_context: CryptContext | None = CryptContext(
-        schemes=["bcrypt"],
-        deprecated="auto",
-        bcrypt__rounds=12,
-    )
-    PASSLIB_AVAILABLE = True
-except ImportError:
-    _pwd_context = None
-    PASSLIB_AVAILABLE = False
+    BCRYPT_AVAILABLE = True
+except ImportError:  # pragma: no cover - depends on the installed extras
+    BCRYPT_AVAILABLE = False
+
+# Cost factor for newly created hashes.
+BCRYPT_ROUNDS = 12
+
+# bcrypt cannot represent more than 72 bytes of input. Passwords over that
+# limit are rejected instead of being silently truncated: truncation makes
+# every password sharing its first 72 bytes interchangeable.
+BCRYPT_MAX_PASSWORD_BYTES = 72
 
 
-def _ensure_passlib() -> None:
-    """Ensure passlib is available, raise ImportError if not.
+def _ensure_bcrypt() -> None:
+    """Ensure bcrypt is available, raise ImportError if not.
 
     Raises:
-        ImportError: If passlib[bcrypt] is not installed.
+        ImportError: If the bcrypt package is not installed.
     """
-    if not PASSLIB_AVAILABLE:
+    if not BCRYPT_AVAILABLE:
         raise ImportError(
-            "passlib[bcrypt] not installed. Install with: "
-            "pip install 'claude-task-master[api]' or pip install 'passlib[bcrypt]'"
+            "bcrypt not installed. Install with: "
+            "pip install 'claude-task-master[api]' or pip install 'bcrypt'"
         )
 
 
-def _truncate_password_for_bcrypt(password: str) -> str:
-    """Truncate password to bcrypt's 72-byte limit.
-
-    bcrypt has a fundamental 72-byte password limit. Passwords longer than
-    72 bytes (when UTF-8 encoded) must be truncated. This is done at a
-    character boundary to avoid breaking multi-byte characters.
+def _encode_password(password: str) -> bytes:
+    """Encode a password as UTF-8 bytes, enforcing bcrypt's 72-byte limit.
 
     Args:
-        password: The password to potentially truncate.
+        password: The plaintext password to encode.
 
     Returns:
-        The password truncated to at most 72 bytes when UTF-8 encoded.
-    """
-    # Encode to bytes to check actual byte length
-    encoded = password.encode("utf-8")
-    if len(encoded) <= 72:
-        return password
+        The UTF-8 encoded password.
 
-    # Truncate at byte boundary, then decode
-    # We need to be careful not to break a multi-byte character
-    truncated = encoded[:72]
-    # Find the last complete character by decoding with error handling
-    # If truncation breaks a multi-byte character, we need to go back
-    while True:
-        try:
-            return truncated.decode("utf-8")
-        except UnicodeDecodeError:
-            truncated = truncated[:-1]
-            if not truncated:
-                # This shouldn't happen with valid UTF-8 input
-                return password[:72]
+    Raises:
+        ValueError: If the encoded password exceeds bcrypt's 72-byte limit.
+    """
+    encoded = password.encode("utf-8")
+    if len(encoded) > BCRYPT_MAX_PASSWORD_BYTES:
+        raise ValueError(
+            f"Password cannot be longer than {BCRYPT_MAX_PASSWORD_BYTES} bytes "
+            f"when UTF-8 encoded (got {len(encoded)} bytes)"
+        )
+    return encoded
 
 
 def hash_password(password: str) -> str:
@@ -142,33 +130,31 @@ def hash_password(password: str) -> str:
         password: The plaintext password to hash.
 
     Returns:
-        The bcrypt hash of the password.
+        The bcrypt hash of the password ($2b$, cost 12, 60 characters).
 
     Raises:
-        ImportError: If passlib[bcrypt] is not installed.
-        ValueError: If password is empty.
+        ImportError: If the bcrypt package is not installed.
+        ValueError: If password is empty or longer than bcrypt's 72-byte limit.
 
     Note:
-        bcrypt has a 72-byte password limit. Passwords longer than 72 bytes
-        (when UTF-8 encoded) will be truncated. This is a bcrypt limitation,
-        not a security concern for most use cases.
+        bcrypt cannot represent more than 72 bytes of input. A password over
+        that limit is rejected rather than truncated: truncation would make
+        every password sharing the first 72 bytes authenticate.
 
     Example:
         >>> hashed = hash_password("my_secret_password")
         >>> hashed.startswith("$2b$")  # bcrypt hash format
         True
     """
-    _ensure_passlib()
+    _ensure_bcrypt()
 
     if not password:
         raise ValueError("Password cannot be empty")
 
-    # Truncate to bcrypt's 72-byte limit
-    password = _truncate_password_for_bcrypt(password)
+    encoded = _encode_password(password)
 
-    assert _pwd_context is not None  # ensured by _ensure_passlib
-    result: str = _pwd_context.hash(password)
-    return result
+    hashed = bcrypt.hashpw(encoded, bcrypt.gensalt(rounds=BCRYPT_ROUNDS))
+    return hashed.decode("utf-8")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -184,11 +170,13 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         True if the password matches, False otherwise.
 
     Raises:
-        ImportError: If passlib[bcrypt] is not installed.
+        ImportError: If the bcrypt package is not installed.
 
     Note:
-        bcrypt has a 72-byte password limit. Passwords are truncated to
-        match the behavior during hashing.
+        bcrypt compares in constant time by design, and the hash format
+        ($2a$, $2b$, $2y$) is unchanged, so hashes stored by earlier
+        versions keep verifying. A candidate longer than bcrypt's 72-byte
+        limit can never match a stored hash and is refused.
 
     Example:
         >>> hashed = hash_password("my_password")
@@ -197,18 +185,23 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         >>> verify_password("wrong_password", hashed)
         False
     """
-    _ensure_passlib()
+    _ensure_bcrypt()
 
     if not plain_password or not hashed_password:
         return False
 
     try:
-        # Truncate to bcrypt's 72-byte limit (must match hash_password behavior)
-        plain_password = _truncate_password_for_bcrypt(plain_password)
+        encoded = _encode_password(plain_password)
+    except ValueError:
+        logger.warning(
+            "Refusing to verify a password longer than %d bytes: bcrypt cannot "
+            "represent it, so it can never match a stored hash.",
+            BCRYPT_MAX_PASSWORD_BYTES,
+        )
+        return False
 
-        assert _pwd_context is not None  # ensured by _ensure_passlib
-        result: bool = _pwd_context.verify(plain_password, hashed_password)
-        return result
+    try:
+        return bcrypt.checkpw(encoded, hashed_password.encode("utf-8"))
     except Exception:
         # Any exception during verification means the password is invalid
         # This includes malformed hashes

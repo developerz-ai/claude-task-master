@@ -1,7 +1,7 @@
 """Authentication module for Claude Task Master.
 
 This module provides shared password-based authentication for REST API, MCP server,
-and webhook authentication. It uses passlib with bcrypt for secure password hashing.
+and webhook authentication. It uses the bcrypt package for secure password hashing.
 
 Key Components:
 - Password hashing and verification using bcrypt

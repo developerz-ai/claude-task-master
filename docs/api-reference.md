@@ -279,7 +279,7 @@ Get accumulated context and learnings.
 ```json
 {
   "success": true,
-  "context": "## Key Learnings\n\n- Project uses pytest for testing\n- Auth module requires passlib[bcrypt]\n..."
+  "context": "## Key Learnings\n\n- Project uses pytest for testing\n- Auth module requires bcrypt\n..."
 }
 ```
 
