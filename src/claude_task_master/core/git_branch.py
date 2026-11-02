@@ -59,7 +59,19 @@ def is_valid_branch_name(name: str) -> bool:
 
 
 def run_git(*args: str, timeout: int = 30) -> subprocess.CompletedProcess[str] | None:
-    """Run a git command, returning None when it could not run at all."""
+    """Run a git command, returning None when it could not run at all.
+
+    The command runs with the agent's GitHub credential overlay applied
+    (``GH_TOKEN`` plus an isolated ``GH_CONFIG_DIR``). The container image's
+    credential helper is gh-backed and gh reads ``GH_TOKEN``, so a credential
+    injected under the ``CLAUDETM_GITHUB_TOKEN`` alias would never reach it
+    and the push would fail. With no credential injected the environment is
+    the ambient one, unchanged — a developer host keeps its own ``gh`` login.
+    """
+    # Imported inside the function: `github` reaches back into `core`, so a
+    # module-level import would close an import cycle.
+    from ..github.gh_auth import gh_subprocess_env
+
     try:
         return subprocess.run(
             ["git", *args],
@@ -67,6 +79,7 @@ def run_git(*args: str, timeout: int = 30) -> subprocess.CompletedProcess[str] |
             capture_output=True,
             text=True,
             timeout=timeout,
+            env=gh_subprocess_env(),
         )
     except (OSError, subprocess.SubprocessError):
         return None

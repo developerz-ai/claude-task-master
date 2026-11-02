@@ -18,6 +18,7 @@ from .cli_commands.profile import register_profile_commands
 from .cli_commands.update import register_update_command
 from .cli_commands.workflow import register_workflow_commands
 from .core.state import StateManager
+from .github.gh_auth import CREDENTIAL_HINT, gh_subprocess_env, redact_token, resolve_github_token
 from .utils.debug_claude_md import debug_claude_md_detection
 from .utils.doctor import SystemDoctor
 
@@ -62,12 +63,18 @@ def _fetch_pr_info(pr_number: int, fields: list[str] | None = None) -> PRInfoRes
             capture_output=True,
             text=True,
             timeout=15,
+            env=gh_subprocess_env(),
         )
 
         if result.returncode != 0:
             # Non-zero return code - gh command failed
             stderr = result.stderr.strip() if result.stderr else "Unknown error"
-            return PRInfoResult(error=f"gh pr view failed: {stderr}")
+            detail = redact_token(stderr)
+            if resolve_github_token() is None:
+                # No credential was injected: name the variable that carries
+                # one instead of leaving the operator with gh's own advice.
+                detail = f"{detail}. {CREDENTIAL_HINT}"
+            return PRInfoResult(error=f"gh pr view failed: {detail}")
 
         pr_info = json.loads(result.stdout)
         return PRInfoResult(

@@ -44,14 +44,15 @@ docker run --rm -v claudetm-profiles:/home/claudetm/.claudetm \
   claudetm profile add agent --type api-key --base-url https://your-gateway.example/anthropic
 
 # Run with Docker
+# The GitHub credential is INJECTED per run — a repository-scoped,
+# least-privilege bot token. No personal gh login is mounted or used.
 docker run -d \
   --name claudetm \
   -p 8000:8000 \
   -v claudetm-profiles:/home/claudetm/.claudetm \
   -e CLAUDETM_PROFILE=agent \
+  -e GH_TOKEN="$AGENT_GITHUB_TOKEN" \
   -v $(pwd):/app/project \
-  -v ~/.gitconfig:/home/claudetm/.gitconfig:ro \
-  -v ~/.config/gh:/home/claudetm/.config/gh:ro \
   ghcr.io/developerz-ai/claude-task-master:latest
 ```
 
@@ -71,6 +72,8 @@ claudetm doctor
 ```
 
 **For Docker users:** containers do **not** use your `~/.claude` — never bind-mount it into one. The agent runs under its own scoped, rotatable API key held in an `api-key` profile; see [Agent Credentials](./docs/docker.md#1-agent-credentials-claudetm).
+
+The same rule applies to GitHub: a container gets **no** personal `gh` login — `~/.config/gh` is never mounted and never read. It receives an **injected**, repository-scoped, least-privilege **bot token** (`GH_TOKEN`, alias `CLAUDETM_GITHUB_TOKEN`) that is revoked and rotated independently of the Claude credential, and is never committed and never printed. The token carries **no admin scope**: CI, required reviews and branch protection stay mandatory, and the credential never bypasses a merge gate.
 
 ### Profiles (multiple accounts / custom endpoints)
 
@@ -237,7 +240,7 @@ Work is NOT complete until it's pushed and in a pull request.
 
 1. **Python 3.10+** - [Install Python](https://www.python.org/downloads/)
 2. **Claude CLI** - [Install Claude](https://github.com/anthropics/anthropic-sdk-python) and run `claude` to authenticate
-3. **GitHub CLI** - [Install gh](https://cli.github.com/) and run `gh auth login`
+3. **GitHub CLI** - [Install gh](https://cli.github.com/) and run `gh auth login` (host CLI only — a container gets an [injected, scoped token](./docs/docker.md#4-github-credential-injected-scoped) instead of a personal login)
 
 ### Install Claude Task Master
 
@@ -721,12 +724,12 @@ Deploy Claude Task Master to a server with git credentials and have it:
 
 ```bash
 # Server startup
+# The GitHub credential is injected per run — never a mounted personal gh login
 docker run -d \
   -p 8000:8000 \
   -v claudetm-profiles:/home/claudetm/.claudetm \
   -e CLAUDETM_PROFILE=agent \
-  -v ~/.gitconfig:/home/claudetm/.gitconfig:ro \
-  -v ~/.config/gh:/home/claudetm/.config/gh:ro \
+  -e GH_TOKEN="$AGENT_GITHUB_TOKEN" \
   -v ~/workspace:/home/claudetm/workspace \
   ghcr.io/developerz-ai/claude-task-master:latest
 
@@ -795,6 +798,9 @@ claudetm doctor
 ```
 
 #### "GitHub CLI not authenticated"
+
+On a **developer host** — authenticate gh with your own account, unchanged:
+
 ```bash
 # Authenticate with GitHub
 gh auth login
@@ -802,6 +808,8 @@ gh auth login
 # Verify authentication
 gh auth status
 ```
+
+In a **container** there is no personal login to use: the GitHub credential is injected as `GH_TOKEN` (alias `CLAUDETM_GITHUB_TOKEN`) at container start (`-e GH_TOKEN="$AGENT_GITHUB_TOKEN"`). Never mount `~/.config/gh` to work around it — a container with no credential injected fails closed, naming the variable that carries one.
 
 ### Common Issues
 

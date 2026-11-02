@@ -7,6 +7,30 @@ import pytest
 from claude_task_master.cli import app
 from claude_task_master.github.client_pr import PRStatus
 
+# A stand-in for the injected agent credential — not a secret. Nothing in this
+# file may print it.
+GH_CREDENTIAL = "ghp_TESTcredentialValue0123456789ab"
+
+
+def _pr_status(number: int = 123) -> PRStatus:
+    """A PR status for the mocked client."""
+    return PRStatus(
+        number=number,
+        state="OPEN",
+        ci_state="SUCCESS",
+        unresolved_threads=0,
+        resolved_threads=0,
+        total_threads=0,
+        checks_passed=0,
+        checks_failed=0,
+        checks_pending=0,
+        checks_skipped=0,
+        check_details=[],
+        mergeable="MERGEABLE",
+        merge_state_status="CLEAN",
+        base_branch="main",
+    )
+
 
 class TestPRCommand:
     """Tests for the pr command."""
@@ -339,6 +363,77 @@ class TestPRCommand:
         assert result.exit_code == 0
         assert "MERGED" in result.output
         assert "Skipped" in result.output
+
+    def test_pr_view_failure_without_credential_names_the_env_var(
+        self, cli_runner, tmp_path, monkeypatch
+    ):
+        """A gh failure with no credential injected names the env var.
+
+        A container has an isolated GH_CONFIG_DIR and therefore no personal
+        login to fall back to, so the failure has to say which variable
+        carries the credential — not leave gh's own advice as the only hint.
+        """
+        monkeypatch.chdir(tmp_path)
+        for var in ("CLAUDETM_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"):
+            monkeypatch.delenv(var, raising=False)
+
+        with (
+            patch("claude_task_master.github.client.GitHubClient._check_gh_cli") as mock_check,
+            patch(
+                "claude_task_master.github.client.GitHubClient.get_pr_status",
+                return_value=_pr_status(),
+            ),
+            patch("subprocess.run") as mock_subprocess,
+        ):
+            mock_check.return_value = None
+
+            mock_subprocess.return_value = MagicMock(
+                returncode=1,
+                stdout="",
+                stderr="gh: authentication required",
+            )
+
+            result = cli_runner.invoke(app, ["pr", "-p", "123"])
+
+        assert result.exit_code == 0
+        assert "GH_TOKEN" in result.output
+        assert "CLAUDETM_GITHUB_TOKEN" in result.output
+        assert "gh auth login" not in result.output
+        # No credential was injected, and none is printed either.
+        assert "ghp_" not in result.output
+
+    def test_pr_view_failure_redacts_the_credential_from_the_error(
+        self, cli_runner, tmp_path, monkeypatch
+    ):
+        """gh's own stderr may quote the credential — it must be scrubbed.
+
+        The error reaches a log line and a terminal, so the credential's value
+        never appears in it; only its shape is redacted.
+        """
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("GH_TOKEN", GH_CREDENTIAL)
+
+        with (
+            patch("claude_task_master.github.client.GitHubClient._check_gh_cli") as mock_check,
+            patch(
+                "claude_task_master.github.client.GitHubClient.get_pr_status",
+                return_value=_pr_status(),
+            ),
+            patch("subprocess.run") as mock_subprocess,
+        ):
+            mock_check.return_value = None
+
+            mock_subprocess.return_value = MagicMock(
+                returncode=1,
+                stdout="",
+                stderr=f"gh: authentication failed for token {GH_CREDENTIAL}",
+            )
+
+            result = cli_runner.invoke(app, ["pr", "-p", "123"])
+
+        assert result.exit_code == 0
+        assert GH_CREDENTIAL not in result.output
+        assert "***" in result.output
 
 
 @pytest.fixture

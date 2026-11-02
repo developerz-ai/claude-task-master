@@ -24,28 +24,36 @@ from claude_task_master.github.client import (
 class TestGitHubClientInitErrors:
     """Tests for GitHubClient initialization and gh CLI check errors."""
 
-    def test_init_gh_cli_authenticated(self):
+    def test_init_gh_cli_authenticated(self, monkeypatch):
         """Test initialization when gh CLI is authenticated."""
+        monkeypatch.setenv("GH_TOKEN", "ghp_test_token")
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
             client = GitHubClient()
-            mock_run.assert_called_once_with(
-                ["gh", "auth", "status"],
-                timeout=10,
-                check=False,
-                capture_output=True,
-                text=True,
-            )
+            args, kwargs = mock_run.call_args
+            assert args[0] == ["gh", "auth", "status"]
+            assert kwargs["timeout"] == 10
+            assert kwargs["check"] is False
+            assert kwargs["capture_output"] is True
+            assert kwargs["text"] is True
+            # The injected credential reaches gh, with an isolated config dir.
+            assert kwargs["env"]["GH_TOKEN"] == "ghp_test_token"
+            assert kwargs["env"]["GH_CONFIG_DIR"].endswith("/gh")
             assert client is not None
 
-    def test_init_gh_cli_not_authenticated(self):
+    def test_init_gh_cli_not_authenticated(self, monkeypatch):
         """Test initialization when gh CLI is not authenticated."""
+        for var in ("CLAUDETM_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"):
+            monkeypatch.delenv(var, raising=False)
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="not logged in")
             with pytest.raises(GitHubAuthError) as exc_info:
                 GitHubClient()
-            assert "gh CLI not authenticated" in str(exc_info.value)
-            assert "gh auth login" in str(exc_info.value)
+            message = str(exc_info.value)
+            assert "not authenticated" in message
+            assert "GH_TOKEN" in message
+            assert "CLAUDETM_GITHUB_TOKEN" in message
+            assert "gh auth login" not in message
 
     def test_init_gh_cli_not_installed(self):
         """Test initialization when gh CLI is not installed."""

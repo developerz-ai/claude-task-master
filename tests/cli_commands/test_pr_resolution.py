@@ -12,6 +12,10 @@ from claude_task_master.cli_commands.pr_resolution import resolve_pr_number
 
 MODULE = "claude_task_master.cli_commands.pr_resolution"
 
+# A stand-in for the injected agent credential — not a secret. Nothing in this
+# file may print it.
+GH_CREDENTIAL = "ghp_TESTcredentialValue0123456789ab"
+
 
 def _proc(returncode: int = 0, stdout: str = "", stderr: str = "") -> subprocess.CompletedProcess:
     return subprocess.CompletedProcess(
@@ -125,6 +129,44 @@ class TestBranchWithoutPR:
             resolve_pr_number(client, None, create_pr=True)
         assert exc.value.exit_code == 1
         assert "No commits between" in capsys.readouterr().out
+
+    @patch(f"{MODULE}.pending_changes_summary", return_value="")
+    @patch(f"{MODULE}.run_git")
+    @patch(f"{MODULE}.subprocess.run")
+    @patch(f"{MODULE}.get_current_branch", return_value="feature/x")
+    def test_failed_creation_without_credential_names_the_env_var(
+        self,
+        _branch: MagicMock,
+        run: MagicMock,
+        run_git: MagicMock,
+        _pending: MagicMock,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A container with no credential cannot open a PR, and says why.
+
+        Its GH_CONFIG_DIR is isolated, so there is no personal login to fall
+        back to: the failure names the variable that carries the credential
+        instead of telling the operator to run "gh auth login".
+        """
+        for var in ("CLAUDETM_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"):
+            monkeypatch.delenv(var, raising=False)
+
+        client = MagicMock()
+        client.get_pr_for_current_branch.return_value = None
+        run_git.return_value = _proc()
+        run.return_value = _proc(returncode=1, stderr="gh: authentication required")
+
+        with pytest.raises(typer.Exit) as exc:
+            resolve_pr_number(client, None, create_pr=True)
+        assert exc.value.exit_code == 1
+
+        output = capsys.readouterr().out
+        assert "GH_TOKEN" in output
+        assert "CLAUDETM_GITHUB_TOKEN" in output
+        assert "gh auth login" not in output
+        # No credential was injected, and no credential value is printed.
+        assert GH_CREDENTIAL not in output
 
     @patch(f"{MODULE}.subprocess.run")
     @patch(f"{MODULE}.get_current_branch", return_value="main")

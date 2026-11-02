@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import subprocess
 
+from .gh_auth import gh_subprocess_env
+
 
 class CIRerunner:
     """Asks GitHub to re-run the failed jobs of a run."""
@@ -57,6 +59,7 @@ class CIRerunner:
                 text=True,
                 check=True,
                 timeout=self.timeout,
+                env=gh_subprocess_env(),
             )
         except subprocess.TimeoutExpired as e:
             raise GitHubTimeoutError(f"Timeout re-running failed jobs for run {run_id}") from e

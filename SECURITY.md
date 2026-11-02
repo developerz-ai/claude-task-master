@@ -68,6 +68,15 @@ The project handles credentials securely:
 - Credentials are never logged or exposed in output
 - Access tokens use OAuth refresh token flow
 
+**Agent GitHub Credential (GitHub CLI and git operations):**
+- Injected per run through the environment as `GH_TOKEN` (alias `CLAUDETM_GITHUB_TOKEN`) — never read from disk, never taken from a personal `gh` login, never persisted by claudetm
+- Repository-scoped and **least privilege**, owned by a **bot account** (e.g. `claudetm[bot]`); Git activity is attributed to that disclosed bot identity (`GIT_AUTHOR_*` / `GIT_COMMITTER_*` = `claudetm[bot]`)
+- Revoked and rotated **independently** of the Claude credential — rotating one never touches the other
+- Never committed, never printed (not in the logs, not by `claudetm doctor`, not in an error message), never stored in the image or written into a compose file
+- Carries **no admin scope**: CI, required reviews and branch protection stay mandatory, and the credential never bypasses a merge gate
+- In a deployment that injects the credential, every `gh` invocation runs with `GH_TOKEN` set and with `GH_CONFIG_DIR` pointing at a claudetm-owned, empty directory (`src/claude_task_master/github/gh_auth.py`), so the operator's `~/.config/gh` is never read and a personal login can never take over an agent run
+- A container gets the same isolation from the image itself (`GH_CONFIG_DIR` is set in the `Dockerfile`), so with **no** credential injected it has no personal login to fall back to and fails closed, naming `GH_TOKEN` / `CLAUDETM_GITHUB_TOKEN`. A developer host with no credential injected keeps using its own `gh` login, unchanged
+
 **Password Authentication (Network Services):**
 - Passwords are hashed using bcrypt with 12 rounds (cost factor)
 - Only the hash is stored/configured via `CLAUDETM_PASSWORD_HASH`
@@ -187,7 +196,7 @@ Docker images published to GitHub Container Registry (ghcr.io):
 - Images run as non-root user
 - No hardcoded secrets in image layers
 - Environment variables used for configuration
-- Volume mounts for project and credentials directories
+- Volume mounts for the project directory and the agent's own credential volume — never a personal `~/.claude` or `~/.config/gh`
 - Read-only volumes where applicable
 
 **Image Distribution:**
@@ -197,7 +206,8 @@ Docker images published to GitHub Container Registry (ghcr.io):
 - Built for multiple architectures (amd64, arm64)
 
 **Volume Mounting Best Practices:**
-- Mount `~/.claude` (credentials) as read-only when possible
+- Mount the agent's own credential volume (`claudetm-profiles`), never a human's `~/.claude`: the agent authenticates with a scoped profile, and a personal OAuth file cannot be scoped down or rotated without breaking that person's own login
+- Mount no personal GitHub configuration: the GitHub credential is injected per run (`GH_TOKEN`) and `GH_CONFIG_DIR` is isolated, so `~/.config/gh` and `~/.gitconfig` stay out of the container
 - Mount project directory as bind mount
 - Use named volumes for persistent state
 - Ensure proper permissions on mounted directories

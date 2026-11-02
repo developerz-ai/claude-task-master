@@ -171,6 +171,15 @@ class _AgentQueryExecuteMixin:
 
         cli_env.update(resolve_runtime_env())
 
+        # Inject the agent's GitHub credential, so the agent's own gh and git
+        # commands authenticate as the agent and not as whatever login the
+        # host happens to have. The SDK merges options.env over os.environ,
+        # so GH_TOKEN and the isolated GH_CONFIG_DIR reach the Bash tool.
+        # No-op when no credential was injected.
+        from ..github.gh_auth import build_gh_env  # noqa: PLC0415
+
+        cli_env.update(build_gh_env())
+
         # Create options with model specification and subagents
         try:
             options_kwargs: dict[str, Any] = {

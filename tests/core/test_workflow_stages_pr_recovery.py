@@ -11,15 +11,23 @@ the branch has nothing over the base) instead of blocking.
 
 from __future__ import annotations
 
+import secrets
 from datetime import datetime
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from claude_task_master.core.state import TaskOptions, TaskState
 from claude_task_master.core.workflow_stages import WorkflowStageHandler
+from claude_task_master.github.gh_auth import gh_config_dir
 
 _MODULE = "claude_task_master.core.stages.pr_recovery"
+
+# A stand-in for the injected agent credential — not a secret. The assertions
+# below compare against it without ever echoing it, so a failing test cannot
+# print a credential into the CI log.
+CREDENTIAL = "ghp_TESTagentCredentialValue0000"
 
 
 @pytest.fixture
@@ -247,3 +255,35 @@ class TestBuildGroupPRText:
         title, _ = workflow_handler._build_group_pr_text(task_state, "feat/long")
 
         assert len(title) <= 70
+
+
+class TestPushCurrentBranch:
+    """The orchestrator's own push authenticates as the injected agent.
+
+    The container image's credential helper is gh-backed and gh reads
+    ``GH_TOKEN``; a credential injected under the ``CLAUDETM_GITHUB_TOKEN``
+    alias only reaches git when the push runs with the overlay applied.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _no_ambient_credential(self, monkeypatch):
+        """No credential in the environment unless a test injects one."""
+        for var in ("CLAUDETM_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"):
+            monkeypatch.delenv(var, raising=False)
+
+    def test_push_runs_with_the_credential_and_an_isolated_config_dir(
+        self, workflow_handler, monkeypatch
+    ):
+        """The push authenticates as the agent, whatever name the credential arrived under."""
+        monkeypatch.setenv("CLAUDETM_GITHUB_TOKEN", CREDENTIAL)
+
+        with patch(f"{_MODULE}.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            workflow_handler._push_current_branch()
+
+        assert mock_run.call_args.args[0] == ["git", "push", "-u", "origin", "HEAD"]
+        env = mock_run.call_args.kwargs["env"]
+        # compare_digest, not ==: a failed assertion must not echo the value.
+        assert secrets.compare_digest(env.get("GH_TOKEN", ""), CREDENTIAL)
+        assert env["GH_CONFIG_DIR"] == str(gh_config_dir())
+        assert env["GH_CONFIG_DIR"] != str(Path.home() / ".config" / "gh")

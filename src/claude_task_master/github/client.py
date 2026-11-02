@@ -26,6 +26,13 @@ from .exceptions import (
     GitHubNotFoundError,
     GitHubTimeoutError,
 )
+from .gh_auth import (
+    CREDENTIAL_HINT,
+    gh_subprocess_env,
+    missing_credential_error,
+    redact_token,
+    resolve_github_token,
+)
 
 # Default timeout for gh CLI commands (30 seconds)
 DEFAULT_GH_TIMEOUT = 30
@@ -181,6 +188,11 @@ class GitHubClient(PROperationsMixin, CIOperationsMixin):
         means the request was rejected before executing, so retrying is safe for
         every command, including merges.
 
+        The command runs with the agent-credential overlay applied (see
+        :mod:`.gh_auth`): the injected ``GH_TOKEN`` and a ``GH_CONFIG_DIR``
+        pointing at a claudetm-owned directory, so the operator's
+        ``~/.config/gh`` is never read.
+
         Args:
             cmd: Command and arguments to run (e.g., ["gh", "pr", "list"]).
             timeout: Timeout in seconds (default 30).
@@ -205,6 +217,7 @@ class GitHubClient(PROperationsMixin, CIOperationsMixin):
                     capture_output=capture_output,
                     text=True,
                     cwd=cwd,
+                    env=gh_subprocess_env(),
                 )
             except subprocess.TimeoutExpired as e:
                 raise GitHubTimeoutError(
@@ -229,7 +242,7 @@ class GitHubClient(PROperationsMixin, CIOperationsMixin):
 
                 if check:
                     error_msg = (
-                        stderr.strip()
+                        redact_token(stderr.strip())
                         if stderr
                         else f"Command failed with exit code {result.returncode}"
                     )
@@ -241,7 +254,10 @@ class GitHubClient(PROperationsMixin, CIOperationsMixin):
         """Check if gh CLI is installed and authenticated.
 
         This is called during initialization to ensure the gh CLI is available
-        and properly authenticated before any operations are attempted.
+        and properly authenticated before any operations are attempted. The
+        check runs with the agent-credential overlay applied, so it reports on
+        the credential the agent actually uses — the injected token, with the
+        operator's ``~/.config/gh`` out of reach.
 
         Raises:
             GitHubAuthError: If gh CLI is not authenticated.
@@ -255,13 +271,10 @@ class GitHubClient(PROperationsMixin, CIOperationsMixin):
                 check=False,
                 capture_output=True,
                 text=True,
+                env=gh_subprocess_env(),
             )
             if result.returncode != 0:
-                raise GitHubAuthError(
-                    "gh CLI not authenticated. Run 'gh auth login' first.",
-                    command=["gh", "auth", "status"],
-                    exit_code=result.returncode,
-                )
+                raise self._auth_error(result.returncode)
         except subprocess.TimeoutExpired as e:
             raise GitHubTimeoutError(
                 "gh auth status timed out",
@@ -272,6 +285,34 @@ class GitHubClient(PROperationsMixin, CIOperationsMixin):
                 "gh CLI not installed. Install from https://cli.github.com/",
                 command=["gh", "auth", "status"],
             ) from e
+
+    @staticmethod
+    def _auth_error(exit_code: int) -> GitHubAuthError:
+        """Build the authentication failure: names the env var, never a value.
+
+        With no credential injected the agent has none at all, so the failure
+        is fail-closed and names the environment variable that carries one. A
+        container — whose ``GH_CONFIG_DIR`` the image already isolates — has no
+        personal login to fall back to, and this is the message it gets.
+
+        With a credential injected, gh rejected it, and saying so is more
+        useful than repeating the variable name.
+
+        Args:
+            exit_code: The exit code of the failed authentication check.
+
+        Returns:
+            The exception to raise.
+        """
+        command = ["gh", "auth", "status"]
+        if resolve_github_token() is None:
+            return missing_credential_error(command=command, exit_code=exit_code)
+        return GitHubAuthError(
+            "gh CLI is not authenticated: the injected GitHub credential was "
+            f"rejected. {CREDENTIAL_HINT}",
+            command=command,
+            exit_code=exit_code,
+        )
 
     def _get_repo_info(self, cwd: str | None = None) -> str:
         """Get current repository owner/name (memoized per working directory).

@@ -14,6 +14,15 @@
 #   docker compose -f development.yml up
 #   docker compose -f development.yml up --build  # Rebuild on changes
 #
+# GitHub credential - injected per run, never mounted:
+#   export GH_TOKEN="$(cat /run/secrets/claudetm_github_token)"   # your secret store
+#   docker compose -f development.yml up
+#
+#   A repository-scoped, least-privilege token owned by a bot account (e.g.
+#   claudetm[bot]), revoked and rotated independently of the Claude
+#   credential. Never written into this file, never stored in the image, never
+#   printed. CLAUDETM_GITHUB_TOKEN is an accepted alias for the same value.
+#
 # =============================================================================
 
 version: "3.8"
@@ -45,15 +54,34 @@ services:
       # Project directory for testing
       - "${PROJECT_PATH:-../../tmp/test-project}:/app/project"
 
-      # Git configuration
-      - "${HOME}/.gitconfig:/home/claudetm/.gitconfig:ro"
-
-      # GitHub CLI configuration
-      - "${HOME}/.config/gh:/home/claudetm/.config/gh:ro"
+      # NO personal GitHub or git configuration is mounted here:
+      #   - the operator's ~/.config/gh holds a personal login, so the agent
+      #     would act as - and be billed to - that person;
+      #   - the operator's ~/.gitconfig carries their identity and can carry a
+      #     personal push credential.
+      # The image configures git itself (bot identity + a gh-backed credential
+      # helper) and points gh at an isolated, empty GH_CONFIG_DIR.
 
     environment:
       # Agent credential - REQUIRED. The api-key profile inside claudetm-profiles.
       - CLAUDETM_PROFILE=${CLAUDETM_PROFILE:-agent-dev}
+
+      # GitHub credential (REQUIRED for PR and CI operations): injected per run
+      # from the deployment's environment, never read from disk and never
+      # written into this file. GH_TOKEN is gh's own standard variable;
+      # CLAUDETM_GITHUB_TOKEN is claudetm's alias for the same value.
+      #
+      # The default is empty, never the "${VAR:?...}" form: a missing
+      # credential must fail closed at the gh call - with a message naming the
+      # variable - not stop the container from starting.
+      - GH_TOKEN=${GH_TOKEN:-}
+      - CLAUDETM_GITHUB_TOKEN=${CLAUDETM_GITHUB_TOKEN:-}
+
+      # gh's config directory, isolated inside the container: empty, owned by
+      # claudetm, never the operator's ~/.config/gh. A personal "gh auth login"
+      # is therefore not a fallback - with no credential injected the
+      # container fails closed and names the variable that carries one.
+      - GH_CONFIG_DIR=/home/claudetm/.claudetm/gh
 
       # No password in development (WARNING: insecure!)
       - CLAUDETM_PASSWORD=${CLAUDETM_PASSWORD:-}
@@ -134,6 +162,27 @@ networks:
 #   PROJECT_PATH=../../tmp/test-project
 #   CLAUDETM_PROFILE=agent-dev      # api-key profile in claudetm-profiles
 #   CLAUDETM_PASSWORD=dev-password  # Only if you want auth in dev
+#   GH_TOKEN=github-token-from-your-secret-store   # Agent GitHub credential
+#
+# =============================================================================
+# GitHub credential (per run)
+# =============================================================================
+#
+# Even in development the container gets its own scoped GitHub token - not
+# your personal login:
+#
+#   export GH_TOKEN="$(cat /run/secrets/claudetm_github_token)"
+#   docker compose -f development.yml up
+#
+# The token is a repository-scoped, least-privilege bot credential: no admin
+# scope, so CI, required reviews and branch protection stay mandatory, and it
+# is revoked and rotated independently of the Claude credential. It is read
+# from the environment, never written into this file, never stored in the
+# image and never printed.
+#
+# gh reads its configuration from GH_CONFIG_DIR (/home/claudetm/.claudetm/gh)
+# - an empty directory owned by claudetm - so your ~/.config/gh is never read
+# and a personal "gh auth login" is not a fallback.
 #
 # =============================================================================
 # Agent credential (one time)

@@ -29,6 +29,8 @@ from __future__ import annotations
 import json
 import subprocess
 
+from .gh_auth import gh_subprocess_env
+
 # Annotation text that means no re-run will ever help: the account or repo is
 # not allowed to run jobs at all. Kept narrow and phrase-based — a generic
 # "error" match here would mistake an ordinary failure for a permanent block
@@ -149,6 +151,7 @@ class CIInfraDetector:
                 text=True,
                 check=True,
                 timeout=self.timeout,
+                env=gh_subprocess_env(),
             )
         except (subprocess.SubprocessError, OSError):
             return []
@@ -177,6 +180,7 @@ class CIInfraDetector:
                 text=True,
                 check=True,
                 timeout=self.timeout,
+                env=gh_subprocess_env(),
             )
         except (subprocess.SubprocessError, OSError):
             return None
@@ -231,6 +235,7 @@ def _notice_exists(repo: str, pr_number: int, timeout: int) -> bool | None:
             text=True,
             check=True,
             timeout=timeout,
+            env=gh_subprocess_env(),
         )
     except (subprocess.SubprocessError, OSError):
         return None
@@ -282,6 +287,7 @@ def post_external_block_notice(
             text=True,
             check=True,
             timeout=timeout,
+            env=gh_subprocess_env(),
         )
     except (subprocess.SubprocessError, OSError):
         return False

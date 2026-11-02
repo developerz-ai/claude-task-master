@@ -5,6 +5,7 @@ import subprocess
 from rich.console import Console
 
 from ..core.credentials import CredentialError, CredentialManager
+from ..github.gh_auth import CREDENTIAL_HINT, credential_source, gh_subprocess_env
 
 
 class SystemDoctor:
@@ -31,25 +32,57 @@ class SystemDoctor:
         return self.checks_passed
 
     def _check_gh_cli(self) -> None:
-        """Check if gh CLI is installed and authenticated."""
+        """Check the gh CLI and the agent's GitHub credential.
+
+        The agent's GitHub credential is injected per run through the
+        environment (``GH_TOKEN`` / ``CLAUDETM_GITHUB_TOKEN``). It is never
+        read from disk and never printed: this check reports only whether one
+        was injected and which variable carries it.
+
+        A developer host that has its own ``gh`` login still passes: that
+        login is the developer's own, not the agent's.
+        """
+        source = credential_source()
+        if source is not None:
+            self.console.print(
+                f"[green]✓[/green] GitHub agent credential injected via "
+                f"[cyan]{source}[/cyan] (value hidden)"
+            )
+
         try:
             result = subprocess.run(
                 ["gh", "auth", "status"],
                 check=False,
                 capture_output=True,
                 text=True,
+                env=gh_subprocess_env(),
             )
-
-            if result.returncode == 0:
-                self.console.print("[green]✓[/green] gh CLI installed and authenticated")
-            else:
-                self.console.print("[red]✗[/red] gh CLI not authenticated")
-                self.console.print("  Run: [cyan]gh auth login[/cyan]")
-                self.checks_passed = False
-
         except FileNotFoundError:
             self.console.print("[red]✗[/red] gh CLI not installed")
             self.console.print("  Install from: https://cli.github.com/")
+            self.checks_passed = False
+            return
+
+        if result.returncode == 0:
+            if source is None:
+                self.console.print("[green]✓[/green] gh CLI installed and authenticated")
+                self.console.print(
+                    "  No agent credential injected — this host's gh login is "
+                    f"used. [cyan]{CREDENTIAL_HINT}[/cyan]"
+                )
+            else:
+                self.console.print(
+                    "[green]✓[/green] gh CLI installed and authenticated "
+                    "with the injected credential"
+                )
+        else:
+            if source is None:
+                self.console.print("[red]✗[/red] gh CLI not authenticated")
+            else:
+                self.console.print(
+                    "[red]✗[/red] gh CLI could not authenticate with the injected credential"
+                )
+            self.console.print(f"  [cyan]{CREDENTIAL_HINT}[/cyan]")
             self.checks_passed = False
 
     def _check_credentials(self) -> None:
