@@ -22,7 +22,7 @@ jobs:
     outputs:
       version: ${{ steps.get_version.outputs.version }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Get version from tag
         id: get_version
@@ -84,7 +84,7 @@ jobs:
     timeout-minutes: 15
     needs: verify
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -106,7 +106,7 @@ jobs:
     timeout-minutes: 30
     needs: [verify, test]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -134,7 +134,7 @@ jobs:
     timeout-minutes: 30
     needs: [verify, build]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Extract changelog for this version
         id: changelog
