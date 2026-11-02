@@ -17,3 +17,11 @@ For each unhealthy signal, one ask, unless an open issue already carries its exa
 Titles are stable: nothing that changes run to run (sha, run URL, version) goes in one; that goes in the body,
 with the command and its output. Unreadable evidence is no verdict: re-run it, never file it as a defect.
 A red `main` comes first: nothing releases from it.
+
+## Rows
+
+- `main-green`: The latest push run of `ci.yml` on `main` has conclusion `success` on the `origin/main` tip; a null conclusion or another sha is no verdict.
+- `last-tag-published`: For the last `v[0-9]*` tag reachable from `origin/main`, the last five `publish.yml` runs include `success` on that tag's commit sha; no run on that sha is no verdict.
+- `pypi-serves-tree`: PyPI's `claude-task-master` version equals the version in `pyproject.toml`, or an open release PR or in-flight run explains the difference.
+- `github-release-exists`: The GitHub Release for that last tag is not a draft and is published.
+- `dependabot-not-stuck`: Among the first 100 open Dependabot PRs returned by the table's command, no PR has failed checks and more than 7 days since `updatedAt`.
