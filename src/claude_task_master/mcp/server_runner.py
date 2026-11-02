@@ -3,7 +3,7 @@
 Provides:
 
 - :data:`TransportType` — Literal type for the three transport modes
-- :func:`_get_authenticated_app` — wraps a FastMCP instance in a Starlette app
+- :func:`_get_authenticated_app` — wraps a MCPServer instance in a Starlette app
 - :func:`_run_network_transport_async` — async uvicorn runner for network transports
 - :func:`_log_server_config` — log startup config
 - :func:`run_server` — top-level server launcher
@@ -17,7 +17,7 @@ import os
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.mcpserver import MCPServer
     from starlette.applications import Starlette
 
 # Import auth utilities - optional, only needed for network transports
@@ -43,25 +43,29 @@ TransportType = Literal["stdio", "sse", "streamable-http"]
 
 
 def _get_authenticated_app(
-    mcp: FastMCP,
+    mcp: MCPServer,
     transport: TransportType,
     mount_path: str | None = None,
+    *,
+    host: str = "127.0.0.1",
 ) -> Starlette:
     """Get the Starlette app with authentication middleware if configured.
 
     Args:
-        mcp: The FastMCP server instance.
+        mcp: The MCPServer server instance.
         transport: The transport type (sse or streamable-http).
-        mount_path: Optional mount path for SSE transport.
+        mount_path: Optional mount prefix for the SSE message endpoint.
+        host: Effective bind host, used for transport security defaults.
 
     Returns:
         Starlette application with optional authentication middleware.
     """
     # Get the appropriate app based on transport
     if transport == "sse":
-        app = mcp.sse_app(mount_path)
+        message_path = f"{mount_path.rstrip('/')}/messages/" if mount_path else "/messages/"
+        app = mcp.sse_app(message_path=message_path, host=host)
     else:  # streamable-http
-        app = mcp.streamable_http_app()
+        app = mcp.streamable_http_app(host=host)
 
     # Add authentication middleware if enabled
     if AUTH_AVAILABLE and is_auth_enabled() and add_auth_middleware is not None:
@@ -72,7 +76,7 @@ def _get_authenticated_app(
 
 
 async def _run_network_transport_async(
-    mcp: FastMCP,
+    mcp: MCPServer,
     transport: TransportType,
     host: str,
     port: int,
@@ -84,7 +88,7 @@ async def _run_network_transport_async(
     adding authentication middleware for network transports.
 
     Args:
-        mcp: The FastMCP server instance.
+        mcp: The MCPServer server instance.
         transport: The transport type (sse or streamable-http).
         host: Host to bind to.
         port: Port to bind to.
@@ -93,7 +97,7 @@ async def _run_network_transport_async(
     import uvicorn
 
     # Get the app with authentication
-    app = _get_authenticated_app(mcp, transport, mount_path)
+    app = _get_authenticated_app(mcp, transport, mount_path, host=host)
 
     # Run with uvicorn
     config = uvicorn.Config(
@@ -186,14 +190,9 @@ def run_server(
     # Create the MCP server
     mcp = create_server(name=name, working_dir=working_dir)
 
-    # Configure host/port in FastMCP settings for network transports
-    if transport != "stdio":
-        mcp.settings.host = effective_host
-        mcp.settings.port = effective_port
-
     # Run based on transport type
     if transport == "stdio":
-        # stdio transport - no authentication needed, use FastMCP directly
+        # stdio transport - no authentication needed, use MCPServer directly
         mcp.run(transport="stdio")
     else:
         # Network transports - use custom runner with authentication

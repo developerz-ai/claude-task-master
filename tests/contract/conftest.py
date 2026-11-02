@@ -28,11 +28,14 @@ try:
 except ImportError:
     _FASTAPI_AVAILABLE = False
 
+# Do not turn an installed but incompatible MCP SDK into skipped coverage.
 try:
-    import mcp.server.fastmcp as _mcp_fastmcp  # noqa: F401
+    from mcp.server.mcpserver import MCPServer as _MCPServer
 
-    _MCP_AVAILABLE = _mcp_fastmcp is not None
-except ImportError:
+    _MCP_AVAILABLE = _MCPServer is not None
+except ModuleNotFoundError as exc:
+    if exc.name != "mcp":
+        raise
     _MCP_AVAILABLE = False
 
 # Skip entire module when either transport is missing.

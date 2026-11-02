@@ -11,13 +11,14 @@ import pytest
 
 from claude_task_master.core.state import StateManager, TaskOptions
 
-# Skip all MCP tests if MCP is not installed
+# Only a missing SDK is optional; an installed incompatible SDK must fail collection.
 try:
-    import mcp.server.fastmcp as _mcp_fastmcp  # noqa: F401
+    from mcp.server.mcpserver import MCPServer as _MCPServer
 
-    # Use the import to ensure it's not flagged as unused
-    MCP_AVAILABLE = _mcp_fastmcp is not None
-except ImportError:
+    MCP_AVAILABLE = _MCPServer is not None
+except ModuleNotFoundError as exc:
+    if exc.name != "mcp":
+        raise
     MCP_AVAILABLE = False
 
 # Apply skip marker to all tests in this package

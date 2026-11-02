@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import uvicorn
+from starlette.applications import Starlette
+from starlette.routing import Mount, Route, WebSocketRoute
 
 from claude_task_master.server import (
     MCP_PORT,
@@ -26,6 +30,25 @@ from claude_task_master.server import (
 
 if TYPE_CHECKING:
     pass
+
+
+def _route_paths(app: Starlette) -> set[str]:
+    """Return the paths of the routes on *app* that carry one.
+
+    ``Starlette.routes`` is a list of ``BaseRoute``; only the path-bearing
+    subclasses (``Route``, ``WebSocketRoute``, ``Mount``) expose ``.path``.
+    """
+    return {route.path for route in app.routes if isinstance(route, (Route, WebSocketRoute, Mount))}
+
+
+def _middleware_classes(app: Starlette) -> Sequence[object]:
+    """Return the middleware classes installed on *app*.
+
+    ``Middleware.cls`` is typed as a factory protocol, so the classes are
+    handed back as plain objects: the identity check against a concrete
+    middleware class stays exact without a false non-overlap report.
+    """
+    return [middleware.cls for middleware in app.user_middleware]
 
 
 class TestEnvironmentDefaults:
@@ -148,70 +171,54 @@ class TestRunRestServer:
 
 
 class TestRunMcpServer:
-    """Tests for MCP server runner."""
+    """Real SDK settings and app factories must work in the unified runner."""
 
     @pytest.mark.asyncio
-    async def test_run_mcp_server_starts(self) -> None:
-        """Test MCP server starts correctly."""
-        mock_server = AsyncMock()
-        mock_server.serve = AsyncMock()
-        mock_mcp = MagicMock()
-        mock_mcp.settings = MagicMock()
+    @pytest.mark.parametrize("transport", ["sse", "streamable-http"])
+    async def test_run_mcp_server_starts(self, tmp_path, monkeypatch, transport) -> None:
+        from mcp.server.mcpserver import MCPServer
+
+        from claude_task_master.auth.middleware import PasswordAuthMiddleware
+        from claude_task_master.mcp.server import create_server
+
+        monkeypatch.setenv("CLAUDETM_PASSWORD", "test-password")
+        monkeypatch.delenv("CLAUDETM_PASSWORD_HASH", raising=False)
+        server = create_server(working_dir=str(tmp_path))
+        assert isinstance(server, MCPServer)
+        factory = "sse_app" if transport == "sse" else "streamable_http_app"
+        configs: list[uvicorn.Config] = []
+
+        async def serve(uvicorn_server: uvicorn.Server) -> None:
+            configs.append(uvicorn_server.config)
 
         with (
-            patch(
-                "claude_task_master.mcp.server.create_server", return_value=mock_mcp
-            ) as mock_create,
-            patch(
-                "claude_task_master.mcp.server._get_authenticated_app",
-                return_value=MagicMock(),
-            ),
-            patch("uvicorn.Config") as mock_config,
-            patch("uvicorn.Server", return_value=mock_server),
+            patch("claude_task_master.mcp.server.create_server", return_value=server) as create,
+            patch.object(server, factory, wraps=getattr(server, factory)) as app_factory,
+            patch("uvicorn.Server.serve", autospec=True, side_effect=serve) as serving,
         ):
             await _run_mcp_server(
-                host="127.0.0.1",
-                port=8080,
-                working_dir=Path("/tmp"),
-                transport="sse",
-            )
-
-            mock_create.assert_called_once()
-            mock_config.assert_called_once()
-            mock_server.serve.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    async def test_run_mcp_server_streamable_http(self) -> None:
-        """Test MCP server starts with streamable-http transport."""
-        mock_server = AsyncMock()
-        mock_server.serve = AsyncMock()
-        mock_mcp = MagicMock()
-        mock_mcp.settings = MagicMock()
-
-        with (
-            patch(
-                "claude_task_master.mcp.server.create_server", return_value=mock_mcp
-            ) as mock_create,
-            patch(
-                "claude_task_master.mcp.server._get_authenticated_app",
-                return_value=MagicMock(),
-            ) as mock_get_app,
-            patch("uvicorn.Config") as mock_config,
-            patch("uvicorn.Server", return_value=mock_server),
-        ):
-            await _run_mcp_server(
-                host="127.0.0.1",
-                port=8080,
-                working_dir=Path("/tmp"),
-                transport="streamable-http",
+                host="0.0.0.0",
+                port=9080,
+                working_dir=tmp_path,
+                transport=transport,
                 log_level="debug",
             )
-
-            mock_create.assert_called_once()
-            # Verify transport was passed to authenticated app
-            assert mock_get_app.call_args[0][1] == "streamable-http"
-            mock_config.assert_called_once()
-            mock_server.serve.assert_awaited_once()
+        create.assert_called_once_with(name="claude-task-master", working_dir=str(tmp_path))
+        if transport == "sse":
+            app_factory.assert_called_once_with(message_path="/messages/", host="0.0.0.0")
+        else:
+            app_factory.assert_called_once_with(host="0.0.0.0")
+        serving.assert_awaited_once()
+        assert server.settings.log_level == "DEBUG"
+        assert not hasattr(server.settings, "host")
+        assert not hasattr(server.settings, "port")
+        config = configs[0]
+        assert (config.host, config.port, config.log_level) == ("0.0.0.0", 9080, "debug")
+        app = config.app
+        assert isinstance(app, Starlette)
+        expected_path = "/sse" if transport == "sse" else "/mcp"
+        assert expected_path in _route_paths(app)
+        assert any(cls is PasswordAuthMiddleware for cls in _middleware_classes(app))
 
 
 class TestSetupSignalHandlers:

@@ -60,17 +60,12 @@ if TYPE_CHECKING:
 
 # Import MCP SDK - using try/except for graceful degradation.
 #
-# The failure is recorded, not just flattened to None: "absent" and "present but
-# the wrong major version" need different advice, and conflating them cost real
-# debugging time. mcp 2.x renamed FastMCP to MCPServer and deleted
-# mcp.server.fastmcp, so on 2.x this ImportError fires with mcp very much
-# installed — and telling the user to "pip install mcp" then sends them in a
-# circle.
+# Preserve the import evidence: an absent SDK and an installed but incompatible
+# API need different diagnostics.
 _MCP_IMPORT_ERROR: str | None = None
 try:
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.mcpserver import MCPServer
 except ImportError as _exc:  # pragma: no cover - depends on the installed mcp
-    FastMCP = None  # type: ignore[misc, assignment]
     _MCP_IMPORT_ERROR = str(_exc)
 
 
@@ -89,11 +84,10 @@ def _mcp_unavailable_message() -> str:
         installed = ""
 
     if not installed:
-        return "MCP SDK not installed. Install with: pip install 'mcp<2'"
+        return "MCP SDK not installed. Install with: pip install 'mcp>=2.1.1,<3'"
     return (
         f"MCP SDK {installed} is installed but incompatible: claude-task-master "
-        f"needs mcp<2 (2.x renamed FastMCP to MCPServer and removed "
-        f"mcp.server.fastmcp). Fix with: pip install 'mcp<2'"
+        "needs the MCP 2 MCPServer API. Fix with: pip install --upgrade 'mcp>=2.1.1,<3'"
         + (f" [import error: {_MCP_IMPORT_ERROR}]" if _MCP_IMPORT_ERROR else "")
     )
 
@@ -124,7 +118,7 @@ _MCP_PORT = int(os.getenv("CLAUDETM_MCP_PORT", "8080"))
 def create_server(
     name: str = "claude-task-master",
     working_dir: str | None = None,
-) -> FastMCP:
+) -> MCPServer:
     """Create and configure the MCP server with all tools.
 
     Args:
@@ -132,18 +126,18 @@ def create_server(
         working_dir: Working directory for task execution. Defaults to cwd.
 
     Returns:
-        Configured FastMCP server instance.
+        Configured MCPServer instance.
 
     Raises:
         ImportError: If MCP SDK is not installed.
     """
     import time
 
-    if FastMCP is None:
+    if _MCP_IMPORT_ERROR is not None:
         raise ImportError(_mcp_unavailable_message())
 
     # Create the server
-    mcp = FastMCP(name)
+    mcp = MCPServer(name)
 
     # Store working directory in server context
     work_dir = Path(working_dir) if working_dir else Path.cwd()

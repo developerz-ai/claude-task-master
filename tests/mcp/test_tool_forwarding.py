@@ -14,7 +14,7 @@ server and are skipped when the SDK is unavailable.
 import asyncio
 import inspect
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -89,24 +89,76 @@ class TestForwardingTableSchemas:
                 name for name in inspect.signature(spec.fn).parameters if name != "work_dir"
             }
             tool = tools_by_name[spec.fn.__name__]
-            actual = set(tool.inputSchema.get("properties", {}))
+            actual = set(tool.input_schema.get("properties", {}))
             assert actual == expected, f"{spec.fn.__name__} drifted: {actual} != {expected}"
 
     def test_initialize_task_exposes_enable_verification(self, temp_dir):
         """The drift that motivated the table: enable_verification is exposed."""
-        props = _tools_by_name(temp_dir)["initialize_task"].inputSchema.get("properties", {})
+        props = _tools_by_name(temp_dir)["initialize_task"].input_schema.get("properties", {})
         assert "enable_verification" in props
         assert "enable_release" in props
 
     def test_update_config_exposes_enable_verification(self, temp_dir):
         """update_config also exposes its full option set (same latent drift)."""
-        props = _tools_by_name(temp_dir)["update_config"].inputSchema.get("properties", {})
+        props = _tools_by_name(temp_dir)["update_config"].input_schema.get("properties", {})
         assert "enable_verification" in props
 
     def test_model_param_has_no_restrictive_pattern(self, temp_dir):
         """The model param is a plain string; validation is centralised, not a regex."""
-        model = _tools_by_name(temp_dir)["initialize_task"].inputSchema["properties"]["model"]
+        model = _tools_by_name(temp_dir)["initialize_task"].input_schema["properties"]["model"]
         assert "pattern" not in model
+
+
+@pytest.mark.skipif(not MCP_AVAILABLE, reason="MCP SDK not installed")
+class TestRealForwardingCalls:
+    """SDK validation and structured results preserve the forwarding contract."""
+
+    @pytest.mark.parametrize(
+        "arguments,tail,state_dir",
+        [
+            ({}, 100, None),
+            ({"tail": 7, "state_dir": "/custom/state"}, 7, "/custom/state"),
+            ({"tail": 2, "state_dir": None}, 2, None),
+        ],
+    )
+    def test_registered_tool_call(self, temp_dir, arguments, tail, state_dir):
+        from mcp.server.mcpserver import MCPServer
+        from mcp.types import CallToolResult
+
+        from claude_task_master.mcp import tools
+
+        server = MCPServer("forwarding-test")
+        register_forwarding_tool(
+            server, ForwardingSpec(tools.get_logs, "Read task logs"), work_dir=temp_dir
+        )
+        listed = asyncio.run(server.list_tools())
+        assert len(listed) == 1
+        tool = listed[0]
+        assert tool.name == "get_logs"
+        assert tool.description == "Read task logs"
+        props = tool.input_schema["properties"]
+        assert set(props) == {"tail", "state_dir"}
+        assert props["tail"]["type"] == "integer"
+        assert props["tail"]["default"] == 100
+        assert {item["type"] for item in props["state_dir"]["anyOf"]} == {"string", "null"}
+
+        # Keep the actual handler and SDK; only replace the business service.
+        with patch("claude_task_master.mcp.tool_handlers_task._task_service") as service:
+            service.return_value.get_logs.return_value = MagicMock(
+                success=True, data={"log_content": "hello", "log_file": "run.log"}
+            )
+            result = asyncio.run(server.call_tool("get_logs", arguments))
+        service.assert_called_once_with(temp_dir, state_dir)
+        service.return_value.get_logs.assert_called_once_with(tail)
+        assert isinstance(result, CallToolResult)
+        assert not result.is_error
+        assert result.structured_content == {
+            "success": True,
+            "log_content": "hello",
+            "log_file": "run.log",
+            "error": None,
+        }
+        assert result.content
 
 
 @pytest.mark.skipif(not MCP_AVAILABLE, reason="MCP SDK not installed")
@@ -117,6 +169,6 @@ class TestRepoToolNaming:
         """setup_repo/plan_repo expose work_dir, not the drifted repo_dir."""
         tools_by_name = _tools_by_name(temp_dir)
         for name in ("setup_repo", "plan_repo"):
-            props = tools_by_name[name].inputSchema.get("properties", {})
+            props = tools_by_name[name].input_schema.get("properties", {})
             assert "work_dir" in props, f"{name} missing work_dir"
             assert "repo_dir" not in props, f"{name} still exposes repo_dir"

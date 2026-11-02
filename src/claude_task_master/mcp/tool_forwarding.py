@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
     from pathlib import Path
 
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.mcpserver import MCPServer
 
 # The injected parameter every forwarding tool supplies from server state rather
 # than exposing to clients. It must be the underlying function's first parameter.
@@ -50,15 +50,15 @@ class ForwardingSpec:
     description: str
 
 
-def register_forwarding_tool(mcp: FastMCP, spec: ForwardingSpec, *, work_dir: Path) -> None:
+def register_forwarding_tool(mcp: MCPServer, spec: ForwardingSpec, *, work_dir: Path) -> None:
     """Register one forwarding tool on ``mcp``, injecting ``work_dir``.
 
     The generated wrapper's signature is the underlying function's signature with
-    the leading ``work_dir`` parameter removed, so FastMCP builds the tool schema
+    the leading ``work_dir`` parameter removed, so MCPServer builds the tool schema
     straight from the source of truth.
 
     Args:
-        mcp: The FastMCP server to register the tool on.
+        mcp: The MCPServer server to register the tool on.
         spec: The forwarding specification (underlying function + description).
         work_dir: The server working directory injected into every call.
 
@@ -68,7 +68,7 @@ def register_forwarding_tool(mcp: FastMCP, spec: ForwardingSpec, *, work_dir: Pa
     fn = spec.fn
     # eval_str resolves the ``from __future__ import annotations`` string
     # annotations to real types using ``fn``'s module globals, so the generated
-    # wrapper carries concrete types (not unresolved strings) for FastMCP.
+    # wrapper carries concrete types (not unresolved strings) for MCPServer.
     signature = inspect.signature(fn, eval_str=True)
     params = list(signature.parameters.values())
     if not params or params[0].name != _INJECTED_PARAM:
@@ -97,12 +97,12 @@ def register_forwarding_tool(mcp: FastMCP, spec: ForwardingSpec, *, work_dir: Pa
 
 
 def register_forwarding_tools(
-    mcp: FastMCP, specs: Iterable[ForwardingSpec], *, work_dir: Path
+    mcp: MCPServer, specs: Iterable[ForwardingSpec], *, work_dir: Path
 ) -> None:
     """Register every :class:`ForwardingSpec` in ``specs`` on ``mcp``.
 
     Args:
-        mcp: The FastMCP server to register the tools on.
+        mcp: The MCPServer server to register the tools on.
         specs: The forwarding specifications to register.
         work_dir: The server working directory injected into every call.
     """
