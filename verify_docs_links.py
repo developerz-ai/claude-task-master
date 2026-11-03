@@ -107,16 +107,16 @@ def verify_link(
     if not path_part:
         return True, ""
 
-    # Resolve relative path from source file
+    # Resolve relative path strictly against the source document's directory.
+    # There is deliberately no retry against the repository root: a link that
+    # only resolves from the root (e.g. "../docs/docker.md" inside
+    # examples/docker-compose/) is broken for the reader who follows it.
     source_dir = source_file.parent
     target_path = (source_dir / path_part).resolve()
 
     # Check if file exists
     if not target_path.exists():
-        # Try from root directory
-        target_path = (root_dir / path_part.lstrip("./")).resolve()
-        if not target_path.exists():
-            return False, f"File not found: {path_part}"
+        return False, f"File not found: {path_part}"
 
     # If anchor specified, check it exists
     if anchor:
