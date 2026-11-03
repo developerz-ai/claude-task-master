@@ -33,4 +33,4 @@ Python 3.14 + uv (Typer CLI, FastAPI, MCP). The gate is `bin/check` (`uv run ruf
 - `bin/claudetm` and `src/claude_task_master/bin/claudetm` being two copies — `scripts/sync_version.py` keeps their `SCRIPT_VERSION` in sync.
 - The mypy overrides for `claude_agent_sdk`, `mcp`, `fastapi`, `uvicorn`, `passlib` and `anthropic` — third-party stubs are absent by design.
 - The `Co-Authored-By` trailer in commit messages.
-- A local gate run with `-n 2` workers and `--timeout=120`; CI uses `-n auto --timeout=120` and a shared box caps para [trimmed]
+- A local gate run with `-n 2` workers and `--timeout=120`; CI uses `-n auto --timeout=120` and a shared box caps parallelism — the smaller local worker count is deliberate, not a defect.
