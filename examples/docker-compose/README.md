@@ -526,10 +526,10 @@ docker compose exec -T claudetm tar -xzf - -C /app/project < backup-20240101.tar
 
 ## Additional Resources
 
-- [Docker Documentation](../docs/docker.md) - Complete Docker deployment guide
-- [Authentication Guide](../docs/authentication.md) - Authentication setup and configuration
-- [Webhooks Guide](../docs/webhooks.md) - Webhook configuration and events
-- [API Reference](../docs/api-reference.md) - REST API documentation
+- [Docker Documentation](../../docs/docker.md) - Complete Docker deployment guide
+- [Authentication Guide](../../docs/authentication.md) - Authentication setup and configuration
+- [Webhooks Guide](../../docs/webhooks.md) - Webhook configuration and events
+- [API Reference](../../docs/api-reference.md) - REST API documentation
 
 ## Support
 

@@ -1,731 +1,187 @@
 # CLAUDE.md
 
-Project instructions for Claude Code when working with Claude Task Master.
-
-## Project Overview
-
-Autonomous task orchestration system that uses Claude Agent SDK to keep Claude working until a goal is achieved. Uses OAuth credentials from `~/.claude/.credentials.json` for authentication.
-
-**Core Philosophy**: Claude is smart enough to do work AND verify it. Task master keeps the loop going and persists state.
-
-### Key Capabilities
-
-- **Autonomous Execution** - Runs until goal achieved or needs human input
-- **PR-Based Workflow** - All work flows through pull requests for review
-- **CI/CD Integration** - Handles CI failures and review comments together in one step
-- **Mailbox System** - Accept dynamic plan updates while working (REST API, MCP, or CLI)
-- **Multi-Instance Coordination** - Multiple claudetm instances can communicate via mailbox
-- **State Persistence** - Survives interruptions, resumes where it left off
-- **Resume with Message** - Update the plan mid-execution with `claudetm resume "message"`
-
-## Installation
-
-### Global Install (Recommended for usage)
-```bash
-# Install globally via uv tools
-uv tool install /path/to/claude-task-master
-
-# Or reinstall after changes
-uv tool install --force --reinstall /path/to/claude-task-master
-
-# Verify installation
-claudetm doctor
-```
-
-### Development Install (For contributing)
-```bash
-# Clone and setup
-uv sync --all-extras             # Install dependencies in .venv
-./scripts/setup-hooks.sh         # Install git pre-commit hooks
-uv run claudetm doctor           # Check system (runs from .venv)
-```
-
-## Quick Start
-
-```bash
-# Usage (after global install)
-cd <project-dir>
-claudetm start "Your task here" --max-sessions 10
-claudetm start "Add feature" --prs 1         # Limit to 1 PR
-claudetm start "Implement API" --prs 3 -n 10 # Max 3 PRs, 10 sessions
-claudetm start "Fix bug" --budget 5.00       # $5 per session cap
-claudetm status           # Check progress
-claudetm plan             # View task list
-claudetm clean -f         # Clean state
-
-# Or with uv run (development mode)
-uv run claudetm start "Your task here"
-```
-
-## Development
-
-```bash
-pytest                    # Run tests
-ruff check . && ruff format .  # Lint & format
-mypy .                    # Type check
-```
-
-## Releasing
-
-```bash
-# 1. Update version in all places (CI's verify job checks the first three):
-#    - pyproject.toml (version = "X.Y.Z")
-#    - src/claude_task_master/__init__.py (__version__ = "X.Y.Z")
-#    - bin/claudetm AND src/claude_task_master/bin/claudetm (SCRIPT_VERSION="X.Y.Z")
-#      Two copies; the packaged one ships. It is what `claudetm --version` prints
-#      first, so a stale value reports a release the user is not on.
-#    - CHANGELOG.md (add entry, update links at bottom)
-
-# 2. Commit and tag
-git add -A && git commit -m "chore: Release vX.Y.Z"
-git tag vX.Y.Z
-git push origin main --tags
-
-# 3. CI publishes to PyPI automatically on tag push
-# 4. Install from PyPI after release:
-uv tool install claude-task-master --force --reinstall
-```
-
-## Architecture
-
-**Components** (Single Responsibility):
-1. **Credential Manager** - OAuth from `~/.claude/.credentials.json` (nested `claudeAiOauth` structure)
-2. **State Manager** - Persistence to `.claude-task-master/`
-3. **Agent Wrapper** - Claude Agent SDK `query()` with real-time streaming
-4. **Planner** - Planning phase (read-only tools)
-5. **Plan Updater** - Updates existing plans with change requests (for `resume "message"`)
-6. **Work Loop Orchestrator** - Execution loop with task tracking, mailbox checks
-7. **Mailbox** - Inter-instance communication for dynamic plan updates
-8. **PR Context Manager** - CI failures + review comments fetched together
-9. **Logger** - Consolidated `logs/run-{timestamp}.txt`
-
-**Tool Configurations by Phase**:
-| Phase | Tools | Purpose |
-|-------|-------|---------|
-| PLANNING | Read, Glob, Grep, WebFetch, WebSearch | Explore codebase + research web for documentation, output plan as TEXT (orchestrator saves to plan.md) |
-| VERIFICATION | Read, Glob, Grep, Bash | Run tests/lint to verify success criteria |
-| WORKING | All tools | Implement tasks with full access |
-
-These sets are a strong **default, not enforcement**: `allowed_tools` is the SDK's *auto-approve* list, and restricting what exists needs `tools=`, which claudetm never passes while running `permission_mode="bypassPermissions"`. So a planning session is read-only by convention and prompt, not by a sandbox. The same fact is why the WORKING phase can spawn subagents with no code change at all — `tools.working` defaults to `[]`, i.e. unrestricted.
-
-**Task Complexity Levels** (for dynamic model routing + effort-based thinking):
-| Complexity | Tag | Model | Effort | Use Case |
-|------------|-----|-------|--------|----------|
-| CODING | `[coding]` | Opus 5 (1M) | max | Complex implementation tasks, new features, intricate logic |
-| QUICK | `[quick]` | Haiku | low | Simple fixes, configuration changes, small tweaks |
-| GENERAL | `[general]` | Sonnet | medium | Tests, documentation, moderate refactoring, balanced tasks |
-| DEBUGGING_QA | `[debugging-qa]` | Sonnet 1M | high | CI failures, bug tracing, visual QA, log analysis (1M context) |
-
-When uncertain, default to `[coding]` (uses the smartest model). The smartest tier is **Claude Opus 5** (`claude-opus-5`) — see the `opus` default in `ModelConfig` in `core/config.py`. `context_windows.opus` defaults to `1_000_000` because Claude Code upgrades Opus to 1M automatically on Max/Team/Enterprise (on Pro that upgrade is billed to usage credits — set `200000` there). Do **not** write the model id as `claude-opus-5[1m]`: the `[1m]` suffix is a Claude Code alias convention, accepted by the CLI but a `404 not_found_error` on `GET /v1/models`, so it is not a portable model string. The window is configured via `context_windows.opus`, not a suffixed model id.
-
-`context_windows` is **currently inert** — nothing reads it. `get_context_window`, `MODEL_CONTEXT_WINDOWS` and `DEFAULT_COMPACT_THRESHOLD_PERCENT` (`core/agent_models.py`) are referenced only by the re-exports in `core/__init__.py`; no value derived from `config.context_windows` reaches `ClaudeAgentOptions` or any compaction logic, so setting it changes no behaviour today. The config surface stays (config key, `CLAUDETM_CONTEXT_*`, per-profile overrides) and the defaults are written for its *intended* meaning: an auto-compact threshold, never a grant of a larger window — over-stating it would compact too late and overflow the session; under-stating it compacts early, which is harmless. On that reading `sonnet` stays at `200_000`: on a subscription the 1M Sonnet window is the paid extra, so it is opt-in rather than assumed. An opt-in `fable` tier (**Claude Fable 5**, `claude-fable-5`, premium-priced) exists alongside it — configured via the `"fable"` config key or `CLAUDETM_MODEL_FABLE`, mirroring Claude Code's `ANTHROPIC_DEFAULT_FABLE_MODEL`. No complexity level routes to it by default (2x Opus pricing); users opt in via `CLAUDETM_MODEL_FABLE=claude-fable-5` or by passing the `fable` model key explicitly. The `sonnet_1m` tier uses Sonnet with 1M context (e.g., `claude-sonnet-5` configured as `CLAUDETM_MODEL_SONNET_1M` for log analysis). Fallback: Fable → Opus → Sonnet → Haiku.
-
-**Fallback Models**: If primary model is unavailable, auto-fallback: Fable → Opus → Sonnet → Haiku.
-
-**State Directory**:
-```
-.claude-task-master/
-├── goal.txt              # User goal
-├── criteria.txt          # Success criteria
-├── plan.md               # Tasks (markdown checkboxes, with per-PR release checks)
-├── state.json            # Machine state
-├── progress.md           # Progress summary
-├── context.md            # Accumulated learnings
-├── coding-style.md       # Coding style guide (generated from CLAUDE.md)
-├── release.md            # Release guide (generated by probing deploy infrastructure)
-├── mailbox.json          # Pending messages for plan updates
-├── logs/
-│   └── run-*.txt         # Last 10 logs kept
-└── debugging/
-    └── pr/
-        └── {number}/     # PR-specific context
-            ├── ci/
-            │   └── *.log # CI failure logs (chunked, ~20KB per file)
-            └── comments/ # Review comments
-```
-
-## Exit Codes
-
-- **0 (Success)**: Tasks done, cleanup all except logs/, coding-style.md, and release.md, keep last 10 logs
-- **1 (Blocked)**: Need intervention, keep everything for resume
-- **2 (Interrupted)**: Ctrl+C, keep everything for resume
-
-## Key Implementation Details
-
-### Credentials Loading
-- File structure: `{"claudeAiOauth": {accessToken, refreshToken, expiresAt, ...}}`
-- `expiresAt` is milliseconds (int), divide by 1000 for datetime
-- Agent SDK auto-uses OAuth from credentials file
-- **Token refresh is handled automatically by Claude Agent SDK/binary** - we don't manually refresh
-- If auth fails, re-run `claude` CLI to re-authenticate
-
-### Agent SDK Integration
-- Use `query()` with `ClaudeAgentOptions(allowed_tools=[], permission_mode="bypassPermissions")`
-- Message types: `TextBlock`, `ToolUseBlock`, `ToolResultBlock`, `ResultMessage`
-- The working directory is **passed** to the SDK as `cwd=str(self.working_dir)` in `ClaudeAgentOptions`; the process never `chdir`s (`core/agent_query_execute.py`). A global chdir would race concurrent queries in server mode — and it is exactly what makes concurrent subagents inside one session safe. The directory is checked for existence first so a missing path fails clearly instead of as a cryptic SDK error
-- Stream output real-time: tool use and results print via `core/console.py` as ANSI-coloured `[claude HH:MM:SS N/M] …` lines (`Using tool: <name> <detail>`, then `Tool completed` / `Tool error`). No emoji anywhere in the printer
-
-### Task Management
-- Parse `- [ ]` and `- [x]` from plan.md
-- Check `_is_task_complete()` before running (skip if [x])
-- Mark complete with `_mark_task_complete()`
-- Advance `current_task_index` to the last task the session actually completed, and save state. Treat it as the loop's **cursor**, not a counter that only goes up: several sites move it forward (the per-task advance, the group-shipping path, post-merge), one deliberately **rewinds** it so a skipped task still closes its group (`loop_working_stage`), and plan updates reconcile it against the rewritten plan (mailbox processing and `resume "message"`). Hive fan-out does not touch this: a session that split its task across workers still advances the cursor by exactly one task
-
-### Work Completion Requirements
-
-What a task owes depends on where it sits in its PR group — `should_create_pr = state.options.pr_per_task or is_last_in_group` (`core/task_runner_session.py`):
-
-- **Not the last task of its group** — the default mode, and most tasks — owes a **commit only**. The prompt is `_build_commit_only_execution` ("DO NOT create PR yet"), and its completion block requires a commit hash and nothing else. Pushing early would open a PR for half a group.
-- **The last task of its group, and every task under `--pr-per-task`** owes all three: commit with a descriptive message, `git push -u origin HEAD`, `gh pr create …` — and must report both the commit hash AND the PR URL.
-
-Either way the agent's report is not the evidence. The orchestrator checks the repository: a session that leaves a dirty tree did not finish, whatever it claimed (see *Unfinished sessions*).
-
-### CLI Commands
-All commands check `state_manager.exists()` first:
-- `start`: Initialize and run planning → work loop. Flags worth knowing: `--admin`, `--sync-before-merge` (both opt-in), `--no-parallel` (turns off hive fan-out, which is on by default — see below)
-- `resume`: Resume paused task, optionally with message to update plan first
-- `status`: Show goal, status, session count, options
-- `plan`: Display plan.md with markdown rendering
-- `logs`: Show last N lines from log file
-- `progress`: Display progress.md
-- `context`: Display context.md
-- `merge-pr`: Monitor PR, fix CI/comments/conflicts, then merge (alias: `fix-pr`)
-- `clean`: Remove .claude-task-master/ with confirmation
-- `mailbox`: Show mailbox status
-- `mailbox send "msg"`: Send message to mailbox
-- `mailbox clear`: Clear pending messages
-- `profile`: Manage auth profiles (`add`/`list`/`use`/`show`/`remove`/`login`)
-- `update`: Self-update from PyPI via `uv tool install --force --reinstall` (pipx fallback); `--check` only reports whether a newer version exists
-
-### Profiles (Multi-Account / Custom Endpoints)
-- Profiles isolate credentials so multiple Claude subscriptions (or a custom Anthropic-compatible endpoint) can be used without colliding on the global `~/.claude/.credentials.json`
-- Two types: `oauth` (isolated `CLAUDE_CONFIG_DIR` per profile under `~/.claudetm/profiles/<name>/`) and `api-key` (injects `ANTHROPIC_API_KEY`/`ANTHROPIC_BASE_URL`, e.g. z.ai/GLM)
-- Registry at `~/.claudetm/profiles.json` (override base dir with `CLAUDETM_HOME`); active profile is a single pointer, overridable per-run via `CLAUDETM_PROFILE`
-- **`default` is reserved** (`DEFAULT_PROFILE_NAME`) for the ambient Claude Code login at `~/.claude` / `CLAUDE_CONFIG_DIR` — the credentials used when no profile is selected. It has no registry entry, so `use("default")` *clears* the pointer and returns None, and `resolve_active` maps the name to None instead of raising. `add` rejects it; a pre-existing registry profile of that name still shadows the built-in everywhere (lookups check the registry first)
-- The active profile's env is injected at the SDK subprocess boundary (`core/agent_query_execute.py`); `CredentialManager` reads the active oauth profile's config dir, and short-circuits the OAuth file check for `api-key` profiles
-- Different accounts run in parallel safely (per-profile creds dir + per-project state); running the *same* subscription twice can trigger OAuth refresh-token rotation — use a distinct profile per concurrent run
-
-### Mailbox System
-- Messages stored in `.claude-task-master/mailbox.json`
-- Checked after each task completion by orchestrator
-- Multiple messages merged with priority ordering (urgent → low)
-- Merged message triggers plan update via `PlanUpdater`
-- REST: `POST /mailbox/send`, `GET /mailbox`, `DELETE /mailbox`
-- MCP: `send_message`, `check_mailbox`, `clear_mailbox` tools
-
-### Resume with Message
-- `claudetm resume "change"` updates plan before resuming
-- Uses `PlanUpdater` to integrate change request into existing plan
-- Preserves completed tasks, modifies pending tasks as needed
-
-### Unfinished sessions (a session that stops mid-task never counts as done)
-
-A work session can end without finishing: the SDK cuts it off (`error_max_turns`, budget cap, `error_during_execution`), or the agent ends its turn waiting on a backgrounded check and the harness kills it. Neither looks like a failure — the second one is a perfectly clean `end_turn` — so the loop used to check the task `[x]`, advance to `pr_created`, find no PR and a dirty tree, and block for a human.
-
-Two independent signals decide whether a session satisfied its contract (`_LoopWorkingStageMixin._session_unfinished_reason`):
-
-- **the SDK's terminal result** — an error result surfaces as `run_work_session` returning `"ran_incomplete"` (`task_runner_session`), derived from `ResultMessage.is_error`
-- **a clean working tree** — the session's own contract is "commit your work", so leftover changes mean it stopped mid-task. Probed in the project dir, not the process cwd. A failed probe (no git, not a repo, timeout) is never read as unfinished
-
-Unfinished → the task is **not** checked off and the same task re-runs, with a `**Retry N**` note in its prompt telling it the leftover diff is its own work to finish, not redo. **That note is driven by the working tree, not by the counter** (`_TaskRunnerSessionMixin._continuation_note`): `task_finish_attempts` is only incremented after the orchestrator *observes* an unfinished session, which a killed process never gets to do. A run that dies mid-session — Ctrl+C, OOM, the machine going down — used to resume into a plain prompt with a large uncommitted diff and no explanation, and the agent could redo the work or throw it away. A dirty tree entering a work session now says so on its own, names the leftover paths (capped at 40 lines / 2000 chars, truncation marked), and forbids discarding them: `git checkout --`/`restore`/`stash`/`reset --hard`/`clean` are unrecoverable, and starting over from a clean tree is the one always-wrong outcome. Bounded by `MAX_TASK_FINISH_ATTEMPTS` (2, `state.task_finish_attempts`); after that the task is checked off anyway and the PR stage takes over — the finish session below can still ship a dirty tree, so a stubborn task must not deadlock the run. Retries burn sessions, so `--max-sessions` still bounds everything.
-
-**The terminal result must survive the CLI's exit code.** After an error result the CLI exits non-zero *on purpose* (for shell consumers), and the SDK turns that trailing `ProcessError` into a bare `Exception("Claude Code returned an error result: <subtype>")` raised from the *next* `__anext__()`. Raising it buried the outcome the `ResultMessage` had already reported and killed the whole run — one `Connection closed mid-response` blip ended a 22-task unattended run at task 1. `_execute_query` now tracks `terminal_result_seen`: once a `ResultMessage` arrives the session is over, so any later stream error or stall closes the stream and returns the accumulated text, and the caller derives `ran_incomplete` from `is_error` as designed. The guard is scoped to *post-terminal* teardown — an error with no terminal result behind it still reaches the retry path.
-
-Relatedly, an unclassified `QueryExecutionError` (a CLI crash whose text carries no keyword `_classify_api_error` recognises) is no longer fatal on sight: it retries under the same failure budget as a connection error (`rate_limit_config.max_retries`), and only a persistent one raises `ConsecutiveFailuresError`.
-
-### Error classification reads the payload, not the prose (`core/agent_error_classify.py`)
-
-The verdict decides whether an unattended run **retries or dies** — `TRANSIENT_ERRORS` members are
-retried under the failure budget, everything else propagates — so it is no longer derived from
-substring matching alone. `claude-agent-sdk` >= 0.2.140 raises **`ResultError`** (a `ProcessError`
-subclass) when the CLI exits after a terminal error result, carrying `api_error_status`, `subtype`,
-`terminal_reason`, `errors` and `result`. An HTTP status is a fact; a substring is a guess, so the
-structured payload is consulted first: 429 → rate limit, 401/403 → auth, 404 *with* a model
-mentioned → the fallback chain, 408/504 → timeout, any other 5xx → server error.
-
-`str(ResultError)` is **only** `"Claude Code returned an error result: <subtype> (exit code: 1)"` —
-the prose naming the actual failure lives in `errors`/`result`. So the payload is folded into the
-searched text as well, which is what lets `Connection closed mid-response` (the blip documented
-above as ending a 22-task run) classify as a retryable `APIConnectionError` at all, and what makes
-**529 overloaded** — invisible to the old rules, absent from `str()` — a retryable `APIServerError`.
-
-The text rules now match on **token boundaries**. Two one-way misclassifications lived in the loose
-version: `"500" in text` also matched `request took 1500ms`, promoting a latency message to a
-retryable server error; and `"auth" in text` also matched **`Co-Authored-By`**, which appears in
-every commit message this project writes, so any error echoing a git command became a
-*non*-retryable `APIAuthenticationError` that ended the run. Both are pinned by named regression
-tests. The module reads the SDK fields by `getattr` and never imports `claude_agent_sdk` — it must
-stay importable in exactly the situation some of these errors describe.
-
-### Accumulated context is capped where it is read
-
-`context.md` grows by a summary per session and never shrinks, so what enters a prompt has to be
-bounded. `ContextAccumulator` has always defined that bound (32k chars, tail kept, trim marked) —
-but it lived on a method with a single caller, the cheap distillation step, while the dozen sites
-that build the prompts that matter called `load_context()` and injected the raw file. A real
-`context.md` reached 157 KB: ~39k tokens in every session's prompt, re-read from cache on every turn
-of it.
-
-The cap now lives at the read. `StateManager.load_context_for_prompt()` applies it and is what every
-prompt path calls; `load_context()` stays raw for appending and distilling. Two display-only callers
-(the `context` CLI command, the MCP handler) deliberately keep the full file.
-
-The growth itself is bounded from the other end too: the learnings extractor is shown the **tail** of
-the session output (the completion report — what changed, what broke — not the opening exploration
-narration it used to get) and only the last 8k chars of already-accumulated context, told explicitly
-not to restate it. Feeding it the whole file made it paraphrase the backlog into every new entry,
-which was then appended and re-injected forever — one carried-forward line was found restated in 26
-separate session entries.
-
-Every session now also reports what it cost (`Session cost: $X | in N out N tok`, logged at the
-terminal `ResultMessage`). Only *working* sessions were ever recorded, so planning, the three kinds
-of fix session, release checks, verification and learnings extraction spent money that appeared in
-no total — and a fanned-out session's figure, which aggregates the lead and every worker, was the
-one number that would have shown a fan-out costing N agents' tokens.
-
-### Usage limits are an account condition, never a task failure
-
-When the subscription exhausts its window, the CLI answers every query in seconds with only
-`You've hit your session limit · resets 1pm (America/Bogota)` and an error terminal result. Before
-this was recognized, one limited run burned both retry attempts of task after task in ninety
-seconds, **checked four untouched tasks off as complete** (the exhausted-budget fallback), spent the
-PR-recovery finish budget the same way, and blocked with a message that never named the cause.
-
-Two layers now handle it (`core/usage_limit.py`):
-
-- **The agent phase layer waits limits out.** Every query — work, fix, finish, planning,
-  verification, release check, learnings extraction, coding-style/release-guide generation — routes
-  through `run_query_riding_out_usage_limits`: a refused query parses the stated reset time
-  (clock-with-timezone or the API's epoch suffix), sleeps until it (interruptibly, Escape/SIGINT
-  honored within seconds), and re-runs. Callers never see the refusal unless the wait was
-  interrupted or `CLAUDETM_USAGE_LIMIT_MAX_WAITS` (48) consecutive waits ran out. A single wait is
-  capped at `CLAUDETM_USAGE_LIMIT_MAX_WAIT_SEC` (6h, misparse protection); an unparseable reset
-  falls back to `CLAUDETM_USAGE_LIMIT_DEFAULT_WAIT_SEC` (30 min) polls.
-- **The working stage refuses to charge a refusal to the task.** A refused session that still leaks
-  through consumes no `task_finish_attempts`, is never checked off (not even by the exhausted-budget
-  fallback), heartbeats the tracker (the progress clock was stamped at session *start*, possibly
-  hours earlier), and simply re-enters the working stage. Context accumulation likewise skips
-  limit-notice output instead of distilling it into context.md.
-
-Detection scans only the output **tail** (a refused session's whole output IS the notice), so a real
-session that merely quotes limit phrasing mid-way — claudetm working on claudetm — is not misread.
-
-### Undelivered fix sessions (push-only stages)
-
-A CI-fix, review-fix or conflict session promises the same two things: **commit** the work, then **push** it so CI re-runs against the fix. Neither was verified — the agent's own report is not evidence, and a session killed mid-turn reports success. Both are now checked against the repository (`_GitOps._fix_session_unfinished_reason`):
-
-- **uncommitted changes** — the session stopped mid-fix. This also breaks the merge outright: `gh pr merge` checks branches out and refuses on a dirty tree
-- **unpushed commits** — the fix exists locally only, so the next `waiting_ci` poll reads the *previous* push's green CI as this fix's and merges the PR without the fix
-
-Undelivered → the stage repeats instead of advancing, bounded by `MAX_FIX_FINISH_ATTEMPTS` (2, `state.fix_finish_attempts`), then blocks. Ordering matters in `addressing_reviews`: the check runs **before** `post_comment_replies`, because resolving the threads is what tells the rest of the workflow the review is handled. A CI-fix that delivered nothing refunds `ci_fix_attempts` — that counter bounds "the fix didn't work", not "no fix was produced".
-
-`ready_to_merge` additionally refuses to call `gh pr merge` on a definite dirty tree, reporting the pending files instead of the raw git checkout error. Same guard on the other two merge sites: the verification fix-PR path (`loop_verification`) and the `merge-pr`/`fix-pr` CLI.
-
-The CLI carries its own copy of the contract check (`fix_session.fix_session_undelivered_reason`) because `fix-pr` runs without a stage handler — `run_fix_session` had the review stage's bug verbatim, resolving threads for a fix that never reached the PR.
-
-**Planning is covered by the same rule.** `run_planning_phase` reports `success`/`subtype` like `run_work_session`, and the planner refuses to persist a plan from a cut-off session: every later stage treats `plan.md` as the whole job, so a task list that stops halfway is worse than none. `PlanUpdater` was already safe here — it validates the result parses to real tasks, preserves every completed task, and backs up before overwriting.
-
-Fail-open vs fail-closed is deliberate. `_porcelain_status()` returns three states (`""` / dirty / `None` = unreadable). `_has_uncommitted_changes()` folds unreadable into dirty (fail **closed**) for pushing and PR-opening; the fix probe and merge guard act only on a *definite* dirty tree (fail **open**), since looping a session over a repo you cannot measure is worse than deferring to `gh`.
-
-### Missing-PR recovery (dirty tree included)
-
-`pr_created` with no PR on the branch self-heals rather than blocking (`core/stages/pr_recovery.py`):
-
-- **clean tree, commits ahead of base** → the orchestrator pushes and opens the PR itself
-- **clean tree, nothing ahead** → nothing to ship; stage advances to `merged`
-- **dirty tree** → a bounded *finish session*: an agent verifies, commits, pushes and opens the PR for the whole group. Bounded by `MAX_PR_FINISH_ATTEMPTS` (2, `state.pr_finish_attempts`). The stage stays `pr_created`, so the next cycle either detects the PR the session opened or — tree now clean — takes the deterministic push+create path
-- **still blocks** for what genuinely needs a human: sitting on the base branch, a failed base comparison, a failed push/`gh pr create`, a crashed finish session, or a tree still dirty after the attempt budget
-
-Both counters reset on task advance, like `ci_fix_attempts`.
-
-### What ends a PR group (the only thing that opens a PR)
-
-Outside `--pr-per-task`, a PR is opened for exactly one reason: the task just finished was the **last of its group** (`is_last_task_in_group` → `pr_created`). Everything else runs commit-only. Two ways that test used to answer "no" forever, both of which produce the same silent failure — tasks completing, commits stacking on an unpushed local branch, zero PRs:
-
-- **Groups must be contiguous.** Group membership comes from `### PR <n>: …` headings, and a planner that restates its task list (draft → verification → "reissuing the corrected plan") writes the same heading two or three times. Keying groups by heading number alone folded the restatements into one group with a non-contiguous index set, so the group did not "end" until its *final* restatement. A repeated heading now opens a new instance — `pr_10` → `pr_10#2` (`_new_group_id`, `core/task_group.py`) — which keeps each group's indices a contiguous run. Re-entering the heading already current is not a new instance. `TaskGroup.pr_number` strips the suffix.
-- **A skipped task still closes its group.** A task already `[x]` runs no session, and the skip path returned without checking the boundary — stranding commits that were already on the branch (a resume, or a task checked off by `MAX_TASK_FINISH_ATTEMPTS`). It now rewinds the index `run_work_session` advanced and enters `pr_created`; `_PRRecovery` opens the PR or closes the group out with no agent session. Skipped on the base branch — nothing is committed there and the PR stage would block.
-
-A triplicated `plan.md` still runs its work N times; the parser only guarantees each block ships. If the task count looks 2–3× too large, check for repeated `### PR n:` headings before blaming the loop.
-
-### Hive mode — the task is the unit of parallelism (`--parallel`, on by default)
-
-- **The parallelism lives inside one task, not across tasks.** The loop is unchanged: one work session per plan task, one task checked off per session, `TASK COMPLETE` reported exactly as before. What `--parallel` adds is that the agent running that session is a **lead** — it may cut *its own single task* into pieces with **disjoint write sets** and hand each piece to a `hive-worker` subagent, doing everything that overlaps itself. There is no batching, no manifest and no new bookkeeping; the orchestrator cannot tell a fanned-out session from a solo one except by what lands in the tree.
-- **On by default** (`TaskOptions.parallel`, default True; `--no-parallel` to keep every session strictly single-agent, `claudetm config-update --no-parallel` mid-run). Parallel is the default because the *decision* is free — the lead only spends anything if it finds real seams.
-- **Fan-out is offered exactly where it can pay, and the machinery follows the offer.** `fan_out_enabled(parallel, push_only)` (`core/hive.py`) is the single source of truth, consulted by *both* the prompt builder and the query builder: no brief and no registered worker definitions unless this session may fan out. Three cases answer no. A **push-only fix session** (CI, review, conflict) — one focused commit on an existing PR. A **resumed task** — a dirty tree means a previous attempt's work is half-written, so the lead cannot hand out a file set it can vouch for, and a fan-out that already failed once would re-run at N agents' cost on the retry it caused. A **`[quick]` task** — the planner already judged it small enough for Haiku, so the brief's own answer is guaranteed to be "zero workers". Until these were gated, `--no-parallel` removed only the *brief*: the `hive-worker` definition stayed registered on every query in every phase (planning, verification, release checks, learnings extraction, every fix session), and sessions with no brief fanned out anyway — a review-fix session was observed dispatching `hive-worker`s.
-
-  **Withholding the definitions is not what stops fan-out** — that was believed and is false. The CLI registers built-in dispatch types (`general-purpose`, `Explore`, `Plan`) on *every* query regardless of `agents=`, so `agents=None` removed `hive-worker` and left the Agent tool fully able to spawn subagents — with none of the guardrails that definition carries (`background=False`, `disallowedTools`, a sized turn budget) and no worker contract in the prompt. A review-fix session was then observed dispatching two `general-purpose` agents that edited the same tree concurrently and collided on a shared file — precisely what the exclusive-file-set design exists to prevent. `_execute_query` now passes `disallowed_tools=["Task", "Agent"]` whenever `agents_for()` returns None, so "may not fan out" is a denied capability rather than an unadvertised one. Fail-closed: a caller that passes no loader gets no dispatch.
-
-  Registration of the *project's* specialists is the part that always worked. Verified live: a query under claudetm's exact options, with `agents=None`, listed a project `.claude/agents/*.md` definition among its `subagent_type` values alongside the built-ins — `setting_sources: ["project"]` is doing its job, and the brief's instruction to dispatch a specialist by name resolves.
-- **Workers exist to do real, big work.** The brief's calibration is "few LARGE self-contained pieces" — a whole module, a feature slice with its own tests and docs, a subsystem sweep — never scattered micro-edits. The worker contract tells it to finish its piece completely (code, tests, docs).
-- **Workers are given room, not rations.** Each carries a generous turn budget of its own (`AgentDefinition.maxTurns`, `CLAUDETM_HIVE_WORKER_MAX_TURNS`, default 200) — a backstop for one worker, not a budget it should feel, because a worker exists to take a whole module off the lead's plate and finish it. The *session* cap is what was wrong: `MAX_TURNS` bounds the whole query and the terminal `ResultMessage` aggregates the lead plus every subagent, so a value written for one agent silently rationed the team — at 400, a lead plus two busy workers could end the session in `error_max_turns` with nothing committed, re-running the entire fanned-out task. `MAX_TURNS` now defaults to **2000**, sized for a lead plus a team. Squeezing each worker to fit inside the old number would have been the wrong fix: a worker that stops mid-piece hands the lead back work that was nearly done. A *project* agent's own frontmatter (`max_turns:`, `model:`, `tools:`) is interpreted by the CLI, which is what loads it — see the note above on why claudetm no longer passes those definitions itself.
-- **Workers are smart, not maximally deliberative.** `model="inherit"` is unchanged — a worker on a `[coding]` task is still Opus. What changed is `effort`: left unset it inherited the session's, which for Opus is `"max"`, so every mechanical turn of every worker ran at the deepest thinking tier. It is pinned to `"high"` (still extended reasoning) since a worker's piece arrives specified, with its file set and API surface handed over. `CLAUDETM_HIVE_WORKER_EFFORT` takes any SDK tier, or `inherit` to restore the old behaviour.
-- **A worker cannot spawn workers.** `disallowedTools=["Task", "Agent"]` on the definition, not just a line in the contract: recursive fan-out is concurrency nobody sized, outside `max_parallel` and outside the exclusive file sets the whole design rests on.
-- **The lead sizes its own team; the orchestrator never counts for it.** Nothing outside the session can tell how big a task is before it runs, so how many workers a task deserves is a judgement made in the prompt (`core/prompts_working_hive.py`), not a number computed from the plan. **Two or more workers, or none — never exactly one.** A lone worker buys no speed (the only thing fan-out is for): full cold start, the lead idle and blind to its tool calls, and everything still to verify on disk. Zero is the right answer for anything small enough that the cold start costs more than the work.
-- **claudetm sends only its own agent definitions; the CLI owns the project's.** `setting_sources` includes `"project"` — it must, or `CLAUDE.md` would not load either — and that is what registers `.claude/agents/*.md`. Passing them again via `agents=` registered every one **twice**: verified against a live session, the model reported a project agent "listed twice, identically — a duplicate entry in the registry". Not deduplicated, so each specialist's full prompt sat in every fan-out query's system prompt twice (~14k duplicated tokens on an 11-agent project, ~27k on a 16-agent one), and with two identical entries nothing determined which copy a dispatch resolved to. `get_agents_for_working_dir` now returns built-ins only, and stands down entirely for a name the project defines — so a project `hive-worker.md` still wins, by us not sending ours. The narrow cost: the `background=False` and default turn budget claudetm applies reach only the definitions it passes, so a *project specialist* is bound by the brief rather than by its definition; `hive-worker` keeps both structurally.
-- **`CLAUDE.md` is already in the agent's context — nothing needs to read it.** Confirmed empirically: a query under claudetm's exact options answered from a marker in the project's `CLAUDE.md` with **zero tool calls**. Every work prompt and the planning prompt used to open by ordering a re-read of it anyway, on top of the coding-style guide extracted from it that is injected right above — ~15k tokens of duplicate reading per session on a repo this size, and once more per worker.
-- **The project's own `.claude/agents/` specialists come first; `hive-worker` is the fallback.** `list_project_agents()` (`core/subagents.py`) surfaces each project agent's name and description in the fan-out brief; the lead matches every piece against them FIRST and dispatches the matching specialist (`subagent_type: <name>`) under the same rules — generic `hive-worker` takes only the pieces no specialist fits (and everything, when the project defines none). Read per work session, so agents added mid-run are picked up.
-- **Dispatch is optimized, not just permitted.** All independent pieces go out in a single message (concurrent, never in waves), the lead works its own kept pieces while workers run instead of idling, and every brief carries four things: the work in full, the exclusive file set, the paths other workers own, and what the worker *cannot* read for itself — the API surface to conform to, the decisions already made, the non-obvious conventions. **Point, don't paste**: the worker has the same checkout, so the brief cites `path:line` rather than copying excerpts into it. Pasting made the lead re-emit the same context once per worker, paid as output tokens by the lead and input tokens by each worker, for a file every one of them already had.
-- **The team is sized against the machine too, not just the task.** `hive.describe_machine()` measures the box the run landed on — CPU model and cores, load average, available/total RAM, free disk — and the figures are interpolated into the fan-out brief, so the lead takes the smaller of "disjoint seams my task has" and "agent processes this box can actually run". Best-effort and dependency-free (`/proc`, `shutil.disk_usage`); a platform that reports nothing omits the paragraph, because sizing a team is never a reason to fail a run.
-- **The seam is the API, not the path.** Disjoint file sets are necessary and not sufficient: a piece that renames an export, changes a signature or edits a shared type breaks every file importing it, *including files no worker owns*. The lead lists, per piece, what it changes that something else reads, and either pulls every caller into that set or keeps the piece itself. (Observed live: one worker renamed a field across the files it owned, an unowned file kept the old name, and all six workers reported success.)
-- **Whether workers may run checks at all is the lead's call, stated in each brief.** Concurrent scoped test/lint runs are a property of *the project* — a shared database or fixture schema, a fixed port, one build or coverage directory, a lock — so the lead looks, decides, and writes the exact scoped command into each brief or explicitly "none". Either way it runs the full gate once at the end. Commands that *write* count as writing: a repo-wide formatter/autofixer rewrites every worker's files at once, and an emitting build or codegen step has workers racing over shared artifacts — both are the lead's alone, never run while a worker is live.
-- **Fan-out is not free, and the brief says so.** Every worker pays a full cold start re-reading the repo, and its final message is the only thing that comes back. A sibling project was observed spawning four workers for four one-line edits: four cold starts for work one agent finishes in a single pass. That is the failure the brief argues against, at length, because it is the only lever there is.
-- **`CLAUDETM_HIVE_MAX_PARALLEL` (default 6) is a safety ceiling, not a target** (`core/hive.py`). It bounds concurrent workers — one lead plus up to N — and nothing else. A typo in the env var never ends a run: anything unset, unparseable or `<= 0` falls back to the default. The number is **prompt-visible**: it is interpolated verbatim into the fan-out brief, so changing the constant changes what every lead is told it may dispatch — which is why the default moved from 10 to 6, a width a single shared checkout on one box actually rewards.
-- **The ceiling is now enforced, not merely stated.** It had always been prose — a number interpolated into the brief with nothing behind it — and this repo has already measured what a prose-only rule is worth (leads ignored "never background a worker" in 27% of dispatches, which is why that one is pinned on the definition). The bundled CLI enforces its own cap: it hands out concurrency slots and refuses the overflow with `Concurrent subagent limit reached`, reading `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` and defaulting to **20** when unset (verified in the bundled binary: `var _e=20; return env.CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS ?? _e`). `_execute_query` now passes `hive_max_parallel()` into the CLI env, so the brief and the runtime finally agree on one number. Related and deliberately *not* set: `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` (default 3) would structurally stop a *project specialist* — which claudetm no longer passes definitions for, so it carries no `disallowedTools` — from spawning its own workers, but whether depth 1 also forbids the lead's own dispatch was not verified, and shipping an unverified value that could disable fan-out outright is the worse risk.
-- **A fanned-out session shows its team, not just its lines** (`core/hive_roster.py`). Per-worker prefixes answer "who said this"; they cannot answer "how many workers are live, what is each on, and what has each burned" — the questions you actually have while watching a hive. `HiveRoster` tracks each worker from its dispatch block to its returning tool result and renders a compact block: `name#n`, current activity, elapsed, tokens. It is pure state plus a renderer — it prints nothing and imports neither `console` nor the SDK — and `MessageProcessor` is the only thing that turns it into output, forced when the team's shape changes (a dispatch, a return) and otherwise throttled by `CLAUDETM_HIVE_ROSTER_INTERVAL_SEC` (60s; `0` disables). Per-worker tokens come from `AssistantMessage.usage` on messages carrying `parent_tool_use_id` — the only per-subagent figure the stream offers, since the terminal `ResultMessage` aggregates the lead and every worker into the one total that cannot say *which* worker spent it. The SDK does not document that field's exact meaning, so it is best-effort: anything malformed is ignored rather than reported as a number. **A dispatch's tool result is an acknowledgement, not a completion** — measured against a live session, the `ToolResultBlock` for an `Agent` call arrives ~0.1s after the dispatch while that worker's own messages keep arriving for the next 40 seconds. Reading it as "the worker returned" is what produced a roster that jumped straight to `3 done` at `0s` elapsed with all three still working. So only a **failed** dispatch retires a worker (a refused spawn — the CLI's `Concurrent subagent limit reached` — or a crash): that worker never ran, and it is the one completion the block stream states outright. Nothing marks when a *successful* worker stopped, and inventing that signal was the original bug. The roster also deliberately **adopts an unfamiliar tool-use id** (a worker can speak before its spawning block is processed), which makes the call sites load-bearing — handing it every errored top-level `ToolResultBlock` would invent a phantom row per failed Read/Bash call on sessions with no hive at all, so it is gated on an id already recorded as a dispatch. Both are pinned by named regression tests.
-- **Within the ceiling, the composition is the lead's and nothing rewards variety.** Up to `max_parallel` workers at once, and they may be N of the same kind, one each of N different kinds, or any mix — four concurrent `hive-worker`s is exactly as legitimate as a `backend-dev`, a `frontend-dev` and two `hive-worker`s. What selects each worker is the piece it is handed: the specialist whose description fits it, else generic `hive-worker`. Two pieces suiting the same specialist get two instances of it.
-- **Workers' own prose reaches the log, not just their tool calls** (`CLAUDETM_FORWARD_SUBAGENT_TEXT`, default on). The SDK forwards a subagent's tool calls unasked but withholds its text and thinking behind `forward_subagent_text` (claude-agent-sdk >= 0.2.140), which left a fanned-out session half-visible: you could see that a worker edited a file and never what it was trying to do. The rendering it needs already existed — stable per-worker colour and `#n` ordinal, and subagent text displayed but never accumulated into the lead's result. Forwarding is display-only and costs no tokens; the only price is log volume.
-- **One checkout, shared by everyone.** Workers work directly in this same tree. Never a git worktree, never a clone, never a per-agent copy — the work has to land in the tree the lead commits from. The exclusive file sets in each worker's brief are the only lock there is; a worker that needs a file it does not own STOPS and reports the collision rather than resolving it silently.
-- **The lead alone runs git.** Workers read, edit and run narrow checks; they never `add`, `commit`, `branch`, `checkout`, `stash` or `push`. That is what makes the shared checkout safe — one writer to the index, so no `.git/index.lock` contention and no half-staged tree — and it keeps history a single authored series. The lead waits for every worker to return, verifies on disk (`git status`, read the changed files), runs the **full** project gate once, and only then commits.
-- **A worker's report is not evidence.** The lead never saw its tool calls. A worker that narrated a change without writing it is a real failure mode, so the lead re-checks on disk and re-does or re-assigns that piece itself.
-- **Backgrounded workers are impossible, not merely forbidden.** `AgentDefinition.background=False` pins it. A worker still writing after the lead ends its turn leaves a dirty tree behind a finished session, which the loop correctly reads as *unfinished* and re-runs the whole task — and measured across real runs, leads broke the prose rule 27% of the time (39 of 210 dispatches explicitly backgrounded, 18 more omitting the parameter, which the Agent tool defaults to background). A rule that expensive to break does not belong in prose alone.
-- **The repository is still the evidence, unchanged.** A fanned-out session is verified like any other: clean tree or the task is not checked off, and `MAX_TASK_FINISH_ATTEMPTS` governs the retry with the leftover diff described as its own work to finish.
-- **Bounded like one session, spends like several.** `MAX_TURNS` (2000) and `--budget` are per *query*, and the terminal `ResultMessage` aggregates the lead plus every subagent — turns and cost accrue at N agents' rate against a single session's cap. An overrun is not a new failure mode: `error_max_turns`, task not checked off, same retry.
-- **Fix sessions never fan out**, structurally: push-only sessions get no brief, no agent definitions, *and* no dispatch tools (see `fan_out_enabled` above).
-
-What it deliberately does **not** do: batch several tasks into one session, parallelise *across* tasks or PR groups, or give any agent its own working copy. The sibling TypeScript port (`../ai-task-master`) built cross-group parallelism and then pinned `--concurrency` to 1 — with one shared checkout, parallelism across groups buys nothing once git is serialized. The only place it pays is *inside* one unit of work, on disjoint file sets, with all git left to one agent.
-
-### CI must actually have run
-
-`ci_state == "SUCCESS"` is not sufficient. GitHub reports SUCCESS the moment the only registered checks are skipped ones — which is exactly what a PR looks like in the seconds after it is opened, before its jobs appear. Accepting it there leaves `waiting_ci` permanently on CI that never started, and with `--auto-merge --admin` that merges a red PR. `handle_waiting_ci_stage` treats **SUCCESS with `checks_passed == 0`** as unconfirmed and keeps polling through the same grace window as the no-CI fast path (`NO_CI_MIN_POLLS` 2 / `NO_CI_MIN_ELAPSED` 30s). A genuinely all-skipped run — every job path-filtered out — still passes, one poll later. `checks_passed` counts `SUCCESS`/`NEUTRAL` only, so a pending check makes the rollup PENDING and never reaches this test.
-
-### What `--auto-merge` actually gates on (there is no approval gate)
-
-Every user- and machine-facing description of `auto_merge` used to say PRs merge "when CI passes **and approved**" — wrong twice: there is no approval requirement anywhere in the code, and the conditions that *do* apply went unstated (#146). claudetm auto-merges when:
-
-- **CI is green** — confirmed to have actually run (see above), with tolerated failures discounted,
-- **no review thread is unresolved** — `waiting_reviews` counts `unresolved_threads`, routes anything actionable to `addressing_reviews`, and only advances at zero.
-
-An approving review is **never required and never waited for**; under `--admin` claudetm explicitly *overrides* a base-branch policy that demands one. If you want a human checkpoint, that is `--no-auto-merge` or `--pause-on-pr`, not an approval the loop is silently ignoring.
-
-The one review state that changes anything is **`CHANGES_REQUESTED`**: a human actively pushed back, so `_handle_requested_changes` refuses to merge over it. `APPROVED`, `REVIEW_REQUIRED`, no decision, and an unreadable decision all behave as before.
-
-**A review bot's `CHANGES_REQUESTED` does not block.** `reviewDecision` says *that* changes were requested, never by whom, and reading only that field made the gate permanent for bots: claudetm answers a bot's comments and resolves its threads, but no bot returns to dismiss its own review afterwards, so a green, fully-addressed PR blocked forever. Three did in one night across two repos — two of them on a CodeRabbit review whose body was a *quota notice*, the exact condition already discounted on the CI axis. The status query now also selects `latestOpinionatedReviews` (the collection GitHub derives the decision from), a GitHub App reviewing as `__typename: Bot` (or a `[bot]` login suffix) is classified as such, and a decision whose reviewers are **all** bots is discounted with a logged reason. One human among them still blocks — that is the case the gate was written for. Unlike the decision field, this half fails **closed**: an unreadable reviewer list is "unknown", not "nobody", and so is a *partial* one — a reviewer whose author cannot be identified, or a page never fetched, could be the single human in a list that otherwise reads as all-bots, so `changes_requested_complete` gates the discount and both cases still block.
-
-**`--admin` deliberately does not override `CHANGES_REQUESTED`.** `--admin` is passed on essentially every run here just to get past branch protection, so honouring it would delete the gate entirely. This is not an undefeatable block of the kind "Blocking is a last resort" warns about: the condition lives on GitHub rather than in the working tree, so a human clears it by approving or dismissing the review and the next cycle proceeds on its own — unlike a local, deterministic block that `resume --force` could never clear.
-
-**The review-stage check timeout blocks by default**, and only `--admin` force-advances it — the same posture as the CI stage, on the same `CI_POLL_TIMEOUT` timer. It previously warned and proceeded toward merge with checks still pending, which is the opposite policy on the same clock. A *tolerated* failing or pending check (CodeRabbit "Review rate limited") no longer causes that wait or that block.
-
-### Blocking is a last resort (unattended runs)
-
-claudetm exists to do a lot of work without supervision, so **every block is a defect unless a human is genuinely required**. A run that dies at 3am on a GitHub 5xx has failed at its one job. Three operations used to end a run on their *first* failure — detecting a PR, merging it, and checking out the base after a merge — all with causes that resolve themselves in seconds.
-
-`_GitOps._retry_transient(state, key, reason, hint)` is the shared primitive: leave `workflow_stage` alone and return None, and the stage simply re-enters next cycle. `MAX_TRANSIENT_RETRIES` (5) with linear backoff to `TRANSIENT_RETRY_MAX_DELAY` (60s); budgets are per `key` and instance-level (a resume starts clean). Clear it with `_clear_transient(key)` on success so flakiness doesn't accumulate across a long run.
-
-Used at: PR detection (`ci_stage`), `merge_pr` (`merge_stage`), post-merge checkout of the base. A permanent failure — branch protection refusing a solo-authored PR without `--admin` — still blocks, just after the retries and with the attempt count attached.
-
-The other half of the rule is recovery over refusal: `_PRRecovery` opens a missing PR itself, a dirty tree gets a finish session, and `loop_verification._open_missing_fix_pr` does the same for the verification path (which had no recovery at all). Recovery only ever fires on the unambiguous case — real feature branch, clean tree, commits over the base; anything else reports rather than pushing something it cannot vouch for.
-
-Blocks that are correct and stay: a PR closed without merging, a tree still dirty after the finish budget, sitting on the base branch, attempt budgets exhausted.
-
-#### A dirty tree at `ready_to_merge` is recovered, not refused
-
-`gh pr merge` checks branches out, so it dies on a raw git error when the tree is dirty — hence the guard. But refusing was *all* the stage did, and that block is undefeatable by the command meant to defeat it: the condition is purely local and deterministic, so `claudetm resume -f` clears the status, re-enters `ready_to_merge`, re-reads the same unchanged tree and blocks again having run **zero** sessions. A green PR sat overnight behind two files an `expo prebuild` had rewritten (`D mobile/app/expo-env.d.ts`, `M mobile/app/tsconfig.json`) — nobody's edit, and nothing an agent couldn't have judged in a minute.
-
-The tree now goes to a bounded cleanup session (`core/stages/merge_cleanup.py`), the same shape `_PRRecovery` uses for a dirty tree with no PR. The agent is the only thing here that can tell the PR's own unfinished work (finish, commit, push) from tooling droppings (discard); the orchestrator keeps what must not be guessed:
-
-- it never commits anything itself,
-- a session that left **new commits** on the branch routes the PR back to `waiting_ci` (`ci_poll_start_time` cleared) rather than merging on CI that ran before those commits existed — and commits it left *unpushed* are pushed deterministically, since a clean-but-unpushed tree is invisible to every later probe and the merge would land the PR without them, then delete the branch carrying them,
-- bounded by `MAX_MERGE_CLEANUP_ATTEMPTS` (2, `state.merge_cleanup_attempts`, reset on task advance).
-
-Still blocks on sight when recovery cannot be right: leftovers on the **base branch** (nothing there belongs to the PR, and a session must not commit to base), a crashed cleanup session, a failed push, or a tree still dirty after the budget.
-
-#### `resume --force` refunds the attempt budgets
-
-Same defect, one level up: the per-PR counters are persisted, so a stage that blocked *because* its budget was spent blocked again the instant a forced resume re-entered it. `StateRecovery.apply_recovery` now zeroes `ci_fix_attempts`, `conflict_fix_attempts`, `branch_sync_attempts`, `pr_finish_attempts`, `merge_cleanup_attempts`, `fix_finish_attempts` and `task_finish_attempts`. The budgets exist to stop an *unattended* loop from spinning; `-f` means a human looked at the run and did something about it.
-
-### Limits — what bounds an agent, and what doesn't
-
-Sessions are bounded in **steps**, not wall-clock. A wall-clock cap punishes a session that is legitimately slow (big test suite, slow CI) exactly as hard as one that is looping.
-
-| Limit | Default | Override | What it does |
-|---|---|---|---|
-| `MAX_TURNS` (`core/agent_query.py`) | 2000 turns | `CLAUDETM_MAX_TURNS` (`0` disables) | Runaway backstop per session, passed to the SDK as `max_turns`. Counts the lead **and every subagent**, so it is sized for a hive, not a soloist — healthy solo sessions run tens of turns. Overrunning yields `error_max_turns` → the task retries (see above), it is never checked off |
-| `max_budget_usd` | unset | `--budget` | Per-session cost cap. Same graceful path on overrun |
-| `STREAM_IDLE_TIMEOUT_SEC` | 1800s | `CLAUDETM_STREAM_IDLE_TIMEOUT_SEC` | Max gap *between* stream messages — catches a hung SDK, not a slow agent |
-| `POST_COMPLETION_IDLE_TIMEOUT_SEC` | 120s | `CLAUDETM_POST_COMPLETION_IDLE_TIMEOUT_SEC` | Only armed after `end_turn`, where the sole remaining message is the `ResultMessage` the SDK sometimes loses (#30333). Times out as *success* |
-| `TrackerConfig.stall_threshold_seconds` | 300s | — | Orchestrator liveness, evaluated only *between* cycles. Every stage that runs an agent session or waits on GitHub heartbeats around it, so this never measures how long an agent may work |
-| `TrackerConfig.max_session_duration` | 4h | — | Backstop, checked only while a session is active — which `should_abort` effectively never is. Must never be tightened to "typical" durations; real sessions run over an hour |
-| `TrackerConfig.max_same_task_attempts` | 3 | — | Loop detection per task index. Sits one above `MAX_TASK_FINISH_ATTEMPTS` so a legitimate retry can't trip it |
-| `CI_POLL_TIMEOUT` | 7200s | — | CI wait, not agent work |
-| `hive_worker_max_turns()` | 200 | `CLAUDETM_HIVE_WORKER_MAX_TURNS` | Per-worker backstop. Deliberately generous: a squeezed worker stops mid-piece and hands the lead back work that was nearly done |
-| `rate_limit_config.max_retries` | 3 | config | Consecutive *failed* queries with no success in between, then `ConsecutiveFailuresError`. Counts attempts, not wall-clock — it used to decay on a ~60s window measured from the first failure, so any session slower than a minute reset it on every failure and the retry loop was unbounded |
-
-Every env var above is parsed defensively: unset, unparseable, negative or zero falls back to the default. A typo in one used to raise at *import* time and take down every claudetm command, `status` and `doctor` included.
-
-### Up-to-date-before-merge (--sync-before-merge, opt-in)
-- **Off by default.** A PR that merges cleanly is merged, even if the base moved under it. Syncing every behind-but-clean PR costs an agent session plus a full CI round on the common case, to catch a semantic clash that is rare — not a trade worth making automatically
-- Pass `claudetm start --sync-before-merge` when the base is volatile enough that the untested merge result is a real risk (`TaskOptions.sync_before_merge`, default False). Then `ready_to_merge` compares the PR head against the live base (`get_pr_behind_by`, GitHub's compare API; `mergeStateStatus == "BEHIND"` is also honored) and routes a behind branch to the same agent session conflicts use
-- Bounded by `MAX_BRANCH_SYNC_ATTEMPTS` (3) via `state.branch_sync_attempts`. Unlike conflicts, an exhausted counter **merges as-is** rather than blocking — a base that moves faster than CI must not stall the pipeline forever
-- A failed/unavailable comparison never blocks a merge (degrades to "not stale")
-
-### Merge Conflict Resolution (--resolve-conflicts)
-- When `ready_to_merge` (or `waiting_ci`) sees `mergeable == "CONFLICTING"`, the conflict is handed to an agent session instead of blocking the run (`core/stages/conflict_stage.py`, stage `resolving_conflicts`). This is the *only* condition that triggers the session by default
-- The session **rebases** onto the base (`git rebase origin/<base>`), resolves every hunk keeping both sides' intent — once per conflicting commit, `git rebase --continue` between — re-runs tests, then `git push --force-with-lease`. Rebase keeps PR history a clean series on top of the base instead of accumulating merge commits; the cost is that review threads anchored to rewritten commits go stale
-- The session passes `allow_rebase=True` into the work prompt, which drops the blanket "NEVER rebase" rule a plain CI-fix session carries (`prompts_working._build_push_only_execution`). Fix sessions still never rebase — they only add commits
-- Push re-triggers CI, so the PR re-enters `waiting_ci` and follows the normal path to merge
-- Bounded by `MAX_CONFLICT_FIX_ATTEMPTS` (3) per PR via `state.conflict_fix_attempts`; exhausted attempts block with "manual resolution required" as before
-- Disable with `claudetm start --no-resolve-conflicts` (`TaskOptions.resolve_conflicts`, default True)
-- Counter resets on task advance, like `ci_fix_attempts`
-
-### PR Limit (--prs flag)
-- `--prs N` limits the maximum number of pull requests that can be created
-- Injected into planning prompt to guide task organization
-- Claude plans work to fit within the PR limit by grouping tasks intelligently
-- Examples:
-  - `claudetm start "Add auth" --prs 1` → Everything in one PR
-  - `claudetm start "Build dashboard" --prs 3` → Max 3 PRs
-- Default: unlimited PRs
-- Useful for keeping changes focused and manageable
-
-### Coding Style Generation
-- Before planning, generates `coding-style.md` if it doesn't exist
-- Analyzes `CLAUDE.md` and convention files to extract:
-  - Development workflow (TDD, test-first patterns)
-  - Code style conventions (naming, formatting)
-  - Project-specific requirements
-- Concise guide (~600 words) injected into planning and work prompts
-- Preserved across runs (not deleted on success) to save tokens
-- Uses Opus for high-quality extraction
-
-### Release Guide Generation
-- Before planning (when `auto_merge=True`), generates `release.md` if it doesn't exist
-- Uses all tools (including Bash) to probe deploy infrastructure:
-  - Deploy pipeline (Vercel, Netlify, Fly, Docker, GitHub Actions deploy jobs)
-  - Health/smoke endpoints (searches routes for `/health`, `/healthz`, etc.)
-  - Database (Prisma, Rails, Alembic migrations — checks migration status commands)
-  - Monitoring (Sentry, Bugsnag — checks for API tokens in env)
-  - Environment variables (checks `.env*` files for production access, never outputs secrets)
-  - Cloud CLIs (checks for `gcloud`, `aws`, `az`, `fly`, `vercel` availability)
-- Maps **accessible surface** — what the AI CAN verify vs what it CAN'T
-- If nothing is found to verify, saves a guide that says so (release phase becomes no-op)
-- Preserved across runs (not deleted on success) to save tokens
-- Uses Sonnet for speed
-- Skipped entirely when `auto_merge=False`
-
-### Release Phase (Post-Merge Verification)
-- **Two levels of release checks:**
-  1. **Project-level** (`release.md`) — generic deploy capabilities, generated once
-  2. **Per-PR** (`**Release checks:**` in plan.md) — specific checks for each PR group
-- Runs automatically after each PR merge when `auto_merge=True`
-- The planner sees `release.md` and generates per-PR release checks in `plan.md`
-- After merge, agent runs release verification using Sonnet:
-  - Checks GitHub Deployments API for deploy status
-  - Hits health endpoints if available
-  - Checks migration status if DB framework detected
-  - Queries error monitoring for new errors (if API token available)
-- **Graceful degradation** — if nothing is checkable, skips immediately
-- **Quick-fix PRs** — if verification fails, creates a small fix PR (max 5 attempts)
-  - Fix PR goes through normal PR lifecycle (CI, reviews, merge)
-  - Then re-runs release verification
-  - After max 5 attempts, moves on (doesn't block the pipeline)
-- **No release phase when `auto_merge=False`** — human manages merges, they handle release
-
-### Planning Prompt
-- Instructs Claude to add `.claude-task-master/` to .gitignore
-- Use Read, Glob, Grep to explore codebase
-- Create task list with checkboxes
-- If `release.md` available, add per-PR `**Release checks:**` sections
-- Define success criteria
-- Includes coding style guide and release guide for task planning
-
-## Testing
-
-Test in `tmp/test-project-1/`:
-```bash
-cd tmp/test-project-1
-uv run claudetm start "Implement TODO" --max-sessions 3 --prs 2 --no-auto-merge
-```
-
-## Code Style
-
-- **Max 500 LOC per file** - split larger files following SRP/SOLID
-- **Single Responsibility** - one reason to change per module
-
-### CI + Comments Combined
-- When CI fails, both CI logs AND PR comments are fetched together
-- Prevents two-step fixes (CI first, then comments)
-- Single work session addresses all feedback at once
-- `PRContextManager.save_ci_failures()` automatically calls `save_pr_comments()`
-
-### Webhook Events
-The system emits the following webhook events that can be registered at `/webhooks`:
-
-**Run Lifecycle**:
-- `run.started` - Emitted when orchestrator starts execution
-- `run.completed` - Emitted when orchestrator finishes (success, failure, or blocked state)
-
-**Task Status**:
-- `status.changed` - Emitted when task status transitions between states (pending → in_progress → completed)
-
-**CI/CD**:
-- `ci.passed` - Emitted when CI checks pass for a PR
-- `ci.failed` - Emitted when CI checks fail for a PR
-
-**Plan Updates**:
-- `plan.updated` - Emitted when plan is updated via mailbox/API or plan updater
-
-Each webhook event includes:
-- `event_id`: Unique identifier for the event
-- `event_type`: The event type (one of above)
-- `timestamp`: When the event occurred
-- `data`: Event-specific payload (varies by event type)
-
-**Webhook Delivery & Retry**:
-- Deliveries are signed with `X-Webhook-Signature-256` header (HMAC-SHA256 of timestamp + payload)
-- Failed deliveries retry with exponential backoff: `retry_delay * 2^(attempt-1)`, max 3 attempts by default
-- Each delivery attempt includes a unique `X-Webhook-Delivery-ID` for idempotency tracking
-- Non-retryable errors (4xx except 429): fail immediately
-- Retryable errors (5xx, timeout, 429): retry with backoff
-- Max retry delay capped at 30 seconds per attempt (`MAX_RETRY_DELAY` in `webhooks/client_types.py`)
-
-### API Endpoints (REST)
-Server runs on port 8000 by default (`claudetm-server`):
-
-**Task Management**:
-- `POST /task/init` - Create a new task
-- `GET /status` - Get orchestrator status
-
-**Mailbox** (Dynamic Plan Updates):
-- `POST /mailbox/send` - Send message to mailbox
-- `GET /mailbox` - Check mailbox status
-- `DELETE /mailbox` - Clear mailbox
-
-**Control**:
-- `POST /control/stop` - Stop orchestrator
-- `POST /control/resume` - Resume paused or blocked task
-
-**Webhooks**:
-- `GET /webhooks` - List webhooks
-- `POST /webhooks` - Register webhook
-- `DELETE /webhooks/{id}` - Delete webhook
-
-**Repo Setup** (AI Developer Workflow):
-- `POST /repo/clone` - Clone a git repository to `~/workspace/claude-task-master/{project-name}`
-- `POST /repo/setup` - Setup cloned repository (install dependencies, create venv, run setup scripts)
-- `POST /repo/plan` - Plan-only mode: analyze codebase and generate task plan without executing
-
-**File Operations**:
-- `DELETE /coding-style` - Delete the coding-style.md file from the state directory
-
-### MCP Tools
-Available via IDE integration:
-
-**Task Management**:
-- `get_status` - Get task status
-- `pause_task` - Pause current task
-- `stop_task` - Stop current task
-- `resume_task` - Resume paused or blocked task
-
-**Mailbox** (Dynamic Plan Updates):
-- `send_message` - Send message to mailbox
-- `check_mailbox` - Check mailbox status
-- `clear_mailbox` - Clear mailbox
-
-**Repo Setup** (AI Developer Workflow):
-- `clone_repo` - Clone a git repository to `~/workspace/claude-task-master/{project-name}`
-- `setup_repo` - Setup cloned repository (install dependencies, create venv, run setup scripts)
-- `plan_repo` - Plan-only mode: analyze codebase and generate task plan without executing
-
-**File Operations**:
-- `delete_coding_style` - Delete the coding-style.md file from the state directory
-
-## Workflow Integration
-
-### Complete Work Loop
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         PLANNING                                 │
-│  Generate coding-style.md → Generate release.md (if auto_merge) │
-│  Read codebase → Create task list → Define success criteria     │
-│  (Planner adds per-PR release checks using release.md)          │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│                      WORKING (per task)                          │
-│  Make changes → Run tests → Commit → Push → Create PR           │
-│                              ↓                                   │
-│                      Check Mailbox ←── Messages from REST/MCP   │
-│                              ↓                                   │
-│              (If messages: Update plan, continue work)          │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│                       PR LIFECYCLE                               │
-│  Wait for CI → Fix failures + comments → Resolve conflicts →    │
-│  Merge                                                           │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│              RELEASE PHASE (auto_merge only)                     │
-│  Check deploy status → Health checks → DB migrations            │
-│  → Error monitoring → Smoke tests                                │
-│  Pass: continue │ Fail: quick-fix PR (max 5 attempts)           │
-│  Skip: nothing to check │ No release.md: skip entirely          │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│                       VERIFICATION                               │
-│  Run tests → Check lint → Verify criteria → Done                │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Dynamic Plan Updates
-
-The orchestrator supports mid-execution plan updates via:
-
-1. **CLI Resume with Message**: `claudetm resume "Add rate limiting to API"`
-2. **REST API**: `POST /mailbox/send` with message content
-3. **MCP Tools**: `send_message` tool from IDE integration
-
-Messages are processed after each task completes. Multiple messages are merged with priority ordering (urgent → low) before updating the plan.
-
-## Important Notes
-
-1. **Always check if tasks already complete** - planning phase might finish some tasks
-2. **Real-time output** - stream Claude's thinking and tool use
-3. **Log rotation** - auto-keep last 10 logs only
-4. **Clean exit** - delete state files on success, keep logs
-5. **OAuth credentials** - handle nested JSON structure properly
-6. **Working directory** - passed to the SDK as `cwd=`, never `chdir`'d; a process-global chdir would race concurrent queries and concurrent subagents
-7. **Mailbox check** - orchestrator checks mailbox after each task completion
-8. **CI + Comments** - fetched together to handle in one step
-9. **Message priority** - 0=low, 1=normal, 2=high, 3=urgent
-10. **Plan preservation** - completed tasks preserved when plan updates occur
-11. **Hooks disabled** - `.claude/settings.json` disables Claude Code hooks to prevent "Stream closed" errors (known bug in Claude Code v2.1.39)
-12. **Release phase** - runs after each PR merge when `auto_merge=True`, skipped when disabled or nothing to verify
-13. **Release guide** - `release.md` generated once by probing deploy infra, preserved across runs like `coding-style.md`
-14. **Per-PR release checks** - planner adds `**Release checks:**` sections to plan.md, specific to each PR's changes
-15. **Release fix limit** - max 5 quick-fix PRs per release failure, then moves on (never blocks pipeline)
-
-## Branch protection & `--admin`
-
-`main` on the `developerz-ai` repos requires **one approving review**, so `gh pr merge` on a solo-authored PR is refused with "the base branch policy prohibits the merge" even with every check green. Two consequences:
-
-- **Running claudetm here:** pass `--admin` (`claudetm start … --admin`, `claudetm merge-pr N --admin`, `claudetm resume --admin`) or the run blocks on a finished, green PR it cannot land.
-- **Merging by hand:** `gh pr merge <n> --squash --admin`.
-
-`--admin` overrides the policy — it does not satisfy it. It never skips CI or merges a conflicted PR; failing checks still route to the fix loop and conflicts to the resolver. It force-advances a *timeout* rather than blocking, at both the CI stage and the review stage (which now block by default, one policy on one timer). The one thing it does **not** override is `CHANGES_REQUESTED` — see "What `--auto-merge` actually gates on" above.
-
-Releases go direct-to-main under the same owner bypass — a "pull request required" banner is a nudge, not a rejection.
-
-## CI standard
-
-- CI runs on GitHub-hosted runners (`ubuntu-latest`; public repo — org rule: private on Ubicloud, public on GitHub-hosted). Every workflow declares a `concurrency` group with cancel-in-progress, and every job sets `timeout-minutes`. Publish workflows (PyPI / TestPyPI / Docker tag) are hard `cancel-in-progress: false` — publishes are irreversible.
-
-### The local gate is the CI gate
-
-`ruff check .`, `ruff format --check .`, `mypy .`, `pytest` — the **whole tree**, all three tools on the same scope. Run exactly that before pushing; anything narrower is not the gate. Two drifts made a narrower gate look green and shipped a red release commit (v0.1.79):
-
-- **`mypy .` used to be unrunnable locally.** A leftover `build/` tree (gitignored, absent in CI's clean checkout) made it die on `Duplicate module named "claude_task_master"` before checking anything, so the habit became `mypy src` — which skips `tests/` and `scripts/`. `[tool.mypy] exclude` now covers `build|dist|coverage_html|htmlcov|.venv|tmp`, a no-op in CI, so the same command works in both places.
-- **ruff was scoped to `src/ tests/` in CI while mypy checked everything.** `scripts/` and the root helpers were type-checked but never linted. Both now run on `.`.
-
-### Tolerated check failures
-
-Some status checks fail for reasons no commit can fix. `github/check_tolerance.py` holds a whitelist of `ToleratedFailure(check, description, reason)` rules; a failure matching one is counted as *skipped*, and the rollup `ci_state` is recomputed as if it weren't there (SUCCESS, or PENDING if other checks are still running). Built in: **CodeRabbit / "Review rate limited"**. Any other CodeRabbit failure, and the same message from any other check, still fails CI.
-
-Add an exception by appending a rule to `TOLERATED_FAILURES`, or without a release via `CLAUDETM_TOLERATED_CHECK_FAILURES="check=description;other=description"`. Discounted failures are always logged (`~ CodeRabbit: 'Review rate limited' ignored — …`), never silent.
-
-## Note
-
-Do not use git worktrees — work directly in this checkout. If a task is big enough to need subagents, run them as a team in this same checkout: split the work into disjoint pieces so no two agents touch the same files.
+## Worker non-negotiables
+
+- Do the assigned task only. Declare your write set; stop and report work outside it.
+- Work in this checkout. Never create a worktree, clone, per-agent copy or shared git stash.
+- Preserve unfinished work and persisted state. Resume the existing diff; do not reset or discard it.
+- Read the affected code, reproduce bugs with a failing test, then fix the cause and ship the guard.
+- Verify against repository state and actual check output, never an agent's completion report.
+- Workers run only their assigned scoped checks. The lead runs the full gate once after all return.
+- Never run a repo-wide formatter, autofixer, build or codegen while workers are editing.
+- Only the lead handles git; when an external harness owns git, leave all git operations to it.
+- Never print, log, commit or copy credentials. Authentication and refresh stay at the SDK boundary.
+- Do not bypass CI, review gates, hooks or branch protections. Missing checks are not green checks.
+- Publishing is irreversible: release/tag/publish only on an explicit release request.
+- Disclose bot identity in comments. Report what was checked, what failed and what remains unverified.
+
+## Purpose and stack
+
+**Core philosophy: Claude is smart enough to do work AND verify it.** Task master keeps the loop
+running and persists state until the goal is achieved or human input is genuinely required.
+Prefer bounded recovery over a deterministic block; do not replace agent judgement with an
+unnecessary hardcoded workflow. Keep safety and completion checks machine-enforced.
+
+| Area | Authority / convention |
+|---|---|
+| Package | `claude-task-master`; source layout under `src/claude_task_master/` |
+| Python | Package minimum **3.12** (`pyproject.toml`); development setup uses **3.14** (`bin/setup`) |
+| Agent | Claude Agent SDK `query()` and `ClaudeAgentOptions`; Claude Code subprocess |
+| CLI / models | Typer, Pydantic 2, Rich; model IDs/config in `core/config.py`, phase routing in `core/agent_phases.py` |
+| Networking | httpx; MCP 2 in base dependencies; optional REST extra uses FastAPI/Uvicorn and bcrypt |
+| Tooling | uv, Ruff, mypy, pytest, pytest-asyncio/timeout/xdist/cov, Hypothesis |
+| Services | Docker Compose; Debian/Ubuntu setup expects mise, Docker Compose and dpkg |
+
+Paths beginning `core/` below are relative to `src/claude_task_master/`.
+Use `pyproject.toml` as dependency/tool configuration authority rather than duplicating version pins.
+
+## Commands and verification
+
+| Command | Purpose / effects |
+|---|---|
+| `./bin/setup` | **Writes:** installs host prerequisites if missing, mise tools, uv 0.13 and Python 3.14; syncs all extras; creates an empty external `claudetm-profiles` volume. Does not copy credentials or start services. |
+| `./bin/dev` | **Starts/builds services:** `docker compose up --build --wait --wait-timeout 180`; waits for REST health readiness, not a build deadline. |
+| `./bin/stop` | Stops Compose services without deleting their data. |
+| `./bin/check` | **Full gate:** whole-tree Ruff lint and format check, mypy, pytest with two workers/coverage, isolated temporary package build, CLI smoke probes. Writes coverage/build artifacts; lead/harness only. |
+| `uv run ruff check .` | Non-autofixing lint check; `--fix` is a writing operation. |
+| `uv run ruff format --check .` | Non-writing format validation. `uv run ruff format .` rewrites files; never substitute it for a check. |
+| `uv run mypy .` | Whole-tree type check, including tests/scripts; narrowing to `src` is not the full gate. |
+| `uv run pytest tests/<area>` | Scoped tests when assigned; use the repository markers and fixtures. |
+| `python verify_docs_links.py` | Read-only repository Markdown path/anchor check; separate from `bin/check`. |
+| `uv sync --all-extras` | **Writes:** development dependency installation, not verification. |
+| `./scripts/setup-hooks.sh` | **Writes:** installs development pre-commit hooks. |
+| `uv run claudetm --help` | CLI smoke check; `doctor` and `status` may fail without credentials/state and are tolerated probes in `bin/check`. |
+
+Follow the applicable skill before verification: `.claude/skills/verify-change/SKILL.md`,
+`.claude/skills/docs-links/SKILL.md` or `.claude/skills/local-install/SKILL.md`.
+Run the narrow reproducer first and the full gate once at the end; never weaken a test/type/lint guard
+to obtain green. Ruff deliberately excludes Markdown. Separate check commands from writing commands.
+Real-SDK tests are opt-in (`CLAUDETM_REAL_SDK=1`), require credentials and spend quota.
+Use a disposable scratch project such as `tmp/test-project-1/` for authorized real runs, with
+`--no-auto-merge`; never reproduce against a valuable repository or share a live run's state directory.
+
+## Source and test structure
+
+| Path | Responsibility / test location |
+|---|---|
+| `src/claude_task_master/core/` | Agent queries, phases/prompts, config, planning, state, loop and `stages/`; mirrored by `tests/core/` |
+| `src/claude_task_master/cli.py`, `cli_commands/` | Typer entry point and command handlers; `tests/cli_commands/` |
+| `src/claude_task_master/wrapper.py`, `bin/claudetm` | Main console wrapper/config loading; `tests/test_wrapper.py`, `tests/test_bin_scripts.py` |
+| `src/claude_task_master/api/`, `mcp/` | Thin REST/MCP entry layers delegating into core; corresponding `tests/api/`, `tests/mcp/` |
+| `src/claude_task_master/server.py`, `server_runners.py` | Unified server runners; `tests/test_server.py` |
+| `src/claude_task_master/github/` | PR/CI/review operations and check tolerance; `tests/github/` |
+| `src/claude_task_master/mailbox/`, `webhooks/`, `auth/`, `utils/` | Communication, delivery, auth and utilities; mirrored test packages |
+| `tests/integration/`, `tests/property/`, `tests/contract/` | Cross-component, Hypothesis and contract guards; shared fixtures in `tests/conftest.py` |
+| `docs/README.md`, `README.md`, `examples/` | User documentation, navigation and examples; use existing pointers, not a second project brain |
+| `.claude/agents/`, `.claude/skills/` | Project specialists and repeatable verification procedures |
+
+Console scripts are declared in `pyproject.toml`: `claudetm` loads the wrapper, `claudetm-py` bypasses
+it, and `claudetm-mcp`, `claudetm-api`, `claudetm-server` start their respective interfaces.
+
+## Coding conventions
+
+| Rule | Apply it |
+|---|---|
+| Size and design | **Max 500 LOC per file**; SRP/SOLID, one reason to change per module. Split by responsibility. |
+| Typing | Typed Python; complete function annotations and explicit optional types; keep mypy clean. |
+| Formatting | Ruff, 100-column target, double quotes, spaces; import ordering enforced by Ruff. |
+| Tests | Ship tests with code under mirrored package paths; failure case first for bugs. |
+| Markers | Use declared `slow`, `integration`, `real_sdk`, `property`; do not invent markers. |
+| Entry layers | Keep API/MCP thin; reuse core logic instead of duplicating orchestration. |
+| Configuration | Keep model IDs/effort routing centralized; use existing config/profile/env surfaces. |
+| Output | Stream through `core/console.py`; no emoji in the printer, no secrets anywhere. |
+| Scope | Smallest correct change; unrelated defects are separate work, not opportunistic refactors. |
+
+## Completion, state and recovery
+
+The orchestrator's application contract below does not grant a worker permission to operate git
+when a lead or harness owns it. Repository evidence, not prose, determines stage advancement.
+
+| Situation | Required invariant / source pointer |
+|---|---|
+| Grouped task | Non-final tasks owe **commit only**, not early push/PR. Last-in-group and `--pr-per-task` owe commit, push and PR URL (`core/task_runner_session.py`). |
+| Group boundary | Groups are contiguous; repeated PR headings create separate instances. A skipped `[x]` task still closes its group off the base branch (`core/task_group.py`, `core/loop_working_stage.py`). |
+| Cursor | `current_task_index` is a saved cursor, not a monotonic counter. Preserve deliberate rewinds and reconcile it after plan updates. Hive completes one task, not one per worker. |
+| Cut-off work | Terminal SDK errors yield `ran_incomplete`; a definite dirty tree also means unfinished. Resume the leftover diff, not a clean restart. `MAX_TASK_FINISH_ATTEMPTS` is 2, then PR recovery takes over; overall session limits still apply. |
+| Push-only fix | CI/review/conflict fixes must commit **and push**. Detect dirty trees and unpushed commits before resolving threads or advancing. Retry up to `MAX_FIX_FINISH_ATTEMPTS` (2), then block; undelivered CI fixes refund `ci_fix_attempts`. |
+| Planning | Never persist a cut-off plan. `PlanUpdater` validates real tasks, preserves completed tasks and backs up before overwrite. Mailbox and `resume "message"` update pending work, not completed work. |
+| Missing PR | `core/stages/pr_recovery.py`: clean/ahead pushes and opens; clean/not-ahead closes the group; dirty gets at most two finish sessions. Base branch, failed comparisons/push/create, crash or exhausted budget block. |
+| Dirty merge | `core/stages/merge_cleanup.py`: at most two cleanup sessions, never auto-commit leftovers. New commits must be pushed and return to `waiting_ci`; never merge using CI for an older head. Base-branch leftovers block. |
+| Git probe | Preserve three states: clean, dirty, unreadable. Push/PR-opening fails closed on unreadable; fix/merge guards act on definite dirty state, not failed probes. |
+| Transient failures | Use bounded `_GitOps._retry_transient`, clear its key on success; do not turn transient PR detection/merge/checkout failures into immediate human blocks. |
+| Budgets | Keep recovery bounded and counters reset on task advance. Explicit forced resume refunds persisted attempt budgets (`StateRecovery`); do not implement endless retry. |
+| Merge checks | CI must actually have run; SUCCESS with zero passed checks is unconfirmed during the grace window. Respect actionable review threads and human requested changes. A worker never overrides a gate. |
+| Conflicts/sync | Conflict resolution may rebase only via its explicit `allow_rebase` path; ordinary fix sessions add commits. `--sync-before-merge` is opt-in, not an unconditional base-sync session. |
+
+State lives in `.claude-task-master/`: goal/criteria, checkbox `plan.md`, `state.json`, progress,
+context, mailbox, generated coding-style/release guides, logs and PR debugging evidence.
+Mailbox messages are checked after tasks, merged urgent-to-low, then passed to `PlanUpdater`.
+Exit **0** cleans successful-run state but preserves `logs/`, `coding-style.md`, `release.md` and the
+last ten logs; **1** (blocked) and **2** (interrupted) preserve state for resume. Do not clean a live run.
+
+## Agent, credentials and prompt invariants
+
+| Area | Rule / pointer |
+|---|---|
+| Working directory | Pass `cwd=str(self.working_dir)` in SDK options, validate existence, **never process-global `chdir`**; concurrent queries share the process (`core/agent_query_execute.py`). |
+| Phase tools | Planning defaults to Read/Glob/Grep/WebFetch/WebSearch; verification to Read/Glob/Grep/Bash; working to all tools. `allowed_tools` is auto-approval, **not a sandbox**, under `bypassPermissions`; restriction requires actual tool denial. |
+| Terminal result | After `ResultMessage`, retain accumulated output and error status despite trailing stream error/stall. Pre-terminal failures still enter retry logic; do not swallow them as success. |
+| Error classification | Prefer structured SDK status/payload over prose; token-boundary text fallback. Keep `core/agent_error_classify.py` importable without the SDK. Unknown query failures use the bounded failure budget. |
+| Usage limits | All query phases use `run_query_riding_out_usage_limits` (`core/usage_limit.py`): bounded, interruptible waits. A leaked refusal consumes no task-finish attempt, never checks a task off and is not distilled into context. |
+| Context | Prompt builders use `load_context_for_prompt()` (32k tail cap); raw `load_context()` is for append/distill/display. Extract learnings from output tail and bounded prior context, without restating the backlog. |
+| Limits and cost | Bound sessions by turns/budget, not typical wall-clock duration. Preserve idle/stall distinctions. Terminal cost/usage aggregates lead and workers; record all query phases. |
+| OAuth | Nested `claudeAiOauth` in the active credentials file; `expiresAt` is milliseconds. SDK/binary refreshes tokens, never custom manual refresh. Re-authentication is an operator action. |
+| Profiles | OAuth uses isolated `CLAUDE_CONFIG_DIR`; API-key profiles inject env at the SDK subprocess boundary and skip OAuth-file checks. Do not expose either credential form. |
+| Isolation | Use distinct profiles for concurrent accounts/runs; sharing one subscription can rotate refresh tokens. Ambient `default` clears the active pointer unless shadowed by an existing registry entry. |
+| Models | Defaults/fallbacks belong in config/phase modules. `context_windows` is currently inert, not a grant of larger context; do not append CLI-only `[1m]` aliases to portable API model IDs. |
+
+## Hive ownership and dispatch
+
+Parallelism is **inside one task**, never across tasks/PR groups; it defaults on but is optional.
+Use few large independent pieces: two or more workers or none, never one worker for a micro-edit.
+
+- Gate prompt and registration with `fan_out_enabled(parallel, push_only)` in `core/hive.py`;
+  push-only fixes, resumed dirty tasks and `[quick]` tasks do not fan out.
+- When `agents_for()` returns None, deny `DISPATCH_TOOLS` (`Task`, `Agent`); absent definitions alone
+  do not stop built-in dispatch. A caller without a loader fails closed.
+- Match project specialists first, generic `hive-worker` second. The CLI loads project definitions
+  via `setting_sources: ["project"]`; `get_agents_for_working_dir` supplies built-ins only.
+- Each brief names exclusive files, other owners, API/caller impacts, conventions and allowed checks.
+  Cite paths rather than pasting source. If callers overlap, keep the shared work with one owner.
+- Dispatch independent pieces together and work on retained pieces meanwhile. Size the team for
+  both real seams and available machine resources; the ceiling is not a target.
+- Use the same `hive_max_parallel()` (default 6) in the brief and CLI concurrency env.
+- Preserve `hive-worker` definition guards: `background=False`, denied Task/Agent,
+  `maxTurns=hive_worker_max_turns()` (default 200), effort from `hive_worker_effort()` (default high).
+- Workers never spawn workers, touch others' paths or run git. One writer per shared artifact;
+  lead/harness alone runs emitting tools and the full gate after workers finish.
+- The lead verifies the actual diff and check output. Query turn/cost limits aggregate the team;
+  fan-out does not change completion evidence or retry semantics.
+- Keep `core/hive_roster.py` independent of console/SDK imports; `MessageProcessor` renders it.
+  A successful dispatch result is an acknowledgement, not completion; only failed dispatches retire
+  workers from that signal. Never invent rows from unrelated top-level tool errors.
+
+See `core/prompts_working_hive.py`, `core/subagents.py` and the project hive specialist for details.
+
+## Releasing and CI
+
+Release only on an explicit request; a normal code change does not authorize a tag or publish.
+Synchronize **all** version locations:
+
+| Location | Required update |
+|---|---|
+| `pyproject.toml` | Project `version` |
+| `src/claude_task_master/__init__.py` | `__version__` |
+| `bin/claudetm` **and** `src/claude_task_master/bin/claudetm` | Both `SCRIPT_VERSION` copies; the packaged copy ships and prints the version first |
+| `CHANGELOG.md` | Release entry and bottom link block |
+
+Tag pushes trigger PyPI publication. Follow authorized release workflow and merge protections;
+never use owner/admin bypass as a worker instruction. Verify published version/install only when
+release work is authorized (`.claude/skills/local-install/SKILL.md`).
+Post-merge runtime release checks use generated `release.md` plus per-PR plan checks when auto-merge
+is enabled; skip unavailable surfaces, and route fixes through normal PR gates, not direct publish.
+
+CI configuration lives in `.github/workflows/`: GitHub-hosted `ubuntu-latest` runners, concurrency
+groups and job timeouts. Irreversible publish workflows keep `cancel-in-progress: false`.
+Check tolerance is explicit and logged in `github/check_tolerance.py`; do not broaden exceptions to
+hide failures. Existing tolerated quota notices are not permission to ignore unrelated failed checks.
