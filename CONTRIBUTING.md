@@ -35,14 +35,17 @@ Thank you for your interest in contributing to Claude Task Master! This document
 
 ```bash
 # Run all tests
-uv run pytest
+uv run pytest tests/ --timeout=120
 
 # Run specific test file
-uv run pytest tests/core/test_agent.py
+uv run pytest tests/core/test_agent_query.py --timeout=120
 
 # Run with coverage report
-uv run pytest --cov=claude_task_master --cov-report=html
+uv run pytest tests/ --cov=claude_task_master --cov-report=html --timeout=120
 ```
+
+pytest's addopts default to a 2-second timeout, so every command above
+overrides it with `--timeout=120` — the value the gate (`bin/check`) uses.
 
 ### Code Quality
 
@@ -52,16 +55,16 @@ We use several tools to maintain code quality:
 # Linting
 uv run ruff check .
 
-# Formatting
-uv run ruff format .
+# Formatting (check only — it never rewrites files)
+uv run ruff format --check .
 
-# Type checking
-uv run mypy src/
+# Type checking (the whole tree: src, tests and scripts)
+uv run mypy .
 ```
 
-Run all checks before submitting a PR:
+Run all checks before submitting a PR — this is the lint, type-check and test step of the gate; `bin/check` also runs pytest with coverage and two workers, builds the package and runs the CLI smoke probes:
 ```bash
-uv run ruff check . && uv run ruff format --check . && uv run mypy src/ && uv run pytest
+uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pytest tests/ --timeout=120
 ```
 
 ### Code Style Guidelines
@@ -104,7 +107,7 @@ Types:
 
 3. **Run all checks**:
    ```bash
-   uv run ruff check . && uv run ruff format . && uv run mypy src/ && uv run pytest
+   uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pytest tests/ --timeout=120
    ```
 
 4. **Push and create PR**:
