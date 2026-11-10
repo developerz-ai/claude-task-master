@@ -18,9 +18,10 @@ mkdir -p "$HOOKS_DIR"
 if [ -f "$SOURCE_HOOKS_DIR/pre-commit" ]; then
     cp "$SOURCE_HOOKS_DIR/pre-commit" "$HOOKS_DIR/pre-commit"
     chmod +x "$HOOKS_DIR/pre-commit"
-    echo "  Installed: pre-commit (runs lint and fixes issues)"
+    echo "  Installed: pre-commit (runs the full gate: bin/check)"
 fi
 
 echo ""
 echo "Git hooks installed successfully!"
-echo "The pre-commit hook will automatically run lint and fix issues on staged Python files."
+echo "The pre-commit hook runs the full gate (bin/check) and blocks the commit when it fails."
+echo "It runs the same gate as .githooks/pre-commit (git config core.hooksPath .githooks)."
