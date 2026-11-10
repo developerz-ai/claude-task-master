@@ -262,18 +262,19 @@ plan_repo(
 
 **What Happens:**
 
-1. **Codebase Exploration** - Uses read-only tools (Read, Glob, Grep, Bash) to explore the repository
+1. **Codebase Exploration** - Uses the planning tools configured in `config.tools.planning` to explore the repository
 2. **Pattern Analysis** - Identifies existing patterns, architecture, and dependencies
 3. **Plan Generation** - Creates a structured task list with markdown checkboxes
 4. **Success Criteria Definition** - Defines measurable success criteria
 5. **State Persistence** - Saves plan to `.claude-task-master/plan.md` and criteria to `.claude-task-master/criteria.txt`
 
-**Read-Only Tools Used:**
+**Default Planning Tools (`config.tools.planning`):**
 
 - **Read** - Read specific files
 - **Glob** - Find files by pattern
 - **Grep** - Search file contents
-- **Bash** - Run read-only commands (ls, grep, find, etc.)
+- **WebFetch** - Fetch a web page
+- **WebSearch** - Search the web
 
 **No Changes Made:**
 
