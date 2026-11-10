@@ -148,6 +148,8 @@ Get comprehensive status information about the current task.
   "workflow_stage": "pr_created",
   "options": {
     "auto_merge": true,
+    "enable_release": false,
+    "enable_verification": false,
     "max_sessions": 10,
     "max_prs": null,
     "pause_on_pr": false,
@@ -412,6 +414,8 @@ Update runtime task configuration options.
 **Supported Options:**
 
 - `auto_merge` (boolean) - Whether to auto-merge PRs once CI is green and review feedback is resolved (no approving review is required)
+- `enable_release` (boolean) - Whether to run post-merge release verification
+- `enable_verification` (boolean) - Whether to run final success-criteria verification + fix loop after all tasks complete
 - `max_sessions` (integer, 1-1000) - Maximum work sessions before pausing
 - `max_prs` (integer, 1-100) - Maximum number of pull requests to create
 - `pause_on_pr` (boolean) - Whether to pause after creating PR
@@ -419,7 +423,6 @@ Update runtime task configuration options.
 - `log_format` (string) - Log format: `text`, `json`
 - `pr_per_task` (boolean) - Create PR per task vs per group
 - `parallel` (boolean) - Whether a work session may split its one task across `hive-worker` subagents with disjoint write sets
-- `max_budget_usd` (float) - Max spending per session in USD (null for unlimited)
 
 **Note:** Only provide the fields you want to update. At least one field is required.
 
@@ -475,11 +478,12 @@ Initialize a new task with the given goal and options.
 - `goal` (required, string, 1-10000 chars) - The goal to achieve
 - `model` (optional, string) - Model to use: `opus`, `sonnet`, `haiku` (default: `opus`)
 - `auto_merge` (optional, boolean) - Auto-merge PRs once CI is green and review feedback is resolved; no approving review is required (default: `true`)
+- `enable_release` (optional, boolean) - Whether to run post-merge release verification (default: `false`)
+- `enable_verification` (optional, boolean) - Whether to run final success-criteria verification + fix loop after all tasks complete (default: `false`)
 - `max_sessions` (optional, integer, 1-1000) - Max sessions before pausing
 - `max_prs` (optional, integer, 1-100) - Max pull requests to create
 - `pause_on_pr` (optional, boolean) - Pause after creating PR (default: `false`)
 - `parallel` (optional, boolean) - Let each work session split its ONE task across `hive-worker` subagents when the pieces have disjoint write sets (default: `true`). The lead sizes its own team; zero workers is a valid answer
-- `budget` (optional, float) - Max spending per session in USD (default: unlimited)
 
 **Response:** `TaskInitResponse` (201 Created)
 
