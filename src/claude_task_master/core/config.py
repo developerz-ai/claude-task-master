@@ -120,7 +120,7 @@ class ContextWindowsConfig(BaseModel):
     """Retained context-window metadata per model (in tokens).
 
     Values remain loadable from configuration and ``CLAUDETM_CONTEXT_*`` environment
-    variables, including those emitted by profiles, and readable by ``get_context_window``.
+    variables, including those emitted by profiles.
     They are currently inert for runtime compaction and window selection: changing them
     does not set a compaction threshold, prevent context overflow, or grant a larger
     SDK context window. Defaults and keys are retained for compatibility.
