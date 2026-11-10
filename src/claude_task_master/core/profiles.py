@@ -14,9 +14,10 @@ Two profile types are supported:
 - ``api-key`` - a direct API key + base URL injected as ``ANTHROPIC_API_KEY`` /
   ``ANTHROPIC_BASE_URL`` (e.g. z.ai / GLM via an Anthropic-compatible endpoint).
   May also carry per-tier ``models`` (opus/sonnet/haiku/sonnet_1m/fable -> a
-  provider-valid model id) and ``context_windows`` overrides; tiers the profile
-  omits inherit from a family neighbour so a partial profile still routes every
-  complexity level to a model the endpoint actually serves.
+   provider-valid model id); omitted model tiers inherit from a family neighbour
+   so a partial profile still routes every complexity level to a model the
+   endpoint actually serves. ``context_windows`` metadata also supports family
+   fallback, but is currently inert for runtime compaction and window selection.
 
 The registry lives in ``~/.claudetm/profiles.json`` (override the base directory
 with the ``CLAUDETM_HOME`` env var). The active profile is a single pointer,
@@ -111,10 +112,11 @@ class Profile(BaseModel):
         default=None,
         description="Model name overrides (opus, sonnet, fable, haiku, sonnet_1m → custom IDs).",
     )
-    # Optional context window overrides (in tokens)
+    # Optional context-window metadata (tokens), retained for compatibility.
     context_windows: dict[str, int] | None = Field(
         default=None,
-        description="Context window sizes per model (opus, sonnet, fable, haiku, sonnet_1m → tokens).",
+        description="Context-window metadata per model (tokens); currently inert for runtime "
+        "compaction and SDK window selection.",
     )
 
     def validate_for_type(self) -> None:
@@ -235,13 +237,11 @@ def env_for_profile(profile: Profile) -> dict[str, str]:
             if value:
                 env[env_var] = value
 
-    # Context window overrides (tokens). Read by the config loader to size the
-    # auto-compact threshold per tier. As with models, a partial mapping still
-    # covers every tier via family fallback (sonnet_1m <- sonnet <- opus,
-    # fable <- opus <- sonnet). This matters for custom endpoints whose real
-    # context is far below the Claude defaults: without it claudetm assumes
-    # e.g. 1M for sonnet_1m and never compacts before the provider's smaller
-    # limit is hit ("The model has reached its context window limit").
+    # Context-window metadata (tokens) is emitted as CLAUDETM_CONTEXT_* and
+    # loaded into config. Missing sonnet_1m/fable values use family fallback
+    # (sonnet_1m <- sonnet <- opus, fable <- opus <- sonnet). These values are
+    # currently inert for runtime compaction and SDK window selection; emission
+    # and loading do not set a compaction threshold or prevent context overflow.
     if profile.context_windows:
         ctx = dict(profile.context_windows)
         if not ctx.get("sonnet_1m"):
@@ -452,7 +452,8 @@ class ProfileManager:
             api_key: API key (required for ``api-key`` profiles).
             base_url: Anthropic-compatible base URL (``api-key`` profiles).
             models: Optional model name overrides (e.g., {"opus": "glm-5.2[1m]", "sonnet": "glm-4.7"}).
-            context_windows: Optional context window sizes per model (in tokens).
+            context_windows: Optional context-window metadata per model (tokens), currently
+                inert for runtime compaction and SDK window selection.
 
         Returns:
             The created profile.
