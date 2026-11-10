@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/developerz-ai/claude-task-master/actions/workflows/ci.yml/badge.svg)](https://github.com/developerz-ai/claude-task-master/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/developerz-ai/claude-task-master/graph/badge.svg)](https://codecov.io/gh/developerz-ai/claude-task-master)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![PyPI version](https://badge.fury.io/py/claude-task-master.svg)](https://badge.fury.io/py/claude-task-master)
 
@@ -184,7 +184,7 @@ Claude Task Master uses the Claude Agent SDK to autonomously work on complex tas
 3. **Create PRs** - All work is pushed and submitted as pull requests
 4. **Handle CI** - Wait for checks, fix failures, address review comments
 5. **Merge** - Auto-merge once CI is green and review feedback is resolved (configurable)
-6. **Verify** - Confirm all success criteria are met
+6. **Verify** (optional, `--verify`) - Confirm all success criteria are met and fix any gaps
 7. **Adapt** - Accept dynamic plan updates via mailbox while working
 
 **Core Philosophy**: Claude is smart enough to do the work AND verify it. Task Master keeps the loop going and persists state between sessions.
@@ -220,7 +220,7 @@ Claude Task Master uses the Claude Agent SDK to autonomously work on complex tas
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│                       VERIFICATION                               │
+│                VERIFICATION (optional: --verify)                 │
 │  Run tests → Check lint → Verify criteria → Done                │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -238,7 +238,7 @@ Work is NOT complete until it's pushed and in a pull request.
 
 ### Prerequisites
 
-1. **Python 3.10+** - [Install Python](https://www.python.org/downloads/)
+1. **Python 3.12+** - [Install Python](https://www.python.org/downloads/)
 2. **Claude CLI** - [Install Claude](https://github.com/anthropics/anthropic-sdk-python) and run `claude` to authenticate
 3. **GitHub CLI** - [Install gh](https://cli.github.com/) and run `gh auth login` (host CLI only — a container gets an [injected, scoped token](./docs/docker.md#4-github-credential-injected-scoped) instead of a personal login)
 
@@ -460,16 +460,24 @@ claudetm start "Your goal here" [OPTIONS]
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--model` | Model to use (sonnet, opus, haiku) | sonnet |
+| `--model`, `-m` | Model to use (opus, sonnet, haiku) | opus |
 | `--auto-merge/--no-auto-merge` | Auto-merge PRs once CI is green and review feedback is resolved (no approving review is required) | True |
-| `--max-sessions` | Limit number of sessions | unlimited |
+| `--max-sessions`, `-n` | Limit number of sessions | unlimited |
 | `--prs` | Limit number of PRs to create | unlimited |
 | `--pause-on-pr` | Pause after creating PR | False |
+| `--pr-per-task` | Create a PR for each task instead of one PR per PR group in the plan | False |
+| `--branch`, `-b` | Explicit branch name for this run; use distinct names for concurrent runs of the same task | agent-chosen |
+| `--verify/--no-verify` | Run final success-criteria verification and a fix loop after all tasks complete (opt-in) | False |
+| `--release/--no-release` | Run post-merge release verification (deploy/health/migration/error checks); also needs `--auto-merge` and a release guide with real checks | False |
+| `--log-level`, `-l` | Logging level: `quiet` (errors only), `normal`, `verbose` (all tool calls) | normal |
+| `--log-format` | Log output format: `text` or `json` | text |
+| `--webhook-url` | URL to receive webhook notifications for task lifecycle events (env: `CLAUDETM_WEBHOOK_URL`) | none |
+| `--webhook-secret` | HMAC secret for signing webhook payloads (env: `CLAUDETM_WEBHOOK_SECRET`) | none |
 | `--resolve-conflicts/--no-resolve-conflicts` | Let an agent rebase onto the base and resolve merge conflicts (3 attempts, then block) | True |
 | `--sync-before-merge/--no-sync-before-merge` | Also rebase PRs that merely trail the base, so CI verifies the combined tree (3 attempts, then merge as-is) | False |
 | `--parallel/--no-parallel` | Let each work session split its one task across `hive-worker` subagents with disjoint write sets | True |
 | `--admin` | Merge via `gh pr merge --admin`, overriding base-branch protection (requires repo-admin rights) | False |
-| `--budget` | Max spending per session in USD | unlimited |
+| `--budget` | Max spending per session in USD, must be > 0 (env: `CLAUDETM_BUDGET`) | unlimited |
 
 #### When you need `--admin`
 
@@ -979,7 +987,7 @@ working → pr_created → waiting_ci → ci_failed → waiting_reviews → addr
 
 Each stage has specific handlers that determine when to transition to the next stage.
 
-**Release phase** (stages `releasing` and `release_fix`) runs automatically after each PR merge when `auto_merge=True`. It verifies the deployment is healthy using whatever access is available (health checks, deploy status, error monitoring, DB migrations). If nothing is checkable, it's a no-op. If verification fails, creates a quick-fix PR (max 5 attempts).
+**Release phase** (stages `releasing` and `release_fix`) is opt-in: it runs after a PR merge only when `auto_merge=True`, the run was started with `--release` (`enable_release`), and a release guide with real checks exists. It verifies the deployment is healthy using whatever access is available (health checks, deploy status, error monitoring, DB migrations). If nothing is checkable, it's a no-op. If verification fails, creates a quick-fix PR (max 5 attempts).
 
 ## State Directory
 
