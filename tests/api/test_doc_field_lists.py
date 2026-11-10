@@ -69,25 +69,6 @@ _BULLET_RE = re.compile(r"^\s*-\s+`(?P<name>[A-Za-z_][A-Za-z0-9_]*)`(?P<rest>.*)
 # uses for its parameter tables.
 _ROW_RE = re.compile(r"^\|\s*`(?P<name>[A-Za-z_][A-Za-z0-9_]*)`(?P<rest>.*)$")
 
-# Phrases that tell the reader the option is accepted and stored but does
-# nothing - nothing in the tree implements checkpointing.
-_INERT_PHRASES = (
-    "no effect",
-    "no checkpointing",
-    "not implemented",
-    "unimplemented",
-    "not supported",
-    "unsupported",
-    "inert",
-    "no-op",
-    "does nothing",
-    "ignored",
-)
-
-# Phrases that tell the reader the option is still accepted and stored.
-_ACCEPTED_PHRASES = ("accepted", "stored")
-
-
 # =============================================================================
 # Markdown parsing
 # =============================================================================
@@ -197,26 +178,6 @@ def _table_fields(block: list[str]) -> list[tuple[str, str]]:
     return fields
 
 
-def _prose(section: list[str]) -> list[str]:
-    """The lines of a section that are not inside a fenced code block.
-
-    Args:
-        section: The lines of a section.
-
-    Returns:
-        The prose lines only.
-    """
-    prose: list[str] = []
-    in_fence = False
-    for line in section:
-        if line.strip().startswith("```"):
-            in_fence = not in_fence
-            continue
-        if not in_fence:
-            prose.append(line)
-    return prose
-
-
 def _json_blocks(section: list[str]) -> list[str]:
     """The bodies of the fenced code blocks of a section.
 
@@ -272,41 +233,6 @@ def _assert_same_fields(
         f"  documented but not accepted: {extra}\n"
         f"  documented more than once: {duplicates}"
     )
-
-
-def _assert_inert(text: str, label: str) -> None:
-    """Assert that an option is documented as accepted but without effect.
-
-    Args:
-        text: The documented text of the option.
-        label: How the option is named in the failure message.
-
-    Raises:
-        AssertionError: If the text does not say the option is inert.
-    """
-    lowered = text.lower()
-    assert any(phrase in lowered for phrase in _ACCEPTED_PHRASES), (
-        f"{label}: the option must be documented as accepted and stored, got: {text.strip()!r}"
-    )
-    assert any(phrase in lowered for phrase in _INERT_PHRASES), (
-        f"{label}: the option must be documented as having no effect, got: {text.strip()!r}"
-    )
-
-
-def _field_text(fields: list[tuple[str, str]], name: str) -> str:
-    """The documented text of one field.
-
-    Args:
-        fields: The parsed ``(name, text)`` pairs of a documented list.
-        name: The field to look up.
-
-    Returns:
-        The text that follows the field name, or an empty string.
-    """
-    for field_name, rest in fields:
-        if field_name == name:
-            return rest
-    return ""
 
 
 def _tool_parameters(fn: Callable[..., Any]) -> set[str]:
@@ -415,35 +341,6 @@ def test_mcp_tools_expose_no_parameters_beyond_the_model_fields_plus_state_dir()
         set(ConfigUpdateRequest.model_fields) | {_MCP_ONLY_PARAM},
         "MCP tool update_config",
     )
-
-
-# =============================================================================
-# Checkpointing
-# =============================================================================
-
-
-def test_checkpointing_is_documented_as_accepted_but_inert() -> None:
-    """Both config surfaces document `enable_checkpointing` as inert: nothing implements it."""
-    surfaces = {
-        "docs/api-reference.md PATCH /config": _bullet_fields(
-            _block_after_label(_API_REFERENCE, "#### `PATCH /config`", "**Supported Options:**")
-        ),
-        "docs/mcp-tools.md update_config": _table_fields(
-            _block_after_label(_MCP_TOOLS, "#### `update_config`", "**Parameters:**")
-        ),
-    }
-    for label, fields in surfaces.items():
-        text = _field_text(fields, "enable_checkpointing")
-        assert text, f"{label}: enable_checkpointing is not documented"
-        _assert_inert(text, f"{label} enable_checkpointing")
-
-
-def test_status_sample_reports_checkpointing_as_inert() -> None:
-    """The `GET /status` note says the reported checkpointing flag does nothing."""
-    prose = _prose(_section(_API_REFERENCE, "#### `GET /status`"))
-    mentions = " ".join(line for line in prose if "enable_checkpointing" in line)
-    assert mentions, "docs/api-reference.md GET /status does not mention enable_checkpointing"
-    _assert_inert(mentions, "docs/api-reference.md GET /status enable_checkpointing")
 
 
 # =============================================================================

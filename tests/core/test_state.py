@@ -86,7 +86,6 @@ class TestTaskOptions:
             "max_sessions": 3,
             "max_prs": 2,
             "pause_on_pr": False,
-            "enable_checkpointing": False,
             "log_level": "normal",
             "log_format": "text",
             "pr_per_task": False,
@@ -2460,7 +2459,6 @@ class TestPRTrackingStateFields:
                 "max_sessions": None,
                 "max_prs": None,
                 "pause_on_pr": False,
-                "enable_checkpointing": False,
                 "log_level": "normal",
                 "log_format": "text",
                 "pr_per_task": False,
@@ -2479,6 +2477,39 @@ class TestPRTrackingStateFields:
         # Should use default values for missing fields
         assert loaded.prs_created == 0
         assert loaded.prs_merged == 0
+
+    def test_load_state_with_removed_enable_checkpointing_key(self, temp_dir):
+        """A state.json written before the option was removed still loads cleanly."""
+        state_dir = temp_dir / ".claude-task-master"
+        state_dir.mkdir(parents=True)
+        state_file = state_dir / "state.json"
+        state_file.write_text(
+            json.dumps(
+                {
+                    "status": "working",
+                    "workflow_stage": None,
+                    "current_task_index": 0,
+                    "session_count": 1,
+                    "current_pr": None,
+                    "created_at": "2025-01-15T12:00:00",
+                    "updated_at": "2025-01-15T12:00:00",
+                    "run_id": "20250115-120000",
+                    "model": "sonnet",
+                    "options": {"auto_merge": True, "enable_checkpointing": True},
+                }
+            )
+        )
+
+        manager = StateManager(state_dir)
+        loaded = manager.load_state()
+
+        assert loaded.options.auto_merge is True
+        assert not hasattr(loaded.options, "enable_checkpointing")
+
+        # Round trip: the stale key is dropped from what gets written back.
+        manager.save_state(loaded)
+        saved = json.loads(state_file.read_text())
+        assert "enable_checkpointing" not in saved["options"]
 
     def test_prs_created_not_negative(self, initialized_state_manager):
         """Test that prs_created can be set to 0 or positive values."""

@@ -161,7 +161,6 @@ def create_info_router() -> APIRouter:
                     max_sessions=state.options.max_sessions,
                     max_prs=state.options.max_prs,
                     pause_on_pr=state.options.pause_on_pr,
-                    enable_checkpointing=state.options.enable_checkpointing,
                     log_level=state.options.log_level,
                     log_format=state.options.log_format,
                     pr_per_task=state.options.pr_per_task,

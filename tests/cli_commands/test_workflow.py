@@ -13,8 +13,7 @@ from claude_task_master.cli_commands.workflow import _validate_budget, _validate
 
 README = Path(__file__).resolve().parents[2] / "README.md"
 
-# --checkpointing is dead and being removed, so it is deliberately undocumented.
-_UNDOCUMENTED_START_FLAGS = {"--checkpointing", "--help"}
+_UNDOCUMENTED_START_FLAGS = {"--help"}
 
 
 def _normalize(text: str) -> str:
@@ -138,6 +137,13 @@ class TestStartInputValidation:
         """A negative --budget is rejected at parse time."""
         result = cli_runner.invoke(app, ["start", "Task", "--budget", "-2.5"])
         assert result.exit_code == 2
+
+    def test_checkpointing_flag_removed(self, cli_runner):
+        """--checkpointing no longer exists: not in help, and passing it is a usage error."""
+        assert "--checkpointing" not in _live_start_flags()
+        result = cli_runner.invoke(app, ["start", "Task", "--checkpointing"])
+        assert result.exit_code == 2
+        assert "--checkpointing" in _normalize(result.output)
 
     def test_empty_goal_rejected(self, cli_runner):
         """An empty goal argument is rejected at parse time."""

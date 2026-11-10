@@ -112,7 +112,6 @@ def create_task_router() -> APIRouter:
                 max_sessions=task_init.max_sessions,
                 max_prs=task_init.max_prs,
                 pause_on_pr=task_init.pause_on_pr,
-                enable_checkpointing=False,  # Default to False
                 log_level="normal",  # Default to normal
                 log_format="text",  # Default to text
                 pr_per_task=False,  # Default to False

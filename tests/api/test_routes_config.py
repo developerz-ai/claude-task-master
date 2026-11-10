@@ -35,7 +35,6 @@ def test_patch_config_success(api_client, api_complete_state, api_state_file, ap
             "auto_merge": True,
             "max_sessions": 10,
             "pause_on_pr": False,
-            "enable_checkpointing": False,
             "log_level": "normal",
             "log_format": "text",
             "pr_per_task": False,
@@ -72,7 +71,6 @@ def test_patch_config_success(api_client, api_complete_state, api_state_file, ap
     assert updated_state["options"]["max_sessions"] == 20
     assert updated_state["options"]["pause_on_pr"] is True
     # Other options should remain unchanged
-    assert updated_state["options"]["enable_checkpointing"] is False
     assert updated_state["options"]["log_level"] == "normal"
 
 
@@ -94,7 +92,6 @@ def test_patch_config_single_field(api_client, api_complete_state, api_state_fil
             "auto_merge": True,
             "max_sessions": 10,
             "pause_on_pr": False,
-            "enable_checkpointing": False,
             "log_level": "normal",
             "log_format": "text",
             "pr_per_task": False,
@@ -158,7 +155,6 @@ def test_patch_config_with_enum_values(api_client, api_complete_state, api_state
             "auto_merge": True,
             "max_sessions": 10,
             "pause_on_pr": False,
-            "enable_checkpointing": False,
             "log_level": "normal",
             "log_format": "text",
             "pr_per_task": False,
@@ -198,7 +194,6 @@ def test_patch_config_invalid_max_sessions(api_client, api_complete_state, api_s
             "auto_merge": True,
             "max_sessions": 10,
             "pause_on_pr": False,
-            "enable_checkpointing": False,
             "log_level": "normal",
             "log_format": "text",
             "pr_per_task": False,
@@ -231,7 +226,6 @@ def test_patch_config_all_fields(api_client, api_complete_state, api_state_file)
             "auto_merge": True,
             "max_sessions": 10,
             "pause_on_pr": False,
-            "enable_checkpointing": False,
             "log_level": "normal",
             "log_format": "text",
             "pr_per_task": False,
@@ -245,7 +239,6 @@ def test_patch_config_all_fields(api_client, api_complete_state, api_state_file)
             "auto_merge": False,
             "max_sessions": 50,
             "pause_on_pr": True,
-            "enable_checkpointing": True,
             "log_level": "verbose",
             "log_format": "json",
             "pr_per_task": True,
@@ -255,14 +248,13 @@ def test_patch_config_all_fields(api_client, api_complete_state, api_state_file)
     assert response.status_code == 200
     data = response.json()
     assert data["success"] is True
-    assert len(data["details"]["updated"]) == 7  # All fields updated
+    assert len(data["details"]["updated"]) == 6  # All fields updated
 
     # Verify all fields were updated
     updated_state = json.loads(api_state_file.read_text())
     assert updated_state["options"]["auto_merge"] is False
     assert updated_state["options"]["max_sessions"] == 50
     assert updated_state["options"]["pause_on_pr"] is True
-    assert updated_state["options"]["enable_checkpointing"] is True
     assert updated_state["options"]["log_level"] == "verbose"
     assert updated_state["options"]["log_format"] == "json"
     assert updated_state["options"]["pr_per_task"] is True
@@ -286,7 +278,6 @@ def test_patch_config_none_values(api_client, api_complete_state, api_state_file
             "auto_merge": True,
             "max_sessions": 10,
             "pause_on_pr": False,
-            "enable_checkpointing": False,
             "log_level": "normal",
             "log_format": "text",
             "pr_per_task": False,

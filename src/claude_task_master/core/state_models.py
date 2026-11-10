@@ -38,7 +38,6 @@ class TaskOptions(BaseModel):
     max_sessions: int | None = None
     max_prs: int | None = None
     pause_on_pr: bool = False
-    enable_checkpointing: bool = False
     log_level: str = "normal"  # quiet, normal, verbose
     log_format: str = "text"  # text, json
     pr_per_task: bool = False  # If True, create PR per task; if False, PR per group

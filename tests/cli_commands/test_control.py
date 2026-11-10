@@ -43,7 +43,6 @@ def task_options():
         auto_merge=True,
         max_sessions=None,
         pause_on_pr=False,
-        enable_checkpointing=False,
         log_level="normal",
         log_format="text",
         pr_per_task=False,

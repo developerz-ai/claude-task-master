@@ -444,7 +444,6 @@ Update task configuration options at runtime.
 | `max_sessions` | integer | No | Max work sessions before pausing |
 | `max_prs` | integer | No | Max pull requests to create |
 | `pause_on_pr` | boolean | No | Pause after creating PR |
-| `enable_checkpointing` | boolean | No | Accepted and stored, but has no effect because no checkpointing is implemented |
 | `log_level` | string | No | Log level: quiet, normal, verbose |
 | `log_format` | string | No | Log format: text, json |
 | `pr_per_task` | boolean | No | Create PR per task vs per group |
