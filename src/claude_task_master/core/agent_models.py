@@ -103,10 +103,9 @@ class TaskComplexity(Enum):
 # Constants
 # =============================================================================
 
-# Retained context-window metadata defaults (tokens) for get_context_window.
-# The helper can read config.json "context_windows" overrides, but has no runtime
-# compaction caller. These values do not set compaction thresholds or select a
-# larger SDK window; they are retained for compatibility.
+# Retained context-window metadata defaults (tokens), inert at runtime. These
+# values do not set compaction thresholds or select a larger SDK window; they
+# are retained for compatibility.
 MODEL_CONTEXT_WINDOWS = {
     ModelType.OPUS: 1_000_000,
     ModelType.FABLE: 1_000_000,
@@ -181,34 +180,6 @@ def get_fallback_chain(model: ModelType) -> list[ModelType]:
         seen.add(nxt)
         current = nxt
     return chain
-
-
-def get_context_window(
-    model: ModelType,
-    config: ClaudeTaskMasterConfig | None = None,
-) -> int:
-    """Read retained context-window metadata, using config when supplied.
-
-    This compatibility helper has no runtime compaction caller. Its return value
-    does not set a compaction threshold or select the SDK's context window.
-
-    Args:
-        model: The model type.
-        config: Optional config object. If None, uses hardcoded defaults.
-
-    Returns:
-        Context-window metadata in tokens, not a runtime capacity guarantee.
-    """
-    if config is not None:
-        context_map = {
-            ModelType.OPUS: config.context_windows.opus,
-            ModelType.FABLE: config.context_windows.fable,
-            ModelType.SONNET: config.context_windows.sonnet,
-            ModelType.HAIKU: config.context_windows.haiku,
-            ModelType.SONNET_1M: config.context_windows.sonnet_1m,
-        }
-        return context_map.get(model, MODEL_CONTEXT_WINDOWS[model])
-    return MODEL_CONTEXT_WINDOWS[model]
 
 
 # Legacy compact-threshold constant, retained for compatibility and unused at runtime.
