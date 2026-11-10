@@ -245,7 +245,6 @@ class _ControlOpsMixin:
             - auto_merge: bool - Whether to auto-merge PRs
             - max_sessions: int | None - Maximum number of sessions
             - pause_on_pr: bool - Whether to pause on PR creation
-            - enable_checkpointing: bool - Whether to enable checkpointing
             - log_level: str - Log level (quiet, normal, verbose)
             - log_format: str - Log format (text, json)
             - pr_per_task: bool - Whether to create PR per task

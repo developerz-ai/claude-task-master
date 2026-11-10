@@ -102,15 +102,6 @@ claudetm start "Complex task" --max-sessions 10
 # Stops after 10 work sessions
 ```
 
-## Checkpointing (Experimental)
-
-Enable file checkpointing for safe rollbacks:
-
-```bash
-claudetm start "Risky refactor" --checkpointing
-# Can rollback changes if things go wrong
-```
-
 ## Troubleshooting
 
 ### Check System Setup

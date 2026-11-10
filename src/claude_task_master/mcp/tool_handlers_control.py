@@ -185,7 +185,6 @@ def update_config(
     max_sessions: int | None = None,
     max_prs: int | None = None,
     pause_on_pr: bool | None = None,
-    enable_checkpointing: bool | None = None,
     log_level: str | None = None,
     log_format: str | None = None,
     pr_per_task: bool | None = None,
@@ -207,7 +206,6 @@ def update_config(
         max_sessions: Maximum number of work sessions before pausing.
         max_prs: Maximum number of pull requests to create.
         pause_on_pr: Whether to pause after creating PR for manual review.
-        enable_checkpointing: Whether to enable state checkpointing.
         log_level: Log level (quiet, normal, verbose).
         log_format: Log format (text, json).
         pr_per_task: Whether to create PR per task vs per group.
@@ -234,8 +232,6 @@ def update_config(
         kwargs["max_prs"] = max_prs
     if pause_on_pr is not None:
         kwargs["pause_on_pr"] = pause_on_pr
-    if enable_checkpointing is not None:
-        kwargs["enable_checkpointing"] = enable_checkpointing
     if log_level is not None:
         kwargs["log_level"] = log_level
     if log_format is not None:

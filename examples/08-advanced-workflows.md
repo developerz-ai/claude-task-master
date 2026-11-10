@@ -334,15 +334,6 @@ claudetm start "Add pagination to API" --model sonnet
 claudetm start "Design and implement microservice architecture" --model opus
 ```
 
-### 5. Checkpointing for Safety
-
-```bash
-# Enable checkpointing for risky changes
-claudetm start "Major database schema refactor" --checkpointing
-
-# If something goes wrong, checkpoint allows rollback
-```
-
 ## Handling Edge Cases
 
 ### CI Failures During Multi-Step Process

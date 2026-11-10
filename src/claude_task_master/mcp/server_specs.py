@@ -192,7 +192,6 @@ _FORWARDING_SPECS: tuple[ForwardingSpec, ...] = (
         "    max_sessions: Maximum number of work sessions before pausing.\n"
         "    max_prs: Maximum number of pull requests to create.\n"
         "    pause_on_pr: Whether to pause after creating PR for manual review.\n"
-        "    enable_checkpointing: Whether to enable state checkpointing.\n"
         "    log_level: Log level (quiet, normal, verbose).\n"
         "    log_format: Log format (text, json).\n"
         "    pr_per_task: Whether to create PR per task vs per group.\n"

@@ -151,7 +151,6 @@ Get comprehensive status information about the current task.
     "max_sessions": 10,
     "max_prs": null,
     "pause_on_pr": false,
-    "enable_checkpointing": false,
     "log_level": "normal",
     "log_format": "text",
     "pr_per_task": false,
@@ -416,7 +415,6 @@ Update runtime task configuration options.
 - `max_sessions` (integer, 1-1000) - Maximum work sessions before pausing
 - `max_prs` (integer, 1-100) - Maximum number of pull requests to create
 - `pause_on_pr` (boolean) - Whether to pause after creating PR
-- `enable_checkpointing` (boolean) - Enable state checkpointing
 - `log_level` (string) - Log level: `quiet`, `normal`, `verbose`
 - `log_format` (string) - Log format: `text`, `json`
 - `pr_per_task` (boolean) - Create PR per task vs per group

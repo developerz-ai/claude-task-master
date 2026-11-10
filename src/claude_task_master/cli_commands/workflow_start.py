@@ -96,11 +96,6 @@ def start(
         "--pause-on-pr",
         help="Pause after creating PR for manual review",
     ),
-    enable_checkpointing: bool = typer.Option(
-        False,
-        "--checkpointing",
-        help="Enable file checkpointing for safe rollbacks",
-    ),
     log_level: str = typer.Option(
         "normal",
         "--log-level",
@@ -253,7 +248,6 @@ def start(
             max_sessions=max_sessions,
             max_prs=max_prs,
             pause_on_pr=pause_on_pr,
-            enable_checkpointing=enable_checkpointing,
             log_level=log_level.lower(),
             log_format=log_format.lower(),
             pr_per_task=pr_per_task,
