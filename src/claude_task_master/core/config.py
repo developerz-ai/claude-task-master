@@ -117,49 +117,39 @@ class GitConfig(BaseModel):
 
 
 class ContextWindowsConfig(BaseModel):
-    """Context window sizes per model (in tokens).
+    """Retained context-window metadata per model (in tokens).
 
-    Controls the max context window size used for auto-compact threshold calculation.
-
-    These only drive *when claudetm compacts* -- they do not grant a larger window. So
-    the bias is deliberate: under-stating a window compacts early (harmless), over-stating
-    it compacts too late and overflows the session. Defaults track a Claude Code
-    subscription, the auth path claudetm runs on:
-
-    - ``opus`` -- 1M. Automatically upgraded on Max/Team/Enterprise with no extra
-      configuration. **On Pro this requires usage credits**; set 200000 there.
-    - ``sonnet`` -- 200K, the conservative default. Raise to 1000000 only once you have
-      confirmed your account actually serves Sonnet at 1M.
-    - ``haiku`` -- 200K, which is Haiku 4.5's real window.
-
-    Two setups budget 1M-capable models at 200K regardless of plan, and want 200000 for
-    every tier here: an LLM gateway (``ANTHROPIC_BASE_URL`` pointing somewhere Claude Code
-    cannot verify 1M support) and ``CLAUDE_CODE_DISABLE_1M_CONTEXT=1``.
+    Values remain loadable from configuration and ``CLAUDETM_CONTEXT_*`` environment
+    variables, including those emitted by profiles, and readable by ``get_context_window``.
+    They are currently inert for runtime compaction and window selection: changing them
+    does not set a compaction threshold, prevent context overflow, or grant a larger
+    SDK context window. Defaults and keys are retained for compatibility.
     """
 
     opus: int = Field(
         default=1_000_000,
-        description="Opus context window size in tokens. 1000000 matches the automatic "
-        "1M upgrade on Max/Team/Enterprise; set to 200000 on Pro (1M needs usage credits "
-        "there) or behind an LLM gateway.",
+        description="Opus context-window metadata in tokens; currently inert for runtime "
+        "compaction and SDK window selection.",
     )
     fable: int = Field(
         default=1_000_000,
-        description="Fable context window size in tokens. Claude Fable 5 is 1M by default.",
+        description="Fable context-window metadata in tokens; currently inert for runtime "
+        "compaction and SDK window selection.",
     )
     sonnet: int = Field(
         default=200_000,
-        description="Sonnet context window size in tokens. 200000 is the conservative "
-        "default (1M on a subscription is billed to usage credits); raise to 1000000 "
-        "only once you have confirmed your account serves Sonnet at 1M.",
+        description="Sonnet context-window metadata in tokens; currently inert for runtime "
+        "compaction and SDK window selection.",
     )
     haiku: int = Field(
         default=200_000,
-        description="Haiku context window size in tokens.",
+        description="Haiku context-window metadata in tokens; currently inert for runtime "
+        "compaction and SDK window selection.",
     )
     sonnet_1m: int = Field(
         default=1_000_000,
-        description="Sonnet 1M context window size in tokens. Always 1M.",
+        description="Sonnet 1M context-window metadata in tokens; currently inert for runtime "
+        "compaction and SDK window selection.",
     )
 
 
@@ -251,7 +241,8 @@ class ClaudeTaskMasterConfig(BaseModel):
     )
     context_windows: ContextWindowsConfig = Field(
         default_factory=ContextWindowsConfig,
-        description="Context window sizes per model (tokens). Set to 200000 if not on tier 4+.",
+        description="Retained context-window metadata per model (tokens); currently inert for "
+        "runtime compaction and SDK window selection.",
     )
     git: GitConfig = Field(
         default_factory=GitConfig,

@@ -1,11 +1,10 @@
 """Agent Models - Enums, constants, and utility functions for model configuration.
 
 This module contains:
-- ModelType: Available Claude models (Sonnet, Opus, Haiku, Sonnet 1M)
+- ModelType: Available Claude models (Sonnet, Opus, Fable, Haiku, Sonnet 1M)
 - TaskComplexity: Task complexity levels for dynamic model selection,
   including get_model_name_for_complexity for name-based model routing
-- ToolConfig: Tool configurations for different execution phases (now config-backed)
-- MODEL_CONTEXT_WINDOWS: Model context window sizes
+- MODEL_CONTEXT_WINDOWS: Retained context-window metadata defaults
 - parse_task_complexity: Parse complexity tags from task descriptions
 - get_tools_for_phase: Get tool list for a phase from global config
 """
@@ -104,27 +103,25 @@ class TaskComplexity(Enum):
 # Constants
 # =============================================================================
 
-# Model context window sizes (tokens) for auto-compact threshold calculation.
-# These are defaults; users can override via config.json "context_windows" section.
-# Opus 5 and Sonnet 5 both report a 1M context window from the Models API.
-# Note: The Agent SDK handles the `context-1m-2025-08-07` beta header internally.
-# These values are only used to calculate when to trigger context compaction.
-# See: https://platform.claude.com/docs/en/build-with-claude/context-windows
+# Retained context-window metadata defaults (tokens) for get_context_window.
+# The helper can read config.json "context_windows" overrides, but has no runtime
+# compaction caller. These values do not set compaction thresholds or select a
+# larger SDK window; they are retained for compatibility.
 MODEL_CONTEXT_WINDOWS = {
-    ModelType.OPUS: 1_000_000,  # Claude Opus 5: 1M context (native, per Models API)
-    ModelType.FABLE: 1_000_000,  # Claude Fable 5: 1M context (default, no beta gate)
-    ModelType.SONNET: 1_000_000,  # Claude Sonnet 5: 1M context (beta, tier 4+)
-    ModelType.HAIKU: 200_000,  # Claude Haiku 4.5: 200K context
-    ModelType.SONNET_1M: 1_000_000,  # Sonnet with 1M context (always 1M)
+    ModelType.OPUS: 1_000_000,
+    ModelType.FABLE: 1_000_000,
+    ModelType.SONNET: 1_000_000,
+    ModelType.HAIKU: 200_000,
+    ModelType.SONNET_1M: 1_000_000,
 }
 
-# Standard context windows (for users below tier 4)
+# Legacy standard-window metadata, retained for compatibility; also inert at runtime.
 MODEL_CONTEXT_WINDOWS_STANDARD = {
     ModelType.OPUS: 200_000,
-    ModelType.FABLE: 1_000_000,  # Fable 5's 1M window is the default, not tier-gated
+    ModelType.FABLE: 1_000_000,
     ModelType.SONNET: 200_000,
     ModelType.HAIKU: 200_000,
-    ModelType.SONNET_1M: 1_000_000,  # Always 1M — that's the point
+    ModelType.SONNET_1M: 1_000_000,
 }
 
 # Fallback model mapping: if primary model unavailable, try fallback
@@ -190,14 +187,17 @@ def get_context_window(
     model: ModelType,
     config: ClaudeTaskMasterConfig | None = None,
 ) -> int:
-    """Get context window size for a model, reading from config if available.
+    """Read retained context-window metadata, using config when supplied.
+
+    This compatibility helper has no runtime compaction caller. Its return value
+    does not set a compaction threshold or select the SDK's context window.
 
     Args:
         model: The model type.
         config: Optional config object. If None, uses hardcoded defaults.
 
     Returns:
-        Context window size in tokens.
+        Context-window metadata in tokens, not a runtime capacity guarantee.
     """
     if config is not None:
         context_map = {
@@ -211,8 +211,8 @@ def get_context_window(
     return MODEL_CONTEXT_WINDOWS[model]
 
 
-# Default compact threshold as percentage of context window
-DEFAULT_COMPACT_THRESHOLD_PERCENT = 0.85  # Compact at 85% usage
+# Legacy compact-threshold constant, retained for compatibility and unused at runtime.
+DEFAULT_COMPACT_THRESHOLD_PERCENT = 0.85
 
 
 # =============================================================================
