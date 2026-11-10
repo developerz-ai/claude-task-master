@@ -252,7 +252,9 @@ def _display_env_overrides(show_secrets: bool = False) -> None:
 | `OPENROUTER_BASE_URL` | `api.openrouter_base_url` | OpenRouter API URL |
 | `CLAUDETM_MODEL_SONNET` | `models.sonnet` | Sonnet model name |
 | `CLAUDETM_MODEL_OPUS` | `models.opus` | Opus model name |
+| `CLAUDETM_MODEL_FABLE` | `models.fable` | Fable model name |
 | `CLAUDETM_MODEL_HAIKU` | `models.haiku` | Haiku model name |
+| `CLAUDETM_MODEL_SONNET_1M` | `models.sonnet_1m` | Sonnet 1M model name |
 | `CLAUDETM_TARGET_BRANCH` | `git.target_branch` | Target branch for PRs |
 """
         console.print(Markdown(env_vars_md))
