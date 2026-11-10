@@ -1,29 +1,17 @@
 #!/usr/bin/env bash
-# Pre-commit hook to run lint and fix issues automatically
+# Pre-commit gate — runs the SAME `bin/check` CI runs, so a commit that would
+# fail CI fails here first.
 # Installed by: scripts/setup-hooks.sh
 #
-# This hook auto-fixes lint/format issues without failing the commit.
-# It silently fixes what it can and lets the commit proceed.
+# The gate decides: the hook neither repairs the tree behind the committer's
+# back nor reports success when the gate failed. The gate's exit status
+# becomes the hook's, so a red gate blocks the commit.
 
-# Get the staged Python files
-STAGED_PY_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\.py$' || true)
+set -euo pipefail
 
-if [ -z "$STAGED_PY_FILES" ]; then
-    exit 0
-fi
-
-# Run ruff check with fix on staged files (ignore errors)
-uv run ruff check --fix $STAGED_PY_FILES 2>/dev/null || true
-
-# Run ruff format on staged files (ignore errors)
-uv run ruff format $STAGED_PY_FILES 2>/dev/null || true
-
-# Re-add the fixed files to staging
-for file in $STAGED_PY_FILES; do
-    if [ -f "$file" ]; then
-        git add "$file"
-    fi
-done
-
-# Always succeed - let the commit proceed
-exit 0
+repo_root="$(git rev-parse --show-toplevel)" || {
+    echo "pre-commit: cannot locate the repository root" >&2
+    exit 1
+}
+cd "$repo_root"
+exec "$repo_root/bin/check"

@@ -119,9 +119,10 @@ class SetupRepoRequest(BaseModel):
 class PlanRepoRequest(BaseModel):
     """Request model for creating a plan for a repository.
 
-    Creates a plan without executing any work. Uses read-only tools
-    (Read, Glob, Grep) to analyze the codebase and outputs a structured
-    plan with tasks and success criteria.
+    Creates a plan without executing any work. Uses the planning tools
+    configured in config.tools.planning (read-only by default) to analyze
+    the codebase and outputs a structured plan with tasks and success
+    criteria.
 
     Use this after cloning and setting up a repo to plan work before
     execution, or to get a plan for a new goal in an existing repository.

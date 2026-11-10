@@ -1,16 +1,19 @@
 """Tests for config CLI commands - init, show, and path."""
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
 import pytest
+from rich.console import Console
 
 from claude_task_master.cli import app
 from claude_task_master.core.config_loader import (
     get_config_file_path,
     reset_config,
 )
+from claude_task_master.core.config_loader_io import ENV_VAR_MAPPINGS
 from tests.cli.conftest import strip_ansi
 
 
@@ -232,30 +235,29 @@ class TestConfigShow:
         assert "CLAUDETM_MODEL_SONNET" in result.output
 
     def test_config_show_env_no_overrides(self, cli_runner, temp_dir, monkeypatch):
-        """Test config show --env when no env vars are set."""
+        """Available model variables and paths match the loader mappings."""
         monkeypatch.chdir(temp_dir)
         reset_config()
 
-        # Clear all relevant env vars
-        for var in [
-            "ANTHROPIC_API_KEY",
-            "ANTHROPIC_BASE_URL",
-            "OPENROUTER_API_KEY",
-            "OPENROUTER_BASE_URL",
-            "CLAUDETM_MODEL_SONNET",
-            "CLAUDETM_MODEL_OPUS",
-            "CLAUDETM_MODEL_HAIKU",
-            "CLAUDETM_TARGET_BRANCH",
-        ]:
+        for var, _ in ENV_VAR_MAPPINGS:
             monkeypatch.delenv(var, raising=False)
+        monkeypatch.setattr("claude_task_master.cli_commands.config.console", Console(width=160))
 
         result = cli_runner.invoke(app, ["config", "show", "--env"])
 
         assert result.exit_code == 0
         assert "No environment variable overrides" in result.output
-        # Should show available env vars table
         assert "Available environment variables" in result.output
         assert "ANTHROPIC_API_KEY" in result.output
+        expected = {
+            var: ".".join(path)
+            for var, path in ENV_VAR_MAPPINGS
+            if var.startswith("CLAUDETM_MODEL_")
+        }
+        rendered = dict(
+            re.findall(r"\b(CLAUDETM_MODEL_\w+)\b[^\w\n]+(models\.\w+)", strip_ansi(result.output))
+        )
+        assert rendered == expected
 
     def test_config_show_indicates_overrides_applied(self, cli_runner, temp_dir, monkeypatch):
         """Test config show indicates when env var overrides are applied."""

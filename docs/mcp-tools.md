@@ -655,7 +655,7 @@ This will:
 
 Create a plan for a repository without executing any work.
 
-This plan-only mode reads the codebase using read-only tools (Read, Glob, Grep, Bash) and outputs a structured plan with tasks and success criteria. No changes are made to the repository.
+This plan-only mode reads the codebase using the planning tools configured in `config.tools.planning` (default: Read, Glob, Grep, WebFetch, WebSearch) and outputs a structured plan with tasks and success criteria. No changes are made to the repository.
 
 **Parameters:**
 | Parameter | Type | Required | Default | Description |
