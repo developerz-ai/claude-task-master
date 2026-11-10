@@ -49,8 +49,18 @@ Use `pyproject.toml` as dependency/tool configuration authority rather than dupl
 | `uv run pytest tests/<area>` | Scoped tests when assigned; use the repository markers and fixtures. |
 | `python verify_docs_links.py` | Read-only repository Markdown path/anchor check; separate from `bin/check`. |
 | `uv sync --all-extras` | **Writes:** development dependency installation, not verification. |
-| `./scripts/setup-hooks.sh` | **Writes:** installs development pre-commit hooks. |
+| `./scripts/setup-hooks.sh` | **Writes:** installs the development pre-commit hook; the installed hook runs the gate (`bin/check`) and propagates its exit status. |
 | `uv run claudetm --help` | CLI smoke check; `doctor` and `status` may fail without credentials/state and are tolerated probes in `bin/check`. |
+
+### Where the gate's tools come from
+
+CI installs the project with `uv pip install -e ".[all]"`, and that install path does not read
+`uv.lock`: CI runs the newest release inside pyproject's dev-extra ranges — `ruff>=0.16.1,<0.17`
+and `mypy>=2.4.1,<2.5`. Local `uv sync --all-extras` and `uv run` do read `uv.lock`, so they run
+the locked ruff 0.16.1 and mypy 2.4.1. A green local `bin/check` is therefore evidence for the
+locked versions only; it is not proof that CI is green.
+
+`requirements.txt` is a committed `uv pip compile` output of `pyproject.toml`, so it floats to the newest in-range releases (fastapi 0.149.0 against the lock's 0.139.2, pydantic 2.14.1 against 2.13.4); only claude-agent-sdk, ruff and mypy are held at `uv.lock`'s resolution, and it is not a gate input.
 
 Follow the applicable skill before verification: `.claude/skills/verify-change/SKILL.md`,
 `.claude/skills/docs-links/SKILL.md` or `.claude/skills/local-install/SKILL.md`.
