@@ -1,14 +1,19 @@
 """Exercise bootstrap scripts without touching the host toolchain or Docker."""
 
 import json
+import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from claude_task_master.core.config import ToolsConfig
+
 ROOT = Path(__file__).resolve().parents[1]
+WRAPPERS = ("bin/claudetm", "src/claude_task_master/bin/claudetm")
 FAKE_TOOL = r"""
 import json
 import os
@@ -191,3 +196,32 @@ def test_setup_root_does_not_require_sudo(sandbox: ScriptSandbox) -> None:
     result = sandbox.run(DPKG_STATUS="1")
     assert result.returncode == 0, result.stderr
     assert sandbox.calls == ["docker compose version", DPKG, "apt-get update", INSTALL, *TOOLCHAIN]
+
+
+def _wrapper_template_config(relative: str) -> dict[str, Any]:
+    """Run the --init-config Python heredoc embedded in a wrapper and parse its JSON."""
+    text = (ROOT / relative).read_text()
+    match = re.search(r"<< 'PYTHON_SCRIPT'\n(.*?)\nPYTHON_SCRIPT\n", text, re.DOTALL)
+    assert match, f"{relative}: PYTHON_SCRIPT heredoc not found"
+    result = subprocess.run(
+        [sys.executable, "-c", match.group(1)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, f"{relative}: template failed: {result.stderr}"
+    config = json.loads(result.stdout)
+    assert isinstance(config, dict), f"{relative}: template is not a JSON object"
+    return config
+
+
+@pytest.mark.parametrize("relative", WRAPPERS)
+def test_wrapper_template_tools_match_tools_config(relative: str) -> None:
+    tools = _wrapper_template_config(relative)["tools"]
+    expected = ToolsConfig().model_dump()
+    assert tools == expected, f"{relative}: template tools differ from ToolsConfig defaults"
+
+
+def test_wrapper_templates_are_identical() -> None:
+    configs = [_wrapper_template_config(relative) for relative in WRAPPERS]
+    assert configs[0] == configs[1], f"{WRAPPERS[0]} and {WRAPPERS[1]} templates differ"
