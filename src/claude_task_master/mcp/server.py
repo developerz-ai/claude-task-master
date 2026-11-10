@@ -260,9 +260,9 @@ def create_server(
     ) -> dict[str, Any]:
         """Create a plan for a repository without executing any work.
 
-        This is a plan-only mode that reads the codebase using read-only tools
-        (Read, Glob, Grep) and outputs a structured plan with tasks and success
-        criteria. No changes are made to the repository.
+        This is a plan-only mode that reads the codebase using the planning tools
+        configured in config.tools.planning and outputs a structured plan with
+        tasks and success criteria. No changes are made to the repository.
 
         Use this after `clone_repo` and `setup_repo` to plan work before execution,
         or to get a plan for a new goal in an existing repository.

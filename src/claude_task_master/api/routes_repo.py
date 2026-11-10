@@ -264,7 +264,8 @@ def create_repo_router() -> APIRouter:
         summary="Plan Repository Work",
         description=(
             "Create a plan for a repository without executing any work. "
-            "Uses read-only tools to analyze the codebase and generate a task list."
+            "Uses the configured planning tools to analyze the codebase and "
+            "generate a task list."
         ),
     )
     async def post_plan_repo(
@@ -272,8 +273,8 @@ def create_repo_router() -> APIRouter:
     ) -> PlanRepoResponse | JSONResponse:
         """Create a plan for a repository.
 
-        Uses read-only tools (Read, Glob, Grep) to analyze the codebase
-        and output a structured plan with tasks and success criteria.
+        Uses the planning tools configured in config.tools.planning to analyze
+        the codebase and output a structured plan with tasks and success criteria.
         No changes are made to the repository.
 
         Use this after cloning and setting up a repo to plan work before

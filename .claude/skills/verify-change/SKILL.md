@@ -57,6 +57,18 @@ Use Python 3.14 and install all extras before proving a change:
 `uv sync --all-extras --python 3.14` (also performed by `bin/setup`). CI selects
 Python 3.14 and installs the editable package with `uv pip install -e ".[all]"`.
 
+The two install paths do not resolve the same tool versions. CI's
+`uv pip install -e ".[all]"` does not read `uv.lock`, so CI runs the newest
+release inside pyproject's dev-extra ranges — `ruff>=0.16.1,<0.17` and
+`mypy>=2.4.1,<2.5`. Local `uv sync --all-extras` and `uv run` do read `uv.lock`,
+so they run the locked ruff 0.16.1 and mypy 2.4.1. A green local gate is
+evidence for the locked versions only — it is not a guarantee that CI will pass.
+
+`requirements.txt` is a committed `uv pip compile` output of `pyproject.toml`, so it floats to the newest in-range releases (fastapi 0.149.0 against the lock's 0.139.2, pydantic 2.14.1 against 2.13.4); only claude-agent-sdk, ruff and mypy are held at `uv.lock`'s resolution, and it is not a gate input.
+
+The pre-commit hook installed by `scripts/setup-hooks.sh` runs `bin/check` and
+propagates its exit status: a red gate blocks the commit.
+
 | CI job | Local equivalent in `bin/check` |
 |--------|--------------------------------|
 | Lint | `uv run ruff check .`, `uv run ruff format --check .`, and `uv run mypy .` retain CI's whole-tree scope. |
