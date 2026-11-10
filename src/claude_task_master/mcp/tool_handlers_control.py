@@ -207,7 +207,8 @@ def update_config(
         max_sessions: Maximum number of work sessions before pausing.
         max_prs: Maximum number of pull requests to create.
         pause_on_pr: Whether to pause after creating PR for manual review.
-        enable_checkpointing: Whether to enable state checkpointing.
+        enable_checkpointing: Accepted and stored, but has no effect because no
+            checkpointing is implemented.
         log_level: Log level (quiet, normal, verbose).
         log_format: Log format (text, json).
         pr_per_task: Whether to create PR per task vs per group.

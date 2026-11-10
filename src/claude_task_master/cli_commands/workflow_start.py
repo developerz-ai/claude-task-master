@@ -99,7 +99,7 @@ def start(
     enable_checkpointing: bool = typer.Option(
         False,
         "--checkpointing",
-        help="Enable file checkpointing for safe rollbacks",
+        help="Accepted and stored, but has no effect because no checkpointing is implemented",
     ),
     log_level: str = typer.Option(
         "normal",
