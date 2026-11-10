@@ -14,7 +14,6 @@ import re
 
 from .client_pr_helpers import (  # noqa: F401 — re-exported for backward compat
     _build_pr_status_query,
-    _format_pr_comments,
     _format_pr_comments_from_rest,
     _get_comment_resolved_map,
     _parse_check_contexts,
@@ -314,6 +313,5 @@ __all__ = [
     "_build_pr_status_query",
     "_parse_pr_status_response",
     "_parse_check_contexts",
-    "_format_pr_comments",
     "_format_pr_comments_from_rest",
 ]

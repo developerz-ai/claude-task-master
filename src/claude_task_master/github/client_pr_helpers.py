@@ -405,35 +405,6 @@ def _parse_check_contexts(contexts: list[dict[str, Any]]) -> list[dict[str, Any]
     return check_details
 
 
-def _format_pr_comments(threads: list[dict[str, Any]], only_unresolved: bool) -> str:
-    """Format PR review threads into a readable string.
-
-    Args:
-        threads: List of review thread nodes.
-        only_unresolved: If True, only include unresolved threads.
-
-    Returns:
-        Formatted string of comments.
-    """
-    formatted = []
-    for thread in threads:
-        if only_unresolved and thread["isResolved"]:
-            continue
-
-        for comment in thread["comments"]["nodes"]:
-            # GraphQL author is null for ghost/deleted accounts.
-            author = (comment.get("author") or {}).get("login") or "unknown"
-            is_bot = author.endswith("[bot]")
-            bot_marker = " (bot)" if is_bot else ""
-
-            formatted.append(
-                f"**{author}{bot_marker}** on {comment.get('path', 'PR')}:"
-                f"{comment.get('line', 'N/A')}\n{comment['body']}\n"
-            )
-
-    return "\n---\n\n".join(formatted)
-
-
 def _format_pr_comments_from_rest(
     comments: list[dict[str, Any]], resolved_map: dict[int, bool], only_unresolved: bool
 ) -> str:
@@ -474,6 +445,5 @@ __all__ = [
     "_build_pr_status_query",
     "_parse_pr_status_response",
     "_parse_check_contexts",
-    "_format_pr_comments",
     "_format_pr_comments_from_rest",
 ]

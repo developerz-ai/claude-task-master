@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 - **Removed the dead public helper `get_context_window` from `claude_task_master.core`.** Defined in `core/agent_models.py`, re-exported through the `core` package facade and referenced by a docstring clause in `core/config.py`, it had no caller anywhere in the codebase, and its return value set no compaction threshold and no SDK context window — a model-to-window mapping nothing consumed. The data behind it is retained: `MODEL_CONTEXT_WINDOWS`, `MODEL_CONTEXT_WINDOWS_STANDARD`, `DEFAULT_COMPACT_THRESHOLD_PERCENT` and `ContextWindowsConfig` are unchanged; only the unreachable accessor and the text naming it are deleted.
+- **Removed the dead `_format_pr_comments` GraphQL formatter (`github/client_pr_helpers.py`).** The REST path `_format_pr_comments_from_rest` is the only PR-comment formatter with a caller; the GraphQL variant had no call site anywhere in the codebase and no test references it. Removed together with its entry in both `__all__` lists (`client_pr_helpers.py` and `client_pr.py`) and the corresponding `client_pr` backward-compat re-export; the five live sibling helpers are unchanged.
 
 ### Fixed
 
