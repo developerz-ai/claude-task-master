@@ -343,7 +343,7 @@ This creates `.claude-task-master/config.json`. The smartest tier (`opus`) defau
 }
 ```
 
-> **Note:** `context_windows` and `CLAUDETM_CONTEXT_*` are **currently inert metadata** retained for compatibility. Values can still be loaded from configuration, emitted by profiles, and read by the context-window helper, but they do not drive runtime auto-compaction, prevent context overflow, or grant a larger context window. Actual context limits and compaction behavior depend on Claude Code/SDK and the provider, not these settings.
+> **Note:** `context_windows` and `CLAUDETM_CONTEXT_*` are **currently inert metadata** retained for compatibility. Values can still be loaded from configuration and emitted by profiles, but they do not drive runtime auto-compaction, prevent context overflow, or grant a larger context window. Actual context limits and compaction behavior depend on Claude Code/SDK and the provider, not these settings.
 >
 > Existing configurations such as the following remain accepted, but changing these values for an account tier or gateway has no runtime compaction effect:
 > ```json

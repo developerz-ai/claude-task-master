@@ -24,7 +24,6 @@ from claude_task_master.core.agent_models import (
     MODEL_CONTEXT_WINDOWS_STANDARD,
     ModelType,
     TaskComplexity,
-    get_context_window,
     get_tools_for_phase,
     parse_task_complexity,
 )
@@ -219,7 +218,6 @@ __all__ = [
     "MODEL_CONTEXT_WINDOWS",
     "MODEL_CONTEXT_WINDOWS_STANDARD",
     "DEFAULT_COMPACT_THRESHOLD_PERCENT",
-    "get_context_window",
     # Rate limit classes
     "RateLimitConfig",
     # State exceptions
