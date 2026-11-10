@@ -253,10 +253,11 @@ class TestEnvForProfileModels:
         assert env["CLAUDETM_CONTEXT_SONNET"] == "128000"
 
     def test_context_family_fallback_covers_all_tiers(self) -> None:
-        """sonnet_1m/fable context inherit their family neighbour so claudetm
-        compacts in time on custom endpoints whose real context is below the
-        Claude defaults (otherwise it assumes 1M and never compacts before the
-        provider's smaller limit -> 'context window limit' crash)."""
+        """sonnet_1m/fable context env values inherit from sonnet/opus respectively.
+
+        This asserts environment-value propagation, not overflow prevention:
+        context_windows remains currently inert for runtime compaction.
+        """
         p = Profile(
             name="zai",
             type="api-key",

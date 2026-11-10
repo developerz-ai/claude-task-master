@@ -82,7 +82,7 @@ By default claudetm uses the global `~/.claude/.credentials.json` session. **Pro
 There are two profile types:
 
 - **`oauth`** — an isolated Claude Code config home. Each profile gets its own credentials directory under `~/.claudetm/profiles/<name>/`, so two subscriptions never clobber each other.
-- **`api-key`** — a direct API key + base URL (e.g. z.ai / GLM via an Anthropic-compatible endpoint), injected as `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`. It can also carry **per-tier model and context-window overrides** so claudetm routes every complexity level to a model the endpoint actually serves.
+- **`api-key`** — a direct API key + base URL (e.g. z.ai / GLM via an Anthropic-compatible endpoint), injected as `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`. It can also carry **per-tier model overrides** so claudetm routes every complexity level to a model the endpoint actually serves. Context-window values are also accepted, but are currently inert metadata: they do not control runtime compaction or grant context.
 
 ```bash
 # Create an oauth profile and log into it (opens claude in its isolated dir)
@@ -95,8 +95,9 @@ CLAUDETM_API_KEY=sk-... claudetm profile add zai --type api-key \
     --base-url https://api.z.ai/api/anthropic
 
 # An api-key profile against a custom endpoint: name a model for each tier
-# (and optionally its context size in tokens). Tiers you omit inherit from a
-# family neighbour, so naming just opus/sonnet/haiku covers every task.
+# and optionally record context-window metadata (currently inert). Model tiers
+# you omit inherit from a family neighbour, so naming just opus/sonnet/haiku
+# covers every task.
 #
 #   --model-opus        coding tasks (complex implementation) — the smart tier
 #   --model-sonnet      general tasks (balanced)
@@ -312,7 +313,7 @@ claudetm --init-config
 claudetm --show-config
 ```
 
-This creates `.claude-task-master/config.json`. The smartest tier (`opus`) defaults to **Claude Opus 5** (`claude-opus-5`), whose context window is **1M tokens natively** — so `context_windows.opus` defaults to `1000000`. (There is no `claude-opus-5[1m]` model ID; that suffix is a Claude Code CLI convention and 404s against the API.) Override the model by editing the `"opus"` key or setting `CLAUDETM_MODEL_OPUS`; drop `context_windows.opus` to `200000` if your account is capped at standard context. A separate opt-in `fable` tier defaults to **Claude Fable 5** (`claude-fable-5`, premium-priced at 2x Opus) — mirroring Claude Code's `ANTHROPIC_DEFAULT_FABLE_MODEL`; override via the `"fable"` key or `CLAUDETM_MODEL_FABLE`. No task routes to it by default; set `CLAUDETM_MODEL_OPUS=claude-fable-5` to run the smartest tier on Fable.
+This creates `.claude-task-master/config.json`. The smartest tier (`opus`) defaults to **Claude Opus 5** (`claude-opus-5`), whose context window is **1M tokens natively** — so `context_windows.opus` defaults to `1000000` as metadata only, with no runtime compaction effect. (There is no `claude-opus-5[1m]` model ID; that suffix is a Claude Code CLI convention and 404s against the API.) Override the model by editing the `"opus"` key or setting `CLAUDETM_MODEL_OPUS`; changing `context_windows.opus` does not change the context available to your account. A separate opt-in `fable` tier defaults to **Claude Fable 5** (`claude-fable-5`, premium-priced at 2x Opus) — mirroring Claude Code's `ANTHROPIC_DEFAULT_FABLE_MODEL`; override via the `"fable"` key or `CLAUDETM_MODEL_FABLE`. No task routes to it by default; set `CLAUDETM_MODEL_OPUS=claude-fable-5` to run the smartest tier on Fable.
 
 ```json
 {
@@ -342,15 +343,9 @@ This creates `.claude-task-master/config.json`. The smartest tier (`opus`) defau
 }
 ```
 
-> **Note:** `context_windows` only drives claudetm's **auto-compact threshold** — it does not grant a bigger window. Over-stating a window means compaction fires too late and the session overflows; under-stating it just compacts early, which is harmless. So the defaults are deliberately conservative, and only `opus` claims 1M:
+> **Note:** `context_windows` and `CLAUDETM_CONTEXT_*` are **currently inert metadata** retained for compatibility. Values can still be loaded from configuration, emitted by profiles, and read by the context-window helper, but they do not drive runtime auto-compaction, prevent context overflow, or grant a larger context window. Actual context limits and compaction behavior depend on Claude Code/SDK and the provider, not these settings.
 >
-> | Tier | Default | Why |
-> |---|---|---|
-> | `opus` | 1000000 | Opus is upgraded to 1M automatically on Max/Team/Enterprise. **On Pro that upgrade is billed to usage credits** — set `200000` if you don't buy them. |
-> | `sonnet` | 200000 | Conservative. On a subscription the 1M window is the paid extra, so this only goes to `1000000` once you've confirmed your account actually serves it. |
-> | `haiku` | 200000 | Haiku 4.5's real window. |
->
-> Two setups cap 1M-capable models at 200K regardless of plan, and want `200000` for every tier: an LLM gateway (`ANTHROPIC_BASE_URL` pointing somewhere Claude Code can't verify 1M support) and `CLAUDE_CODE_DISABLE_1M_CONTEXT=1`.
+> Existing configurations such as the following remain accepted, but changing these values for an account tier or gateway has no runtime compaction effect:
 > ```json
 > "context_windows": {
 >   "opus": 200000,
@@ -374,7 +369,7 @@ The config file sets these environment variables before Python starts:
 | `models.fable` | `CLAUDETM_MODEL_FABLE` | Model for fable tier (opt-in, premium) |
 | `models.haiku` | `CLAUDETM_MODEL_HAIKU` | Model for haiku tier |
 | `models.sonnet_1m` | `CLAUDETM_MODEL_SONNET_1M` | Model for debugging/QA tier (big context) |
-| `context_windows.*` | `CLAUDETM_CONTEXT_{OPUS,FABLE,SONNET,HAIKU,SONNET_1M}` | Context window per tier (tokens) |
+| `context_windows.*` | `CLAUDETM_CONTEXT_{OPUS,FABLE,SONNET,HAIKU,SONNET_1M}` | Currently inert per-tier metadata (tokens); does not control runtime compaction or grant context |
 | `git.target_branch` | `CLAUDETM_TARGET_BRANCH` | Target branch for PRs |
 
 Precedence (highest first): real environment variables, then the **active profile** (api-key/oauth profiles supply these same keys), then the config file.
