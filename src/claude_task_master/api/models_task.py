@@ -114,7 +114,8 @@ class ConfigUpdateRequest(_RemovedFieldGuard):
         max_sessions: Maximum number of work sessions before pausing.
         max_prs: Maximum number of pull requests to create.
         pause_on_pr: Whether to pause after creating PR for manual review.
-        enable_checkpointing: Whether to enable state checkpointing.
+        enable_checkpointing: Accepted and stored, but has no effect because no
+            checkpointing is implemented.
         log_level: Log level (quiet, normal, verbose).
         log_format: Log format (text, json).
         pr_per_task: Whether to create PR per task vs per group.
@@ -155,7 +156,9 @@ class ConfigUpdateRequest(_RemovedFieldGuard):
     )
     enable_checkpointing: bool | None = Field(
         default=None,
-        description="Whether to enable state checkpointing",
+        description=(
+            "Accepted and stored, but has no effect because no checkpointing is implemented"
+        ),
     )
     log_level: LogLevel | None = Field(
         default=None,
@@ -288,7 +291,8 @@ class TaskOptionsResponse(BaseModel):
         max_sessions: Maximum number of work sessions before pausing.
         max_prs: Maximum number of pull requests to create.
         pause_on_pr: Whether to pause after creating PR for manual review.
-        enable_checkpointing: Whether state checkpointing is enabled.
+        enable_checkpointing: Accepted and stored, but has no effect because no
+            checkpointing is implemented.
         log_level: Current log level.
         log_format: Current log format.
         pr_per_task: Whether to create PR per task vs per group.
