@@ -6,7 +6,7 @@ independently and reused without pulling in FastAPI router machinery.
 The SSRF URL check (``_url_ssrf_error``) and DNS resolution (``_resolve_host``)
 live in routes_webhooks.py, not here: they must be defined in that module's
 namespace so ``monkeypatch.setattr(rw, "_resolve_host", ...)`` intercepts the
-calls made there. Only the IP classifier is shared from this module.
+calls made there. The IP classifier and header helpers are shared from this module.
 """
 
 from __future__ import annotations
