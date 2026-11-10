@@ -315,7 +315,7 @@ default_config = {
         "auto_push": True
     },
     "tools": {
-        "planning": ["Read", "Glob", "Grep", "Bash"],
+        "planning": ["Read", "Glob", "Grep", "WebFetch", "WebSearch"],
         "verification": ["Read", "Glob", "Grep", "Bash"],
         "working": []
     }

@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pytest
 import typer
 
 from claude_task_master.cli import app
 from claude_task_master.cli_commands.workflow import _validate_budget, _validate_goal
+
+README = Path(__file__).resolve().parents[2] / "README.md"
+
+# --checkpointing is dead and being removed, so it is deliberately undocumented.
+_UNDOCUMENTED_START_FLAGS = {"--checkpointing", "--help"}
 
 
 def _normalize(text: str) -> str:
@@ -61,6 +67,45 @@ class TestValidateBudget:
         """A negative budget raises BadParameter."""
         with pytest.raises(typer.BadParameter):
             _validate_budget(-1.5)
+
+
+def _live_start_flags() -> set[str]:
+    """Every long flag the live ``start`` command accepts."""
+    start = getattr(typer.main.get_command(app), "commands")["start"]  # noqa: B009
+    flags: set[str] = set()
+    for param in start.params:
+        # Typer vendors click, so duck-type: the goal Argument has no "--" opts.
+        names = (*getattr(param, "opts", []), *getattr(param, "secondary_opts", []))
+        flags.update(n for n in names if n.startswith("--"))
+    return flags
+
+
+def _readme_start_table_flags() -> set[str]:
+    """Long flags named in the Start Options table of the README."""
+    text = README.read_text(encoding="utf-8")
+    section = text.split("### Start Options", 1)[1]
+    section = re.split(r"^#{3,4} ", section, maxsplit=1, flags=re.MULTILINE)[0]
+    flags: set[str] = set()
+    for line in section.splitlines():
+        if line.startswith("|"):
+            first_cell = line.split("|")[1]
+            flags.update(re.findall(r"--[a-z][a-z0-9-]*", first_cell))
+    return flags
+
+
+class TestStartOptionsDocumented:
+    """The README Start Options table must not drift from the live command."""
+
+    def test_every_start_flag_is_in_readme_table(self):
+        """A start option missing from the README table fails this test."""
+        live = _live_start_flags() - _UNDOCUMENTED_START_FLAGS
+        missing = sorted(live - _readme_start_table_flags())
+        assert not missing, f"README 'Start Options' table is missing: {', '.join(missing)}"
+
+    def test_readme_table_names_no_unknown_flag(self):
+        """A flag documented in the table must still exist on the command."""
+        unknown = sorted(_readme_start_table_flags() - _live_start_flags())
+        assert not unknown, f"README table lists removed flags: {', '.join(unknown)}"
 
 
 class TestStartInputValidation:

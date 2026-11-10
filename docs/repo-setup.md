@@ -335,7 +335,7 @@ POST /task/init
    - Push to remote
    - Create pull request
 3. **PR Lifecycle** - Handles CI checks, review comments, and merging
-4. **Verification** - Runs tests and checks success criteria
+4. **Verification** (opt-in) - Off by default. Enable it with `--verify` on the CLI or `enable_verification` in `POST /task/init`; it runs tests and checks success criteria. Post-merge release verification is likewise opt-in via `--release` on the CLI or `enable_release` in `POST /task/init`, and also needs `auto_merge` and a release guide
 5. **Completion** - Reports results and cleans up
 
 See the main [README](../README.md) for detailed information on the work phase.
