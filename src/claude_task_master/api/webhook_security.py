@@ -2,13 +2,16 @@
 
 Extracted from routes_webhooks.py so the security logic can be tested
 independently and reused without pulling in FastAPI router machinery.
+
+The SSRF URL check (``_url_ssrf_error``) and DNS resolution (``_resolve_host``)
+live in routes_webhooks.py, not here: they must be defined in that module's
+namespace so ``monkeypatch.setattr(rw, "_resolve_host", ...)`` intercepts the
+calls made there. The IP classifier and header helpers are shared from this module.
 """
 
 from __future__ import annotations
 
 import ipaddress
-import socket
-from urllib.parse import urlparse
 
 __all__ = [
     "_HOP_BY_HOP_HEADERS",
@@ -16,9 +19,7 @@ __all__ = [
     "_MASKED_VALUE",
     "_mask_headers",
     "_strip_hop_headers",
-    "_resolve_host",
     "_is_blocked_ip",
-    "_url_ssrf_error",
 ]
 
 # Hop-by-hop headers (RFC 7230 §6.1) plus routing headers that must never be
@@ -97,26 +98,6 @@ def _strip_hop_headers(headers: dict[str, str]) -> dict[str, str]:
     }
 
 
-def _resolve_host(host: str) -> list[str]:
-    """Resolve a hostname to all of its IP addresses.
-
-    Numeric IP literals are returned as-is (no network I/O). Extracted as a
-    module-level function so tests can stub DNS resolution.
-
-    Args:
-        host: The hostname or IP literal to resolve.
-
-    Returns:
-        List of resolved IP address strings.
-
-    Raises:
-        OSError: If resolution fails (e.g. unknown host).
-    """
-    infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
-    # sockaddr[0] is the address string (typeshed widens it to str | int).
-    return [str(info[4][0]) for info in infos]
-
-
 def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     """Return True if an IP is private, loopback, link-local, or otherwise reserved.
 
@@ -137,49 +118,3 @@ def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
         or ip.is_reserved
         or ip.is_unspecified
     )
-
-
-def _url_ssrf_error(url: str) -> str | None:
-    """Validate that a URL's host resolves only to public addresses.
-
-    Resolves the host post-DNS and rejects the request if any resolved address
-    falls in a private/loopback/link-local/reserved range. This blocks SSRF to
-    cloud metadata endpoints (169.254.169.254), localhost, and internal networks
-    even when the attacker hides behind a hostname.
-
-    Note:
-        This is a pre-connection screen, not a pinned resolution: it validates a
-        fresh DNS lookup but does not bind the caller's later HTTP connection to
-        the vetted address, so a rebinding host could resolve differently at
-        connect time (a TOCTOU window). It gates the authenticated
-        ``POST /webhooks/test`` endpoint as defense-in-depth. Fully closing the
-        rebinding window requires pinning the connection to the vetted IP while
-        preserving the original Host header and TLS SNI/cert hostname; that is
-        tracked as separate hardening rather than bundled into this refactor.
-
-    Args:
-        url: The target URL.
-
-    Returns:
-        An error message if the target is not permitted, otherwise None.
-    """
-    host = urlparse(url).hostname
-    if not host:
-        return "URL has no host"
-    try:
-        addresses = _resolve_host(host)
-    except OSError:
-        return f"Could not resolve host: {host}"
-    if not addresses:
-        return f"Could not resolve host: {host}"
-    for addr in addresses:
-        try:
-            ip = ipaddress.ip_address(addr)
-        except ValueError:
-            return f"Invalid resolved address: {addr}"
-        if _is_blocked_ip(ip):
-            return (
-                f"Target resolves to a non-public address ({addr}); "
-                "private, loopback, link-local, and reserved ranges are blocked"
-            )
-    return None
